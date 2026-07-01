@@ -122,6 +122,70 @@ function registerToggleHotkey() {
 // folgen ab Meilenstein 2 ueber das 'osd-data'-Event an overlayWindow.
 let overlayWindow = null
 
+// --- NVIDIA-GPU-Sensoren via NVML (koffi) — treiberfrei, aus dem Grafiktreiber ---
+let nvml = null
+function setupNvml() {
+  let koffi
+  try { koffi = require('koffi') } catch { return }
+  try {
+    let lib = null
+    for (const p of ['nvml.dll', 'C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll']) {
+      try { lib = koffi.load(p); break } catch {}
+    }
+    if (!lib) throw new Error('nvml.dll nicht ladbar')
+    koffi.pointer('nvmlDevice_t', koffi.opaque())
+    koffi.struct('nvmlUtilization_t', { gpu: 'uint32', memory: 'uint32' })
+    koffi.struct('nvmlMemory_t', { total: 'uint64', free: 'uint64', used: 'uint64' })
+    const f = {
+      init:   lib.func('int nvmlInit_v2()'),
+      handle: lib.func('int nvmlDeviceGetHandleByIndex_v2(uint32 index, _Out_ nvmlDevice_t* device)'),
+      name:   lib.func('int nvmlDeviceGetName(nvmlDevice_t device, _Out_ char* name, uint32 length)'),
+      util:   lib.func('int nvmlDeviceGetUtilizationRates(nvmlDevice_t device, _Out_ nvmlUtilization_t* u)'),
+      temp:   lib.func('int nvmlDeviceGetTemperature(nvmlDevice_t device, uint32 sensor, _Out_ uint32* t)'),
+      power:  lib.func('int nvmlDeviceGetPowerUsage(nvmlDevice_t device, _Out_ uint32* mw)'),
+      clock:  lib.func('int nvmlDeviceGetClockInfo(nvmlDevice_t device, uint32 type, _Out_ uint32* mhz)'),
+      mem:    lib.func('int nvmlDeviceGetMemoryInfo(nvmlDevice_t device, _Out_ nvmlMemory_t* m)'),
+    }
+    if (f.init() !== 0) throw new Error('nvmlInit_v2 fehlgeschlagen')
+    const dev = [null]
+    if (f.handle(0, dev) !== 0) throw new Error('GetHandleByIndex fehlgeschlagen')
+    const nameBuf = Buffer.alloc(96)
+    f.name(dev[0], nameBuf, 96)
+    const model = nameBuf.toString('utf8').split('\0')[0].replace(/^NVIDIA\s+/i, '').replace(/GeForce\s+/i, '').trim()
+    nvml = { f, device: dev[0], model }
+    console.log('[osd] NVML aktiv:', model)
+  } catch (e) {
+    console.log('[osd] NVML nicht verfügbar:', e && e.message)
+    nvml = null
+  }
+}
+
+function readGpu() {
+  if (!nvml) return null
+  try {
+    const { f, device } = nvml
+    const u = {}, m = {}, t = [0], p = [0], c = [0]
+    f.util(device, u); f.temp(device, 0, t); f.power(device, p); f.clock(device, 0, c); f.mem(device, m)
+    return { name: nvml.model, load: u.gpu, temp: t[0], power: +(p[0] / 1000).toFixed(1), clock: c[0], vram: Math.round(Number(m.used) / 1048576) }
+  } catch { return null }
+}
+
+// Sensor-Pump: solange das Overlay sichtbar ist, 1x/s Werte ans Overlay senden.
+let osdDataInterval = null
+function startOsdData() {
+  if (osdDataInterval) return
+  const tick = () => {
+    if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return
+    const gpu = readGpu()
+    if (gpu) overlayWindow.webContents.send('osd-data', { gpu })
+  }
+  tick()
+  osdDataInterval = setInterval(tick, 1000)
+}
+function stopOsdData() {
+  if (osdDataInterval) { clearInterval(osdDataInterval); osdDataInterval = null }
+}
+
 // Das Overlay-Fenster deckt die GANZE Bildschirmflaeche ab (transparent +
 // klick-durchlaessig). Dadurch ist die Panel-Position nur noch CSS (Ecke) und die
 // Groesse ein einziger Zoomfaktor – kein Fenster-Verschieben/-Skalieren noetig.
@@ -168,10 +232,12 @@ function showOverlay() {
   w.showInactive()                                 // anzeigen, ohne zu fokussieren
   w.setAlwaysOnTop(true, 'screen-saver')
   applyOsdConfig()
+  startOsdData()
 }
 
 function hideOverlay() {
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide()
+  stopOsdData()
 }
 
 function toggleOverlay() {
@@ -190,9 +256,16 @@ function setOsdEditMode(on) {
   if (on) {
     if (!appSettings.osdEnabled) { appSettings.osdEnabled = true; saveAppSettings() }
     showOverlay()
+    // Fokussierbar machen + fokussieren: ein focusable:false-Fenster wird von
+    // Windows nicht aktiviert und faengt die Maus nur, wenn es ohnehin oberstes
+    // Fenster ist (z.B. ueber einem Spiel). Ist Lumora selbst im Vordergrund,
+    // braucht es echten Fokus, damit Ziehen/Mausrad/Buttons reagieren.
+    w.setFocusable(true)
     w.setIgnoreMouseEvents(false)             // Maus wird jetzt gefangen
+    w.focus()
   } else {
     w.setIgnoreMouseEvents(true, { forward: true })   // wieder klick-durchlaessig
+    w.setFocusable(false)
   }
   osdEditActive = on
   w.webContents.send('osd-edit', on)
@@ -1595,7 +1668,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => showMainWindow())
 
-  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); registerToggleHotkey(); setupGamepadHotkey(); if (appSettings.osdEnabled) showOverlay() })
+  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); registerToggleHotkey(); setupGamepadHotkey(); setupNvml(); if (appSettings.osdEnabled) showOverlay() })
 
   // HDR abschalten, falls der Launcher es für ein noch laufendes Spiel aktiviert hatte
   app.on('before-quit', () => {
