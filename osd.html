@@ -82,9 +82,42 @@
 
   /* Text gut lesbar auch auf hellen Szenen */
   #panel { text-shadow: 0 1px 2px rgba(0,0,0,0.9); }
+
+  /* Live-Edit-Modus */
+  body.edit #panel { outline: 2px dashed #4f8ef7; outline-offset: 5px; cursor: move; }
+  #editbar {
+    display: none;
+    position: absolute;
+    left: 50%; top: 14px;
+    transform: translateX(-50%);
+    align-items: center;
+    gap: 14px;
+    white-space: nowrap;
+    padding: 10px 12px 10px 16px;
+    background: rgba(15, 17, 24, 0.94);
+    border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 11px;
+    color: #d8d8e2;
+    font-family: 'Segoe UI', 'DejaVu Sans', sans-serif;
+    font-weight: 400;
+    font-size: 13px;
+    text-shadow: none;
+  }
+  body.edit #editbar { display: flex; }
+  #editbar b { color: #fff; font-weight: 600; }
+  #editDone {
+    background: #4f8ef7; color: #fff; border: none;
+    border-radius: 7px; padding: 6px 15px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  #editDone:hover { background: #6ba0f8; }
 </style>
 </head>
 <body class="pos-tl">
+  <div id="editbar">
+    <span>Verschieben: <b>ziehen</b> &nbsp;·&nbsp; Größe: <b>Mausrad</b></span>
+    <button id="editDone">Fertig</button>
+  </div>
   <div id="panel">
     <div class="group nv">
       <div class="g-label" id="nvLabel">NVIDIA RTX</div>
@@ -176,11 +209,56 @@
     if (c.opacity != null) document.documentElement.style.setProperty('--panel-op', c.opacity)
   }
 
-  try {
-    const { ipcRenderer } = require('electron')
+  let ipcRenderer = null
+  try { ipcRenderer = require('electron').ipcRenderer } catch (e) {}
+  if (ipcRenderer) {
     ipcRenderer.on('osd-data', (e, d) => updateOsd(d))
     ipcRenderer.on('osd-config', (e, c) => applyConfig(c))
-  } catch (e) {}
+    ipcRenderer.on('osd-edit', (e, on) => setEdit(on))
+  }
+
+  // --- Live-Edit: ziehen (rastet in naechste Ecke) + Mausrad = Groesse --------
+  const panel = document.getElementById('panel')
+  let editing = false, drag = null
+  function setEdit(on) {
+    editing = on
+    document.body.classList.toggle('edit', on)
+    if (!on) { panel.style.left = panel.style.top = panel.style.right = panel.style.bottom = '' }
+  }
+  panel.addEventListener('pointerdown', (e) => {
+    if (!editing || e.target.closest('#editDone')) return
+    const r = panel.getBoundingClientRect()
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top }
+    document.body.classList.remove('pos-tl', 'pos-tr', 'pos-bl', 'pos-br')
+    panel.style.right = panel.style.bottom = ''
+    panel.style.margin = '0'
+    panel.style.left = r.left + 'px'; panel.style.top = r.top + 'px'
+    try { panel.setPointerCapture(e.pointerId) } catch (er) {}
+    e.preventDefault()
+  })
+  panel.addEventListener('pointermove', (e) => {
+    if (!drag) return
+    panel.style.left = (e.clientX - drag.dx) + 'px'
+    panel.style.top = (e.clientY - drag.dy) + 'px'
+  })
+  panel.addEventListener('pointerup', () => {
+    if (!drag) return
+    drag = null
+    const r = panel.getBoundingClientRect()
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+    const corner = (cy < window.innerHeight / 2 ? 't' : 'b') + (cx < window.innerWidth / 2 ? 'l' : 'r')
+    panel.style.left = panel.style.top = panel.style.margin = ''
+    document.body.classList.add('pos-' + corner)
+    if (ipcRenderer) ipcRenderer.invoke('osd-edit-corner', corner)
+  })
+  window.addEventListener('wheel', (e) => {
+    if (!editing) return
+    e.preventDefault()
+    if (ipcRenderer) ipcRenderer.invoke('osd-edit-scale', e.deltaY < 0 ? 1 : -1)
+  }, { passive: false })
+  document.getElementById('editDone').addEventListener('click', () => {
+    if (ipcRenderer) ipcRenderer.invoke('osd-edit-done')
+  })
 
   // Platzhalter-Wellenform, bis echte Frametimes kommen (Meilenstein 1: Optik).
   for (let i = 0; i < FT_MAX; i++) ftBuf[i] = 33 + Math.sin(i / 4) * 2 + (i % 7 === 0 ? 6 : 0)
