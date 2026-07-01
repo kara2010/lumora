@@ -1,0 +1,1543 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Lumora</title>
+  <style>
+    /* Kritisches Inline-CSS: dunkler, gebrandeter Boot-Screen ab dem ersten Frame */
+    html, body { margin: 0; background: #0f0f0f; }
+    #bootScreen {
+      position: fixed; inset: 0; z-index: 99999;
+      background: #0f0f0f;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 18px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    #bootScreen .bl { width: 76px; height: 76px; object-fit: contain; border-radius: 18px; }
+    #bootScreen .bs {
+      width: 26px; height: 26px;
+      border: 3px solid #222; border-top-color: #4f8ef7; border-radius: 50%;
+      animation: bootspin 0.8s linear infinite;
+    }
+    #bootScreen .bt { font-size: 13px; color: #777; }
+    @keyframes bootspin { to { transform: rotate(360deg); } }
+    #bootScreen.hidden { display: none; }
+  </style>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div id="bootScreen">
+    <img class="bl" src="icon-64.png" alt="">
+    <div class="bs"></div>
+    <div class="bt">Wird geladen…</div>
+  </div>
+
+  <div class="titlebar">
+    <div class="titlebar-left">
+      <img class="titlebar-icon" src="icon-64.png" alt="">
+      <span class="titlebar-title">Lumora</span>
+    </div>
+    <div class="titlebar-controls">
+      <div class="hdr-indicator" id="hdrIndicator">
+        <span class="hdr-dot" id="hdrDot"></span>
+        <span id="hdrLabel">HDR aus</span>
+      </div>
+      <button class="btn-icon" onclick="minimize()">─</button>
+      <button class="btn-icon" id="btnMaximize" onclick="toggleMaximize()">□</button>
+      <button class="btn-icon btn-close" onclick="closeApp()">✕</button>
+    </div>
+  </div>
+
+  <div class="layout">
+
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <span>Meine Spiele</span>
+        <div style="display:flex;gap:5px">
+          <button class="btn-header-icon" id="vtDetail" onclick="setLibView('detail')" title="Detailansicht">☰</button>
+          <button class="btn-header-icon" id="vtGrid" onclick="setLibView('grid')" title="Rasteransicht">▦</button>
+          <button class="btn-header-icon" onclick="showScanDialog(false)" title="Spiele suchen">⊕</button>
+          <button class="btn-header-icon btn-header-add" onclick="showAddDialog()" title="Spiel hinzufügen">+</button>
+        </div>
+      </div>
+      <div class="sidebar-tools">
+        <input id="searchInput" class="search-input" type="text" placeholder="Suchen…" oninput="onSearch()">
+        <button id="favFilterBtn" class="tool-btn" onclick="toggleFavFilter()" title="Nur Favoriten anzeigen">★</button>
+      </div>
+      <select id="sortSelect" class="sort-select" onchange="onSortChange()">
+        <option value="manual">Manuelle Reihenfolge</option>
+        <option value="name">Name (A–Z)</option>
+        <option value="name-desc">Name (Z–A)</option>
+        <option value="played">Zuletzt gespielt</option>
+        <option value="playtime">Spielzeit</option>
+        <option value="added">Zuletzt hinzugefügt</option>
+      </select>
+      <div class="game-list" id="gameList"></div>
+      <div class="sidebar-footer">
+        <button class="btn-about" onclick="showSettings()">⚙ Einstellungen</button>
+        <button class="btn-about" onclick="showAbout()">ⓘ Über</button>
+        <span class="app-version" id="appVersion"></span>
+      </div>
+    </div>
+
+    <div class="detail" id="detail">
+      <div class="detail-bg" id="detailBg"></div>
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">🎮</div>
+        <p>Kein Spiel ausgewählt</p>
+        <button class="btn-primary" onclick="showAddDialog()">Erstes Spiel hinzufügen</button>
+      </div>
+
+      <div class="game-detail" id="gameDetail" style="display:none">
+        <div class="game-cover-hero" id="gameCoverHero"
+          ondragover="event.preventDefault(); this.classList.add('drag-over')"
+          ondragleave="this.classList.remove('drag-over')"
+          ondrop="dropCover(event)">
+          <div class="cover-bg" id="coverBg"></div>
+          <div class="cover-drop-hint" id="coverDropHint">Bild hier ablegen</div>
+          <div class="cover-overlay">
+            <div class="cover-poster" id="coverPoster"><span style="font-size:48px">🎮</span></div>
+            <div class="game-hero-info">
+              <h1 id="detailName" ondblclick="startRename()" title="Doppelklick zum Umbenennen">-</h1>
+            <input id="detailNameInput" style="display:none" class="rename-input" onblur="commitRename()" onkeydown="if(event.key==='Enter')commitRename();if(event.key==='Escape')cancelRename()">
+              <p id="detailPath">-</p>
+            </div>
+            <button class="btn-delete" onclick="deleteGame()" title="Spiel entfernen">✕</button>
+          </div>
+        </div>
+
+        <div class="detail-info" id="detailInfo" style="display:none">
+          <p class="detail-desc" id="detailDesc"></p>
+          <div class="detail-tags" id="detailTags"></div>
+        </div>
+
+        <div class="detail-meta">
+          <div class="meta-row">
+            <span class="meta-label">Spielzeit</span>
+            <span class="meta-value" id="detailPlaytime">–</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">Zuletzt gespielt</span>
+            <span class="meta-value" id="detailLastPlayed">nie</span>
+          </div>
+          <div class="meta-row hdr-toggle-row">
+            <div class="meta-text">
+              <span class="meta-label-main">HDR-Automatik</span>
+              <span class="meta-sublabel" id="hdrSubLabel">HDR wird beim Start aktiviert und beim Beenden abgeschaltet.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="hdrToggle" onchange="toggleGameHdr()">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="detail-actions">
+          <button class="btn-launch" id="launchBtn" onclick="launchGame()">
+            <span>▶ Spiel starten</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="grid-view" id="gridView" style="display:none">
+        <div class="grid-scroll" id="gridScroll"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="context-menu" id="contextMenu" style="display:none">
+    <div class="context-menu-item" onclick="contextRename()">✏ Umbenennen</div>
+    <div class="context-menu-item" onclick="contextChangeIcon()">🖼 Icon ändern...</div>
+    <div class="context-menu-item" onclick="openCoverSearch()">🎨 Cover suchen...</div>
+    <div class="context-menu-item" onclick="contextOpenFolder()">📂 Speicherort öffnen</div>
+    <div class="context-menu-item" onclick="contextOptions()">⚙ Startoptionen...</div>
+    <div class="context-menu-item danger" onclick="contextDeleteGame()">✕ Entfernen</div>
+  </div>
+
+  <!-- Scan-Dialog -->
+  <div class="overlay" id="scanOverlay" style="display:none">
+    <div class="dialog scan-dialog">
+      <div class="scan-header">
+        <h2>Spiele suchen</h2>
+        <div class="scan-actions-top">
+          <button class="btn-browse" onclick="addScanFolder()">📁 Ordner hinzufügen...</button>
+          <button class="btn-browse" id="btnRunScan" onclick="runScan()">🔍 Automatisch scannen</button>
+        </div>
+      </div>
+
+      <div id="scanStatus" class="scan-status" style="display:none">
+        <span class="scan-spinner">⏳</span>
+        <span id="scanStatusText">Wird gescannt...</span>
+      </div>
+
+      <div id="scanResults" class="scan-results" style="display:none">
+        <div class="scan-results-header">
+          <span id="scanResultCount">0 Spiele gefunden</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn-sel-toggle" onclick="selectAllScan(true)">Alle</button>
+            <button class="btn-sel-toggle" onclick="selectAllScan(false)">Keine</button>
+          </div>
+        </div>
+        <div class="scan-list" id="scanList"></div>
+      </div>
+
+      <div id="scanEmpty" class="scan-empty" style="display:none">
+        Keine neuen Spiele gefunden.
+      </div>
+
+      <div class="dialog-actions">
+        <button class="btn-cancel" onclick="hideScanDialog()">Schließen</button>
+        <button class="btn-primary" id="btnAddScanned" onclick="addScannedGames()" style="display:none">Ausgewählte hinzufügen</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay" style="display:none">
+    <div class="dialog">
+      <h2>Spiel hinzufügen</h2>
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="gameName" placeholder="z.B. Cyberpunk 2077" onkeydown="if(event.key==='Enter')addGame()">
+      </div>
+      <div class="form-group">
+        <label>Pfad zur .exe</label>
+        <div class="path-row">
+          <input type="text" id="gamePath" placeholder="C:\Games\..." onkeydown="if(event.key==='Enter')addGame()">
+          <button class="btn-browse" onclick="browseExe()">Durchsuchen</button>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-cancel" onclick="hideAddDialog()">Abbrechen</button>
+        <button class="btn-primary" onclick="addGame()">Hinzufügen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Einstellungen -->
+  <div class="overlay" id="settingsOverlay" style="display:none">
+    <div class="dialog">
+      <h2>Einstellungen</h2>
+      <div class="form-group">
+        <label>Cover-Darstellung</label>
+        <div class="mode-options">
+          <button class="mode-option" data-mode="hero" onclick="setCoverMode('hero')">
+            <span class="mode-shape shape-hero"></span>
+            <span class="mode-title">Hero-Banner</span>
+            <span class="mode-desc">Breites Querformat</span>
+          </button>
+          <button class="mode-option" data-mode="poster" onclick="setCoverMode('poster')">
+            <span class="mode-shape shape-poster"></span>
+            <span class="mode-title">Poster</span>
+            <span class="mode-desc">Hochformat-Cover</span>
+          </button>
+        </div>
+        <p class="settings-hint">Ist die bevorzugte Variante für ein Spiel nicht verfügbar, wird automatisch die andere als Fallback verwendet.</p>
+      </div>
+      <div class="form-group">
+        <label>Akzentfarbe</label>
+        <div class="accent-swatches" id="accentSwatches"></div>
+      </div>
+      <div class="form-group">
+        <label>Allgemein</label>
+        <div class="setting-toggle-row">
+          <span class="setting-toggle-label">Mit Windows starten</span>
+          <label class="switch"><input type="checkbox" id="setAutostart" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
+        </div>
+        <div class="setting-toggle-row">
+          <span class="setting-toggle-label">Minimiert starten</span>
+          <label class="switch"><input type="checkbox" id="setStartMin" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
+        </div>
+        <div class="setting-toggle-row">
+          <span class="setting-toggle-label">Beim Schließen in den Infobereich (Tray)</span>
+          <label class="switch"><input type="checkbox" id="setTray" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Mehr Cover &amp; Hero über SteamGridDB (optional)</label>
+        <input type="text" id="setSgdbKey" placeholder="API-Key hier einfügen" autocomplete="off" spellcheck="false" onchange="onAppSettingChange()">
+        <p class="settings-hint">Ohne Key läuft alles (Steam + Microsoft Store). <strong>Mit</strong> Key bekommst du in der Cover-/Hero-Suche deutlich mehr Auswahl — auch für Epic-/GOG-Spiele und schönere Alternativ-Cover.</p>
+        <details class="sgdb-guide">
+          <summary>Lohnt sich das? &amp; in 2 Minuten einrichten</summary>
+          <div class="sgdb-guide-body">
+            <p><strong>Was es bringt:</strong> SteamGridDB ist eine riesige Community-Bibliothek mit Covern und Hero-Bannern für Spiele aus <em>jedem</em> Store. Statt nur des einen offiziellen Bildes wählst du je Spiel aus vielen Varianten — deine Bibliothek sieht einheitlich top aus.</p>
+            <p><strong>So holst du den kostenlosen Key:</strong></p>
+            <ol>
+              <li>Auf <span class="about-link" onclick="openExternal('https://www.steamgriddb.com')">steamgriddb.com</span> mit <strong>Steam</strong> anmelden. Der Login läuft über Steam selbst — <strong>Lumora sieht deine Steam-Daten nie</strong>.</li>
+              <li>Oben rechts aufs Profil → <strong>Preferences</strong> → Reiter <strong>API</strong>.</li>
+              <li><strong>Generate API Key</strong> klicken und den Key kopieren.</li>
+              <li>Hier oben ins Feld einfügen — fertig, sofort aktiv.</li>
+            </ol>
+            <button class="btn-browse" onclick="openExternal('https://www.steamgriddb.com/profile/preferences/api')">↗ Key-Seite öffnen</button>
+          </div>
+        </details>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-primary" onclick="hideSettings()">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Startoptionen pro Spiel -->
+  <div class="overlay" id="optionsOverlay" style="display:none">
+    <div class="dialog">
+      <h2>Startoptionen</h2>
+      <div class="form-group">
+        <label>Startargumente</label>
+        <input type="text" id="optArgs" placeholder="z.B. -windowed -novid">
+      </div>
+      <div class="setting-toggle-row">
+        <span class="setting-toggle-label">Als Administrator starten</span>
+        <label class="switch"><input type="checkbox" id="optAdmin"><span class="switch-slider"></span></label>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-cancel" onclick="hideOptions()">Abbrechen</button>
+        <button class="btn-primary" onclick="saveOptions()">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Über / Rechtliches -->
+  <div class="overlay" id="aboutOverlay" style="display:none">
+    <div class="dialog about-dialog">
+      <h2>Über Lumora</h2>
+      <p class="about-version" id="aboutVersion">kostenlos</p>
+      <p class="about-text">
+        Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam,
+        Microsoft oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind
+        Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation
+        der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.
+      </p>
+      <p class="about-text">
+        HDR-Steuerung via <strong>HDRTray</strong> von Frank Richter (GPL&nbsp;v3) ·
+        <span class="about-link" onclick="openExternal('https://github.com/res2k/HDRTray')">github.com/res2k/HDRTray</span>
+      </p>
+      <div class="dialog-actions">
+        <button class="btn-primary" onclick="hideAbout()">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Erweiterte Cover-Suche -->
+  <div class="overlay" id="coverSearchOverlay" style="display:none">
+    <div class="dialog cover-dialog">
+      <h2 id="coverSearchTitle">Artwork suchen</h2>
+      <div class="cover-mode-toggle">
+        <button id="coverModeCover" class="active" onclick="setArtworkMode('cover')">Cover (Hochformat)</button>
+        <button id="coverModeHero" onclick="setArtworkMode('hero')">Hero-Banner</button>
+      </div>
+      <div class="cover-search-bar">
+        <input type="text" id="coverSearchInput" placeholder="Spielname…"
+               onkeydown="if(event.key==='Enter')runCoverSearch()">
+        <button class="btn-primary" onclick="runCoverSearch()">Suchen</button>
+      </div>
+      <div class="cover-results" id="coverResults"></div>
+      <details class="cover-own">
+        <summary>Eigenes Bild verwenden</summary>
+        <div class="cover-own-body">
+          <div class="path-row">
+            <input type="text" id="coverUrlInput" placeholder="Bild-URL (https://…)"
+                   onkeydown="if(event.key==='Enter')coverFromUrl()">
+            <button class="btn-browse" onclick="coverFromUrl()">Laden</button>
+          </div>
+          <button class="btn-browse" style="align-self:flex-start"
+                  onclick="document.getElementById('coverFileInput').click()">Lokale Datei wählen…</button>
+          <input type="file" id="coverFileInput" accept="image/*" style="display:none" onchange="coverFromFile(this)">
+        </div>
+      </details>
+      <div class="dialog-actions">
+        <button class="btn-cancel" onclick="hideCoverSearch()">Abbrechen</button>
+        <button class="btn-primary" id="coverApplyBtn" onclick="applyCoverChoice()" disabled>Übernehmen</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron')
+
+    // Spiele & Einstellungen aus Dateien laden (kein localStorage → kein langsames
+    // leveldb-Recovery beim Start, zuverlässige Persistenz).
+    let games = (function () {
+      let raw = null
+      try { raw = ipcRenderer.sendSync('load-games-sync') } catch {}
+      try { return JSON.parse(raw || '[]') } catch { return [] }
+    })()
+
+    const _prefs = (function () {
+      try { const r = ipcRenderer.sendSync('load-prefs-sync'); return r ? JSON.parse(r) : {} } catch { return {} }
+    })()
+
+    let selectedIndex = -1
+    let contextIndex = -1
+    let dragSrcIdx = null
+    let coverMode = (_prefs.coverMode === 'hero' || _prefs.coverMode === 'poster') ? _prefs.coverMode : 'hero'
+    let sortMode = _prefs.sortMode || 'manual'
+    let searchQuery = ''
+    let favFilter = false
+    let libView = _prefs.libView || 'detail'
+    let accentHex = _prefs.accentHex || '#4f8ef7'
+    let accentRgb = _prefs.accentRgb || '79, 142, 247'
+    let lastSelectedId = _prefs.lastSelectedId || null
+
+    function savePrefs() {
+      ipcRenderer.invoke('save-prefs', JSON.stringify({ coverMode, sortMode, libView, accentHex, accentRgb, lastSelectedId }))
+    }
+
+    const contextMenu = document.getElementById('contextMenu')
+
+    function showContextMenu(e, i) {
+      e.preventDefault()
+      e.stopPropagation()
+      contextIndex = i
+      contextMenu.style.display = 'block'
+      const x = Math.min(e.clientX, window.innerWidth - contextMenu.offsetWidth - 8)
+      const y = Math.min(e.clientY, window.innerHeight - contextMenu.offsetHeight - 8)
+      contextMenu.style.left = x + 'px'
+      contextMenu.style.top = y + 'px'
+    }
+
+    function hideContextMenu() {
+      contextMenu.style.display = 'none'
+      contextIndex = -1
+    }
+
+    async function contextChangeIcon() {
+      const i = contextIndex
+      hideContextMenu()
+      if (i < 0) return
+      const icon = await ipcRenderer.invoke('browse-icon')
+      if (icon) {
+        if (!games[i].id) games[i].id = newId()
+        games[i].icon = await persistMedia(games[i].id, 'icon', icon)
+        saveGames()
+        renderList()
+        if (selectedIndex === i) updateCoverHero(games[i])
+      }
+    }
+
+    function contextRename() {
+      const i = contextIndex
+      hideContextMenu()
+      if (i < 0) return
+      selectGame(i)
+      startRename()
+    }
+
+    function startRename() {
+      if (selectedIndex < 0) return
+      const h1 = document.getElementById('detailName')
+      const input = document.getElementById('detailNameInput')
+      input.value = games[selectedIndex].name
+      h1.style.display = 'none'
+      input.style.display = 'block'
+      input.focus()
+      input.select()
+    }
+
+    function commitRename() {
+      const input = document.getElementById('detailNameInput')
+      const name = input.value.trim()
+      if (name && selectedIndex >= 0) {
+        games[selectedIndex].name = name
+        saveGames()
+        renderList()
+      }
+      const h1 = document.getElementById('detailName')
+      h1.textContent = games[selectedIndex]?.name || '-'
+      h1.style.display = 'block'
+      input.style.display = 'none'
+    }
+
+    function cancelRename() {
+      document.getElementById('detailName').style.display = 'block'
+      document.getElementById('detailNameInput').style.display = 'none'
+    }
+
+    async function contextFetchCover() {
+      const i = contextIndex
+      hideContextMenu()
+      if (i < 0) return
+      await fetchAndStoreCover(i)
+      await fetchAndStoreHero(i, true)
+      selectGame(i)
+    }
+
+    // ── Erweiterte Cover-Suche ───────────────────────────────
+    let coverSearchIndex = -1
+    let coverSearchMode = 'cover'   // 'cover' (Hochformat) | 'hero' (Banner)
+    let coverChoice = null          // gewähltes Hochformat-Cover { cover, source, appId }
+    let heroChoice = null           // gewähltes Hero-Banner { cover, source, appId }
+    let coverSearchToken = 0        // läuft hoch je Suche → ignoriert veraltete Treffer
+    let coverSeen = null            // Dedup der Bilder über alle Quellen
+    let coverResultCount = 0
+    let coverLoadingAnchor = null   // Skeletons: davor werden echte Treffer eingefügt
+
+    function openCoverSearch() {
+      const i = contextIndex
+      hideContextMenu()
+      if (i < 0) return
+      coverSearchIndex = i
+      coverChoice = null
+      heroChoice = null
+      // Im selben Modus öffnen, in dem die Bibliothek das Spiel anzeigt:
+      // coverMode 'hero' → Hero-Banner, sonst ('poster') → Hochformat-Cover.
+      coverSearchMode = (coverMode === 'hero') ? 'hero' : 'cover'
+      const g = games[i]
+      document.getElementById('coverSearchTitle').textContent = 'Artwork suchen — ' + g.name
+      document.getElementById('coverSearchInput').value = g.name
+      document.getElementById('coverUrlInput').value = ''
+      document.getElementById('coverApplyBtn').disabled = true
+      document.getElementById('coverModeCover').classList.toggle('active', coverSearchMode === 'cover')
+      document.getElementById('coverModeHero').classList.toggle('active', coverSearchMode === 'hero')
+      document.getElementById('coverSearchOverlay').style.display = 'flex'
+      runCoverSearch()
+    }
+
+    function setArtworkMode(mode) {
+      if (mode === coverSearchMode) return
+      coverSearchMode = mode
+      // coverChoice/heroChoice bleiben erhalten → man kann Hero UND Cover wählen.
+      document.getElementById('coverModeCover').classList.toggle('active', mode === 'cover')
+      document.getElementById('coverModeHero').classList.toggle('active', mode === 'hero')
+      document.getElementById('coverApplyBtn').disabled = !(coverChoice || heroChoice)
+      runCoverSearch()
+    }
+
+    function hideCoverSearch() {
+      document.getElementById('coverSearchOverlay').style.display = 'none'
+      coverSearchIndex = -1
+      coverChoice = null
+      heroChoice = null
+    }
+
+    function coverStatus(text) {
+      document.getElementById('coverResults').innerHTML =
+        '<div class="cover-status">' + esc(text) + '</div>'
+    }
+
+    function addCurrentCell(box) {
+      const g = games[coverSearchIndex]
+      const currentArt = g && (coverSearchMode === 'hero' ? g.hero : g.cover)
+      if (!currentArt) return
+      const cur = document.createElement('div')
+      cur.className = 'cover-cell current'
+      cur.innerHTML = '<img src="' + mediaSrc(currentArt) + '">' +
+        '<span class="current-badge">Aktuell</span>' +
+        '<span class="cover-cell-cap">Aktuelles ' + (coverSearchMode === 'hero' ? 'Hero-Banner' : 'Cover') + '</span>'
+      box.appendChild(cur)
+    }
+
+    function makeCoverCell(item) {
+      const cell = document.createElement('div')
+      cell.className = 'cover-cell'
+      cell.innerHTML =
+        '<img src="' + item.cover + '">' +
+        '<span class="cover-cell-src">' + esc(item.source || '') + '</span>' +
+        '<span class="cover-cell-cap">' + esc(item.name || '') + '</span>'
+      cell.onclick = () => selectCoverCell(cell, { cover: item.cover, source: item.source, appId: item.appId })
+      return cell
+    }
+
+    // Parallele Suche über alle Quellen; Treffer erscheinen, sobald die jeweilige
+    // Quelle fertig ist. Skeleton-Kacheln + Spinner zeigen „läuft noch".
+    function runCoverSearch() {
+      const term = document.getElementById('coverSearchInput').value.trim()
+      if (!term) return
+      const token = ++coverSearchToken
+      const box = document.getElementById('coverResults')
+      box.classList.toggle('hero-mode', coverSearchMode === 'hero')
+      box.innerHTML = ''
+      addCurrentCell(box)
+      coverSeen = new Set()
+      coverResultCount = 0
+      for (let i = 0; i < 3; i++) {
+        const s = document.createElement('div'); s.className = 'cover-skeleton'; box.appendChild(s)
+      }
+      const status = document.createElement('div')
+      status.className = 'cover-loading-status'
+      status.innerHTML = '<span class="cover-spinner"></span> Weitere Quellen werden durchsucht<span class="cover-dots"></span>'
+      box.appendChild(status)
+      coverLoadingAnchor = box.querySelector('.cover-skeleton')
+
+      let pending = 3
+      const finalize = () => { if (token === coverSearchToken && --pending === 0) finishCoverSearch(token) }
+      const onRes = (res) => { if (token === coverSearchToken) appendCoverCells(res || []); finalize() }
+      ipcRenderer.invoke('search-steam', term, coverSearchMode).then(onRes, finalize)
+      ipcRenderer.invoke('search-msstore', term, coverSearchMode).then(onRes, finalize)
+      ipcRenderer.invoke('search-sgdb', term, coverSearchMode).then(onRes, finalize)
+    }
+
+    function appendCoverCells(list) {
+      const box = document.getElementById('coverResults')
+      const activeChoice = coverSearchMode === 'hero' ? heroChoice : coverChoice
+      for (const item of list) {
+        if (!item || !item.cover || coverSeen.has(item.cover)) continue
+        coverSeen.add(item.cover)
+        const cell = makeCoverCell(item)
+        if (activeChoice && activeChoice.cover === item.cover) cell.classList.add('selected')
+        box.insertBefore(cell, coverLoadingAnchor)
+        coverResultCount++
+      }
+    }
+
+    function finishCoverSearch(token) {
+      if (token !== coverSearchToken) return
+      const box = document.getElementById('coverResults')
+      box.querySelectorAll('.cover-skeleton, .cover-loading-status').forEach(el => el.remove())
+      if (coverResultCount === 0) {
+        const d = document.createElement('div')
+        d.className = 'cover-status'
+        d.textContent = 'Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.'
+        box.appendChild(d)
+      }
+    }
+
+    // Einzelbild anzeigen (eigene URL/Datei) – ersetzt das Raster sofort,
+    // entwertet eine evtl. noch laufende Quellen-Suche.
+    function renderCoverResults(list) {
+      coverSearchToken++
+      const box = document.getElementById('coverResults')
+      box.classList.toggle('hero-mode', coverSearchMode === 'hero')
+      box.innerHTML = ''
+      addCurrentCell(box)
+      if (!list.length) {
+        const d = document.createElement('div')
+        d.className = 'cover-status'
+        d.textContent = 'Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.'
+        box.appendChild(d)
+        return
+      }
+      list.forEach(item => box.appendChild(makeCoverCell(item)))
+    }
+
+    function selectCoverCell(cell, choice) {
+      document.querySelectorAll('#coverResults .cover-cell.selected').forEach(c => c.classList.remove('selected'))
+      cell.classList.add('selected')
+      if (coverSearchMode === 'hero') heroChoice = choice
+      else coverChoice = choice
+      document.getElementById('coverApplyBtn').disabled = false
+    }
+
+    function selectFirstResultCell(choice) {
+      const cell = document.querySelector('#coverResults .cover-cell:not(.current)')
+      if (cell) selectCoverCell(cell, choice)
+    }
+
+    async function coverFromUrl() {
+      const url = document.getElementById('coverUrlInput').value.trim()
+      if (!url) return
+      coverStatus('Bild wird geladen…')
+      let dataUrl = null
+      try { dataUrl = await ipcRenderer.invoke('fetch-image-url', url) } catch {}
+      if (!dataUrl) { coverStatus('Bild-URL konnte nicht geladen werden (nur JPG/PNG).'); return }
+      renderCoverResults([{ cover: dataUrl, source: 'URL', name: 'Eigenes Bild' }])
+      selectFirstResultCell({ cover: dataUrl, source: 'URL' })
+    }
+
+    function coverFromFile(input) {
+      const file = input.files && input.files[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result
+        renderCoverResults([{ cover: dataUrl, source: 'Datei', name: file.name }])
+        selectFirstResultCell({ cover: dataUrl, source: 'Datei' })
+      }
+      reader.readAsDataURL(file)
+      input.value = ''
+    }
+
+    async function applyCoverChoice() {
+      const i = coverSearchIndex
+      if (i < 0 || (!coverChoice && !heroChoice)) return
+      const g = games[i]
+      if (!g) return
+      document.getElementById('coverApplyBtn').disabled = true
+      if (!g.id) g.id = newId()
+
+      // 1) Hochformat-Cover (kann bei Steam-Treffer Hero & Beschreibung mitsetzen)
+      if (coverChoice) {
+        g.cover = await persistMedia(g.id, 'cover', coverChoice.cover)
+        g.coverTriedV3 = true
+        if (coverChoice.appId) {
+          g.steamAppId = coverChoice.appId
+          const hero = await ipcRenderer.invoke('fetch-hero', g.name, coverChoice.appId)
+          if (hero) g.hero = await persistMedia(g.id, 'hero', hero)
+          g.heroTriedV2 = true
+          const info = await ipcRenderer.invoke('fetch-game-info', g.name, coverChoice.appId)
+          if (info) g.info = info
+          g.infoTriedV2 = true
+        }
+      }
+      // 2) Explizit gewähltes Hero hat Vorrang (überschreibt ggf. das Auto-Hero oben)
+      if (heroChoice) {
+        g.hero = await persistMedia(g.id, 'hero', heroChoice.cover)
+        g.heroTriedV2 = true
+        if (heroChoice.appId && !g.steamAppId) g.steamAppId = heroChoice.appId
+      }
+      saveGames()
+      hideCoverSearch()
+      if (selectedIndex === i) {
+        updateCoverHero(games[i])
+        updateDetailInfo(games[i])
+        updateDetailBg()
+      }
+      renderList()
+    }
+
+    async function fetchAndStoreCover(i) {
+      const g = games[i]
+      if (!g) return
+      g.coverTriedV3 = true
+      const dataUrl = await ipcRenderer.invoke('fetch-cover', g.name, g.steamAppId)
+      if (dataUrl) {
+        if (!g.id) g.id = newId()
+        g.cover = await persistMedia(g.id, 'cover', dataUrl)
+      } else {
+        // Kein echtes Cover gefunden → evtl. alten Platzhalter entfernen,
+        // damit das Hero-/Kachel-Fallback greift.
+        g.cover = ''
+      }
+      saveGames()
+    }
+
+    // Lädt fehlendes Cover/Hero für ein Spiel einmalig nach (z.B. wenn der
+    // erste Versuch beim Hinzufügen scheiterte) und aktualisiert die Ansicht.
+    async function enrichArtwork(i) {
+      const g = games[i]
+      if (!g) return
+      if (!g.iconUpgradedV1) {
+        g.iconUpgradedV1 = true
+        const raw = await ipcRenderer.invoke('get-file-icon', g.path)
+        if (raw) { if (!g.id) g.id = newId(); g.icon = await persistMedia(g.id, 'icon', raw) }
+        else { g.icon = '' }
+        saveGames()
+      }
+      if (!g.coverTriedV3) await fetchAndStoreCover(i)
+      if (!g.hero && !g.heroTriedV2) await fetchAndStoreHero(i)
+      if (!g.infoTriedV2) {
+        g.infoTriedV2 = true
+        const info = await ipcRenderer.invoke('fetch-game-info', g.name, g.steamAppId)
+        if (info) g.info = info
+        saveGames()
+      }
+      if (selectedIndex === i) {
+        updateCoverHero(games[i])
+        updateDetailInfo(games[i])
+        updateDetailBg()
+      }
+      renderList()
+    }
+
+    // Steam-Hero (breites Querformat). Wird nur einmal pro Spiel versucht,
+    // außer force=true (z.B. über „Cover suchen").
+    async function fetchAndStoreHero(i, force) {
+      const g = games[i]
+      if (!g) return
+      if (g.heroTriedV2 && !force) return
+      g.heroTriedV2 = true
+      const dataUrl = await ipcRenderer.invoke('fetch-hero', g.name, g.steamAppId)
+      if (dataUrl) {
+        if (!g.id) g.id = newId()
+        g.hero = await persistMedia(g.id, 'hero', dataUrl)
+      }
+      saveGames()
+    }
+
+    function updateCoverHero(g) {
+      const heroEl = document.getElementById('gameCoverHero')
+      const bg = document.getElementById('coverBg')
+      const poster = document.getElementById('coverPoster')
+      const hint = document.getElementById('coverDropHint')
+
+      // Bevorzugte Darstellung gemäß Einstellung, mit automatischem Fallback
+      // auf die jeweils andere Variante, wenn das Artwork fehlt.
+      const useHero   = coverMode === 'hero'   ? !!g.hero  : (!g.cover && !!g.hero)
+      const usePoster = coverMode === 'poster' ? !!g.cover : (!g.hero  && !!g.cover)
+
+      if (useHero) {
+        // Steam-Hero-Look: scharfes Querformat als Banner, Titel als Overlay
+        heroEl.classList.add('hero-mode')
+        bg.style.backgroundImage = `url("${mediaSrc(g.hero)}")`
+        bg.classList.add('show')
+        poster.style.display = 'none'
+        hint.style.display = 'none'
+      } else if (usePoster) {
+        heroEl.classList.remove('hero-mode')
+        bg.style.backgroundImage = `url("${mediaSrc(g.cover)}")`
+        bg.classList.add('show')
+        poster.style.display = ''
+        poster.classList.add('has-cover')
+        poster.innerHTML = `<img class="poster-img" src="${mediaSrc(g.cover)}">`
+        hint.style.display = 'none'
+      } else {
+        heroEl.classList.remove('hero-mode')
+        bg.style.backgroundImage = ''
+        bg.classList.remove('show')
+        poster.style.display = ''
+        poster.classList.remove('has-cover')
+        poster.innerHTML = gameIcon(g, 'hero')
+        hint.style.display = 'flex'
+      }
+    }
+
+    function dropCover(event) {
+      event.preventDefault()
+      document.getElementById('gameCoverHero').classList.remove('drag-over')
+      if (selectedIndex < 0) return
+      const file = event.dataTransfer.files[0]
+      if (!file || !file.type.startsWith('image/')) return
+      const reader = new FileReader()
+      reader.onload = async (e) => {
+        const g = games[selectedIndex]
+        if (!g.id) g.id = newId()
+        g.cover = await persistMedia(g.id, 'cover', e.target.result)
+        saveGames()
+        updateCoverHero(g)
+      }
+      reader.readAsDataURL(file)
+    }
+
+    function contextDeleteGame() {
+      const i = contextIndex
+      hideContextMenu()
+      if (i < 0) return
+      if (!confirm(`„${games[i].name}" wirklich aus der Liste entfernen?`)) return
+      if (games[i].id) ipcRenderer.invoke('delete-media', games[i].id)
+      games.splice(i, 1)
+      if (selectedIndex === i) selectedIndex = -1
+      else if (selectedIndex > i) selectedIndex--
+      saveGames()
+      renderList()
+      applyLibView()
+    }
+
+    function contextOpenFolder() {
+      const i = contextIndex
+      hideContextMenu()
+      if (i < 0) return
+      ipcRenderer.invoke('open-game-folder', games[i].path)
+    }
+
+    document.addEventListener('click', hideContextMenu)
+    document.addEventListener('contextmenu', (e) => {
+      if (!e.target.closest('.game-item')) hideContextMenu()
+    })
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return
+      hideContextMenu()
+      if (document.getElementById('detailNameInput').style.display !== 'none') { cancelRename(); return }
+      if (document.getElementById('overlay').style.display === 'flex') hideAddDialog()
+      if (document.getElementById('scanOverlay').style.display === 'flex') hideScanDialog()
+      if (document.getElementById('aboutOverlay').style.display === 'flex') hideAbout()
+      if (document.getElementById('settingsOverlay').style.display === 'flex') hideSettings()
+      if (document.getElementById('optionsOverlay').style.display === 'flex') hideOptions()
+    })
+
+    function saveGames() {
+      ipcRenderer.invoke('save-games', JSON.stringify(games))
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]))
+    }
+
+    function newId() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+    }
+
+    // Speichert ein Bild (dataURL) als Datei und liefert den Pfad zurück.
+    // Ist der Wert bereits ein Pfad, wird er unverändert zurückgegeben.
+    async function persistMedia(id, kind, dataUrl) {
+      if (!dataUrl) return null
+      if (!dataUrl.startsWith('data:')) return dataUrl
+      const p = await ipcRenderer.invoke('store-media', { id, kind, dataUrl })
+      return p || dataUrl
+    }
+
+    // Wandelt einen gespeicherten Wert (Dateipfad oder dataURL) in eine
+    // anzeigbare Quelle um. Dateipfade werden als file:// URL kodiert.
+    function mediaSrc(v) {
+      if (!v) return ''
+      if (v.startsWith('data:')) return v
+      return 'file:///' + v.replace(/\\/g, '/').replace(/ /g, '%20').replace(/#/g, '%23')
+    }
+
+    function hashHue(s) {
+      let h = 0
+      for (let i = 0; i < (s || '').length; i++) h = (h * 31 + s.charCodeAt(i)) % 360
+      return h
+    }
+
+    function letterTile(name, size) {
+      const sz = size === 'hero' ? 48 : 20
+      const fs = size === 'hero' ? 24 : 12
+      const letter = ((name || '?').trim().charAt(0) || '?').toUpperCase()
+      const hue = hashHue(name)
+      return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${sz}px;height:${sz}px;border-radius:5px;background:hsl(${hue} 42% 32%);color:#fff;font-size:${fs}px;font-weight:600;flex-shrink:0">${esc(letter)}</span>`
+    }
+
+    function gameIcon(g, size = 'list') {
+      const sz = size === 'hero' ? '48px' : '20px'
+      // Echtes Icon zuerst (Steam-Original bzw. Exe-Icon). Generische Platzhalter
+      // werden bereits beim Laden verworfen, daher hier Cover/Kachel als Fallback.
+      if (g.icon) {
+        return `<img src="${mediaSrc(g.icon)}" style="width:${sz};height:${sz};object-fit:contain;image-rendering:pixelated">`
+      }
+      if (g.cover) {
+        return `<img src="${mediaSrc(g.cover)}" style="width:${sz};height:${sz};object-fit:cover;border-radius:5px">`
+      }
+      return letterTile(g.name, size)
+    }
+
+    function formatPlaytime(sec) {
+      sec = Math.floor(sec || 0)
+      if (sec < 60) return sec > 0 ? 'unter 1 Min' : '–'
+      const h = Math.floor(sec / 3600)
+      const m = Math.floor((sec % 3600) / 60)
+      return h === 0 ? `${m} Min` : `${h} Std ${m} Min`
+    }
+
+    function formatLastPlayed(ts) {
+      if (!ts) return 'nie'
+      const diff = Date.now() - ts
+      const day = 86400000
+      if (diff < 60000)    return 'gerade eben'
+      if (diff < 3600000)  return `vor ${Math.floor(diff / 60000)} Min`
+      if (diff < day)      return `vor ${Math.floor(diff / 3600000)} Std`
+      if (diff < 2 * day)  return 'gestern'
+      if (diff < 7 * day)  return `vor ${Math.floor(diff / day)} Tagen`
+      return new Date(ts).toLocaleDateString('de-DE')
+    }
+
+    function onSearch() {
+      searchQuery = document.getElementById('searchInput').value
+      renderList()
+    }
+
+    function onSortChange() {
+      sortMode = document.getElementById('sortSelect').value
+      savePrefs()
+      renderList()
+    }
+
+    function toggleFavFilter() {
+      favFilter = !favFilter
+      document.getElementById('favFilterBtn').classList.toggle('active', favFilter)
+      renderList()
+    }
+
+    function toggleFavorite(idx, e) {
+      if (e) e.stopPropagation()
+      games[idx].favorite = !games[idx].favorite
+      saveGames()
+      renderList()
+    }
+
+    // Anzeige-Reihenfolge berechnen, ohne die Original-Reihenfolge (manuell/Drag) zu verändern
+    function sortedGameEntries() {
+      let entries = games.map((g, idx) => ({ g, idx }))
+      const q = searchQuery.trim().toLowerCase()
+      if (q) entries = entries.filter(e => e.g.name.toLowerCase().includes(q))
+      if (favFilter) entries = entries.filter(e => e.g.favorite)
+      const cmpName = (a, b) => a.g.name.localeCompare(b.g.name, 'de', { sensitivity: 'base' })
+      switch (sortMode) {
+        case 'name':      entries.sort(cmpName); break
+        case 'name-desc': entries.sort((a, b) => -cmpName(a, b)); break
+        case 'played':    entries.sort((a, b) => (b.g.lastPlayed || 0) - (a.g.lastPlayed || 0)); break
+        case 'playtime':  entries.sort((a, b) => (b.g.playtime || 0) - (a.g.playtime || 0)); break
+        case 'added':     entries.sort((a, b) => (b.g.addedAt || 0) - (a.g.addedAt || 0)); break
+      }
+      // Favoriten immer oben anpinnen. Stabile Sortierung (V8) → die Reihenfolge
+      // innerhalb der Favoriten und innerhalb der übrigen Spiele bleibt erhalten.
+      // Beim aktiven Favoriten-Filter sind ohnehin nur Favoriten sichtbar (No-op).
+      if (!favFilter) entries.sort((a, b) => (b.g.favorite ? 1 : 0) - (a.g.favorite ? 1 : 0))
+      return entries
+    }
+
+    function renderList() {
+      const list = document.getElementById('gameList')
+      list.innerHTML = ''
+      const canDrag = sortMode === 'manual' && !searchQuery.trim() && !favFilter
+      const entries = sortedGameEntries()
+
+      if (entries.length === 0) {
+        const empty = document.createElement('div')
+        empty.className = 'list-empty'
+        empty.textContent = games.length === 0 ? 'Noch keine Spiele' : 'Keine Treffer'
+        list.appendChild(empty)
+        return
+      }
+
+      entries.forEach(({ g, idx }) => {
+        const el = document.createElement('div')
+        el.className = 'game-item' + (idx === selectedIndex ? ' active' : '')
+        el.draggable = canDrag
+        const sub = g.playtime ? `${formatPlaytime(g.playtime)} · ${formatLastPlayed(g.lastPlayed)}` : esc(g.path)
+        el.innerHTML =
+          (canDrag ? '<span class="game-item-drag">⠿</span>' : '') +
+          `<span class="game-item-icon">${gameIcon(g)}</span>` +
+          `<div class="game-item-info"><span class="game-item-name">${esc(g.name)}</span><span class="game-item-path">${sub}</span></div>` +
+          `<button class="game-item-fav${g.favorite ? ' on' : ''}" title="Favorit" onclick="toggleFavorite(${idx}, event)">${g.favorite ? '★' : '☆'}</button>`
+        el.onclick = () => selectGame(idx)
+        el.oncontextmenu = (e) => showContextMenu(e, idx)
+
+        if (canDrag) {
+          el.addEventListener('dragstart', (e) => {
+            dragSrcIdx = idx
+            requestAnimationFrame(() => el.classList.add('dragging'))
+            e.dataTransfer.effectAllowed = 'move'
+          })
+          el.addEventListener('dragend', () => {
+            dragSrcIdx = null
+            el.classList.remove('dragging')
+            list.querySelectorAll('.game-item').forEach(n => n.classList.remove('drop-above', 'drop-below'))
+          })
+          el.addEventListener('dragover', (e) => {
+            e.preventDefault()
+            if (dragSrcIdx === null || dragSrcIdx === idx) return
+            const rect = el.getBoundingClientRect()
+            const above = e.clientY < rect.top + rect.height / 2
+            list.querySelectorAll('.game-item').forEach(n => n.classList.remove('drop-above', 'drop-below'))
+            el.classList.add(above ? 'drop-above' : 'drop-below')
+          })
+          el.addEventListener('dragleave', () => {
+            el.classList.remove('drop-above', 'drop-below')
+          })
+          el.addEventListener('drop', (e) => {
+            e.preventDefault()
+            el.classList.remove('drop-above', 'drop-below')
+            if (dragSrcIdx === null || dragSrcIdx === idx) return
+            const rect = el.getBoundingClientRect()
+            let target = e.clientY < rect.top + rect.height / 2 ? idx : idx + 1
+            if (dragSrcIdx < target) target--
+            const [moved] = games.splice(dragSrcIdx, 1)
+            games.splice(target, 0, moved)
+            if (selectedIndex === dragSrcIdx) selectedIndex = target
+            else if (dragSrcIdx < target && selectedIndex > dragSrcIdx && selectedIndex <= target) selectedIndex--
+            else if (dragSrcIdx > target && selectedIndex >= target && selectedIndex < dragSrcIdx) selectedIndex++
+            dragSrcIdx = null
+            saveGames()
+            renderList()
+          })
+        }
+
+        list.appendChild(el)
+      })
+      if (libView === 'grid') renderGrid()
+    }
+
+    function updateViewToggle() {
+      document.getElementById('vtDetail').classList.toggle('active', libView === 'detail')
+      document.getElementById('vtGrid').classList.toggle('active', libView === 'grid')
+    }
+
+    function setLibView(v) {
+      libView = v
+      savePrefs()
+      applyLibView()
+    }
+
+    function applyLibView() {
+      const grid = document.getElementById('gridView')
+      const detail = document.getElementById('gameDetail')
+      const empty = document.getElementById('emptyState')
+      updateViewToggle()
+      if (libView === 'grid') {
+        grid.style.display = 'flex'
+        detail.style.display = 'none'
+        empty.style.display = 'none'
+        renderGrid()
+      } else {
+        grid.style.display = 'none'
+        const hasSel = selectedIndex >= 0
+        detail.style.display = hasSel ? 'flex' : 'none'
+        empty.style.display = hasSel ? 'none' : 'flex'
+      }
+      updateDetailBg()
+    }
+
+    function renderGrid() {
+      const wrap = document.getElementById('gridScroll')
+      wrap.innerHTML = ''
+      const entries = sortedGameEntries()
+      if (entries.length === 0) {
+        wrap.innerHTML = `<div class="list-empty">${games.length === 0 ? 'Noch keine Spiele' : 'Keine Treffer'}</div>`
+        return
+      }
+      entries.forEach(({ g, idx }) => {
+        const card = document.createElement('div')
+        card.className = 'grid-card' + (idx === selectedIndex ? ' active' : '')
+        const coverOpen = g.cover
+          ? `<div class="grid-cover" style="background-image:url('${mediaSrc(g.cover)}')">`
+          : `<div class="grid-cover grid-cover-empty">${gameIcon(g, 'hero')}`
+        const sub = g.playtime ? formatPlaytime(g.playtime) : ''
+        card.innerHTML =
+          coverOpen +
+            `<button class="grid-fav${g.favorite ? ' on' : ''}" title="Favorit" onclick="toggleFavorite(${idx}, event)">${g.favorite ? '★' : '☆'}</button>` +
+            `<button class="grid-play" title="Starten" onclick="quickLaunch(${idx}, event)">▶</button>` +
+          `</div>` +
+          `<div class="grid-name">${esc(g.name)}</div>` +
+          `<div class="grid-sub">${esc(sub)}</div>`
+        card.onclick = () => selectGame(idx)
+        card.oncontextmenu = (e) => showContextMenu(e, idx)
+        wrap.appendChild(card)
+      })
+    }
+
+    function quickLaunch(idx, e) {
+      if (e) e.stopPropagation()
+      selectGame(idx)
+      launchGame()
+    }
+
+    function selectGame(i, restore) {
+      selectedIndex = i
+      if (!restore) {
+        libView = 'detail'
+        lastSelectedId = games[i] ? games[i].id : null
+        savePrefs()
+      }
+      renderList()
+      const g = games[i]
+      document.getElementById('detailName').textContent = g.name
+      document.getElementById('detailPath').textContent = g.path
+      document.getElementById('detailPlaytime').textContent = formatPlaytime(g.playtime)
+      document.getElementById('detailLastPlayed').textContent = formatLastPlayed(g.lastPlayed)
+      const hdrOn = g.hdr !== false
+      document.getElementById('hdrToggle').checked = hdrOn
+      updateHdrSubLabel(hdrOn)
+      updateDetailInfo(g)
+      updateCoverHero(g)
+      applyLibView()
+      if (!g.iconUpgradedV1 || !g.coverTriedV3 || (!g.hero && !g.heroTriedV2) || !g.infoTriedV2) enrichArtwork(i)
+    }
+
+    function deleteGame() {
+      if (selectedIndex < 0) return
+      const g = games[selectedIndex]
+      if (!confirm(`„${g.name}" wirklich aus der Liste entfernen?`)) return
+      if (g.id) ipcRenderer.invoke('delete-media', g.id)
+      games.splice(selectedIndex, 1)
+      selectedIndex = -1
+      saveGames()
+      renderList()
+      applyLibView()
+    }
+
+    function showAddDialog() {
+      document.getElementById('overlay').style.display = 'flex'
+      document.getElementById('gameName').value = ''
+      document.getElementById('gamePath').value = ''
+    }
+
+    function hideAddDialog() {
+      document.getElementById('overlay').style.display = 'none'
+    }
+
+    async function browseExe() {
+      const p = await ipcRenderer.invoke('browse-game')
+      if (p) {
+        document.getElementById('gamePath').value = p
+        if (!document.getElementById('gameName').value) {
+          const parts = p.split('\\')
+          const filename = parts[parts.length - 1]
+          const isLnk = filename.toLowerCase().endsWith('.lnk')
+          document.getElementById('gameName').value = isLnk
+            ? filename.replace(/\.lnk$/i, '')
+            : parts[parts.length - 2] || filename
+        }
+      }
+    }
+
+    async function addGame() {
+      const name = document.getElementById('gameName').value.trim()
+      const exePath = document.getElementById('gamePath').value.trim()
+      if (!name || !exePath) return
+      const id = newId()
+      const rawIcon = await ipcRenderer.invoke('get-file-icon', exePath)
+      const icon = await persistMedia(id, 'icon', rawIcon)
+      games.push({ id, name, path: exePath, icon, addedAt: Date.now() })
+      const i = games.length - 1
+      saveGames()
+      renderList()
+      hideAddDialog()
+      selectGame(i)
+      // Cover & Hero im Hintergrund laden
+      fetchAndStoreCover(i).then(() => { if (selectedIndex === i) updateCoverHero(games[i]) })
+      fetchAndStoreHero(i).then(() => { if (selectedIndex === i) updateCoverHero(games[i]) })
+    }
+
+    function updateHdrSubLabel(on) {
+      document.getElementById('hdrSubLabel').textContent = on
+        ? 'HDR wird beim Start aktiviert und beim Beenden abgeschaltet.'
+        : 'Spiel wird ohne HDR-Umschaltung gestartet.'
+    }
+
+    function toggleGameHdr() {
+      if (selectedIndex < 0) return
+      const on = document.getElementById('hdrToggle').checked
+      games[selectedIndex].hdr = on
+      saveGames()
+      updateHdrSubLabel(on)
+    }
+
+    async function launchGame() {
+      if (selectedIndex < 0) return
+      const g = games[selectedIndex]
+      const btn = document.getElementById('launchBtn')
+      btn.disabled = true
+      btn.innerHTML = '<span>Wird gestartet...</span>'
+      g.lastPlayed = Date.now()
+      saveGames()
+      document.getElementById('detailLastPlayed').textContent = formatLastPlayed(g.lastPlayed)
+      renderList()
+      const result = await ipcRenderer.invoke('launch-game', g.path, { useHdr: g.hdr !== false, args: g.launchArgs || '', admin: !!g.runAsAdmin })
+      if (!result.success) {
+        btn.disabled = false
+        btn.innerHTML = '<span>▶ Spiel starten</span>'
+        alert('Fehler: ' + result.error)
+      }
+      // Bei Erfolg steuern die 'launch-status'-Events den Button-Zustand
+      // (verhindert versehentlichen Doppelstart, während das Spiel läuft)
+    }
+
+ipcRenderer.on('launch-status', (event, status) => {
+  const btn = document.getElementById('launchBtn')
+  const messages = {
+    'hdr-wait':   '⏳ HDR wird aktiviert...',
+    'launching':  '🚀 Spiel wird gestartet...',
+    'running':    '⏹ Spiel läuft...',
+    'idle':       '▶ Spiel starten'
+  }
+  btn.innerHTML = `<span>${messages[status] || '▶ Spiel starten'}</span>`
+  btn.disabled = status !== 'idle'
+})
+
+    ipcRenderer.on('hdr-status', (event, enabled) => {
+      const indicator = document.getElementById('hdrIndicator')
+      const dot = document.getElementById('hdrDot')
+      const label = document.getElementById('hdrLabel')
+      indicator.classList.toggle('active', enabled)
+      dot.classList.toggle('active', enabled)
+      label.textContent = enabled ? 'HDR an' : 'HDR aus'
+    })
+
+    ipcRenderer.on('play-session', (event, { gamePath, durationMs }) => {
+      const secs = Math.round(durationMs / 1000)
+      if (secs <= 0) return
+      const g = games.find(x => x.path === gamePath)
+      if (!g) return
+      g.playtime = (g.playtime || 0) + secs
+      g.lastPlayed = Date.now()
+      saveGames()
+      renderList()
+      if (selectedIndex >= 0 && games[selectedIndex] === g) {
+        document.getElementById('detailPlaytime').textContent = formatPlaytime(g.playtime)
+        document.getElementById('detailLastPlayed').textContent = formatLastPlayed(g.lastPlayed)
+      }
+    })
+
+    function minimize() { ipcRenderer.invoke('minimize-window') }
+    function toggleMaximize() { ipcRenderer.invoke('toggle-maximize') }
+    function closeApp() { ipcRenderer.invoke('close-window') }
+
+    function showAbout() { document.getElementById('aboutOverlay').style.display = 'flex' }
+    function hideAbout() { document.getElementById('aboutOverlay').style.display = 'none' }
+    function openExternal(url) { require('electron').shell.openExternal(url) }
+
+    async function showSettings() {
+      document.getElementById('settingsOverlay').style.display = 'flex'
+      updateModeOptions()
+      renderAccentSwatches()
+      const s = await ipcRenderer.invoke('get-app-settings')
+      document.getElementById('setAutostart').checked = !!s.autostart
+      document.getElementById('setStartMin').checked = !!s.startMinimized
+      document.getElementById('setTray').checked = !!s.minimizeToTray
+      document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
+    }
+    function hideSettings() { document.getElementById('settingsOverlay').style.display = 'none' }
+
+    function onAppSettingChange() {
+      ipcRenderer.invoke('set-app-settings', {
+        autostart: document.getElementById('setAutostart').checked,
+        startMinimized: document.getElementById('setStartMin').checked,
+        minimizeToTray: document.getElementById('setTray').checked,
+        steamGridDbKey: document.getElementById('setSgdbKey').value.trim(),
+      })
+    }
+
+    const ACCENTS = [
+      { name: 'Blau',   hex: '#4f8ef7', rgb: '79, 142, 247' },
+      { name: 'Lila',   hex: '#a974f7', rgb: '169, 116, 247' },
+      { name: 'Türkis', hex: '#2dd4bf', rgb: '45, 212, 191' },
+      { name: 'Grün',   hex: '#4ade80', rgb: '74, 222, 128' },
+      { name: 'Orange', hex: '#f7944f', rgb: '247, 148, 79' },
+      { name: 'Pink',   hex: '#f76ca8', rgb: '247, 108, 168' },
+    ]
+
+    function applyAccent() {
+      document.documentElement.style.setProperty('--accent', accentHex)
+      document.documentElement.style.setProperty('--accent-rgb', accentRgb)
+    }
+
+    function setAccent(hex, rgb) {
+      accentHex = hex
+      accentRgb = rgb
+      savePrefs()
+      applyAccent()
+      renderAccentSwatches()
+    }
+
+    function renderAccentSwatches() {
+      const wrap = document.getElementById('accentSwatches')
+      if (!wrap) return
+      wrap.innerHTML = ACCENTS.map(a =>
+        `<button class="accent-swatch${a.hex.toLowerCase() === accentHex.toLowerCase() ? ' active' : ''}" style="background:${a.hex}" title="${a.name}" onclick="setAccent('${a.hex}','${a.rgb}')"></button>`
+      ).join('')
+    }
+
+    function updateDetailBg() {
+      const el = document.getElementById('detailBg')
+      const g = (libView === 'detail' && selectedIndex >= 0) ? games[selectedIndex] : null
+      const art = g ? (g.hero || g.cover) : null
+      if (art) {
+        el.style.backgroundImage = `url("${mediaSrc(art)}")`
+        el.classList.add('show')
+      } else {
+        el.classList.remove('show')
+      }
+    }
+
+    function updateDetailInfo(g) {
+      const box = document.getElementById('detailInfo')
+      const info = g && g.info
+      if (!info || (!info.description && !(info.genres || []).length)) {
+        box.style.display = 'none'
+        return
+      }
+      box.style.display = 'block'
+      document.getElementById('detailDesc').textContent = info.description || ''
+      const tags = []
+      if (info.releaseYear) tags.push(info.releaseYear)
+      if (info.developer) tags.push(info.developer)
+      ;(info.genres || []).forEach(x => tags.push(x))
+      document.getElementById('detailTags').innerHTML = tags.map(t => `<span class="detail-tag">${esc(t)}</span>`).join('')
+    }
+
+    let optionsIndex = -1
+    function contextOptions() {
+      const i = contextIndex
+      hideContextMenu()
+      if (i < 0) return
+      optionsIndex = i
+      document.getElementById('optArgs').value = games[i].launchArgs || ''
+      document.getElementById('optAdmin').checked = !!games[i].runAsAdmin
+      document.getElementById('optionsOverlay').style.display = 'flex'
+    }
+    function hideOptions() { document.getElementById('optionsOverlay').style.display = 'none' }
+    function saveOptions() {
+      if (optionsIndex >= 0) {
+        games[optionsIndex].launchArgs = document.getElementById('optArgs').value.trim()
+        games[optionsIndex].runAsAdmin = document.getElementById('optAdmin').checked
+        saveGames()
+      }
+      hideOptions()
+    }
+
+    function setCoverMode(mode) {
+      coverMode = mode
+      savePrefs()
+      updateModeOptions()
+      if (selectedIndex >= 0) updateCoverHero(games[selectedIndex])
+    }
+
+    function updateModeOptions() {
+      document.querySelectorAll('.mode-option').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === coverMode)
+      })
+    }
+
+    ipcRenderer.on('window-maximized',   () => { document.getElementById('btnMaximize').textContent = '❐' })
+    ipcRenderer.on('window-unmaximized', () => { document.getElementById('btnMaximize').textContent = '□' })
+
+    // ─── Scanner ──────────────────────────────────────────────
+
+    let scanFolders = []
+    let scanFoundGames = []
+
+    function showScanDialog(autoRun) {
+      document.getElementById('scanOverlay').style.display = 'flex'
+      document.getElementById('scanStatus').style.display = 'none'
+      document.getElementById('scanResults').style.display = 'none'
+      document.getElementById('scanEmpty').style.display = 'none'
+      document.getElementById('btnAddScanned').style.display = 'none'
+      document.getElementById('btnRunScan').disabled = false
+      document.getElementById('scanList').innerHTML = ''
+      scanFolders = []
+      scanFoundGames = []
+      if (autoRun) runScan(true)
+    }
+
+    function hideScanDialog() {
+      document.getElementById('scanOverlay').style.display = 'none'
+    }
+
+    async function addScanFolder() {
+      const folder = await ipcRenderer.invoke('browse-scan-folder')
+      if (folder && !scanFolders.includes(folder)) {
+        scanFolders.push(folder)
+        runScan()
+      }
+    }
+
+    async function runScan(isAuto) {
+      document.getElementById('btnRunScan').disabled = true
+      document.getElementById('scanStatus').style.display = 'flex'
+      document.getElementById('scanStatusText').textContent = isAuto
+        ? 'Willkommen! Deine installierten Spiele werden gesucht – das kann einen Moment dauern…'
+        : 'Steam, Epic, GOG, Ubisoft, Xbox, EA, Rockstar, Battle.net, Amazon, Riot und Ordner werden gescannt…'
+      document.getElementById('scanResults').style.display = 'none'
+      document.getElementById('scanEmpty').style.display = 'none'
+      document.getElementById('btnAddScanned').style.display = 'none'
+
+      const found = await ipcRenderer.invoke('scan-games', scanFolders)
+
+      // Deduplizieren: bereits vorhandene Spiele ausfiltern
+      const existingPaths = new Set(games.map(g => g.path.toLowerCase()))
+      const deduped = []
+      const seenPaths = new Set()
+      for (const g of found) {
+        const key = g.path.toLowerCase()
+        if (!existingPaths.has(key) && !seenPaths.has(key)) {
+          seenPaths.add(key)
+          deduped.push(g)
+        }
+      }
+
+      document.getElementById('scanStatus').style.display = 'none'
+      document.getElementById('btnRunScan').disabled = false
+      scanFoundGames = deduped
+
+      if (deduped.length === 0) {
+        document.getElementById('scanEmpty').style.display = 'flex'
+        return
+      }
+
+      document.getElementById('scanResultCount').textContent = `${deduped.length} Spiel${deduped.length === 1 ? '' : 'e'} gefunden`
+      renderScanList()
+      document.getElementById('scanResults').style.display = 'flex'
+      document.getElementById('btnAddScanned').style.display = 'block'
+    }
+
+    function renderScanList() {
+      const list = document.getElementById('scanList')
+      list.innerHTML = ''
+      scanFoundGames.forEach((g, i) => {
+        const item = document.createElement('div')
+        item.className = 'scan-item'
+        const sourceClass = 'badge-' + g.source.toLowerCase().replace(/[^a-z]/g, '')
+        item.innerHTML = `
+          <label class="scan-item-label">
+            <input type="checkbox" class="scan-check" data-idx="${i}" checked>
+            <span class="scan-item-name">${esc(g.name)}</span>
+            <span class="scan-badge ${sourceClass}">${esc(g.source)}</span>
+          </label>
+          <span class="scan-item-path">${esc(g.path)}</span>`
+        list.appendChild(item)
+      })
+    }
+
+    function selectAllScan(checked) {
+      document.querySelectorAll('.scan-check').forEach(cb => cb.checked = checked)
+    }
+
+    async function addScannedGames() {
+      const checked = [...document.querySelectorAll('.scan-check:checked')]
+      if (!checked.length) return
+
+      // Neu gescannte Spiele alphabetisch vorsortieren, damit die manuelle
+      // Reihenfolge nicht in zufälliger Scan-Reihenfolge (Steam, Epic, …) startet.
+      checked.sort((a, b) =>
+        scanFoundGames[parseInt(a.dataset.idx)].name.localeCompare(
+          scanFoundGames[parseInt(b.dataset.idx)].name, 'de', { sensitivity: 'base' }))
+
+      document.getElementById('btnAddScanned').disabled = true
+      document.getElementById('btnAddScanned').textContent = 'Wird hinzugefügt...'
+
+      for (const cb of checked) {
+        const g = scanFoundGames[parseInt(cb.dataset.idx)]
+        const id = newId()
+        const rawIcon = await ipcRenderer.invoke('get-file-icon', g.path)
+        const icon = await persistMedia(id, 'icon', rawIcon)
+        const newGame = { id, name: g.name, path: g.path, icon, addedAt: Date.now() }
+        games.push(newGame)
+        const idx = games.length - 1
+        saveGames()
+        fetchAndStoreCover(idx).then(() => {
+          if (selectedIndex === idx) updateCoverHero(games[idx])
+        })
+        fetchAndStoreHero(idx).then(() => {
+          if (selectedIndex === idx) updateCoverHero(games[idx])
+        })
+      }
+
+      renderList()
+      hideScanDialog()
+
+      if (selectedIndex < 0 && games.length > 0) selectGame(games.length - 1)
+
+      document.getElementById('btnAddScanned').disabled = false
+      document.getElementById('btnAddScanned').textContent = 'Ausgewählte hinzufügen'
+    }
+
+    // ─────────────────────────────────────────────────────────
+
+    // Einmalige Migration: vorhandene Base64-Cover/Icons in Dateien auslagern,
+    // damit der localStorage nicht volläuft.
+    async function migrateMedia() {
+      let changed = false
+      for (let i = 0; i < games.length; i++) {
+        const g = games[i]
+        if (!g.id) { g.id = newId(); changed = true }
+        if (g.addedAt == null)  { g.addedAt = i; changed = true }   // bestehende Reihenfolge bewahren
+        if (g.playtime == null) { g.playtime = 0; changed = true }
+        if (g.favorite == null) { g.favorite = false; changed = true }
+        if (g.icon && g.icon.startsWith('data:'))  { g.icon  = await persistMedia(g.id, 'icon',  g.icon);  changed = true }
+        if (g.cover && g.cover.startsWith('data:')) { g.cover = await persistMedia(g.id, 'cover', g.cover); changed = true }
+      }
+      if (changed) {
+        saveGames()
+        renderList()
+        if (selectedIndex >= 0) selectGame(selectedIndex)
+      }
+    }
+
+    // App-Version anzeigen (Fußzeile + Über-Dialog)
+    try {
+      const _ver = ipcRenderer.sendSync('get-version-sync')
+      if (_ver) {
+        document.getElementById('appVersion').textContent = 'v' + _ver
+        document.getElementById('aboutVersion').textContent = 'Version ' + _ver + ' · kostenlos'
+      }
+    } catch {}
+
+    applyAccent()
+    document.getElementById('sortSelect').value = sortMode
+    renderList()
+    applyLibView()
+    // Zuletzt gewähltes Spiel wiederherstellen (per ID, sortierungs-unabhängig)
+    if (lastSelectedId) {
+      const idx = games.findIndex(g => g.id === lastSelectedId)
+      if (idx >= 0) selectGame(idx, true)
+    }
+    migrateMedia()
+    if (games.length === 0) showScanDialog(true)
+
+    // UI steht → Boot-Screen ausblenden
+    document.getElementById('bootScreen').classList.add('hidden')
+  </script>
+</body>
+</html>

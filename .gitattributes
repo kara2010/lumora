@@ -1,0 +1,8 @@
+# Zeilenenden normalisieren: Textdateien intern als LF speichern.
+* text=auto eol=lf
+
+# Binärdateien nie anfassen
+*.png binary
+*.ico binary
+*.exe binary
+*.zip binary
