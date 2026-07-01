@@ -292,6 +292,33 @@
         <p class="settings-hint" id="gpHotkeyHint" style="display:none"></p>
       </div>
       <div class="form-group">
+        <label>Performance-Overlay (OSD)</label>
+        <p class="settings-hint">Blendet GPU-/CPU-Auslastung, Temperaturen und FPS über dem Spiel ein – funktioniert über randlos laufenden Spielen. Test-Hotkey: <strong>Alt+O</strong>.</p>
+        <div class="setting-toggle-row">
+          <span class="setting-toggle-label">Overlay anzeigen</span>
+          <label class="switch"><input type="checkbox" id="setOsdEnabled" onchange="onOsdSettingChange()"><span class="switch-slider"></span></label>
+        </div>
+        <div class="osd-field">
+          <span class="osd-field-label">Größe</span>
+          <input type="range" id="setOsdScale" min="0.5" max="2" step="0.05" value="1" oninput="onOsdScaleInput()">
+          <span class="osd-field-val" id="osdScaleVal">100%</span>
+        </div>
+        <div class="osd-field">
+          <span class="osd-field-label">Deckkraft</span>
+          <input type="range" id="setOsdOpacity" min="0.2" max="0.95" step="0.05" value="0.55" oninput="onOsdOpacityInput()">
+          <span class="osd-field-val" id="osdOpacityVal">55%</span>
+        </div>
+        <div class="osd-field">
+          <span class="osd-field-label">Position</span>
+          <div class="osd-corners" id="osdCorners">
+            <button class="osd-corner" data-corner="tl" onclick="setOsdCorner('tl')" title="Oben links">◤</button>
+            <button class="osd-corner" data-corner="tr" onclick="setOsdCorner('tr')" title="Oben rechts">◥</button>
+            <button class="osd-corner" data-corner="bl" onclick="setOsdCorner('bl')" title="Unten links">◣</button>
+            <button class="osd-corner" data-corner="br" onclick="setOsdCorner('br')" title="Unten rechts">◢</button>
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
         <label>Updates</label>
         <p class="settings-hint">Lumora sucht beim Start automatisch nach Updates. Du kannst auch jederzeit selbst prüfen.</p>
         <button class="btn-browse" id="updateCheckBtn" style="align-self:flex-start" onclick="checkForUpdatesManually()">Jetzt nach Updates suchen</button>
@@ -1424,6 +1451,13 @@ ipcRenderer.on('launch-status', (event, status) => {
       document.getElementById('setStartMin').checked = !!s.startMinimized
       document.getElementById('setTray').checked = !!s.minimizeToTray
       document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
+      document.getElementById('setOsdEnabled').checked = !!s.osdEnabled
+      const oScale = s.osdScale || 1, oOp = s.osdOpacity != null ? s.osdOpacity : 0.55
+      document.getElementById('setOsdScale').value = oScale
+      document.getElementById('osdScaleVal').textContent = Math.round(oScale * 100) + '%'
+      document.getElementById('setOsdOpacity').value = oOp
+      document.getElementById('osdOpacityVal').textContent = Math.round(oOp * 100) + '%'
+      setOsdCorner(s.osdCorner || 'tl', false)
       appSettingsCache.toggleHotkey = s.toggleHotkey || ''
       appSettingsCache.gamepadHotkey = Array.isArray(s.gamepadHotkey) ? s.gamepadHotkey : []
       refreshHotkeyDisplay()
@@ -1438,6 +1472,30 @@ ipcRenderer.on('launch-status', (event, status) => {
         minimizeToTray: document.getElementById('setTray').checked,
         steamGridDbKey: document.getElementById('setSgdbKey').value.trim(),
       })
+    }
+
+    // --- OSD-Layout (live): jede Änderung wirkt sofort aufs Overlay ------------
+    let osdCorner = 'tl'
+    function onOsdSettingChange() {
+      ipcRenderer.invoke('set-app-settings', {
+        osdEnabled: document.getElementById('setOsdEnabled').checked,
+        osdScale: parseFloat(document.getElementById('setOsdScale').value),
+        osdOpacity: parseFloat(document.getElementById('setOsdOpacity').value),
+        osdCorner: osdCorner,
+      })
+    }
+    function onOsdScaleInput() {
+      document.getElementById('osdScaleVal').textContent = Math.round(parseFloat(document.getElementById('setOsdScale').value) * 100) + '%'
+      onOsdSettingChange()
+    }
+    function onOsdOpacityInput() {
+      document.getElementById('osdOpacityVal').textContent = Math.round(parseFloat(document.getElementById('setOsdOpacity').value) * 100) + '%'
+      onOsdSettingChange()
+    }
+    function setOsdCorner(c, apply = true) {
+      osdCorner = c
+      document.querySelectorAll('#osdCorners .osd-corner').forEach(b => b.classList.toggle('active', b.dataset.corner === c))
+      if (apply) onOsdSettingChange()
     }
 
     const ACCENTS = [
