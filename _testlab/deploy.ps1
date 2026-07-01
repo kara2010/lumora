@@ -16,7 +16,7 @@ Write-Host "main.js OK"
 # Staging (Build-Dateien)
 if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
 New-Item -ItemType Directory -Force $tmp | Out-Null
-foreach ($f in 'main.js','index.html','styles.css','icon.ico','icon-64.png','package.json') {
+foreach ($f in 'main.js','index.html','osd.html','styles.css','icon.ico','icon-64.png','package.json') {
   Copy-Item "$src\$f" $tmp
 }
 
