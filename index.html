@@ -391,6 +391,8 @@
 
   <!-- Gamepad-Hinweis (kurz eingeblendet) -->
   <div class="gamepad-toast" id="gamepadToast" style="display:none"></div>
+  <!-- Info-Tooltip für das per Gamepad/Tastatur fokussierte Element -->
+  <div class="nav-tooltip" id="navTooltip" style="display:none"></div>
 
   <script>
     const { ipcRenderer } = require('electron')
@@ -1844,7 +1846,30 @@ ipcRenderer.on('launch-status', (event, status) => {
         : '.game-item, .hdr-toggle-row .switch, #launchBtn, .btn-delete'
       return Array.from(document.querySelectorAll(tools + ', ' + games)).filter(isNavVisible)
     }
-    function setNavMode(on) { document.body.classList.toggle('nav-mode', on) }
+    function setNavMode(on) {
+      document.body.classList.toggle('nav-mode', on)
+      if (!on) hideNavTooltip()
+      else if (navFocusEl) updateNavTooltip(navFocusEl)
+    }
+    // Info-Tooltip für das fokussierte Element (title/aria-label) – ersetzt den
+    // nativen Hover-Tooltip, der bei Gamepad-/Tastatur-Navigation nicht erscheint.
+    function hideNavTooltip() {
+      const tip = document.getElementById('navTooltip'); if (tip) tip.style.display = 'none'
+    }
+    function updateNavTooltip(el) {
+      const tip = document.getElementById('navTooltip'); if (!tip) return
+      const label = el && (el.getAttribute('title') || el.getAttribute('aria-label'))
+      if (!el || !label || !document.body.classList.contains('nav-mode')) { tip.style.display = 'none'; return }
+      tip.textContent = label
+      tip.style.display = 'block'
+      const r = el.getBoundingClientRect()
+      const tr = tip.getBoundingClientRect()
+      let left = Math.max(8, Math.min(r.left + r.width / 2 - tr.width / 2, window.innerWidth - tr.width - 8))
+      let top = r.top - tr.height - 8
+      if (top < 8) top = r.bottom + 8   // kein Platz oben → darunter
+      tip.style.left = Math.round(left) + 'px'
+      tip.style.top = Math.round(top) + 'px'
+    }
     function setNavFocus(el, scroll) {
       if (navFocusEl && navFocusEl !== el) navFocusEl.classList.remove('nav-focus')
       navFocusEl = el || null
@@ -1869,6 +1894,7 @@ ipcRenderer.on('launch-status', (event, status) => {
           }
         }
       }
+      updateNavTooltip(navFocusEl)   // nach dem Scrollen positionieren (korrekte Koordinaten)
     }
     function navPickStart(items) {
       const active = items.find(el => el.classList.contains('active'))
