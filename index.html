@@ -1851,12 +1851,22 @@ ipcRenderer.on('launch-status', (event, status) => {
       return null
     }
     // Bestes Element in der Richtung (geometrisch) aus einer Kandidatenliste.
+    // Die Position weggescrollter Elemente wird auf den sichtbaren Bereich ihres
+    // Scroll-Containers begrenzt (geclamped). Sonst liegt eine unter die Kante
+    // gescrollte Cover-Reihe auf dem Bildschirm TIEFER als die darunter fest
+    // stehenden Buttons – und der Fokus spränge über sie hinweg aus der Liste.
     function navBestInDir(cands, from, dir) {
       const fx = from.left + from.width / 2, fy = from.top + from.height / 2
       let best = null, bestScore = Infinity
       for (const el of cands) {
         const r = el.getBoundingClientRect()
-        const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+        let cx = r.left + r.width / 2, cy = r.top + r.height / 2
+        const sc = navScrollParent(el)
+        if (sc) {
+          const cr = sc.getBoundingClientRect()
+          cx = Math.max(cr.left, Math.min(cr.right, cx))
+          cy = Math.max(cr.top, Math.min(cr.bottom, cy))
+        }
         const dx = cx - fx, dy = cy - fy
         let along, perp
         if (dir === 'right') { if (dx <= 1) continue; along = dx; perp = Math.abs(dy) }
@@ -1874,16 +1884,8 @@ ipcRenderer.on('launch-status', (event, status) => {
       const items = navFocusables()
       if (!items.length) return
       if (!navFocusEl || !items.includes(navFocusEl)) { setNavFocus(navPickStart(items)); return }
-      const fromEl = navFocusEl
-      const from = fromEl.getBoundingClientRect()
-      const rest = items.filter(el => el !== fromEl)
-      // Zuerst im SELBEN Scroll-Container bleiben – sonst springt der Fokus über
-      // weggescrollte Reihen hinweg aus der Liste (z.B. Cover-Liste → Buttons).
-      // Erst wenn dort in der Richtung nichts mehr ist, den Container verlassen.
-      const sp = navScrollParent(fromEl)
-      let best = null
-      if (sp) best = navBestInDir(rest.filter(el => navScrollParent(el) === sp), from, dir)
-      if (!best) best = navBestInDir(rest, from, dir)
+      const from = navFocusEl.getBoundingClientRect()
+      const best = navBestInDir(items.filter(el => el !== navFocusEl), from, dir)
       if (best) {
         setNavFocus(best)
         // Beim Durchzappen der Spieleliste das Spiel gleich im Content-Fenster
