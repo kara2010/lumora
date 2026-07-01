@@ -1731,21 +1731,71 @@ body:not(.nav-mode) .cover-cell:hover { border-color: #3a3a3a; }
 .update-toast-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 3px; }
 .update-toast-text { font-size: 12.5px; color: #aaa; line-height: 1.45; }
 
-.update-toast-notes {
-  margin-top: 8px;
-  padding: 8px 10px;
-  max-height: 130px;
-  overflow-y: auto;
-  background: #111216;
-  border: 1px solid #26272c;
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #b8b8c0;
-  white-space: pre-line;   /* Zeilenumbrüche der Notes erhalten */
+/* --- Update-Dialog (Changelog) --- */
+.update-dialog { width: 480px; gap: 18px; }
+
+.update-hero { display: flex; align-items: center; gap: 15px; }
+.update-hero-badge {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-light);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
 }
-.update-toast-notes::-webkit-scrollbar { width: 5px; }
-.update-toast-notes::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+.update-hero-title { font-size: 17px; font-weight: 600; color: #fff; }
+.update-hero-sub { font-size: 13px; color: #8a8a92; margin-top: 2px; }
+.update-ver-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-light);
+  font-size: 12px;
+  font-weight: 600;
+}
+.update-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #6a6a74;
+}
+.update-changelog {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+  margin-top: -6px;
+}
+.update-changelog::-webkit-scrollbar { width: 6px; }
+.update-changelog::-webkit-scrollbar-track { background: transparent; }
+.update-changelog::-webkit-scrollbar-thumb { background: #2f2f36; border-radius: 3px; }
+
+.changelog-intro { font-size: 13.5px; color: #b6b6c0; line-height: 1.6; margin-bottom: 12px; }
+.changelog-list { list-style: none; display: flex; flex-direction: column; gap: 11px; }
+.changelog-list li {
+  position: relative;
+  padding-left: 22px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #cfcfd6;
+}
+.changelog-list li::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
 
 .update-toast-actions {
   display: flex;
