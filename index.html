@@ -1099,6 +1099,9 @@
       const detail = document.getElementById('gameDetail')
       const empty = document.getElementById('emptyState')
       updateViewToggle()
+      // In der Rasteransicht die (redundante) linke Spiele-Liste ausblenden –
+      // Werkzeugleiste/Fußleiste bleiben erhalten.
+      document.querySelector('.sidebar').classList.toggle('list-hidden', libView === 'grid')
       if (libView === 'grid') {
         grid.style.display = 'flex'
         detail.style.display = 'none'
@@ -1843,7 +1846,21 @@ ipcRenderer.on('launch-status', (event, status) => {
       navFocusEl = el || null
       if (el) {
         el.classList.add('nav-focus')
-        if (scroll !== false) el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        if (scroll !== false) {
+          el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+          // Liegt das Element in der obersten Zeile seines Scroll-Containers,
+          // ganz nach oben scrollen – sonst bleibt die obere Kante/Padding
+          // verdeckt (Element säße nur bündig am oberen Rand).
+          const sc = navScrollParent(el)
+          if (sc) {
+            const elTop = el.getBoundingClientRect().top
+            let anyAbove = false
+            for (const it of sc.querySelectorAll('.grid-card, .cover-cell, .game-item')) {
+              if (it !== el && it.getBoundingClientRect().top < elTop - 2) { anyAbove = true; break }
+            }
+            if (!anyAbove) sc.scrollTop = 0
+          }
+        }
       }
     }
     function navPickStart(items) {
@@ -2090,6 +2107,20 @@ ipcRenderer.on('launch-status', (event, status) => {
       gpTap('x', b[2] && b[2].pressed, () => navFavorite())
       gpTap('y', b[3] && b[3].pressed, () => navContext())
       gpTap('start', b[9] && b[9].pressed, () => navStart())
+
+      // Rechter Stick: freies Scrollen der aktuellen Liste (ergänzende Steuerung,
+      // unabhängig von der Fokus-Navigation).
+      const ry = ax[3] || 0
+      if (Math.abs(ry) > GP_DEAD) {
+        const sc = gpScrollTarget()
+        if (sc) sc.scrollTop += ry * 22
+      }
+    }
+    function gpScrollTarget() {
+      if (navFocusEl) { const sc = navScrollParent(navFocusEl); if (sc) return sc }
+      const o = navOpenOverlay()
+      if (o) return o.el.querySelector('.cover-results') || o.el
+      return document.querySelector(libView === 'grid' ? '.grid-view' : '.game-list')
     }
     function showGamepadToast(msg) {
       const t = document.getElementById('gamepadToast')
