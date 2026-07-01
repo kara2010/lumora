@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumora – Game-Launcher mit automatischem HDR für Windows</title>
+  <meta name="description" content="Lumora vereint alle deine Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon und Riot in einer schönen Oberfläche – mit Cover-Bibliothek, Spielzeit und automatischem HDR. Kostenlos für Windows 10 und 11.">
+  <meta name="keywords" content="Game Launcher, Spiele-Launcher, Lumora, alle Spiele an einem Ort, Steam Epic GOG zusammen, Windows HDR, HDR automatisch aktivieren, HDR Gaming, Spielbibliothek Windows, HDR Tool kostenlos">
+  <meta name="robots" content="index, follow">
+  <meta name="author" content="Lumora">
+  <link rel="canonical" href="https://kara-webdesign.de/hdr-launcher/">
+
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+
+  <!-- Open Graph (Facebook, Discord, WhatsApp …) -->
+  <meta property="og:type"        content="website">
+  <meta property="og:url"         content="https://kara-webdesign.de/hdr-launcher/">
+  <meta property="og:title"       content="Lumora – Game-Launcher mit automatischem HDR für Windows">
+  <meta property="og:description" content="Alle deine Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon & Riot in einer schönen Cover-Bibliothek – mit Spielzeit und automatischem HDR. Kostenlos für Windows 10 / 11.">
+  <meta property="og:locale"      content="de_DE">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card"        content="summary_large_image">
+  <meta name="twitter:title"       content="Lumora – Game-Launcher mit automatischem HDR für Windows">
+  <meta name="twitter:description" content="Alle deine Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon & Riot in einer schönen Cover-Bibliothek – mit Spielzeit und automatischem HDR. Kostenlos für Windows 10 / 11.">
+  <meta name="twitter:image"       content="https://kara-webdesign.de/hdr-launcher/screenshot.png">
+
+  <!-- og:image -->
+  <meta property="og:image"        content="https://kara-webdesign.de/hdr-launcher/screenshot.png">
+  <meta property="og:image:width"  content="2712">
+  <meta property="og:image:height" content="1806">
+  <meta property="og:image:alt"    content="Lumora Screenshot">
+
+  <!-- Schema.org – SoftwareApplication (wird von Google als Rich Result angezeigt) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Lumora",
+    "version": "2.0.0",
+    "operatingSystem": "Windows 10, Windows 11",
+    "applicationCategory": "GameApplication",
+    "applicationSubCategory": "Utility",
+    "description": "Lumora ist ein Game-Launcher, der alle Spiele aus Steam, Epic, GOG, Ubisoft, Xbox Game Pass, EA, Battle.net, Rockstar, Amazon und Riot in einer Cover-Bibliothek vereint – mit Spielzeit-Tracking, Favoriten und automatischem HDR. Kostenlos.",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "EUR"
+    },
+    "downloadUrl": "https://kara-webdesign.de/hdr-launcher/download.php",
+    "softwareRequirements": "Windows 10 Version 1809 oder höher, HDR-fähiger Monitor",
+    "featureList": [
+      "Alle Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon und Riot an einem Ort",
+      "Schöne Cover-Bibliothek mit Raster- und Listenansicht",
+      "Spielzeit-Tracking und zuletzt gespielt",
+      "Favoriten, Suche und flexible Sortierung",
+      "HDR automatisch beim Spielstart aktivieren und beim Beenden deaktivieren",
+      "HDR pro Spiel ein- und ausschaltbar",
+      "Spielecover und -beschreibungen automatisch laden",
+      "Wählbare Akzentfarben, System-Tray und Autostart"
+    ],
+    "inLanguage": "de"
+  }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0a0a0f;
+      --surface:   #111118;
+      --card:      #16161f;
+      --border:    #1e1e2e;
+      --accent:    #4f8ef7;
+      --accent2:   #7ab3ff;
+      --text:      #d8d8e8;
+      --muted:     #6a6a8a;
+      --success:   #4ade80;
+      --warn:      #facc15;
+      --radius:    14px;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scrollbar-width: thin;                       /* Firefox */
+      scrollbar-color: #2a2a3a transparent;        /* Firefox */
+    }
+
+    /* Dezente, zum Design passende Scrollbar (Chrome/Edge/Safari) */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3a3a4a; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* ── NAV ─────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      background: rgba(10,10,15,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 100;
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--accent2);
+      text-decoration: none;
+    }
+
+    .nav-logo span { color: var(--text); }
+
+    .nav-logo-img { width: 26px; height: 26px; border-radius: 6px; display: block; }
+
+    nav ul {
+      display: flex;
+      gap: 28px;
+      list-style: none;
+    }
+
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+      transition: color .2s;
+    }
+
+    nav a:hover { color: var(--text); }
+
+    /* ── HERO ────────────────────────────── */
+    .hero {
+      text-align: center;
+      padding: 96px 24px 80px;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(79,142,247,.18) 0%, transparent 70%);
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(79,142,247,.12);
+      border: 1px solid rgba(79,142,247,.3);
+      color: var(--accent2);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 14px;
+      border-radius: 20px;
+      margin-bottom: 28px;
+      letter-spacing: .4px;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.2rem, 5vw, 3.8rem);
+      font-weight: 700;
+      letter-spacing: -1px;
+      line-height: 1.15;
+      color: #fff;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 em {
+      font-style: normal;
+      color: var(--accent2);
+    }
+
+    .hero p {
+      max-width: 540px;
+      margin: 0 auto 40px;
+      font-size: 17px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .btn-dl {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      padding: 14px 30px;
+      border-radius: 10px;
+      text-decoration: none;
+      transition: background .2s, transform .15s;
+      box-shadow: 0 0 32px rgba(79,142,247,.35);
+      cursor: pointer;
+    }
+
+    .btn-dl:hover { background: #6aa0ff; transform: translateY(-1px); }
+
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 14px;
+      padding: 13px 22px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      text-decoration: none;
+      transition: all .2s;
+    }
+
+    .btn-ghost:hover { border-color: #333; color: var(--text); }
+
+    .dl-meta {
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .dl-meta strong { color: var(--text); }
+
+    .dl-count {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .dl-count-num {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--accent2);
+      min-width: 2ch;
+    }
+
+    .dl-count-num.loading {
+      opacity: .4;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: .4; }
+      50%       { opacity: .9; }
+    }
+
+    /* ── SECTION ─────────────────────────── */
+    section { padding: 72px 24px; }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    .section-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+
+    h2 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 12px;
+      letter-spacing: -.5px;
+    }
+
+    .section-sub {
+      font-size: 16px;
+      color: var(--muted);
+      max-width: 560px;
+      margin-bottom: 52px;
+    }
+
+    /* ── HOW IT WORKS ───────────────────── */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+    }
+
+    .step {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+    }
+
+    .step-num {
+      width: 36px;
+      height: 36px;
+      background: rgba(79,142,247,.15);
+      border: 1px solid rgba(79,142,247,.3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--accent2);
+      margin-bottom: 16px;
+    }
+
+    .step h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+
+    .step p {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    /* ── FEATURES ───────────────────────── */
+    .features {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .feature {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 20px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .feature-icon {
+      font-size: 22px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .feature h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+
+    .feature p {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* ── TRANSPARENCY ───────────────────── */
+    .tech-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    .tech-table th {
+      text-align: left;
+      padding: 10px 16px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tech-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      vertical-align: top;
+    }
+
+    .tech-table tr:last-child td { border-bottom: none; }
+
+    .tech-table a {
+      color: var(--accent2);
+      text-decoration: none;
+    }
+
+    .tech-table a:hover { text-decoration: underline; }
+
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .badge-mit   { background: #0d3320; color: #4ade80; }
+    .badge-gpl   { background: #2a1a00; color: #facc15; }
+
+    .note-box {
+      background: rgba(250,204,21,.07);
+      border: 1px solid rgba(250,204,21,.2);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-top: 28px;
+      font-size: 13px;
+      color: #c8a840;
+      line-height: 1.6;
+    }
+
+    .note-box strong { color: var(--warn); }
+
+    .note-box.note-neutral {
+      background: rgba(255,255,255,0.025);
+      border-color: var(--border);
+      color: var(--muted);
+    }
+
+    .note-box.note-neutral strong { color: var(--text); }
+
+    /* ── INSTALL NOTE ───────────────────── */
+    .install-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .install-step {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      font-size: 14px;
+    }
+
+    .install-step .num {
+      width: 24px;
+      height: 24px;
+      background: rgba(79,142,247,.15);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent2);
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .install-step p { color: var(--muted); line-height: 1.5; }
+    .install-step p strong { color: var(--text); }
+
+    /* ── REQUIREMENTS ───────────────────── */
+    .req-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .req-item {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+    }
+
+    .req-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      flex-shrink: 0;
+    }
+
+    /* ── FOOTER ──────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 24px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--text); }
+
+    /* ── SCREENSHOT ─────────────────────── */
+    .screenshot-wrap {
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
+      display: inline-block;
+      width: 100%;
+      background: var(--card);
+      position: relative;
+      cursor: zoom-in;
+    }
+
+    .screenshot-img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 13px;
+    }
+
+    /* ── LIGHTBOX ───────────────────────── */
+    .lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.96);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      cursor: zoom-out;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img {
+      max-width: 100%;
+      max-height: 100vh;
+      border-radius: 8px;
+      object-fit: contain;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.8);
+    }
+    .lightbox-close {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      font-size: 24px;
+      color: #fff;
+      opacity: 0.7;
+      cursor: pointer;
+      z-index: 2;
+    }
+    .lightbox-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 54px;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      background: rgba(22,22,31,0.62);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 50%;
+      color: #fff;
+      font-size: 32px;
+      line-height: 1;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: background .15s, transform .1s;
+    }
+    .lightbox-nav:hover { background: rgba(45,45,62,0.9); }
+    .lightbox-nav:active { transform: translateY(-50%) scale(0.92); }
+    .lightbox-prev { left: 20px; }
+    .lightbox-next { right: 20px; }
+    .lightbox-caption {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #d8d8e8;
+      font-size: 14px;
+      font-weight: 600;
+      background: rgba(22,22,31,0.62);
+      border: 1px solid rgba(255,255,255,0.10);
+      padding: 7px 16px;
+      border-radius: 20px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    @media (max-width: 640px) {
+      .lightbox { padding: 0; }
+      .lightbox img { max-height: 80vh; border-radius: 6px; }
+      .lightbox-nav { width: 44px; height: 44px; font-size: 26px; background: rgba(22,22,31,0.78); }
+      .lightbox-prev { left: 10px; }
+      .lightbox-next { right: 10px; }
+      .lightbox-close { top: 12px; right: 16px; font-size: 30px; opacity: 0.9; }
+      .lightbox-caption { bottom: 16px; font-size: 12.5px; }
+    }
+    .screenshot-tap-hint {
+      display: none;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 10px;
+      text-align: center;
+    }
+
+    /* ── VIEW TOGGLE ────────────────────── */
+    .view-toggle {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      margin: 0 0 22px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .view-toggle button {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 9px 18px;
+      border-radius: 9px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: background .15s, color .15s;
+    }
+    .view-toggle button:hover { color: var(--text); }
+    .view-toggle button.active { background: var(--accent); color: #fff; }
+    .view-toggle button svg { display: block; }
+    .view-caption {
+      font-size: 13.5px;
+      color: var(--muted);
+      margin-top: 14px;
+      text-align: center;
+    }
+
+    /* ── SMARTSCREEN HINT ───────────────── */
+    .ss-hint {
+      max-width: 540px;
+      margin: 20px auto 0;
+      text-align: left;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .ss-hint summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 13px 16px;
+      color: var(--accent2);
+      font-weight: 600;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .ss-hint summary::-webkit-details-marker { display: none; }
+    .ss-hint summary::after {
+      content: '▾';
+      margin-left: auto;
+      color: var(--muted);
+      transition: transform .2s;
+    }
+    .ss-hint[open] summary::after { transform: rotate(180deg); }
+    .ss-hint .ss-body {
+      padding: 0 16px 15px;
+      color: var(--muted);
+      font-size: 13.5px;
+      line-height: 1.65;
+    }
+    .ss-hint .ss-body strong { color: var(--text); }
+    .ss-hint ol { margin: 9px 0 0 18px; }
+    .ss-hint li { margin-bottom: 4px; }
+
+    /* ── TABLE SCROLL ───────────────────── */
+    .table-scroll {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border-radius: var(--radius);
+    }
+    .tech-table { min-width: 560px; }
+
+    /* ── RESPONSIVE ─────────────────────── */
+    @media (max-width: 640px) {
+      nav ul { display: none; }
+
+      .hero { padding: 48px 16px 40px; }
+
+      .hero-actions { flex-direction: column; width: 100%; }
+      .btn-dl, .btn-ghost { width: 100%; justify-content: center; text-align: center; }
+
+      section { padding: 48px 16px; }
+      h2 { font-size: 1.5rem; }
+      .section-sub { font-size: 14px; }
+
+      .steps { grid-template-columns: 1fr; }
+      .feature-grid { grid-template-columns: 1fr; }
+
+      .install-step { flex-direction: row; align-items: flex-start; }
+
+      .req-list { flex-direction: column; }
+      .req-item { width: 100%; }
+
+      .dialog { padding: 20px 16px; }
+
+      footer { padding: 28px 16px; font-size: 12px; }
+
+      .screenshot-tap-hint { display: block; }
+      .screenshot-wrap { cursor: zoom-in; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-logo" href="#"><img src="icon.png" alt="" class="nav-logo-img"> <span>Lumora</span></a>
+  <ul>
+    <li><a href="#features">Funktionen</a></li>
+    <li><a href="#install">Installation</a></li>
+    <li><a href="#transparency">Transparenz</a></li>
+  </ul>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">⬡ Version 2.0.0 · Windows 10 / 11</div>
+  <h1>Alle deine Spiele.<br><em>Ein Launcher. Mit automatischem HDR.</em></h1>
+  <p>Lumora vereint deine Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon &amp; Riot in einer schönen Cover-Bibliothek — mit Spielzeit, Favoriten und HDR, das beim Spielstart automatisch an- und danach wieder ausgeht.</p>
+  <div class="hero-actions">
+    <button class="btn-dl" onclick="startDownload()">
+      ⬇ Download &nbsp;·&nbsp; 97 MB
+    </button>
+    <a class="btn-ghost" href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">
+      ↗ HDRTray auf GitHub
+    </a>
+  </div>
+  <p class="dl-meta">
+    <strong>Kostenlos</strong> · Keine Registrierung · Nur für Windows
+  </p>
+  <details class="ss-hint">
+    <summary>🛡️ Windows zeigt eine Sicherheitswarnung? So geht's weiter</summary>
+    <div class="ss-body">
+      Weil der Launcher (noch) kein kostenpflichtiges Code-Signing-Zertifikat hat, kann Windows beim ersten Start die SmartScreen-Meldung <strong>„Der Computer wurde durch Windows geschützt"</strong> anzeigen. Das ist weder ein Fehler noch ein Virus – so startest du ganz normal weiter:
+      <ol>
+        <li>Auf <strong>„Weitere Informationen"</strong> klicken.</li>
+        <li>Dann auf <strong>„Trotzdem ausführen"</strong>.</li>
+      </ol>
+    </div>
+  </details>
+  <p class="dl-count">
+    <span class="dl-count-num loading" id="dlCount">—</span>
+    Downloads
+  </p>
+</section>
+
+<!-- SCREENSHOT -->
+<section style="padding: 0 24px 72px; text-align: center;">
+  <div class="container">
+    <div class="view-toggle" role="tablist" aria-label="Ansicht wählen">
+      <button id="tabList" class="active" onclick="setView('list')" role="tab" aria-selected="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><circle cx="3.5" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="3.5" cy="18" r="1.1" fill="currentColor" stroke="none"/></svg>
+        Listenansicht
+      </button>
+      <button id="tabCover" onclick="setView('cover')" role="tab" aria-selected="false">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        Cover-Ansicht
+      </button>
+    </div>
+    <div class="screenshot-wrap" onclick="openLightbox()">
+      <img id="shot" src="1.png" alt="Lumora – Listenansicht" class="screenshot-img">
+    </div>
+    <p class="view-caption" id="viewCaption">Listenansicht – Details, Beschreibung &amp; HDR-Schalter pro Spiel</p>
+    <p class="screenshot-tap-hint">Tippen zum Vergrößern</p>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section>
+  <div class="container">
+    <p class="section-label">So funktioniert's</p>
+    <h2>Drei Schritte, fertig.</h2>
+    <p class="section-sub">Einmal einrichten, danach läuft alles automatisch im Hintergrund.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Spiel hinzufügen</h3>
+        <p>Über den Scanner automatisch erkennen lassen oder manuell per .exe oder .lnk hinzufügen. Spiele-Cover werden automatisch geladen.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Starten</h3>
+        <p>„Spiel starten" klicken — Lumora aktiviert HDR und startet das Spiel. Ein kurzer Moment Vorbereitung, dann geht's los.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Spielen &amp; vergessen</h3>
+        <p>Nach dem Beenden des Spiels schaltet Lumora HDR automatisch wieder ab. Kein manuelles Eingreifen nötig.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <div class="container">
+    <p class="section-label">Funktionen</p>
+    <h2>Alles drin, was du brauchst.</h2>
+    <p class="section-sub">Kein Bloat, keine Cloud, keine Accounts.</p>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="feature-icon">🔍</div>
+        <div>
+          <h3>Alle Stores, ein Scanner</h3>
+          <p>Erkennt Spiele aus Steam, Epic, GOG, Ubisoft, Xbox Game Pass, EA, Battle.net, Rockstar, Amazon und Riot automatisch. Eigene Ordner lassen sich ergänzen.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🖼</div>
+        <div>
+          <h3>Cover-Bibliothek</h3>
+          <p>Umschaltbare Raster- und Listenansicht mit hübscher Cover-Art. Per ▶ direkt aus dem Raster starten.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⏱</div>
+        <div>
+          <h3>Spielzeit &amp; zuletzt gespielt</h3>
+          <p>Erfasst deine Spielzeit store-übergreifend — etwas, das Steam &amp; Co. dir nicht in einem Ort zeigen.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⭐</div>
+        <div>
+          <h3>Favoriten, Suche &amp; Sortierung</h3>
+          <p>Favoriten markieren, blitzschnell suchen und nach Name, Spielzeit oder zuletzt gespielt sortieren.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🎨</div>
+        <div>
+          <h3>Cover &amp; Artwork – automatisch oder selbst gewählt</h3>
+          <p>Cover, Hero-Banner sowie deutsche Beschreibung, Genre und Release-Jahr werden automatisch geladen. Passt etwas nicht, suchst du selbst aus mehreren Quellen (Steam, Microsoft Store, optional SteamGridDB) oder legst ein eigenes Bild ab.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🌈</div>
+        <div>
+          <h3>Automatisches HDR</h3>
+          <p>HDR geht beim Spielstart an und beim Beenden wieder aus — pro Spiel ein- und ausschaltbar, auch für Nicht-HDR-Spiele nutzbar.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⚙</div>
+        <div>
+          <h3>Startoptionen</h3>
+          <p>Eigene Startargumente pro Spiel und „als Administrator starten" — ideal für Mods und Spezialfälle.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🖌</div>
+        <div>
+          <h3>Anpassbar &amp; griffbereit</h3>
+          <p>Wählbare Akzentfarben, System-Tray und Autostart mit Windows. Dynamischer Hintergrund aus dem Spiel-Artwork.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🪶</div>
+        <div>
+          <h3>Schlank, offline &amp; ohne Account</h3>
+          <p>Keine Cloud, keine Registrierung, keine Hintergrundprozesse nach dem Schließen. Internet nur fürs Laden von Covern &amp; Infos.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INSTALL -->
+<section id="install">
+  <div class="container">
+    <p class="section-label">Installation</p>
+    <h2>Herunterladen &amp; loslegen.</h2>
+    <p class="section-sub">Der Installer richtet alles ein — kein manuelles Entpacken nötig.</p>
+
+    <div class="install-steps">
+      <div class="install-step">
+        <div class="num">1</div>
+        <p>Setup-Datei <strong>Lumora Setup 2.0.0.exe</strong> herunterladen.</p>
+      </div>
+      <div class="install-step">
+        <div class="num">2</div>
+        <p>
+          <strong>Windows SmartScreen-Hinweis:</strong> Da die App kein kostenpflichtiges Code-Signing-Zertifikat hat, zeigt Windows möglicherweise eine Warnung an.
+          Klicke auf <strong>„Weitere Informationen"</strong> → <strong>„Trotzdem ausführen"</strong>, um fortzufahren.
+          Alle verwendeten Komponenten sind unten unter „Transparenz" dokumentiert.
+        </p>
+      </div>
+      <div class="install-step">
+        <div class="num">3</div>
+        <p>Installer ausführen. Lumora wird unter <strong>%LocalAppData%\Programs\lumora</strong> installiert und erscheint im Startmenü.</p>
+      </div>
+      <div class="install-step">
+        <div class="num">4</div>
+        <p>Beim ersten Start öffnet sich automatisch der <strong>Spiele-Scanner</strong> und sucht nach installierten Spielen.</p>
+      </div>
+    </div>
+
+    <div class="req-list" style="margin-top: 40px;">
+      <p class="section-label" style="width:100%; margin-bottom:12px;">Systemvoraussetzungen</p>
+      <div class="req-item"><div class="req-dot"></div> Windows 10 (Version 1809+) oder Windows 11</div>
+      <div class="req-item"><div class="req-dot"></div> HDR-fähiger Monitor — optional, nur für die HDR-Funktion</div>
+      <div class="req-item"><div class="req-dot"></div> Auch ohne HDR als reiner Game-Launcher nutzbar</div>
+      <div class="req-item"><div class="req-dot"></div> Keine Administratorrechte erforderlich</div>
+    </div>
+  </div>
+</section>
+
+<!-- TRANSPARENCY -->
+<section id="transparency" style="background: var(--surface); border-top: 1px solid var(--border);">
+  <div class="container">
+    <p class="section-label">Transparenz</p>
+    <h2>Womit ist das gebaut?</h2>
+    <p class="section-sub">
+      Lumora ist vollständig aus frei verfügbaren Open-Source-Komponenten aufgebaut.
+      Hier ist eine vollständige Liste aller verwendeten Drittanbieter-Technologien.
+    </p>
+
+    <div class="table-scroll"><table class="tech-table">
+      <thead>
+        <tr>
+          <th>Komponente</th>
+          <th>Version</th>
+          <th>Verwendung</th>
+          <th>Lizenz</th>
+          <th>Quelle</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Electron</strong></td>
+          <td>42.3.0</td>
+          <td>App-Framework, bringt Node.js + Chromium mit</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://www.electronjs.org" target="_blank" rel="noopener">electronjs.org</a></td>
+        </tr>
+        <tr>
+          <td><strong>Node.js</strong></td>
+          <td>(in Electron enthalten)</td>
+          <td>Dateisystem, Prozess-Management, IPC</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a></td>
+        </tr>
+        <tr>
+          <td><strong>Chromium</strong></td>
+          <td>(in Electron enthalten)</td>
+          <td>Rendering-Engine für die Benutzeroberfläche</td>
+          <td><span class="badge badge-mit">BSD/MIT</span></td>
+          <td><a href="https://www.chromium.org" target="_blank" rel="noopener">chromium.org</a></td>
+        </tr>
+        <tr>
+          <td><strong>HDRCmd.exe</strong><br><small style="color:var(--muted)">Teil von HDRTray</small></td>
+          <td>0.5.5</td>
+          <td>Kommandozeilen-Tool zum Ein-/Ausschalten von Windows-HDR</td>
+          <td><span class="badge badge-gpl">GPL v3</span></td>
+          <td><a href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">github.com/res2k/HDRTray</a><br>
+              <small style="color:var(--muted)">© 2022–2025 Frank Richter</small></td>
+        </tr>
+        <tr>
+          <td><strong>electron-builder</strong></td>
+          <td>26.8.1</td>
+          <td>Build-Tool zur Erstellung des Installers (nicht in der App enthalten)</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://www.electron.build" target="_blank" rel="noopener">electron.build</a></td>
+        </tr>
+      </tbody>
+    </table></div>
+
+    <div class="note-box">
+      <strong>Hinweis zu HDRCmd / GPL v3:</strong>
+      HDRCmd.exe wird als eigenständiger Prozess gestartet (vergleichbar mit dem Aufruf aus einem Shell-Skript) — es findet keine Code-Verknüpfung statt.
+      Die GPL-v3-Copyleft-Pflicht greift daher nicht auf den Launcher-Code zurück.
+      Die vollständige GPL-v3-Lizenz liegt der installierten Anwendung als <code>resources/app.asar</code>
+      bei und ist im HDRTray-GitHub-Repository einsehbar.
+    </div>
+
+    <div class="note-box note-neutral">
+      <strong>Rechtlicher Hinweis:</strong>
+      Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam, Microsoft
+      oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind Eigentum der
+      jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation der vom Nutzer
+      installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal auf dem Gerät gespeichert.
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>
+    Lumora 2.0.0 · Kostenlos &amp; Open-Source-basiert ·
+    HDR-Steuerung via <a href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">HDRTray</a> von Frank Richter (GPL v3)
+  </p>
+  <p style="margin-top:10px; font-size:12px; opacity:0.7;">
+    Inoffizielles Tool · nicht verbunden mit Valve/Steam oder Microsoft · alle Marken und Coverbilder gehören den jeweiligen Rechteinhabern.
+  </p>
+  <p style="margin-top:14px;">
+    <a href="impressum.html">Impressum</a> &nbsp;·&nbsp; <a href="datenschutz.html">Datenschutzerklärung</a>
+  </p>
+</footer>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <span class="lightbox-close" onclick="closeLightbox(event)" aria-label="Schließen">✕</span>
+  <button class="lightbox-nav lightbox-prev" onclick="lightboxGo(-1, event)" aria-label="Vorheriges Bild">‹</button>
+  <img id="lightboxImg" src="1.png" alt="Lumora Screenshot" onclick="event.stopPropagation()">
+  <button class="lightbox-nav lightbox-next" onclick="lightboxGo(1, event)" aria-label="Nächstes Bild">›</button>
+  <div class="lightbox-caption" id="lightboxCaption">Listenansicht</div>
+</div>
+
+<script>
+  const VIEWS = {
+    list:  { img: '1.png', alt: 'Lumora – Listenansicht', cap: 'Listenansicht – Details, Beschreibung &amp; HDR-Schalter pro Spiel' },
+    cover: { img: '2.png', alt: 'Lumora – Cover-Ansicht', cap: 'Cover-Ansicht – deine Bibliothek als Raster aus Spiel-Covern' }
+  };
+  function setView(v) {
+    const d = VIEWS[v];
+    const shot = document.getElementById('shot');
+    shot.src = d.img;
+    shot.alt = d.alt;
+    document.getElementById('viewCaption').innerHTML = d.cap;
+    const isList = v === 'list';
+    const tabList = document.getElementById('tabList');
+    const tabCover = document.getElementById('tabCover');
+    tabList.classList.toggle('active', isList);
+    tabCover.classList.toggle('active', !isList);
+    tabList.setAttribute('aria-selected', isList);
+    tabCover.setAttribute('aria-selected', !isList);
+  }
+  // Galerie für die Vergrößerung – Reihenfolge = Reihenfolge der Ansichten
+  const GALLERY = [
+    { img: '1.png', alt: 'Lumora – Listenansicht', cap: 'Listenansicht' },
+    { img: '2.png', alt: 'Lumora – Cover-Ansicht',  cap: 'Cover-Ansicht' }
+  ];
+  let lightboxIndex = 0;
+  function lightboxSet(i) {
+    lightboxIndex = (i + GALLERY.length) % GALLERY.length;
+    const g = GALLERY[lightboxIndex];
+    const img = document.getElementById('lightboxImg');
+    img.src = g.img;
+    img.alt = g.alt;
+    document.getElementById('lightboxCaption').textContent = g.cap;
+  }
+  function lightboxGo(dir, ev) {
+    if (ev) ev.stopPropagation();
+    lightboxSet(lightboxIndex + dir);
+  }
+  function openLightbox() {
+    const cur = document.getElementById('shot').src;
+    const idx = GALLERY.findIndex(g => cur.endsWith(g.img));
+    lightboxSet(idx < 0 ? 0 : idx);
+    document.getElementById('lightbox').classList.add('open');
+  }
+  function closeLightbox(ev) {
+    if (ev) ev.stopPropagation();
+    document.getElementById('lightbox').classList.remove('open');
+  }
+
+  // Tastatur: ← → blättern, Esc schließt (nur wenn Lightbox offen)
+  document.addEventListener('keydown', (e) => {
+    if (!document.getElementById('lightbox').classList.contains('open')) return;
+    if (e.key === 'ArrowLeft') lightboxGo(-1);
+    else if (e.key === 'ArrowRight') lightboxGo(1);
+    else if (e.key === 'Escape') closeLightbox();
+  });
+
+  // Wisch-Geste fürs Smartphone
+  (function () {
+    const lb = document.getElementById('lightbox');
+    let x0 = null;
+    lb.addEventListener('touchstart', (e) => { x0 = e.changedTouches[0].clientX; }, { passive: true });
+    lb.addEventListener('touchend', (e) => {
+      if (x0 === null) return;
+      const dx = e.changedTouches[0].clientX - x0;
+      if (Math.abs(dx) > 45) lightboxGo(dx < 0 ? 1 : -1);
+      x0 = null;
+    }, { passive: true });
+  })();
+
+  async function loadCount() {
+    try {
+      const res  = await fetch('download.php?count')
+      const data = await res.json()
+      const el   = document.getElementById('dlCount')
+      el.textContent = Number(data.count).toLocaleString('de-DE')
+      el.classList.remove('loading')
+    } catch {
+      document.getElementById('dlCount').textContent = '–'
+    }
+  }
+
+  function startDownload() {
+    // PHP zählt und liefert die Datei gleichzeitig aus
+    window.location.href = 'download.php'
+
+    // Anzeige nach kurzem Delay aktualisieren
+    setTimeout(loadCount, 1200)
+  }
+
+  loadCount()
+</script>
+
+</body>
+</html>

@@ -1,0 +1,12 @@
+# ====================================================================
+# Diese Datei gehört in das STAMMVERZEICHNIS von kara-webdesign.de
+# (dorthin, wo z.B. der hdr-launcher-Ordner und robots.txt liegen)
+# und MUSS dort ".htaccess" heißen (mit Punkt, ohne .txt).
+#
+# Falls dort schon eine .htaccess existiert: nur die Zeile
+#   Options -Indexes
+# ergänzen.
+# ====================================================================
+
+# Verzeichnis-Listing für die GESAMTE Domain deaktivieren
+Options -Indexes

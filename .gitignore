@@ -1,0 +1,14 @@
+# Abhängigkeiten & Build-Ausgaben (werden generiert, gehören nicht ins Repo)
+node_modules/
+dist/
+
+# Electron-Download-Cache (~138 MB)
+electron.zip
+
+# Harness-/Editor-lokale Dateien
+.claude/
+
+# OS / Editor
+Thumbs.db
+Desktop.ini
+*.log

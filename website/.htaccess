@@ -1,0 +1,13 @@
+# kara-webdesign.de/hdr-launcher/
+
+# Verzeichnis-Listing (autoindex) deaktivieren – kein Auflisten von Dateien/Ordnern
+Options -Indexes
+
+# Beim Aufruf des Ordners immer index.html ausliefern
+DirectoryIndex index.html
+
+# Kleine Sicherheits-/Hygiene-Header
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

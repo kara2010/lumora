@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://kara-webdesign.de/hdr-launcher/sitemap.xml
