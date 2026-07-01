@@ -1799,6 +1799,7 @@ body.nav-mode .switch.nav-focus { border-radius: 999px; }
   align-items: center;
   gap: 8px;
 }
+.hotkey-kind { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
 .hotkey-display {
   flex: 1;
   padding: 9px 12px;
