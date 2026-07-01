@@ -11,14 +11,26 @@
     "appId": "com.lumora.app",
     "productName": "Lumora",
     "files": [
-      "main.js",
-      "index.html",
-      "styles.css",
-      "icon.ico",
-      "icon-64.png",
-      "package.json"
+      "**/*",
+      "!_testlab${/*}",
+      "!website${/*}",
+      "!dist${/*}",
+      "!.claude${/*}",
+      "!**/*.zip",
+      "!screenshot1.png",
+      "!screenshot2.png",
+      "!icon-source.png",
+      "!color.png",
+      "!tray-icon.png",
+      "!afterpack.js"
     ],
     "compression": "maximum",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://kara-webdesign.de/hdr-launcher/updates/"
+      }
+    ],
     "win": {
       "target": "nsis",
       "icon": "icon.ico"
@@ -33,6 +45,9 @@
         "to": "HDRTray-LICENSE.html"
       }
     ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^42.3.0",

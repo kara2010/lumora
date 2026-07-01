@@ -273,6 +273,11 @@
           </div>
         </details>
       </div>
+      <div class="form-group">
+        <label>Updates</label>
+        <p class="settings-hint">Lumora sucht beim Start automatisch nach Updates. Du kannst auch jederzeit selbst prüfen.</p>
+        <button class="btn-browse" id="updateCheckBtn" style="align-self:flex-start" onclick="checkForUpdatesManually()">Jetzt nach Updates suchen</button>
+      </div>
       <div class="dialog-actions">
         <button class="btn-primary" onclick="hideSettings()">Schließen</button>
       </div>
@@ -351,6 +356,20 @@
         <button class="btn-primary" id="coverApplyBtn" onclick="applyCoverChoice()" disabled>Übernehmen</button>
       </div>
     </div>
+  </div>
+
+  <!-- Update-Benachrichtigung (unten rechts, nicht blockierend) -->
+  <div class="update-toast" id="updateToast" style="display:none">
+    <div class="update-toast-icon">⬆️</div>
+    <div class="update-toast-body">
+      <div class="update-toast-title" id="updateToastTitle">Update verfügbar</div>
+      <div class="update-toast-text" id="updateToastText"></div>
+      <div class="update-progress-track" id="updateProgressTrack" style="display:none">
+        <div class="update-progress-fill" id="updateProgressFill"></div>
+      </div>
+    </div>
+    <div class="update-toast-actions" id="updateToastActions"></div>
+    <button class="update-toast-close" onclick="dismissUpdateToast()" title="Schließen">✕</button>
   </div>
 
   <script>
@@ -1523,6 +1542,82 @@ ipcRenderer.on('launch-status', (event, status) => {
         document.getElementById('aboutVersion').textContent = 'Version ' + _ver + ' · kostenlos'
       }
     } catch {}
+
+    // ---- Auto-Update UI --------------------------------------------------
+    const upToast    = document.getElementById('updateToast')
+    const upTitle    = document.getElementById('updateToastTitle')
+    const upText     = document.getElementById('updateToastText')
+    const upActions  = document.getElementById('updateToastActions')
+    const upTrack    = document.getElementById('updateProgressTrack')
+    const upFill     = document.getElementById('updateProgressFill')
+
+    function showUpdateToast() { upToast.style.display = 'flex' }
+    function dismissUpdateToast() { upToast.style.display = 'none' }
+    function setUpdateActions(buttons) {
+      upActions.innerHTML = ''
+      buttons.forEach(b => {
+        const el = document.createElement('button')
+        el.className = b.primary ? 'btn-primary' : 'btn-cancel'
+        el.textContent = b.label
+        el.onclick = b.onClick
+        upActions.appendChild(el)
+      })
+    }
+
+    ipcRenderer.on('update-available', (e, info) => {
+      upTitle.textContent = 'Neue Version verfügbar'
+      upText.textContent = 'Lumora ' + info.version + ' steht bereit. Jetzt aktualisieren?'
+      upTrack.style.display = 'none'
+      setUpdateActions([
+        { label: 'Jetzt aktualisieren', primary: true, onClick: () => {
+            upText.textContent = 'Update wird geladen…'
+            upTrack.style.display = 'block'
+            upFill.style.width = '0%'
+            setUpdateActions([])
+            ipcRenderer.invoke('download-update')
+          } },
+        { label: 'Später', primary: false, onClick: dismissUpdateToast },
+      ])
+      showUpdateToast()
+    })
+
+    ipcRenderer.on('update-progress', (e, { percent }) => {
+      upTrack.style.display = 'block'
+      upFill.style.width = percent + '%'
+      upText.textContent = 'Update wird geladen… ' + percent + '%'
+    })
+
+    ipcRenderer.on('update-ready', (e, info) => {
+      upTitle.textContent = 'Update bereit'
+      upText.textContent = 'Lumora ' + info.version + ' wurde geladen. Zum Abschließen neu starten.'
+      upTrack.style.display = 'none'
+      setUpdateActions([
+        { label: 'Neu starten & installieren', primary: true, onClick: () => ipcRenderer.invoke('install-update') },
+        { label: 'Später', primary: false, onClick: dismissUpdateToast },
+      ])
+      showUpdateToast()
+    })
+
+    // Nur bei manueller Suche (aus den Einstellungen) sichtbar:
+    ipcRenderer.on('update-none', () => {
+      if (typeof updateCheckBtn !== 'undefined' && updateCheckBtn) {
+        updateCheckBtn.textContent = 'Du hast die neueste Version ✓'
+        updateCheckBtn.disabled = false
+      }
+    })
+    ipcRenderer.on('update-error', (e, { message }) => {
+      if (typeof updateCheckBtn !== 'undefined' && updateCheckBtn) {
+        updateCheckBtn.textContent = 'Prüfung fehlgeschlagen – erneut versuchen'
+        updateCheckBtn.disabled = false
+      }
+    })
+
+    let updateCheckBtn = null
+    function checkForUpdatesManually() {
+      updateCheckBtn = document.getElementById('updateCheckBtn')
+      if (updateCheckBtn) { updateCheckBtn.textContent = 'Suche…'; updateCheckBtn.disabled = true }
+      ipcRenderer.invoke('check-for-updates')
+    }
 
     applyAccent()
     document.getElementById('sortSelect').value = sortMode
