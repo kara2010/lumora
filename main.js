@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage, globalShortcut } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const https = require('https')
@@ -47,7 +47,7 @@ let tray = null
 let appSettingsFile = null
 let gamesFile = null
 let prefsFile = null
-const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '' }
+const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L' }
 app.isQuitting = false
 
 function loadAppSettings() {
@@ -70,6 +70,27 @@ function showMainWindow() {
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+}
+
+// Globaler Hotkey: holt Lumora nach vorne bzw. versteckt es wieder (Toggle).
+function toggleMainWindow() {
+  if (!mainWindow) return
+  if (mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()) {
+    if (appSettings.minimizeToTray) mainWindow.hide()
+    else mainWindow.minimize()
+  } else {
+    showMainWindow()
+  }
+}
+
+// (Neu-)Registriert den konfigurierten Toggle-Hotkey. Gibt true/false zurueck,
+// je nachdem ob die Kombination angenommen wurde (kann vom OS belegt sein).
+function registerToggleHotkey() {
+  globalShortcut.unregisterAll()
+  const acc = appSettings.toggleHotkey
+  if (!acc) return true
+  try { return globalShortcut.register(acc, toggleMainWindow) }
+  catch { return false }
 }
 
 function createTray() {
@@ -1331,6 +1352,16 @@ function checkForUpdates(manual) {
   })
 }
 
+// Toggle-Hotkey aus den Einstellungen setzen. Leerer String = deaktiviert.
+// Liefert { ok } zurueck – false, wenn die Kombination nicht registriert werden
+// konnte (z.B. schon vom System/anderer App belegt).
+ipcMain.handle('set-hotkey', (event, accelerator) => {
+  appSettings.toggleHotkey = accelerator || ''
+  saveAppSettings()
+  const ok = registerToggleHotkey()
+  return { ok }
+})
+
 ipcMain.handle('check-for-updates', () => { checkForUpdates(true) })
 ipcMain.handle('download-update', () => { if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {}) })
 ipcMain.handle('install-update', () => { if (autoUpdater) { app.isQuitting = true; autoUpdater.quitAndInstall() } })
@@ -1342,7 +1373,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => showMainWindow())
 
-  app.whenReady().then(() => { setupAutoUpdate(); createWindow() })
+  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); registerToggleHotkey() })
 
   // HDR abschalten, falls der Launcher es für ein noch laufendes Spiel aktiviert hatte
   app.on('before-quit', () => {
@@ -1351,6 +1382,8 @@ if (!app.requestSingleInstanceLock()) {
       hdrEnabledByLauncher = false
     }
   })
+
+  app.on('will-quit', () => globalShortcut.unregisterAll())
 
   app.on('window-all-closed', () => {
     if (hdrPollInterval) clearInterval(hdrPollInterval)
