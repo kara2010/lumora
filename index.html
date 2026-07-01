@@ -1827,7 +1827,7 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (ctx) return Array.from(ctx.querySelectorAll('.context-menu-item')).filter(isNavVisible)
       const o = navOpenOverlay()
       if (o) {
-        const sel = 'input:not([type=hidden]):not([type=file]), select, textarea, button, summary, .cover-cell, .accent-swatch, .mode-option'
+        const sel = 'input:not([type=hidden]):not([type=file]):not([type=checkbox]), select, textarea, button, summary, .cover-cell, .accent-swatch, .mode-option, .switch'
         return Array.from(o.el.querySelectorAll(sel)).filter(isNavVisible)
       }
       // Werkzeugleiste + Fußleiste sind immer erreichbar. Für die Spiele selbst
@@ -1848,17 +1848,20 @@ ipcRenderer.on('launch-status', (event, status) => {
         el.classList.add('nav-focus')
         if (scroll !== false) {
           el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-          // Liegt das Element in der obersten Zeile seines Scroll-Containers,
-          // ganz nach oben scrollen – sonst bleibt die obere Kante/Padding
-          // verdeckt (Element säße nur bündig am oberen Rand).
-          const sc = navScrollParent(el)
-          if (sc) {
-            const elTop = el.getBoundingClientRect().top
-            let anyAbove = false
-            for (const it of sc.querySelectorAll('.grid-card, .cover-cell, .game-item')) {
-              if (it !== el && it.getBoundingClientRect().top < elTop - 2) { anyAbove = true; break }
+          // Nur für Kachel-/Listenelemente: liegt das Element in der obersten
+          // Zeile seines Scroll-Containers, ganz nach oben scrollen (obere
+          // Kante/Padding sichtbar). NICHT für generische Dialog-Steuerelemente –
+          // sonst würde der Dialog bei jedem Fokus nach oben zurückspringen.
+          if (el.matches('.grid-card, .cover-cell, .game-item')) {
+            const sc = navScrollParent(el)
+            if (sc) {
+              const elTop = el.getBoundingClientRect().top
+              let anyAbove = false
+              for (const it of sc.querySelectorAll('.grid-card, .cover-cell, .game-item')) {
+                if (it !== el && it.getBoundingClientRect().top < elTop - 2) { anyAbove = true; break }
+              }
+              if (!anyAbove) sc.scrollTop = 0
             }
-            if (!anyAbove) sc.scrollTop = 0
           }
         }
       }
