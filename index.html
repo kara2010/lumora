@@ -2184,6 +2184,15 @@ ipcRenderer.on('launch-status', (event, status) => {
         if (best.classList.contains('game-item')) {
           const gi = Number(best.dataset.idx)
           if (gi >= 0 && gi !== selectedIndex) selectGame(gi)
+        } else if (best.classList.contains('grid-card')) {
+          // In der Rasteransicht folgt die Auswahl dem Fokus (eine einzige,
+          // mitwandernde Markierung) – ohne Ansichtswechsel/Neuzeichnen.
+          const gi = Number(best.dataset.idx)
+          if (gi >= 0) {
+            selectedIndex = gi
+            lastSelectedId = games[gi] ? games[gi].id : null
+            document.querySelectorAll('#gridScroll .grid-card').forEach(c => c.classList.toggle('active', c === best))
+          }
         }
       }
     }
