@@ -2128,6 +2128,14 @@ ipcRenderer.on('launch-status', (event, status) => {
       else if (dir === 'down') { if (i + cols < n) j = i + cols }
       return j >= 0 ? tiles[j] : null
     }
+    // Kurzes „Ende erreicht"-Feedback: Kachel stupst in die Richtung an und zurück.
+    function navEdgeBump(el, dir) {
+      const classes = ['edge-bump-up', 'edge-bump-down', 'edge-bump-left', 'edge-bump-right']
+      el.classList.remove(...classes)
+      void el.offsetWidth   // Reflow erzwingen, damit die Animation neu startet
+      el.classList.add('edge-bump-' + dir)
+      setTimeout(() => el.classList.remove('edge-bump-' + dir), 320)
+    }
     // Zeilenbewusste lineare Navigation in DOM-Reihenfolge – für Formular-Dialoge
     // (Einstellungen usw.). hoch/runter = nächste/vorherige Zeile, links/rechts =
     // Nachbar in derselben Zeile. Vorhersehbar, hakt nicht, überspringt nichts.
@@ -2166,8 +2174,13 @@ ipcRenderer.on('launch-status', (event, status) => {
         // (im Dialog linear, sonst geometrisch).
         const tileSel = fromEl.matches('.game-item') ? '.game-item' : '.cover-cell, .grid-card'
         best = navGridMove(dir, items.filter(el => el.matches(tileSel)), fromEl)
-        if (!best) best = inDialog ? navLinearMove(dir, items, fromEl)
-                                   : navBestInDir(items.filter(el => el !== fromEl), fromEl.getBoundingClientRect(), dir)
+        if (!best) {
+          // Im Haupt-Raster oben/unten am Rand NICHT nach links/aussen springen –
+          // Fokus bleibt, kurzes optisches „Ende erreicht"-Feedback.
+          if (fromEl.matches('.grid-card') && (dir === 'up' || dir === 'down')) { navEdgeBump(fromEl, dir); return }
+          best = inDialog ? navLinearMove(dir, items, fromEl)
+                          : navBestInDir(items.filter(el => el !== fromEl), fromEl.getBoundingClientRect(), dir)
+        }
       } else if (inDialog) {
         // Formular-Dialog: lineare, vorhersehbare Navigation in Lese-Reihenfolge.
         best = navLinearMove(dir, items, fromEl)

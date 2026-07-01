@@ -551,6 +551,12 @@ body:not(.nav-mode) .grid-card:hover .grid-cover {
    keine Doppel-Hervorhebung auf derselben Kachel entsteht. */
 body.nav-mode .grid-card.active .grid-cover { border-color: #262626; box-shadow: none; }
 
+/* „Ende erreicht" am oberen/unteren Rasterrand: kurzer Stups statt Wegspringen. */
+@keyframes edgeBumpUp   { 0%,100% { transform: translateY(0) } 35% { transform: translateY(-7px) } }
+@keyframes edgeBumpDown { 0%,100% { transform: translateY(0) } 35% { transform: translateY(7px) } }
+.grid-card.edge-bump-up .grid-cover   { animation: edgeBumpUp 0.3s ease; }
+.grid-card.edge-bump-down .grid-cover { animation: edgeBumpDown 0.3s ease; }
+
 .grid-cover-empty {
   display: flex;
   align-items: center;
