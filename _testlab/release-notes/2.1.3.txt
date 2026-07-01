@@ -1,0 +1,7 @@
+Neuerungen und Verbesserungen:
+
+• Spielzeit-Rückblick: neuer Überblick über deine Gesamtspielzeit, meistgespielte Titel, Lieblings-Genre und Favoriten – erreichbar über den Button in der Fußleiste.
+• Gamepad: In der Rasteransicht startet A jetzt direkt das ausgewählte Spiel (mit HDR-Einstellung pro Spiel), ohne in die Detailansicht zu wechseln.
+• Einstellungen werden robuster geladen – API-Key und Hotkeys können nicht mehr durch eine beschädigte Konfigurationsdatei verloren gehen.
+• „Minimiert starten" greift nur noch beim automatischen Start mit Windows, nicht beim manuellen Öffnen.
+• Diverse Feinschliffe an Layout und Bedienung.
