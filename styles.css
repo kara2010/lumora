@@ -224,6 +224,11 @@ body::before {
   flex-shrink: 0;
 }
 
+/* Rasteransicht: linke Spiele-Liste ausgeblendet (redundant zum Raster),
+   Fußleiste bleibt am unteren Rand. */
+.sidebar.list-hidden .game-list { display: none; }
+.sidebar.list-hidden .sidebar-footer { margin-top: auto; }
+
 .app-version {
   flex-basis: 100%;
   text-align: center;
