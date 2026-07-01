@@ -174,7 +174,10 @@ function createWindow() {
   const state = loadWindowState() || {}
   const hasValidPos = Number.isInteger(state.x) && Number.isInteger(state.y) &&
     isVisibleOnSomeDisplay({ x: state.x, y: state.y, width: state.width || 900, height: state.height || 600 })
-  const wantMin = appSettings.startMinimized || process.argv.includes('--minimized')
+  // Minimiert starten NUR beim Autostart: der Autostart-Eintrag uebergibt
+  // '--minimized' (siehe applyAutostart). Beim MANUELLEN Start fehlt das Argument
+  // -> die App oeffnet normal, auch wenn "Minimiert starten" aktiviert ist.
+  const wantMin = process.argv.includes('--minimized')
 
   mainWindow = new BrowserWindow({
     width: state.width || 900,
