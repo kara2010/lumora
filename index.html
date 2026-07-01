@@ -1840,6 +1840,48 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (launch) return launch
       return items[0]
     }
+
+    // ---- Fokus-Wiederherstellung über Kontext-Wechsel (Dialoge, Kontextmenü) ----
+    // Beim Öffnen eines Menüs/Dialogs merken wir uns, wo der Fokus vorher war;
+    // beim Schließen springt er exakt dorthin zurück – auch verschachtelt
+    // (z.B. Spiel -> Kontextmenü -> Cover-Suche -> zurück aufs Spiel).
+    let navCtx = 'main'
+    const navStack = []
+    function navCurrentContext() {
+      if (navContextOpen()) return 'ctx'
+      const o = navOpenOverlay()
+      if (o) return o.el.id
+      return 'main'
+    }
+    function navRestoreTo(frame) {
+      const items = navFocusables()
+      let target = frame.el
+      if (!(target && document.body.contains(target) && items.includes(target))) {
+        // Element ggf. durch Neuzeichnen ersetzt → über data-idx wiederfinden.
+        target = frame.idx != null ? items.find(x => x.dataset && x.dataset.idx === frame.idx) : null
+      }
+      if (target) setNavFocus(target)
+      else if (items.length) setNavFocus(navPickStart(items))
+    }
+    // Kontext angleichen: nach Öffnen/Schließen aufrufen. Speichert beim
+    // Tieferwechsel die aktuelle Auswahl und stellt sie beim Zurück wieder her.
+    function navSyncContext() {
+      const cur = navCurrentContext()
+      if (cur === navCtx) return false
+      const backIdx = navStack.findIndex(s => s.ctx === cur)
+      if (backIdx >= 0) {
+        const frame = navStack[backIdx]
+        navStack.length = backIdx
+        navCtx = cur
+        navRestoreTo(frame)
+      } else {
+        navStack.push({ ctx: navCtx, el: navFocusEl, idx: (navFocusEl && navFocusEl.dataset) ? navFocusEl.dataset.idx : null })
+        navCtx = cur
+        const items = navFocusables()
+        if (items.length) setNavFocus(navPickStart(items))
+      }
+      return true
+    }
     // Nächster scrollbarer Vorfahr (overflow auto/scroll) – oder null.
     function navScrollParent(el) {
       let p = el && el.parentElement
@@ -1881,6 +1923,9 @@ ipcRenderer.on('launch-status', (event, status) => {
     function navMove(dir) {
       if (isEditingField()) document.activeElement.blur()
       setNavMode(true)
+      // Hat sich der Kontext extern geändert (Dialog per Maus/Escape geschlossen),
+      // erst nur den Fokus wiederherstellen – nicht gleichzeitig weiterbewegen.
+      if (navSyncContext()) return
       const items = navFocusables()
       if (!items.length) return
       if (!navFocusEl || !items.includes(navFocusEl)) { setNavFocus(navPickStart(items)); return }
@@ -1910,12 +1955,15 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (el.tagName === 'INPUT' && /^(text|search)$/.test(el.type || 'text')) { el.focus(); return }
       if (el.matches('.switch')) { const cb = el.querySelector('input'); if (cb) cb.click(); return }
       el.click()
+      // Der Klick kann ein Menü/Dialog öffnen ODER schließen (z.B. „Schließen",
+      // „Übernehmen") → Kontext angleichen, damit der Fokus richtig sitzt.
+      navSyncContext()
     }
     function navBack() {
       const ctx = navContextOpen()
-      if (ctx) { hideContextMenu(); return }
+      if (ctx) { hideContextMenu(); navSyncContext(); return }
       const o = navOpenOverlay()
-      if (o) { o.hide(); return }
+      if (o) { o.hide(); navSyncContext(); return }
       if (isEditingField()) { document.activeElement.blur(); return }
       if (libView === 'detail') { setLibView('grid'); return }
     }
@@ -1934,7 +1982,7 @@ ipcRenderer.on('launch-status', (event, status) => {
       const i = navFocusedIdx(); if (i < 0) return
       const r = navFocusEl.getBoundingClientRect()
       showContextMenu({ preventDefault() {}, stopPropagation() {}, clientX: r.left + 24, clientY: r.top + 24 }, i)
-      setTimeout(() => { const items = navFocusables(); if (items.length) setNavFocus(items[0]) }, 0)
+      navSyncContext()
     }
     // Nach dem Neuzeichnen von Liste/Raster den Fokus auf dasselbe Spiel setzen.
     function gpReapplyFocus() {
