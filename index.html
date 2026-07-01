@@ -1971,8 +1971,15 @@ ipcRenderer.on('launch-status', (event, status) => {
     function navLinearMove(dir, items, fromEl) {
       const idx = items.indexOf(fromEl)
       if (idx < 0) return null
-      const fromTop = fromEl.getBoundingClientRect().top
-      const sameRow = (el) => Math.abs(el.getBoundingClientRect().top - fromTop) < 12
+      const fr = fromEl.getBoundingClientRect()
+      // Zeilen-Erkennung über vertikale Überlappung statt fester Pixelschwelle –
+      // robust gegen Skalierung (300%-TV) und unterschiedlich hohe Elemente in
+      // derselben Zeile (mittig ausgerichtete Schalter/Buttons/Spans).
+      const sameRow = (el) => {
+        const r = el.getBoundingClientRect()
+        const overlap = Math.min(r.bottom, fr.bottom) - Math.max(r.top, fr.top)
+        return overlap > Math.min(r.height, fr.height) * 0.5
+      }
       if (dir === 'left') { const p = items[idx - 1]; return (p && sameRow(p)) ? p : null }
       if (dir === 'right') { const p = items[idx + 1]; return (p && sameRow(p)) ? p : null }
       if (dir === 'down') { for (let k = idx + 1; k < items.length; k++) if (!sameRow(items[k])) return items[k]; return null }
