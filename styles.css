@@ -1783,7 +1783,10 @@ body.nav-mode .nav-focus {
   transition: outline-color 0.1s ease;
 }
 body.nav-mode .game-item.nav-focus { border-radius: 10px; }
-body.nav-mode .switch.nav-focus { border-radius: 999px; }
+/* Schalter: der inset-Ring wäre vom Slider (position:absolute; inset:0) verdeckt.
+   Ring daher auf den sichtbaren Slider legen (verifiziert im laufenden Programm). */
+body.nav-mode .switch.nav-focus { outline: none; }
+body.nav-mode .switch.nav-focus .switch-slider { box-shadow: 0 0 0 3px var(--accent); }
 
 /* Bild-Kacheln (Cover-Suche & Raster): Ring als Overlay OBEN auf dem Bild,
    vollständig innerhalb der Kachel → wird nirgends abgeschnitten. */
