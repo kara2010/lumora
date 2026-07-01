@@ -275,12 +275,20 @@
       </div>
       <div class="form-group">
         <label>Steuerung</label>
-        <p class="settings-hint">Globaler Hotkey, um Lumora überall in den Vordergrund zu holen bzw. wieder zu verstecken. Ein angeschlossener Gamepad-Controller steuert die Bibliothek automatisch (D-Pad/Stick bewegen, A wählt/startet, B zurück).</p>
+        <p class="settings-hint">Globaler Hotkey, um Lumora in den Vordergrund zu holen bzw. wieder zu verstecken – als Tastenkombination <strong>oder</strong> Gamepad-Kombi. Ein angeschlossener Controller steuert die Bibliothek automatisch (D-Pad/Stick bewegen, A wählt/startet, B zurück).</p>
         <div class="hotkey-row">
+          <span class="hotkey-kind" title="Tastatur">⌨️</span>
           <span class="hotkey-display" id="hotkeyDisplay">Alt+L</span>
           <button class="btn-browse" id="hotkeyCaptureBtn" onclick="toggleHotkeyCapture()">Ändern</button>
-          <button class="btn-cancel" id="hotkeyClearBtn" onclick="clearHotkey()">Aus</button>
+          <button class="btn-cancel" onclick="clearHotkey()">Aus</button>
         </div>
+        <div class="hotkey-row">
+          <span class="hotkey-kind" title="Gamepad">🎮</span>
+          <span class="hotkey-display" id="gpHotkeyDisplay">—</span>
+          <button class="btn-browse" id="gpHotkeyCaptureBtn" onclick="toggleGpHotkeyCapture()">Aufnehmen</button>
+          <button class="btn-cancel" onclick="clearGpHotkey()">Aus</button>
+        </div>
+        <p class="settings-hint" id="gpHotkeyHint" style="display:none"></p>
       </div>
       <div class="form-group">
         <label>Updates</label>
@@ -1307,7 +1315,9 @@ ipcRenderer.on('launch-status', (event, status) => {
       document.getElementById('setTray').checked = !!s.minimizeToTray
       document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
       appSettingsCache.toggleHotkey = s.toggleHotkey || ''
+      appSettingsCache.gamepadHotkey = Array.isArray(s.gamepadHotkey) ? s.gamepadHotkey : []
       refreshHotkeyDisplay()
+      refreshGpHotkeyDisplay()
     }
     function hideSettings() { document.getElementById('settingsOverlay').style.display = 'none'; stopHotkeyCapture() }
 
@@ -1654,7 +1664,7 @@ ipcRenderer.on('launch-status', (event, status) => {
     // ======================================================================
     // Hotkey-Konfiguration (globaler Toggle-Shortcut)
     // ======================================================================
-    const appSettingsCache = { toggleHotkey: 'Alt+L' }
+    const appSettingsCache = { toggleHotkey: 'Alt+L', gamepadHotkey: [] }
     let capturingHotkey = false
 
     function refreshHotkeyDisplay() {
@@ -1708,6 +1718,57 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (res && res.ok) { appSettingsCache.toggleHotkey = acc; disp.textContent = acc }
       else disp.textContent = acc + ' – belegt, andere wählen'
     }, true)
+
+    // ---- Gamepad-Hotkey (globale Knopf-Kombi zum Ein-/Ausblenden) ----
+    const XBTN = { 0:'A', 1:'B', 2:'X', 3:'Y', 4:'LB', 5:'RB', 6:'LT', 7:'RT',
+      8:'View', 9:'Menu', 10:'L3', 11:'R3', 12:'D-Pad ↑', 13:'D-Pad ↓',
+      14:'D-Pad ←', 15:'D-Pad →', 16:'Xbox' }
+    function gpComboLabel(combo) {
+      if (!combo || !combo.length) return '—'
+      return combo.map(i => XBTN[i] || ('Knopf ' + i)).join(' + ')
+    }
+    function refreshGpHotkeyDisplay() {
+      const d = document.getElementById('gpHotkeyDisplay')
+      if (d) d.textContent = gpComboLabel(appSettingsCache.gamepadHotkey)
+    }
+    let capturingGpHotkey = false
+    let gpCaptureSet = null          // größte gleichzeitig gedrückte Knopf-Menge
+    let gpHotkeyWasDown = false      // Flankenerkennung für den globalen Hotkey
+    function toggleGpHotkeyCapture() { capturingGpHotkey ? stopGpHotkeyCapture() : startGpHotkeyCapture() }
+    function startGpHotkeyCapture() {
+      const hint = document.getElementById('gpHotkeyHint')
+      if (gpPadIndex === null) {
+        if (hint) { hint.style.display = 'block'; hint.textContent = 'Kein Controller verbunden – bitte zuerst anschließen.' }
+        return
+      }
+      capturingGpHotkey = true
+      gpCaptureSet = null
+      document.getElementById('gpHotkeyDisplay').textContent = 'Knöpfe drücken (auch mehrere gleichzeitig)…'
+      document.getElementById('gpHotkeyCaptureBtn').textContent = 'Abbrechen'
+      if (hint) { hint.style.display = 'block'; hint.textContent = 'Tipp: z. B. D-Pad ← halten und Y dazu drücken. Loslassen speichert die Kombi.' }
+    }
+    function stopGpHotkeyCapture() {
+      capturingGpHotkey = false
+      gpCaptureSet = null
+      const b = document.getElementById('gpHotkeyCaptureBtn'); if (b) b.textContent = 'Aufnehmen'
+      const hint = document.getElementById('gpHotkeyHint'); if (hint) hint.style.display = 'none'
+      refreshGpHotkeyDisplay()
+    }
+    async function commitGpHotkey(combo) {
+      capturingGpHotkey = false
+      gpCaptureSet = null
+      const b = document.getElementById('gpHotkeyCaptureBtn'); if (b) b.textContent = 'Aufnehmen'
+      const hint = document.getElementById('gpHotkeyHint'); if (hint) hint.style.display = 'none'
+      appSettingsCache.gamepadHotkey = combo
+      await ipcRenderer.invoke('set-app-settings', { gamepadHotkey: combo })
+      refreshGpHotkeyDisplay()
+    }
+    async function clearGpHotkey() {
+      stopGpHotkeyCapture()
+      appSettingsCache.gamepadHotkey = []
+      await ipcRenderer.invoke('set-app-settings', { gamepadHotkey: [] })
+      refreshGpHotkeyDisplay()
+    }
 
     // ======================================================================
     // Fokus-Engine: einheitliche räumliche Navigation für Gamepad UND Tastatur.
@@ -1874,7 +1935,10 @@ ipcRenderer.on('launch-status', (event, status) => {
     })
 
     // ---- Gamepad-Anbindung an die Fokus-Engine ----
-    let gpPadIndex = null, gpRaf = null
+    // Polling per setInterval (nicht requestAnimationFrame): läuft mit
+    // backgroundThrottling:false auch weiter, wenn Lumora minimiert ist – nötig,
+    // damit der Gamepad-Hotkey das Fenster zurückholen kann.
+    let gpPadIndex = null, gpTimer = null
     const gpPressed = {}, gpRepeatAt = {}
     const GP_DEAD = 0.5, GP_REPEAT_FIRST = 400, GP_REPEAT_NEXT = 120
 
@@ -1890,23 +1954,47 @@ ipcRenderer.on('launch-status', (event, status) => {
     }
     function gpPoll() {
       const gp = gpPadIndex !== null ? navigator.getGamepads()[gpPadIndex] : null
-      if (gp) {
-        const b = gp.buttons, ax = gp.axes
-        const up = (b[12] && b[12].pressed) || ax[1] < -GP_DEAD
-        const down = (b[13] && b[13].pressed) || ax[1] > GP_DEAD
-        const left = (b[14] && b[14].pressed) || ax[0] < -GP_DEAD
-        const right = (b[15] && b[15].pressed) || ax[0] > GP_DEAD
-        gpEdge('up', up, () => navMove('up'))
-        gpEdge('down', down, () => navMove('down'))
-        gpEdge('left', left, () => navMove('left'))
-        gpEdge('right', right, () => navMove('right'))
-        gpTap('a', b[0] && b[0].pressed, () => navActivate())
-        gpTap('b', b[1] && b[1].pressed, () => navBack())
-        gpTap('x', b[2] && b[2].pressed, () => navFavorite())
-        gpTap('y', b[3] && b[3].pressed, () => navContext())
-        gpTap('start', b[9] && b[9].pressed, () => navStart())
+      if (!gp) return
+      const b = gp.buttons, ax = gp.axes
+
+      // 1) Aufnahme-Modus: größte gleichzeitig gedrückte Knopf-Menge merken,
+      //    beim Loslassen speichern.
+      if (capturingGpHotkey) {
+        const now = []
+        for (let i = 0; i < b.length; i++) if (b[i] && b[i].pressed) now.push(i)
+        if (now.length) {
+          if (!gpCaptureSet || now.length >= gpCaptureSet.size) gpCaptureSet = new Set(now)
+          const disp = document.getElementById('gpHotkeyDisplay')
+          if (disp) disp.textContent = gpComboLabel([...gpCaptureSet].sort((x, y) => x - y)) + ' …'
+        } else if (gpCaptureSet && gpCaptureSet.size) {
+          commitGpHotkey([...gpCaptureSet].sort((x, y) => x - y))
+        }
+        return
       }
-      gpRaf = requestAnimationFrame(gpPoll)
+
+      // 2) Globaler Gamepad-Hotkey (Kombi) – auf steigende Flanke ein-/ausblenden.
+      const combo = appSettingsCache.gamepadHotkey
+      const comboDown = combo && combo.length && combo.every(i => b[i] && b[i].pressed)
+      if (comboDown && !gpHotkeyWasDown) { gpHotkeyWasDown = true; ipcRenderer.invoke('toggle-window') }
+      else if (!comboDown) gpHotkeyWasDown = false
+
+      // 3) Navigation nur im Vordergrund und nicht, während die Kombi aktiv ist
+      //    (damit der Toggle-Moment nicht zusätzlich navigiert).
+      if (comboDown || !document.hasFocus()) return
+
+      const up = (b[12] && b[12].pressed) || ax[1] < -GP_DEAD
+      const down = (b[13] && b[13].pressed) || ax[1] > GP_DEAD
+      const left = (b[14] && b[14].pressed) || ax[0] < -GP_DEAD
+      const right = (b[15] && b[15].pressed) || ax[0] > GP_DEAD
+      gpEdge('up', up, () => navMove('up'))
+      gpEdge('down', down, () => navMove('down'))
+      gpEdge('left', left, () => navMove('left'))
+      gpEdge('right', right, () => navMove('right'))
+      gpTap('a', b[0] && b[0].pressed, () => navActivate())
+      gpTap('b', b[1] && b[1].pressed, () => navBack())
+      gpTap('x', b[2] && b[2].pressed, () => navFavorite())
+      gpTap('y', b[3] && b[3].pressed, () => navContext())
+      gpTap('start', b[9] && b[9].pressed, () => navStart())
     }
     function showGamepadToast(msg) {
       const t = document.getElementById('gamepadToast')
@@ -1918,14 +2006,14 @@ ipcRenderer.on('launch-status', (event, status) => {
       setNavMode(true)
       showGamepadToast('🎮 Controller verbunden')
       const items = navFocusables(); if (items.length && !navFocusEl) setNavFocus(navPickStart(items))
-      if (!gpRaf) gpRaf = requestAnimationFrame(gpPoll)
+      if (!gpTimer) gpTimer = setInterval(gpPoll, 30)
     })
     window.addEventListener('gamepaddisconnected', (e) => {
       if (e.gamepad.index !== gpPadIndex) return
       gpPadIndex = null
       setNavMode(false)
       if (navFocusEl) { navFocusEl.classList.remove('nav-focus'); navFocusEl = null }
-      if (gpRaf) { cancelAnimationFrame(gpRaf); gpRaf = null }
+      if (gpTimer) { clearInterval(gpTimer); gpTimer = null }
       showGamepadToast('Controller getrennt')
     })
 
@@ -1940,6 +2028,13 @@ ipcRenderer.on('launch-status', (event, status) => {
     }
     migrateMedia()
     if (games.length === 0) showScanDialog(true)
+
+    // Hotkey-Einstellungen früh laden, damit der Gamepad-Hotkey ab Start greift
+    // (auch wenn der Einstellungsdialog nie geöffnet wird).
+    ipcRenderer.invoke('get-app-settings').then(s => {
+      appSettingsCache.toggleHotkey = s.toggleHotkey || ''
+      appSettingsCache.gamepadHotkey = Array.isArray(s.gamepadHotkey) ? s.gamepadHotkey : []
+    }).catch(() => {})
 
     // UI steht → Boot-Screen ausblenden
     document.getElementById('bootScreen').classList.add('hidden')

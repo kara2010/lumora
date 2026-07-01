@@ -47,7 +47,7 @@ let tray = null
 let appSettingsFile = null
 let gamesFile = null
 let prefsFile = null
-const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L' }
+const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L', gamepadHotkey: [] }
 app.isQuitting = false
 
 function loadAppSettings() {
@@ -189,7 +189,10 @@ function createWindow() {
     icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false
+      contextIsolation: false,
+      // Timer/Gamepad-Polling laufen auch weiter, wenn das Fenster minimiert/
+      // verdeckt ist – nötig, damit ein Gamepad-Hotkey Lumora zurückholen kann.
+      backgroundThrottling: false
     },
     backgroundColor: '#0f0f0f'
   })
@@ -1372,6 +1375,9 @@ ipcMain.handle('set-hotkey', (event, accelerator) => {
   const ok = registerToggleHotkey()
   return { ok }
 })
+
+// Gamepad-Hotkey (Renderer erkennt die Kombi und ruft dies zum Ein-/Ausblenden).
+ipcMain.handle('toggle-window', () => { toggleMainWindow() })
 
 ipcMain.handle('check-for-updates', () => { checkForUpdates(true) })
 ipcMain.handle('download-update', () => { if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {}) })
