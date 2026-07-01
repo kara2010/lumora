@@ -5,6 +5,11 @@ dist/
 # Electron-Download-Cache (~138 MB)
 electron.zip
 
+# Gebaute Installer / Update-Artefakte (gehoeren auf den Webserver, nicht ins Repo)
+# (Installer liegen nur in dist/ [schon ignoriert] und website/updates/)
+website/updates/
+*.blockmap
+
 # Harness-/Editor-lokale Dateien
 .claude/
 
