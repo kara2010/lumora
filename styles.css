@@ -546,6 +546,10 @@ body:not(.nav-mode) .grid-card:hover .grid-cover {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent);
 }
+/* Im Gamepad-/Tastatur-Modus folgt die Auswahl dem Fokus – dort ist der
+   Fokus-Ring die Markierung; den separaten .active-Rahmen ausblenden, damit
+   keine Doppel-Hervorhebung auf derselben Kachel entsteht. */
+body.nav-mode .grid-card.active .grid-cover { border-color: #262626; box-shadow: none; }
 
 .grid-cover-empty {
   display: flex;
