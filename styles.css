@@ -1760,22 +1760,35 @@ body::before {
 }
 
 /* --- Fokus-Engine (Gamepad + Tastatur) --- */
-/* Ring nur sichtbar, solange per Controller/Pfeiltasten navigiert wird. */
+/* Ring nur sichtbar, solange per Controller/Pfeiltasten navigiert wird.
+   WICHTIG: Ring INNEN zeichnen (outline-offset negativ bzw. Overlay), damit ihn
+   scrollbare Container mit overflow (Cover-Suche, Raster, Dialoge, Scan-Liste)
+   niemals abschneiden. Aussen liegende Ringe würden an den Container-Kanten
+   beschnitten. */
 body.nav-mode .nav-focus {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
   border-radius: 8px;
-  box-shadow: 0 0 0 4px var(--accent-bg);
-  transition: outline-color 0.1s ease, box-shadow 0.12s ease;
+  transition: outline-color 0.1s ease;
 }
-body.nav-mode .game-item.nav-focus { outline-offset: -2px; border-radius: 10px; }
-body.nav-mode .grid-card.nav-focus {
-  outline: 3px solid var(--accent);
-  border-radius: 12px;
-  box-shadow: 0 0 0 6px var(--accent-bg), 0 8px 28px rgba(0,0,0,0.5);
-  transform: translateY(-2px);
-}
+body.nav-mode .game-item.nav-focus { border-radius: 10px; }
 body.nav-mode .switch.nav-focus { border-radius: 999px; }
+
+/* Bild-Kacheln (Cover-Suche & Raster): Ring als Overlay OBEN auf dem Bild,
+   vollständig innerhalb der Kachel → wird nirgends abgeschnitten. */
+body.nav-mode .cover-cell.nav-focus,
+body.nav-mode .grid-card.nav-focus { outline: none; }
+body.nav-mode .cover-cell.nav-focus::after,
+body.nav-mode .grid-card.nav-focus .grid-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--accent);
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.45);
+  pointer-events: none;
+  z-index: 6;
+}
 
 .gamepad-toast {
   position: fixed;
