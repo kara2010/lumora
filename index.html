@@ -1060,6 +1060,19 @@
       if (libView === 'grid') renderGrid()
     }
 
+    // Hält den markierten Eintrag sichtbar – scrollt NUR die Liste (nie die Seite)
+    // und nur, wenn er tatsächlich ausserhalb des Sichtbereichs liegt.
+    function scrollActiveListItemIntoView() {
+      const list = document.getElementById('gameList')
+      if (!list) return
+      const el = list.querySelector('.game-item.active')
+      if (!el) return
+      const lr = list.getBoundingClientRect()
+      const er = el.getBoundingClientRect()
+      if (er.top < lr.top) list.scrollTop -= (lr.top - er.top)
+      else if (er.bottom > lr.bottom) list.scrollTop += (er.bottom - lr.bottom)
+    }
+
     function updateViewToggle() {
       document.getElementById('vtDetail').classList.toggle('active', libView === 'detail')
       document.getElementById('vtGrid').classList.toggle('active', libView === 'grid')
@@ -1134,6 +1147,7 @@
         savePrefs()
       }
       renderList()
+      scrollActiveListItemIntoView()
       const g = games[i]
       document.getElementById('detailName').textContent = g.name
       document.getElementById('detailPath').textContent = g.path

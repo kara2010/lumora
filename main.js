@@ -812,7 +812,7 @@ ipcMain.handle('launch-game', async (event, gamePath, opts = {}) => {
 
     // Erst auf den echten Spielstart warten (Steam braucht ein paar Sekunden),
     // Spielzeit ab dann zählen; Ende erst nach 2 leeren Checks (gegen kurze Lücken).
-    let started = false, startTs = null, absent = 0
+    let started = false, startTs = null, absent = 0, reenabled = false
     const monitor = setInterval(async () => {
       const running = await probeRunning()
       if (!started) {
@@ -820,12 +820,23 @@ ipcMain.handle('launch-game', async (event, gamePath, opts = {}) => {
           started = true; startTs = Date.now(); absent = 0
           mainWindow.webContents.send('launch-status', 'running')
           playLog(`STARTED nach +${Math.round((Date.now() - launchTs) / 1000)}s`)
-        } else if (Date.now() - launchTs > 300000) {    // 5 Min – großzügig für schwere Spiele
-          clearInterval(monitor)
-          playLog(`TIMEOUT – nie erkannt nach ${Math.round((Date.now() - launchTs) / 1000)}s.  ` +
-            `reg=${(steamInfo && steamInfo.appId) ? await steamAppRunning(steamInfo.appId) : 'n/a'}  ` +
-            `name=${await processByName(exeName)}  folder=${isLnk ? 'n/a' : await anyProcessInFolder(gameDir)}`)
-          endSession(null)
+        } else {
+          const waited = Date.now() - launchTs
+          // Nach 30 s ohne Erkennung den Button wieder freigeben, damit der Nutzer
+          // nicht bei „Spiel wird gestartet" festhängt (z.B. Spiel sofort wieder
+          // geschlossen). Der Monitor laeuft im Hintergrund weiter – taucht das
+          // Spiel doch noch auf (schwere Titel), wird ab dann normal getrackt.
+          if (!reenabled && waited > 30000) {
+            reenabled = true
+            mainWindow.webContents.send('launch-status', 'idle')
+          }
+          if (waited > 120000) {    // 2 Min endgueltig aufgeben
+            clearInterval(monitor)
+            playLog(`TIMEOUT – nie erkannt nach ${Math.round(waited / 1000)}s.  ` +
+              `reg=${(steamInfo && steamInfo.appId) ? await steamAppRunning(steamInfo.appId) : 'n/a'}  ` +
+              `name=${await processByName(exeName)}  folder=${isLnk ? 'n/a' : await anyProcessInFolder(gameDir)}`)
+            endSession(null)   // HDR ggf. wieder aus; sendet erneut 'idle' (harmlos)
+          }
         }
       } else if (running) {
         absent = 0
