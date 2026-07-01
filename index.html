@@ -1407,8 +1407,10 @@ ipcRenderer.on('launch-status', (event, status) => {
            ${statCard('Lieblings-Genre', topGenre ? topGenre[0] : '–', topGenre ? formatPlaytime(topGenre[1]) : '')}
            ${statCard('Favoriten', String(favCount), favCount === 1 ? 'Spiel' : 'Spiele')}
          </div>
-         <div class="review-section-label">Top-Spiele nach Spielzeit</div>
-         <div class="review-top">${rows}</div>`
+         <div class="review-topwrap">
+           <div class="review-section-label">Top-Spiele nach Spielzeit</div>
+           <div class="review-top">${rows}</div>
+         </div>`
 
       document.getElementById('reviewOverlay').style.display = 'flex'
     }
