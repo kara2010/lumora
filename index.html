@@ -1925,23 +1925,15 @@ ipcRenderer.on('launch-status', (event, status) => {
       }
       return null
     }
-    // Bestes Element in der Richtung (geometrisch) aus einer Kandidatenliste.
-    // Die Position weggescrollter Elemente wird auf den sichtbaren Bereich ihres
-    // Scroll-Containers begrenzt (geclamped). Sonst liegt eine unter die Kante
-    // gescrollte Cover-Reihe auf dem Bildschirm TIEFER als die darunter fest
-    // stehenden Buttons – und der Fokus spränge über sie hinweg aus der Liste.
+    // Bestes Element in der Richtung – rein geometrisch (echte Bildschirm-
+    // positionen, KEIN Clamping). Für Dialoge/Werkzeugleiste und zum Betreten/
+    // Verlassen von Rastern.
     function navBestInDir(cands, from, dir) {
       const fx = from.left + from.width / 2, fy = from.top + from.height / 2
       let best = null, bestScore = Infinity
       for (const el of cands) {
         const r = el.getBoundingClientRect()
-        let cx = r.left + r.width / 2, cy = r.top + r.height / 2
-        const sc = navScrollParent(el)
-        if (sc) {
-          const cr = sc.getBoundingClientRect()
-          cx = Math.max(cr.left, Math.min(cr.right, cx))
-          cy = Math.max(cr.top, Math.min(cr.bottom, cy))
-        }
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2
         const dx = cx - fx, dy = cy - fy
         let along, perp
         if (dir === 'right') { if (dx <= 1) continue; along = dx; perp = Math.abs(dy) }
@@ -1953,6 +1945,26 @@ ipcRenderer.on('launch-status', (event, status) => {
       }
       return best
     }
+    // Logische Zeile/Spalte-Navigation innerhalb eines Kachel-/Listen-Rasters
+    // (Cover-Suche, Raster, Spieleliste) – robust, unabhängig vom Scroll-Zustand.
+    // Liefert null an den Rasterrändern, damit von dort geometrisch heraus
+    // navigiert wird. Das behebt sowohl das „aus der Liste springen" als auch
+    // das Haken beim Hoch-/Runter-Navigieren.
+    function navGridMove(dir, tiles, fromEl) {
+      const i = tiles.indexOf(fromEl)
+      if (i < 0) return null
+      const n = tiles.length
+      const top0 = tiles[0].getBoundingClientRect().top
+      let cols = 0
+      for (const t of tiles) { if (Math.abs(t.getBoundingClientRect().top - top0) < 2) cols++; else break }
+      cols = Math.max(1, cols)
+      let j = -1
+      if (dir === 'left') { if (i % cols > 0) j = i - 1 }
+      else if (dir === 'right') { if (i % cols < cols - 1 && i + 1 < n) j = i + 1 }
+      else if (dir === 'up') { if (i - cols >= 0) j = i - cols }
+      else if (dir === 'down') { if (i + cols < n) j = i + cols }
+      return j >= 0 ? tiles[j] : null
+    }
     function navMove(dir) {
       if (isEditingField()) document.activeElement.blur()
       setNavMode(true)
@@ -1962,8 +1974,15 @@ ipcRenderer.on('launch-status', (event, status) => {
       const items = navFocusables()
       if (!items.length) return
       if (!navFocusEl || !items.includes(navFocusEl)) { setNavFocus(navPickStart(items)); return }
-      const from = navFocusEl.getBoundingClientRect()
-      const best = navBestInDir(items.filter(el => el !== navFocusEl), from, dir)
+      const fromEl = navFocusEl
+      let best = null
+      // Innerhalb eines Kachel-/Listen-Rasters logisch navigieren; an den Rändern
+      // geometrisch heraus.
+      if (fromEl.matches('.cover-cell, .grid-card, .game-item')) {
+        const tileSel = fromEl.matches('.game-item') ? '.game-item' : '.cover-cell, .grid-card'
+        best = navGridMove(dir, items.filter(el => el.matches(tileSel)), fromEl)
+      }
+      if (!best) best = navBestInDir(items.filter(el => el !== fromEl), fromEl.getBoundingClientRect(), dir)
       if (best) {
         setNavFocus(best)
         // Beim Durchzappen der Spieleliste das Spiel gleich im Content-Fenster
