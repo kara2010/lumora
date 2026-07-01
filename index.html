@@ -2035,6 +2035,18 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (navFocusEl) { navFocusEl.classList.remove('nav-focus'); navFocusEl = null }
     })
 
+    // Echte Mausbewegung übergibt die Kontrolle zurück an die Maus (Hover aktiv,
+    // Nav-Ring aus). Der Fokus bleibt erhalten und erscheint beim nächsten
+    // Gamepad-/Tastatur-Input wieder. Scroll-bedingte "Fake"-mousemove-Events
+    // (gleiche Cursor-Koordinaten) werden ignoriert, sonst würde das
+    // Auto-Scrollen der Navigation den Nav-Modus ausschalten.
+    let navLastMouseX = -1, navLastMouseY = -1
+    document.addEventListener('mousemove', (e) => {
+      if (e.clientX === navLastMouseX && e.clientY === navLastMouseY) return
+      navLastMouseX = e.clientX; navLastMouseY = e.clientY
+      if (document.body.classList.contains('nav-mode')) setNavMode(false)
+    })
+
     // Tastatur-Pfeile an dieselbe Engine koppeln
     document.addEventListener('keydown', (e) => {
       if (capturingHotkey) return

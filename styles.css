@@ -536,7 +536,7 @@ body::before {
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
-.grid-card:hover .grid-cover {
+body:not(.nav-mode) .grid-card:hover .grid-cover {
   transform: translateY(-4px);
   box-shadow: 0 14px 32px rgba(0,0,0,0.55);
   border-color: #3a3a3a;
@@ -580,7 +580,7 @@ body::before {
   transition: opacity 0.15s, color 0.15s;
 }
 
-.grid-card:hover .grid-fav { opacity: 1; }
+body:not(.nav-mode) .grid-card:hover .grid-fav { opacity: 1; }
 .grid-fav:hover { color: #f5c518; }
 .grid-fav.on { opacity: 1; color: #f5c518; }
 
@@ -604,12 +604,18 @@ body::before {
   transition: opacity 0.18s, transform 0.18s, background 0.18s;
 }
 
-.grid-card:hover .grid-play {
+body:not(.nav-mode) .grid-card:hover .grid-play {
   opacity: 1;
   transform: scale(1);
 }
 
 .grid-play:hover { background: var(--accent); }
+
+/* Im Nav-Modus zeigt die FOKUSSIERTE Kachel Play/Favorit + Anheben (statt der
+   Maus-Hover-Kachel), damit Anzeige und Gamepad-Fokus zusammenpassen. */
+body.nav-mode .grid-card.nav-focus .grid-cover { transform: translateY(-2px); }
+body.nav-mode .grid-card.nav-focus .grid-play { opacity: 1; transform: scale(1); }
+body.nav-mode .grid-card.nav-focus .grid-fav { opacity: 1; }
 
 .grid-name {
   font-size: 13px;
@@ -638,7 +644,7 @@ body::before {
   margin-bottom: 2px;
 }
 
-.game-item:hover {
+body:not(.nav-mode) .game-item:hover {
   background: #1e1e1e;
 }
 
@@ -699,7 +705,7 @@ body::before {
   transition: color 0.15s, opacity 0.15s;
 }
 
-.game-item:hover .game-item-fav { opacity: 1; }
+body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
 .game-item-fav:hover { color: #f5c518; }
 
 .game-item-fav.on {
@@ -1344,7 +1350,7 @@ body::before {
   transition: border-color 0.15s;
 }
 
-.cover-cell:hover { border-color: #3a3a3a; }
+body:not(.nav-mode) .cover-cell:hover { border-color: #3a3a3a; }
 .cover-cell.selected { border-color: var(--accent); }
 .cover-cell.current { cursor: default; border-color: #333; }
 
