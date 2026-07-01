@@ -1807,6 +1807,12 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (!el || el.disabled) return false
       const cs = getComputedStyle(el)
       if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') return false
+      // In einem zugeklappten <details> stehende Elemente sind eingeklappt und
+      // dürfen nicht angesteuert werden – nur die <summary> bleibt erreichbar.
+      const closed = el.closest('details:not([open])')
+      if (closed && el.tagName !== 'SUMMARY') return false
+      // offsetParent == null → Element (oder ein Vorfahr) wird nicht gerendert.
+      if (el.tagName !== 'SUMMARY' && el.offsetParent === null && cs.position !== 'fixed') return false
       const r = el.getBoundingClientRect()
       return r.width >= 2 && r.height >= 2 && r.bottom > 0 && r.right > 0
     }
