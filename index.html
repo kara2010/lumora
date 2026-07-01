@@ -1840,17 +1840,21 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (launch) return launch
       return items[0]
     }
-    function navMove(dir) {
-      if (isEditingField()) document.activeElement.blur()
-      setNavMode(true)
-      const items = navFocusables()
-      if (!items.length) return
-      if (!navFocusEl || !items.includes(navFocusEl)) { setNavFocus(navPickStart(items)); return }
-      const f = navFocusEl.getBoundingClientRect()
-      const fx = f.left + f.width / 2, fy = f.top + f.height / 2
+    // Nächster scrollbarer Vorfahr (overflow auto/scroll) – oder null.
+    function navScrollParent(el) {
+      let p = el && el.parentElement
+      while (p) {
+        const oy = getComputedStyle(p).overflowY
+        if (oy === 'auto' || oy === 'scroll') return p
+        p = p.parentElement
+      }
+      return null
+    }
+    // Bestes Element in der Richtung (geometrisch) aus einer Kandidatenliste.
+    function navBestInDir(cands, from, dir) {
+      const fx = from.left + from.width / 2, fy = from.top + from.height / 2
       let best = null, bestScore = Infinity
-      for (const el of items) {
-        if (el === navFocusEl) continue
+      for (const el of cands) {
         const r = el.getBoundingClientRect()
         const cx = r.left + r.width / 2, cy = r.top + r.height / 2
         const dx = cx - fx, dy = cy - fy
@@ -1862,6 +1866,24 @@ ipcRenderer.on('launch-status', (event, status) => {
         const score = along + perp * 2
         if (score < bestScore) { bestScore = score; best = el }
       }
+      return best
+    }
+    function navMove(dir) {
+      if (isEditingField()) document.activeElement.blur()
+      setNavMode(true)
+      const items = navFocusables()
+      if (!items.length) return
+      if (!navFocusEl || !items.includes(navFocusEl)) { setNavFocus(navPickStart(items)); return }
+      const fromEl = navFocusEl
+      const from = fromEl.getBoundingClientRect()
+      const rest = items.filter(el => el !== fromEl)
+      // Zuerst im SELBEN Scroll-Container bleiben – sonst springt der Fokus über
+      // weggescrollte Reihen hinweg aus der Liste (z.B. Cover-Liste → Buttons).
+      // Erst wenn dort in der Richtung nichts mehr ist, den Container verlassen.
+      const sp = navScrollParent(fromEl)
+      let best = null
+      if (sp) best = navBestInDir(rest.filter(el => navScrollParent(el) === sp), from, dir)
+      if (!best) best = navBestInDir(rest, from, dir)
       if (best) {
         setNavFocus(best)
         // Beim Durchzappen der Spieleliste das Spiel gleich im Content-Fenster
