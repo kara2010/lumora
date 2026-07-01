@@ -2274,6 +2274,24 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (!items.length) return
       if (!navFocusEl || !items.includes(navFocusEl)) { setNavFocus(navPickStart(items)); return }
       const fromEl = navFocusEl
+
+      // Schieberegler (z.B. OSD-Groesse/Deckkraft) per D-Pad links/rechts
+      // verstellen – ohne den Fokus zu verlassen. hoch/runter navigiert normal
+      // weiter. Nutzt allen Reglern (Sofa-Bedienung ohne Maus).
+      if (fromEl.matches('input[type="range"]') && (dir === 'left' || dir === 'right')) {
+        const step = parseFloat(fromEl.step) || 1
+        const min = parseFloat(fromEl.min), max = parseFloat(fromEl.max)
+        let v = parseFloat(fromEl.value) + (dir === 'right' ? step : -step)
+        if (!isNaN(min)) v = Math.max(min, v)
+        if (!isNaN(max)) v = Math.min(max, v)
+        v = Math.round(v * 1000) / 1000
+        if (v !== parseFloat(fromEl.value)) {
+          fromEl.value = v
+          fromEl.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+        return
+      }
+
       const inDialog = !!(navOpenOverlay() || navContextOpen())
       let best = null
 
