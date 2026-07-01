@@ -381,6 +381,7 @@
     <div class="update-toast-body">
       <div class="update-toast-title" id="updateToastTitle">Update verfügbar</div>
       <div class="update-toast-text" id="updateToastText"></div>
+      <div class="update-toast-notes" id="updateToastNotes" style="display:none"></div>
       <div class="update-progress-track" id="updateProgressTrack" style="display:none">
         <div class="update-progress-fill" id="updateProgressFill"></div>
       </div>
@@ -1597,6 +1598,17 @@ ipcRenderer.on('launch-status', (event, status) => {
     const upActions  = document.getElementById('updateToastActions')
     const upTrack    = document.getElementById('updateProgressTrack')
     const upFill     = document.getElementById('updateProgressFill')
+    const upNotes    = document.getElementById('updateToastNotes')
+
+    // Release-Notes anzeigen (Text aus der latest.yml). Sicher als Text, keine
+    // Ausführung von Markup. Leere Zeilen/Bullets bleiben erhalten.
+    function showUpdateNotes(notes) {
+      if (!upNotes) return
+      const txt = (notes || '').trim()
+      if (!txt) { upNotes.style.display = 'none'; upNotes.textContent = ''; return }
+      upNotes.textContent = txt
+      upNotes.style.display = 'block'
+    }
 
     function showUpdateToast() { upToast.style.display = 'flex' }
     function dismissUpdateToast() { upToast.style.display = 'none' }
@@ -1615,9 +1627,11 @@ ipcRenderer.on('launch-status', (event, status) => {
       upTitle.textContent = 'Neue Version verfügbar'
       upText.textContent = 'Lumora ' + info.version + ' steht bereit. Jetzt aktualisieren?'
       upTrack.style.display = 'none'
+      showUpdateNotes(info.notes)
       setUpdateActions([
         { label: 'Jetzt aktualisieren', primary: true, onClick: () => {
             upText.textContent = 'Update wird geladen…'
+            showUpdateNotes('')
             upTrack.style.display = 'block'
             upFill.style.width = '0%'
             setUpdateActions([])

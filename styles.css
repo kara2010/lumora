@@ -1731,6 +1731,22 @@ body:not(.nav-mode) .cover-cell:hover { border-color: #3a3a3a; }
 .update-toast-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 3px; }
 .update-toast-text { font-size: 12.5px; color: #aaa; line-height: 1.45; }
 
+.update-toast-notes {
+  margin-top: 8px;
+  padding: 8px 10px;
+  max-height: 130px;
+  overflow-y: auto;
+  background: #111216;
+  border: 1px solid #26272c;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #b8b8c0;
+  white-space: pre-line;   /* Zeilenumbrüche der Notes erhalten */
+}
+.update-toast-notes::-webkit-scrollbar { width: 5px; }
+.update-toast-notes::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
 .update-toast-actions {
   display: flex;
   flex-direction: column;
