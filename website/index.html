@@ -863,7 +863,7 @@
       </button>
     </div>
     <div class="screenshot-wrap" onclick="openLightbox()">
-      <img id="shot" src="1.png" alt="Lumora – Listenansicht" class="screenshot-img">
+      <img id="shot" src="1.jpg" alt="Lumora – Listenansicht" class="screenshot-img">
     </div>
     <p class="view-caption" id="viewCaption">Listenansicht – Details, Beschreibung &amp; HDR-Schalter pro Spiel</p>
     <p class="screenshot-tap-hint">Tippen zum Vergrößern</p>
@@ -1168,15 +1168,15 @@
 <div class="lightbox" id="lightbox" onclick="closeLightbox()">
   <span class="lightbox-close" onclick="closeLightbox(event)" aria-label="Schließen">✕</span>
   <button class="lightbox-nav lightbox-prev" onclick="lightboxGo(-1, event)" aria-label="Vorheriges Bild">‹</button>
-  <img id="lightboxImg" src="1.png" alt="Lumora Screenshot" onclick="event.stopPropagation()">
+  <img id="lightboxImg" src="1.jpg" alt="Lumora Screenshot" onclick="event.stopPropagation()">
   <button class="lightbox-nav lightbox-next" onclick="lightboxGo(1, event)" aria-label="Nächstes Bild">›</button>
   <div class="lightbox-caption" id="lightboxCaption">Listenansicht</div>
 </div>
 
 <script>
   const VIEWS = {
-    list:  { img: '1.png', alt: 'Lumora – Listenansicht', cap: 'Listenansicht – Details, Beschreibung &amp; HDR-Schalter pro Spiel' },
-    cover: { img: '2.png', alt: 'Lumora – Cover-Ansicht', cap: 'Cover-Ansicht – deine Bibliothek als Raster aus Spiel-Covern' }
+    list:  { img: '1.jpg', alt: 'Lumora – Listenansicht', cap: 'Listenansicht – Details, Beschreibung &amp; HDR-Schalter pro Spiel' },
+    cover: { img: '2.jpg', alt: 'Lumora – Cover-Ansicht', cap: 'Cover-Ansicht – deine Bibliothek als Raster aus Spiel-Covern' }
   };
   function setView(v) {
     const d = VIEWS[v];
@@ -1194,8 +1194,8 @@
   }
   // Galerie für die Vergrößerung – Reihenfolge = Reihenfolge der Ansichten
   const GALLERY = [
-    { img: '1.png', alt: 'Lumora – Listenansicht', cap: 'Listenansicht' },
-    { img: '2.png', alt: 'Lumora – Cover-Ansicht',  cap: 'Cover-Ansicht' }
+    { img: '1.jpg', alt: 'Lumora – Listenansicht', cap: 'Listenansicht' },
+    { img: '2.jpg', alt: 'Lumora – Cover-Ansicht',  cap: 'Cover-Ansicht' }
   ];
   let lightboxIndex = 0;
   function lightboxSet(i) {
