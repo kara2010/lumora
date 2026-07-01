@@ -2198,6 +2198,9 @@ ipcRenderer.on('launch-status', (event, status) => {
       }
       if (el.tagName === 'INPUT' && /^(text|search)$/.test(el.type || 'text')) { el.focus(); return }
       if (el.matches('.switch')) { const cb = el.querySelector('input'); if (cb) cb.click(); return }
+      // In der Rasteransicht startet A das fokussierte Spiel (statt in die Detail-
+      // ansicht zu wechseln – das Raster IST die Browse-Ansicht, wie das ▶ zeigt).
+      if (el.matches('.grid-card')) { const i = Number(el.dataset.idx); if (i >= 0) quickLaunch(i); return }
       el.click()
       // Der Klick kann ein Menü/Dialog öffnen ODER schließen (z.B. „Schließen",
       // „Übernehmen") → Kontext angleichen, damit der Fokus richtig sitzt.
