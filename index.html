@@ -1816,8 +1816,12 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (closed && el.tagName !== 'SUMMARY') return false
       // offsetParent == null → Element (oder ein Vorfahr) wird nicht gerendert.
       if (el.tagName !== 'SUMMARY' && el.offsetParent === null && cs.position !== 'fixed') return false
+      // NUR Groesse pruefen (gerendert vs display:none) – NICHT die Sichtbarkeit
+      // im Viewport. Sonst werden aus dem Scroll-Bereich weggescrollte Elemente
+      // gefiltert, und die Navigation dorthin bleibt haengen (bewiesen: hoch aus
+      // dem Key-Feld). setNavFocus scrollt das Ziel ohnehin ins Bild.
       const r = el.getBoundingClientRect()
-      return r.width >= 2 && r.height >= 2 && r.bottom > 0 && r.right > 0
+      return r.width >= 2 && r.height >= 2
     }
     // Aktuell erreichbare Elemente – im Dialog nur dessen Steuerelemente
     // (Fokus-Einsperrung), im Kontextmenü nur dessen Einträge, sonst die
