@@ -1759,15 +1759,23 @@ body::before {
   transition: width 0.25s ease;
 }
 
-/* --- Gamepad-Steuerung --- */
-.grid-card.gp-focus {
-  outline: 3px solid var(--accent);
+/* --- Fokus-Engine (Gamepad + Tastatur) --- */
+/* Ring nur sichtbar, solange per Controller/Pfeiltasten navigiert wird. */
+body.nav-mode .nav-focus {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
+  border-radius: 8px;
+  box-shadow: 0 0 0 4px var(--accent-bg);
+  transition: outline-color 0.1s ease, box-shadow 0.12s ease;
+}
+body.nav-mode .game-item.nav-focus { outline-offset: -2px; border-radius: 10px; }
+body.nav-mode .grid-card.nav-focus {
+  outline: 3px solid var(--accent);
   border-radius: 12px;
   box-shadow: 0 0 0 6px var(--accent-bg), 0 8px 28px rgba(0,0,0,0.5);
   transform: translateY(-2px);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
+body.nav-mode .switch.nav-focus { border-radius: 999px; }
 
 .gamepad-toast {
   position: fixed;
