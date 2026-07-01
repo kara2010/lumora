@@ -4,6 +4,11 @@ const fs = require('fs')
 const https = require('https')
 const { exec, spawn, execSync } = require('child_process')
 const crypto = require('crypto')
+// Ausfallsicher: fehlt das Modul (z.B. bei einem schnellen Dev-Deploy ohne
+// node_modules), bleibt autoUpdater null und die Update-Funktion ist einfach aus,
+// statt die ganze App am Start abstuerzen zu lassen.
+let autoUpdater = null
+try { autoUpdater = require('electron-updater').autoUpdater } catch (e) { console.warn('electron-updater nicht verfügbar:', e.message) }
 
 function httpsGet(url, extraHeaders) {
   return new Promise((resolve, reject) => {
@@ -195,6 +200,8 @@ function createWindow() {
       mainWindow.webContents.send('hdr-status', enabled)
     })
     startHDRPolling()
+    // Kurz nach dem Start still nach Updates schauen (UI ist dann bereit).
+    setTimeout(() => checkForUpdates(false), 4000)
   })
 }
 
@@ -1277,6 +1284,57 @@ ipcMain.handle('set-app-settings', (event, partial) => {
   return appSettings
 })
 
+// ---------------------------------------------------------------------------
+// Auto-Update (electron-updater, generischer Feed auf dem eigenen Webserver)
+// Ablauf: beim Start still pruefen -> bei neuer Version den Nutzer FRAGEN ->
+// erst auf dessen Wunsch herunterladen und installieren.
+// ---------------------------------------------------------------------------
+let updateManualCheck = false   // true = vom Nutzer manuell ausgeloest (dann auch "keine Updates"/Fehler zeigen)
+
+function sendToUi(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+}
+
+function setupAutoUpdate() {
+  if (!autoUpdater) return
+  autoUpdater.autoDownload = false           // nie ungefragt laden
+  autoUpdater.autoInstallOnAppQuit = false   // Installation steuern wir selbst
+
+  autoUpdater.on('update-available', (info) => {
+    sendToUi('update-available', { version: info.version, notes: typeof info.releaseNotes === 'string' ? info.releaseNotes : '' })
+  })
+  autoUpdater.on('update-not-available', () => {
+    if (updateManualCheck) sendToUi('update-none', {})
+    updateManualCheck = false
+  })
+  autoUpdater.on('download-progress', (p) => {
+    sendToUi('update-progress', { percent: Math.round(p.percent || 0) })
+  })
+  autoUpdater.on('update-downloaded', (info) => {
+    sendToUi('update-ready', { version: info.version })
+  })
+  autoUpdater.on('error', (err) => {
+    if (updateManualCheck) sendToUi('update-error', { message: String(err && err.message || err) })
+    updateManualCheck = false
+  })
+}
+
+function checkForUpdates(manual) {
+  if (!autoUpdater || !app.isPackaged) {   // kein Modul oder Dev-Modus: kein Update-Paket
+    if (manual) sendToUi('update-none', {})
+    return
+  }
+  updateManualCheck = !!manual
+  autoUpdater.checkForUpdates().catch((err) => {
+    if (manual) sendToUi('update-error', { message: String(err && err.message || err) })
+    updateManualCheck = false
+  })
+}
+
+ipcMain.handle('check-for-updates', () => { checkForUpdates(true) })
+ipcMain.handle('download-update', () => { if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {}) })
+ipcMain.handle('install-update', () => { if (autoUpdater) { app.isQuitting = true; autoUpdater.quitAndInstall() } })
+
 // Nur eine Instanz zulassen: ein zweiter Start holt das vorhandene (ggf. im Tray
 // versteckte) Fenster nach vorne, statt eine neue Instanz zu öffnen.
 if (!app.requestSingleInstanceLock()) {
@@ -1284,7 +1342,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => showMainWindow())
 
-  app.whenReady().then(createWindow)
+  app.whenReady().then(() => { setupAutoUpdate(); createWindow() })
 
   // HDR abschalten, falls der Launcher es für ein noch laufendes Spiel aktiviert hatte
   app.on('before-quit', () => {

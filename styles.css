@@ -1690,3 +1690,71 @@ body::before {
   color: #555;
   text-align: center;
 }
+
+/* --- Auto-Update-Karte (unten rechts) --- */
+.update-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 300;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  padding: 16px 16px 16px 18px;
+  background: #17181c;
+  border: 1px solid var(--accent-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  animation: updateToastIn 0.28s ease;
+}
+
+@keyframes updateToastIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.update-toast-icon { font-size: 20px; line-height: 1.2; }
+.update-toast-body { flex: 1; min-width: 0; }
+.update-toast-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 3px; }
+.update-toast-text { font-size: 12.5px; color: #aaa; line-height: 1.45; }
+
+.update-toast-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: stretch;
+  justify-content: center;
+}
+.update-toast-actions:empty { display: none; }
+.update-toast-actions .btn-primary,
+.update-toast-actions .btn-cancel { padding: 7px 12px; font-size: 12px; white-space: nowrap; }
+
+.update-toast-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px;
+}
+.update-toast-close:hover { color: #aaa; }
+
+.update-progress-track {
+  margin-top: 8px;
+  height: 5px;
+  background: #26272c;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.update-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.25s ease;
+}
