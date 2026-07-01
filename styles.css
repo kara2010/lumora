@@ -542,14 +542,10 @@ body:not(.nav-mode) .grid-card:hover .grid-cover {
   border-color: #3a3a3a;
 }
 
-.grid-card.active .grid-cover {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent);
-}
-/* Im Gamepad-/Tastatur-Modus folgt die Auswahl dem Fokus – dort ist der
-   Fokus-Ring die Markierung; den separaten .active-Rahmen ausblenden, damit
-   keine Doppel-Hervorhebung auf derselben Kachel entsteht. */
-body.nav-mode .grid-card.active .grid-cover { border-color: #262626; box-shadow: none; }
+/* Das Raster ist eine Browse-Ansicht: KEINE persistente Auswahl-Markierung.
+   Einzige Hervorhebung ist der Fokus-Ring – und den gibt es nur bei aktiver
+   Gamepad-/Tastatur-Navigation (body.nav-mode). Bei Maus und direkt nach dem
+   Start ist damit nichts vorab hervorgehoben. */
 
 /* „Ende erreicht" am oberen/unteren Rasterrand: kurzer Stups statt Wegspringen. */
 @keyframes edgeBumpUp   { 0%,100% { transform: translateY(0) } 35% { transform: translateY(-7px) } }
