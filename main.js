@@ -105,10 +105,53 @@ function toggleMainWindow() {
 // je nachdem ob die Kombination angenommen wurde (kann vom OS belegt sein).
 function registerToggleHotkey() {
   globalShortcut.unregisterAll()
+  // Test-Hotkey fuer das OSD (spaeter frei konfigurierbar). Global, damit es auch
+  // funktioniert, waehrend ein Spiel im Vordergrund ist.
+  try { globalShortcut.register('Alt+O', toggleOverlay) } catch {}
   const acc = appSettings.toggleHotkey
   if (!acc) return true
   try { return globalShortcut.register(acc, toggleMainWindow) }
   catch { return false }
+}
+
+// --- OSD-Overlay (transparentes, klick-durchlaessiges Fenster ueber dem Spiel) ---
+// Meilenstein 1: nur die Anzeige (Platzhalter-Werte in osd.html). Live-Daten
+// folgen ab Meilenstein 2 ueber das 'osd-data'-Event an overlayWindow.
+let overlayWindow = null
+
+function createOverlayWindow() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow
+  const wa = screen.getPrimaryDisplay().workArea
+  overlayWindow = new BrowserWindow({
+    width: 380,
+    height: 600,
+    x: wa.x + 24,
+    y: wa.y + 24,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    focusable: false,          // stiehlt dem Spiel niemals den Fokus
+    show: false,
+    hasShadow: false,
+    webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false },
+  })
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true })   // Klicks gehen ans Spiel
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver')            // ueber randlosen Spielen
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  overlayWindow.loadFile('osd.html')
+  overlayWindow.on('closed', () => { overlayWindow = null })
+  return overlayWindow
+}
+
+function toggleOverlay() {
+  const w = createOverlayWindow()
+  if (w.isVisible()) { w.hide(); return }
+  w.showInactive()                                 // anzeigen, ohne zu fokussieren
+  w.setAlwaysOnTop(true, 'screen-saver')
 }
 
 // --- Nativer Gamepad-Hotkey (funktioniert auch minimiert / während Spielen) ---
@@ -1472,6 +1515,9 @@ ipcMain.handle('set-hotkey', (event, accelerator) => {
 
 // Gamepad-Hotkey (Renderer erkennt die Kombi und ruft dies zum Ein-/Ausblenden).
 ipcMain.handle('toggle-window', () => { toggleMainWindow() })
+
+// OSD-Overlay ein-/ausblenden (spaeter ueber einen Button/Hotkey in der App).
+ipcMain.handle('toggle-osd', () => { toggleOverlay() })
 
 ipcMain.handle('check-for-updates', () => { checkForUpdates(true) })
 ipcMain.handle('download-update', () => { if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {}) })

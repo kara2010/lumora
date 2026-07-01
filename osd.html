@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    font-family: 'Consolas', 'DejaVu Sans Mono', 'Courier New', monospace;
+    font-weight: 700;
+  }
+  /* Das eigentliche Panel – halbtransparenter dunkler Hintergrund für Lesbarkeit
+     über beliebigen Spielszenen. Der Rest des Fensters bleibt transparent und
+     (per setIgnoreMouseEvents) klick-durchlässig. */
+  #panel {
+    position: absolute;
+    top: 0; left: 0;
+    padding: 14px 16px 16px;
+    background: rgba(8, 8, 12, 0.55);
+    border-radius: 10px;
+    backdrop-filter: blur(2px);
+    line-height: 1.05;
+    color: #fff;
+  }
+
+  .group { margin-bottom: 16px; }
+  .group:last-child { margin-bottom: 0; }
+
+  .g-label {
+    color: #8a8a8a;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 1px;
+  }
+
+  /* Kopfzeile jeder Gruppe: großer Name links, große Kennzahl rechts */
+  .g-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 2px;
+  }
+  .g-name { font-size: 30px; letter-spacing: 1px; }
+  .g-headval { font-size: 30px; }
+  .g-headval .u { font-size: 15px; margin-left: 4px; }
+
+  /* Werte-Zeilen: Beschriftung links, Wert + Einheit rechtsbündig */
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 1px;
+  }
+  .row .k { font-size: 22px; }
+  .row .v { font-size: 22px; color: #ffe100; text-align: right; }
+  .row .v .u { font-size: 12px; color: #ffe100; margin-left: 4px; }
+
+  /* Farbschemata je Gruppe */
+  .nv .g-name, .nv .row .k { color: #74e857; }
+  .amd .g-name, .amd .row .k { color: #ff8a1e; }
+
+  .nv .g-headval, .amd .g-headval { color: #ffe100; }
+  .nv .g-headval .u, .amd .g-headval .u { color: #ffe100; }
+
+  /* FPS-Gruppe */
+  .fps .g-name { color: #74e857; }
+  .fps-line { display: flex; justify-content: space-between; align-items: baseline; }
+  .fps-big { font-size: 40px; color: #ffffff; }
+  .fps-unit { font-size: 18px; color: #74e857; }
+  .ft-label { color: #9a9a9a; font-size: 20px; margin-top: 6px; }
+  .ft-val { color: #6fe86f; font-size: 20px; text-align: center; margin-top: 2px; }
+  #ftGraph { display: block; width: 100%; height: 46px; margin-top: 4px; }
+
+  /* Text gut lesbar auch auf hellen Szenen */
+  #panel { text-shadow: 0 1px 2px rgba(0,0,0,0.9); }
+</style>
+</head>
+<body>
+  <div id="panel">
+    <div class="group nv">
+      <div class="g-label" id="nvLabel">NVIDIA RTX</div>
+      <div class="g-head">
+        <span class="g-name" id="nvName">5080</span>
+        <span class="g-headval"><span id="nvLoad">1</span><span class="u">%</span></span>
+      </div>
+      <div class="row"><span class="k">temp</span>  <span class="v"><span id="nvTemp">42</span><span class="u">°C</span></span></div>
+      <div class="row"><span class="k">power</span> <span class="v"><span id="nvPower">53.1</span><span class="u">W</span></span></div>
+      <div class="row"><span class="k">clock</span> <span class="v"><span id="nvClock">2730</span><span class="u">MHz</span></span></div>
+      <div class="row"><span class="k">VRAM</span>  <span class="v"><span id="nvVram">4667</span><span class="u">MB</span></span></div>
+    </div>
+
+    <div class="group amd">
+      <div class="g-label" id="cpuLabel">AMD RYZEN</div>
+      <div class="g-head">
+        <span class="g-name" id="cpuName">7950X3D</span>
+        <span class="g-headval"><span id="cpuLoad">17</span><span class="u">%</span></span>
+      </div>
+      <div class="row"><span class="k">temp</span>  <span class="v"><span id="cpuTemp">78</span><span class="u">°C</span></span></div>
+      <div class="row"><span class="k">clock</span> <span class="v"><span id="cpuClock">5100</span><span class="u">MHz</span></span></div>
+      <div class="row"><span class="k">power</span> <span class="v"><span id="cpuPower">63.7</span><span class="u">W</span></span></div>
+      <div class="row"><span class="k">RAM</span>   <span class="v"><span id="cpuRam">18059</span><span class="u">MB</span></span></div>
+    </div>
+
+    <div class="group fps">
+      <div class="g-label" id="apiLabel">D3D12</div>
+      <div class="fps-line">
+        <span class="g-name">FPS</span>
+        <span><span class="fps-big" id="fpsVal">30</span> <span class="fps-unit">FPS</span></span>
+      </div>
+      <div class="ft-label">Frametime</div>
+      <canvas id="ftGraph" width="320" height="46"></canvas>
+      <div class="ft-val"><span id="ftVal">33.9</span> ms</div>
+    </div>
+  </div>
+
+<script>
+  // --- Frametime-Graph (Ringpuffer) -------------------------------------------
+  const ftCanvas = document.getElementById('ftGraph')
+  const ftCtx = ftCanvas.getContext('2d')
+  const FT_MAX = 120
+  let ftBuf = new Array(FT_MAX).fill(0)
+
+  function drawFtGraph() {
+    const w = ftCanvas.width, h = ftCanvas.height
+    ftCtx.clearRect(0, 0, w, h)
+    // Skala relativ zum Maximum im Puffer (mind. 20 ms), damit der Graph "atmet".
+    const peak = Math.max(20, ...ftBuf)
+    ftCtx.strokeStyle = '#6fe86f'
+    ftCtx.lineWidth = 1.5
+    ftCtx.beginPath()
+    for (let i = 0; i < FT_MAX; i++) {
+      const x = (i / (FT_MAX - 1)) * w
+      const y = h - (ftBuf[i] / peak) * (h - 2) - 1
+      if (i === 0) ftCtx.moveTo(x, y); else ftCtx.lineTo(x, y)
+    }
+    ftCtx.stroke()
+  }
+
+  function pushFrametime(ms) {
+    ftBuf.push(ms); if (ftBuf.length > FT_MAX) ftBuf.shift()
+    drawFtGraph()
+  }
+
+  // --- Live-Datenschnittstelle (ab Meilenstein 2 gefüttert) -------------------
+  // data = { gpu:{name,load,temp,power,clock,vram}, cpu:{...}, fps, frametime, api }
+  function setText(id, val) { const el = document.getElementById(id); if (el != null && val != null) el.textContent = val }
+  function updateOsd(d) {
+    if (!d) return
+    if (d.gpu) { const g = d.gpu
+      setText('nvName', g.name); setText('nvLoad', g.load); setText('nvTemp', g.temp)
+      setText('nvPower', g.power); setText('nvClock', g.clock); setText('nvVram', g.vram) }
+    if (d.cpu) { const c = d.cpu
+      setText('cpuName', c.name); setText('cpuLoad', c.load); setText('cpuTemp', c.temp)
+      setText('cpuClock', c.clock); setText('cpuPower', c.power); setText('cpuRam', c.ram) }
+    if (d.fps != null) setText('fpsVal', d.fps)
+    if (d.api) setText('apiLabel', d.api)
+    if (d.frametime != null) { setText('ftVal', d.frametime); pushFrametime(Number(d.frametime)) }
+  }
+
+  try {
+    const { ipcRenderer } = require('electron')
+    ipcRenderer.on('osd-data', (e, d) => updateOsd(d))
+  } catch (e) {}
+
+  // Platzhalter-Wellenform, bis echte Frametimes kommen (Meilenstein 1: Optik).
+  for (let i = 0; i < FT_MAX; i++) ftBuf[i] = 33 + Math.sin(i / 4) * 2 + (i % 7 === 0 ? 6 : 0)
+  drawFtGraph()
+</script>
+</body>
+</html>
