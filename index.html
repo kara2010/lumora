@@ -1869,7 +1869,6 @@ ipcRenderer.on('launch-status', (event, status) => {
     }
     let capturingGpHotkey = false
     let gpCaptureSet = null          // größte gleichzeitig gedrückte Knopf-Menge
-    let gpHotkeyWasDown = false      // Flankenerkennung für den globalen Hotkey
     function toggleGpHotkeyCapture() { capturingGpHotkey ? stopGpHotkeyCapture() : startGpHotkeyCapture() }
     function startGpHotkeyCapture() {
       const hint = document.getElementById('gpHotkeyHint')
@@ -1978,6 +1977,56 @@ ipcRenderer.on('launch-status', (event, status) => {
         ? '.grid-card'
         : '.game-item, .hdr-toggle-row .switch, #launchBtn, .btn-delete'
       return Array.from(document.querySelectorAll(tools + ', ' + games)).filter(isNavVisible)
+    }
+    // Steuerelemente der Detailspalte in vertikaler Lesereihenfolge (oben→unten):
+    // Löschen (im Hero), HDR-Schalter, Start-Button. Nur die sichtbaren. Dient der
+    // deterministischen Navigation Liste ⇄ Detail (Geometrie ist hier zu fragil).
+    function detailControls() {
+      return [
+        document.querySelector('.game-detail .btn-delete'),
+        document.querySelector('.hdr-toggle-row .switch'),
+        document.getElementById('launchBtn'),
+      ].filter(el => el && isNavVisible(el))
+    }
+    // Fokus auf eine Raster-Kachel + Auswahl folgt dem Fokus (eine einzige,
+    // mitwandernde Markierung) – ohne Ansichtswechsel/Neuzeichnen.
+    function focusGridCard(el) {
+      setNavFocus(el)
+      const gi = Number(el.dataset.idx)
+      if (gi >= 0) {
+        selectedIndex = gi
+        lastSelectedId = games[gi] ? games[gi].id : null
+        document.querySelectorAll('#gridScroll .grid-card').forEach(c => c.classList.toggle('active', c === el))
+      }
+    }
+    // Zeilennächstes Element aus einer Liste zu einem Bezugselement (nach y-Mitte).
+    function navNearestByY(target, list) {
+      const ty = target.getBoundingClientRect().top
+      let best = null, bd = Infinity
+      for (const el of list) { const d = Math.abs(el.getBoundingClientRect().top - ty); if (d < bd) { bd = d; best = el } }
+      return best
+    }
+    // Beim Verlassen des Rasters nach links: in die Sidebar, zeilennah und dort
+    // auf das am weitesten rechts liegende Element (dem Raster am nächsten).
+    function gridExitToSidebar(fromEl, sb) {
+      if (!sb.length) return null
+      const near = navNearestByY(fromEl, sb)
+      const nr = near.getBoundingClientRect()
+      let best = near, bx = -Infinity
+      for (const el of sb) {
+        const r = el.getBoundingClientRect()
+        const overlap = Math.min(r.bottom, nr.bottom) - Math.max(r.top, nr.top)
+        if (overlap > Math.min(r.height, nr.height) * 0.5 && r.left > bx) { bx = r.left; best = el }
+      }
+      return best
+    }
+    // Beim Betreten des Rasters von der Sidebar nach rechts: linkeste Spalte,
+    // Kachel mit der geringsten vertikalen Distanz zum Ausgangselement.
+    function gridEnterNear(fromEl, tiles) {
+      if (!tiles.length) return null
+      const minLeft = Math.min(...tiles.map(t => t.getBoundingClientRect().left))
+      const col = tiles.filter(t => t.getBoundingClientRect().left < minLeft + 4)
+      return navNearestByY(fromEl, col.length ? col : tiles)
     }
     function setNavMode(on) {
       document.body.classList.toggle('nav-mode', on)
@@ -2169,6 +2218,68 @@ ipcRenderer.on('launch-status', (event, status) => {
       const fromEl = navFocusEl
       const inDialog = !!(navOpenOverlay() || navContextOpen())
       let best = null
+
+      // --- Deterministischer Übergang Liste ⇄ Detailspalte (Hauptansicht, kein
+      //     Dialog, keine Rasteransicht). Hart durchgeschaltet statt geometrisch,
+      //     damit "nach rechts" IMMER sauber in die Detailspalte fährt und dort
+      //     Löschen/HDR-Schalter/Start in klarer Reihenfolge erreichbar sind. ---
+      if (!inDialog && libView !== 'grid') {
+        const dc = detailControls()
+        // Aus der Liste nach rechts -> auf den Start-Button (Primäraktion);
+        // HDR-Schalter/Löschen sind von dort einen Schritt nach oben erreichbar.
+        if (fromEl.matches('.game-item') && dir === 'right' && dc.length) {
+          setNavFocus(dc.find(el => el.id === 'launchBtn') || dc[dc.length - 1])
+          return
+        }
+        const di = dc.indexOf(fromEl)
+        if (di >= 0) {
+          if (dir === 'down') {
+            if (dc[di + 1]) { setNavFocus(dc[di + 1]); return }
+            return   // unterstes Steuerelement: bleiben
+          }
+          if (dir === 'up') {
+            if (dc[di - 1]) { setNavFocus(dc[di - 1]); return }
+            // oberstes Steuerelement -> geometrisch weiter nach oben (Toolbar).
+            best = navBestInDir(items.filter(el => el !== fromEl && !dc.includes(el)), fromEl.getBoundingClientRect(), 'up')
+            if (best) setNavFocus(best)
+            return
+          }
+          if (dir === 'left') {
+            // Zurück in die Liste auf das aktuell gewählte Spiel.
+            const listItems = items.filter(el => el.matches('.game-item'))
+            const target = listItems.find(el => Number(el.dataset.idx) === selectedIndex) || listItems[0]
+            if (target) { setNavFocus(target); return }
+            return
+          }
+          return   // rechts: schon in der Detailspalte -> bleiben
+        }
+      }
+
+      // --- Deterministischer Übergang Sidebar ⇄ Raster (Rasteransicht, kein
+      //     Dialog). Sidebar: zeilenbewusst linear (Kopf-Buttons, Suche/Favoriten,
+      //     Sortierung, Fußleiste). Übergang nach rechts aus dem rechten Zeilenende
+      //     ins Raster; aus der linken Rasterspalte nach links zurück in die
+      //     Sidebar – jeweils zeilennah, damit "hinzufügen ⇄ Cover" sauber paart. ---
+      if (!inDialog && libView === 'grid') {
+        const sb = items.filter(el => !el.matches('.grid-card'))
+        const tiles = items.filter(el => el.matches('.grid-card'))
+        if (fromEl.matches('.grid-card')) {
+          const mv = navGridMove(dir, tiles, fromEl)
+          if (mv) { focusGridCard(mv); return }
+          if (dir === 'up' || dir === 'down' || dir === 'right') { navEdgeBump(fromEl, dir); return }
+          // dir === 'left' an der linken Spalte -> zurück in die Sidebar
+          const t = gridExitToSidebar(fromEl, sb)
+          if (t) setNavFocus(t)
+          return
+        }
+        if (sb.includes(fromEl)) {
+          const nb = navLinearMove(dir, sb, fromEl)
+          if (nb) { setNavFocus(nb); return }
+          // Kein Nachbar in der Sidebar: nach rechts ins Raster eintreten.
+          if (dir === 'right' && tiles.length) { const t = gridEnterNear(fromEl, tiles); if (t) { focusGridCard(t); return } }
+          return   // sonstiger Rand -> Fokus bleibt
+        }
+      }
       if (fromEl.matches('.cover-cell, .grid-card, .game-item')) {
         // Kachel-/Listen-Raster: nach Zeile/Spalte; an den Rändern heraus
         // (im Dialog linear, sonst geometrisch).
@@ -2178,8 +2289,14 @@ ipcRenderer.on('launch-status', (event, status) => {
           // Im Haupt-Raster oben/unten am Rand NICHT nach links/aussen springen –
           // Fokus bleibt, kurzes optisches „Ende erreicht"-Feedback.
           if (fromEl.matches('.grid-card') && (dir === 'up' || dir === 'down')) { navEdgeBump(fromEl, dir); return }
+          // Beim HORIZONTALEN Verlassen einer Liste/eines Rasters die gleichartigen
+          // Kacheln aus der geometrischen Suche ausschliessen: sonst gewinnt ein
+          // minimal (1–2px) versetzter Nachbar-Eintrag mit winziger Horizontal-
+          // Distanz gegen das eigentliche Ziel rechts (HDR-Schalter/Start-Button
+          // in der Detailspalte) – der Fokus spraenge dann hoch/runter statt rechts.
+          const excludeTiles = (dir === 'left' || dir === 'right')
           best = inDialog ? navLinearMove(dir, items, fromEl)
-                          : navBestInDir(items.filter(el => el !== fromEl), fromEl.getBoundingClientRect(), dir)
+                          : navBestInDir(items.filter(el => el !== fromEl && !(excludeTiles && el.matches(tileSel))), fromEl.getBoundingClientRect(), dir)
         }
       } else if (inDialog) {
         // Formular-Dialog: lineare, vorhersehbare Navigation in Lese-Reihenfolge.
@@ -2189,22 +2306,17 @@ ipcRenderer.on('launch-status', (event, status) => {
         best = navBestInDir(items.filter(el => el !== fromEl), fromEl.getBoundingClientRect(), dir)
       }
       if (best) {
-        setNavFocus(best)
-        // Beim Durchzappen der Spieleliste das Spiel gleich im Content-Fenster
-        // anzeigen (wie ein Klick). Nur für Listen-Einträge; selectGame zeichnet
-        // die Liste neu, gpReapplyFocus setzt den Fokus danach aufs selbe Spiel
-        // (keine Rekursion, da hier nur bei echter Navigation aufgerufen).
-        if (best.classList.contains('game-item')) {
-          const gi = Number(best.dataset.idx)
-          if (gi >= 0 && gi !== selectedIndex) selectGame(gi)
-        } else if (best.classList.contains('grid-card')) {
-          // In der Rasteransicht folgt die Auswahl dem Fokus (eine einzige,
-          // mitwandernde Markierung) – ohne Ansichtswechsel/Neuzeichnen.
-          const gi = Number(best.dataset.idx)
-          if (gi >= 0) {
-            selectedIndex = gi
-            lastSelectedId = games[gi] ? games[gi].id : null
-            document.querySelectorAll('#gridScroll .grid-card').forEach(c => c.classList.toggle('active', c === best))
+        if (best.classList.contains('grid-card')) {
+          focusGridCard(best)   // Auswahl folgt dem Fokus (siehe Helfer)
+        } else {
+          setNavFocus(best)
+          // Beim Durchzappen der Spieleliste das Spiel gleich im Content-Fenster
+          // anzeigen (wie ein Klick). Nur für Listen-Einträge; selectGame zeichnet
+          // die Liste neu, gpReapplyFocus setzt den Fokus danach aufs selbe Spiel
+          // (keine Rekursion, da hier nur bei echter Navigation aufgerufen).
+          if (best.classList.contains('game-item')) {
+            const gi = Number(best.dataset.idx)
+            if (gi >= 0 && gi !== selectedIndex) selectGame(gi)
           }
         }
       }
@@ -2220,11 +2332,12 @@ ipcRenderer.on('launch-status', (event, status) => {
       }
       if (el.tagName === 'INPUT' && /^(text|search)$/.test(el.type || 'text')) { el.focus(); return }
       if (el.matches('.switch')) { const cb = el.querySelector('input'); if (cb) cb.click(); return }
-      // In der Rasteransicht startet A das fokussierte Spiel – OHNE in die Detail-
-      // ansicht zu wechseln (das Raster IST die Browse-Ansicht, wie das ▶ zeigt).
-      // Nicht quickLaunch/selectGame nutzen (die wuerden die Ansicht wechseln):
-      // nur selectedIndex setzen und starten, libView bleibt 'grid'.
-      if (el.matches('.grid-card')) {
+      // A auf einem Spiel (Raster-Kachel ODER Listeneintrag) startet direkt – im
+      // Raster ist es die Browse-Ansicht (▶-Symbol), in der Liste folgt das
+      // Detailfenster ohnehin dem Fokus. Nur selectedIndex setzen und starten,
+      // die Ansicht (libView) bleibt unveraendert. Die Detailspalte (HDR-Schalter,
+      // Start-Button) bleibt per Rechts-Navigation erreichbar.
+      if (el.matches('.grid-card, .game-item')) {
         const i = Number(el.dataset.idx)
         if (i >= 0) {
           selectedIndex = i
@@ -2345,11 +2458,12 @@ ipcRenderer.on('launch-status', (event, status) => {
         return
       }
 
-      // 2) Globaler Gamepad-Hotkey (Kombi) – auf steigende Flanke ein-/ausblenden.
+      // 2) Globaler Gamepad-Hotkey (Kombi): Das Ein-/Ausblenden macht jetzt der
+      //    native XInput-Poll im Hauptprozess (funktioniert auch minimiert). Hier
+      //    ermitteln wir die Kombi nur noch, um die Navigation nicht auszulösen,
+      //    während der Hotkey gedrückt wird.
       const combo = appSettingsCache.gamepadHotkey
       const comboDown = combo && combo.length && combo.every(i => b[i] && b[i].pressed)
-      if (comboDown && !gpHotkeyWasDown) { gpHotkeyWasDown = true; ipcRenderer.invoke('toggle-window') }
-      else if (!comboDown) gpHotkeyWasDown = false
 
       // 3) Navigation nur im Vordergrund und nicht, während die Kombi aktiv ist
       //    (damit der Toggle-Moment nicht zusätzlich navigiert).

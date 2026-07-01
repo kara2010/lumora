@@ -75,8 +75,19 @@ function applyAutostart() {
 function showMainWindow() {
   if (!mainWindow) return
   if (mainWindow.isMinimized()) mainWindow.restore()
+  // Windows verweigert SetForegroundWindow, wenn der Aufruf aus dem Hintergrund
+  // kommt (Hotkey/Tray) – das Fenster blinkt dann nur in der Taskleiste, statt
+  // wirklich nach vorne zu kommen. Ein kurzzeitiges alwaysOnTop erzwingt das
+  // echte Anheben; danach wieder zuruecknehmen, damit es kein Dauer-Overlay wird.
+  mainWindow.setAlwaysOnTop(true)
   mainWindow.show()
+  mainWindow.moveTop()
   mainWindow.focus()
+  app.focus({ steal: true })
+  mainWindow.flashFrame(false)
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false)
+  }, 150)
 }
 
 // Globaler Hotkey: holt Lumora nach vorne bzw. versteckt es wieder (Toggle).
@@ -98,6 +109,75 @@ function registerToggleHotkey() {
   if (!acc) return true
   try { return globalShortcut.register(acc, toggleMainWindow) }
   catch { return false }
+}
+
+// --- Nativer Gamepad-Hotkey (funktioniert auch minimiert / während Spielen) ---
+// Der Renderer-Gamepad-Code friert ein, sobald das Fenster den Fokus verliert.
+// Darum lesen wir die Controller hier im Hauptprozess direkt über die Windows-
+// XInput-DLL (via koffi). Fällt koffi/DLL aus, bleibt alles beim Alten – dann
+// funktioniert der Gamepad-Hotkey eben nur im Vordergrund (Renderer-Fallback).
+let xinputPoll = null
+let xinputGetState = null
+let gpHotkeyDown = false
+
+// Standard-Gamepad-API-Index -> Prüf-Funktion auf dem XINPUT_GAMEPAD-Struct.
+const XI_MASK = {
+  0: g => g.wButtons & 0x1000, 1: g => g.wButtons & 0x2000,
+  2: g => g.wButtons & 0x4000, 3: g => g.wButtons & 0x8000,
+  4: g => g.wButtons & 0x0100, 5: g => g.wButtons & 0x0200,
+  6: g => g.bLeftTrigger > 40,  7: g => g.bRightTrigger > 40,
+  8: g => g.wButtons & 0x0020, 9: g => g.wButtons & 0x0010,
+  10: g => g.wButtons & 0x0040, 11: g => g.wButtons & 0x0080,
+  12: g => g.wButtons & 0x0001, 13: g => g.wButtons & 0x0002,
+  14: g => g.wButtons & 0x0004, 15: g => g.wButtons & 0x0008,
+}
+
+function setupGamepadHotkey() {
+  let koffi
+  try { koffi = require('koffi') } catch (e) {
+    console.log('[gamepad] koffi nicht verfügbar – nativer Hotkey deaktiviert:', e && e.message)
+    return
+  }
+  try {
+    let lib = null
+    for (const name of ['xinput1_4.dll', 'xinput1_3.dll', 'xinput9_1_0.dll']) {
+      try { lib = koffi.load(name); break } catch {}
+    }
+    if (!lib) throw new Error('keine XInput-DLL ladbar')
+
+    koffi.struct('XINPUT_GAMEPAD', {
+      wButtons: 'uint16', bLeftTrigger: 'uint8', bRightTrigger: 'uint8',
+      sThumbLX: 'int16', sThumbLY: 'int16', sThumbRX: 'int16', sThumbRY: 'int16'
+    })
+    koffi.struct('XINPUT_STATE', { dwPacketNumber: 'uint32', Gamepad: 'XINPUT_GAMEPAD' })
+    xinputGetState = lib.func('uint32 __stdcall XInputGetState(uint32 dwUserIndex, _Out_ XINPUT_STATE *pState)')
+
+    xinputPoll = setInterval(pollGamepadHotkey, 45)
+    console.log('[gamepad] nativer XInput-Hotkey aktiv')
+  } catch (e) {
+    console.log('[gamepad] XInput-Init fehlgeschlagen – nativer Hotkey deaktiviert:', e && e.message)
+    xinputGetState = null
+  }
+}
+
+function pollGamepadHotkey() {
+  const combo = appSettings.gamepadHotkey
+  if (!combo || !combo.length || !xinputGetState) { gpHotkeyDown = false; return }
+  // Guide-Taste (Index 16) gibt es im Standard-XInput nicht -> Kombi nie erfüllbar.
+  if (combo.some(i => !XI_MASK[i])) { gpHotkeyDown = false; return }
+
+  let anyDown = false
+  for (let slot = 0; slot < 4 && !anyDown; slot++) {
+    const st = {}
+    let ret
+    try { ret = xinputGetState(slot, st) } catch { continue }
+    if (ret !== 0) continue // Slot nicht verbunden
+    const g = st.Gamepad
+    if (combo.every(i => XI_MASK[i](g))) anyDown = true
+  }
+
+  if (anyDown && !gpHotkeyDown) toggleMainWindow() // steigende Flanke
+  gpHotkeyDown = anyDown
 }
 
 function createTray() {
@@ -1404,7 +1484,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => showMainWindow())
 
-  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); registerToggleHotkey() })
+  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); registerToggleHotkey(); setupGamepadHotkey() })
 
   // HDR abschalten, falls der Launcher es für ein noch laufendes Spiel aktiviert hatte
   app.on('before-quit', () => {
@@ -1414,7 +1494,7 @@ if (!app.requestSingleInstanceLock()) {
     }
   })
 
-  app.on('will-quit', () => globalShortcut.unregisterAll())
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll) })
 
   app.on('window-all-closed', () => {
     if (hdrPollInterval) clearInterval(hdrPollInterval)

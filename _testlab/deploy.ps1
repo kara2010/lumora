@@ -36,7 +36,11 @@ foreach ($p in $prod) {
 }
 Write-Host "Prod-Module gestaged: $($prod.Count)"
 $out = "$src\dist\win-unpacked\resources\app.asar"
-& "$src\node_modules\.bin\asar.cmd" pack $tmp $out
+# --unpack: native .node (koffi/XInput) MUSS entpackt neben dem asar liegen –
+# aus einem asar heraus laesst sich keine .node laden. Erzeugt app.asar.unpacked.
+$unpackDir = "$out.unpacked"
+if (Test-Path $unpackDir) { Remove-Item -Recurse -Force $unpackDir }
+& "$src\node_modules\.bin\asar.cmd" pack $tmp $out --unpack "**/*.node"
 
 # 1) ERST beenden  2) DANN kopieren
 $running = Get-Process -Name "Lumora","HDR Launcher" -ErrorAction SilentlyContinue
@@ -46,7 +50,15 @@ $targets = @(
   "$env:LOCALAPPDATA\Programs\lumora\resources\app.asar"
 )
 foreach ($t in $targets) {
-  if (Test-Path (Split-Path $t)) { Copy-Item $out $t -Force; Write-Host "Deployed -> $t  ($((Get-Item $t).LastWriteTime.ToString('HH:mm:ss')))" }
+  if (Test-Path (Split-Path $t)) {
+    Copy-Item $out $t -Force
+    # app.asar.unpacked mitliefern (native koffi/XInput-.node). Ziel vorher leeren,
+    # damit keine veralteten Dateien zurueckbleiben.
+    $tUnpack = "$t.unpacked"
+    if (Test-Path $tUnpack) { Remove-Item -Recurse -Force $tUnpack }
+    if (Test-Path $unpackDir) { Copy-Item $unpackDir $tUnpack -Recurse -Force }
+    Write-Host "Deployed -> $t  ($((Get-Item $t).LastWriteTime.ToString('HH:mm:ss')))"
+  }
 }
 
 # app-update.yml mitkopieren: electron-updater liest daraus die Feed-URL. Fehlt sie
