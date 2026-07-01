@@ -1798,9 +1798,12 @@ body:not(.nav-mode) .cover-cell:hover { border-color: #3a3a3a; }
 }
 
 /* --- Spielzeit-Rückblick --- */
-.review-dialog { width: 560px; gap: 16px; }
+.review-dialog { width: 560px; gap: 18px; }
 .review-head { display: flex; align-items: center; justify-content: space-between; }
 .review-head h2 { font-size: 16px; font-weight: 600; color: #fff; }
+/* Inhalts-Abschnitte klar voneinander trennen (Hero / Karten / Top-Liste). */
+#reviewBody { display: flex; flex-direction: column; gap: 20px; }
+.review-topwrap { display: flex; flex-direction: column; gap: 13px; }
 
 .review-hero {
   text-align: center;
@@ -1825,12 +1828,12 @@ body:not(.nav-mode) .cover-cell:hover { border-color: #3a3a3a; }
 .review-hero-unit { font-size: 17px; font-weight: 600; color: var(--accent-light); letter-spacing: 0; }
 .review-hero-sub { margin-top: 10px; font-size: 13px; color: #8a8a92; }
 
-.review-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.review-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; }
 .review-stat {
   background: #16171b;
   border: 1px solid #24252b;
   border-radius: 11px;
-  padding: 12px 13px;
+  padding: 14px 15px;
   min-width: 0;
 }
 .review-stat-value {

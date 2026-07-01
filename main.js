@@ -50,8 +50,15 @@ let prefsFile = null
 const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L', gamepadHotkey: [] }
 app.isQuitting = false
 
+// Entfernt ein evtl. vorangestelltes UTF-8 BOM – sonst schlaegt JSON.parse fehl
+// (z.B. wenn die Datei mal von einem anderen Werkzeug geschrieben wurde).
+function stripBom(s) { return (s && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s }
+
 function loadAppSettings() {
-  try { Object.assign(appSettings, JSON.parse(fs.readFileSync(appSettingsFile, 'utf8'))) } catch {}
+  try {
+    const parsed = JSON.parse(stripBom(fs.readFileSync(appSettingsFile, 'utf8')))
+    if (parsed && typeof parsed === 'object') Object.assign(appSettings, parsed)
+  } catch {}
 }
 
 function saveAppSettings() {
@@ -1294,7 +1301,7 @@ ipcMain.on('get-version-sync', (event) => { event.returnValue = app.getVersion()
 
 // Dauerhafte Speicherung der Spieleliste als Datei (zuverlässiger als file://-localStorage)
 ipcMain.on('load-games-sync', (event) => {
-  try { event.returnValue = fs.readFileSync(gamesFile, 'utf8') }
+  try { event.returnValue = stripBom(fs.readFileSync(gamesFile, 'utf8')) }
   catch { event.returnValue = null }
 })
 
@@ -1303,7 +1310,7 @@ ipcMain.handle('save-games', (event, json) => {
 })
 
 ipcMain.on('load-prefs-sync', (event) => {
-  try { event.returnValue = fs.readFileSync(prefsFile, 'utf8') }
+  try { event.returnValue = stripBom(fs.readFileSync(prefsFile, 'utf8')) }
   catch { event.returnValue = null }
 })
 
