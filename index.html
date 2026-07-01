@@ -375,13 +375,33 @@
     </div>
   </div>
 
-  <!-- Update-Benachrichtigung (unten rechts, nicht blockierend) -->
+  <!-- Update verfügbar: eigener Dialog mit Changelog -->
+  <div class="overlay" id="updateOverlay" style="display:none">
+    <div class="dialog update-dialog">
+      <div class="update-hero">
+        <div class="update-hero-badge">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+        </div>
+        <div class="update-hero-text">
+          <div class="update-hero-title">Update verfügbar</div>
+          <div class="update-hero-sub">Lumora <span class="update-ver-pill" id="updateVersion"></span> ist bereit zur Installation</div>
+        </div>
+      </div>
+      <div class="update-section-label">Das ist neu</div>
+      <div class="update-changelog" id="updateChangelog"></div>
+      <div class="dialog-actions">
+        <button class="btn-cancel" onclick="hideUpdateDialog()">Später</button>
+        <button class="btn-primary" onclick="startUpdateDownload()">Jetzt aktualisieren</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Download-Fortschritt (unten rechts, nicht blockierend) -->
   <div class="update-toast" id="updateToast" style="display:none">
     <div class="update-toast-icon">⬆️</div>
     <div class="update-toast-body">
-      <div class="update-toast-title" id="updateToastTitle">Update verfügbar</div>
+      <div class="update-toast-title" id="updateToastTitle">Update</div>
       <div class="update-toast-text" id="updateToastText"></div>
-      <div class="update-toast-notes" id="updateToastNotes" style="display:none"></div>
       <div class="update-progress-track" id="updateProgressTrack" style="display:none">
         <div class="update-progress-fill" id="updateProgressFill"></div>
       </div>
@@ -876,6 +896,7 @@
       if (document.getElementById('aboutOverlay').style.display === 'flex') hideAbout()
       if (document.getElementById('settingsOverlay').style.display === 'flex') hideSettings()
       if (document.getElementById('optionsOverlay').style.display === 'flex') hideOptions()
+      if (document.getElementById('updateOverlay').style.display === 'flex') hideUpdateDialog()
     })
 
     function saveGames() {
@@ -1598,17 +1619,6 @@ ipcRenderer.on('launch-status', (event, status) => {
     const upActions  = document.getElementById('updateToastActions')
     const upTrack    = document.getElementById('updateProgressTrack')
     const upFill     = document.getElementById('updateProgressFill')
-    const upNotes    = document.getElementById('updateToastNotes')
-
-    // Release-Notes anzeigen (Text aus der latest.yml). Sicher als Text, keine
-    // Ausführung von Markup. Leere Zeilen/Bullets bleiben erhalten.
-    function showUpdateNotes(notes) {
-      if (!upNotes) return
-      const txt = (notes || '').trim()
-      if (!txt) { upNotes.style.display = 'none'; upNotes.textContent = ''; return }
-      upNotes.textContent = txt
-      upNotes.style.display = 'block'
-    }
 
     function showUpdateToast() { upToast.style.display = 'flex' }
     function dismissUpdateToast() { upToast.style.display = 'none' }
@@ -1623,34 +1633,58 @@ ipcRenderer.on('launch-status', (event, status) => {
       })
     }
 
-    ipcRenderer.on('update-available', (e, info) => {
-      upTitle.textContent = 'Neue Version verfügbar'
-      upText.textContent = 'Lumora ' + info.version + ' steht bereit. Jetzt aktualisieren?'
-      upTrack.style.display = 'none'
-      showUpdateNotes(info.notes)
-      setUpdateActions([
-        { label: 'Jetzt aktualisieren', primary: true, onClick: () => {
-            upText.textContent = 'Update wird geladen…'
-            showUpdateNotes('')
-            upTrack.style.display = 'block'
-            upFill.style.width = '0%'
-            setUpdateActions([])
-            ipcRenderer.invoke('download-update')
-          } },
-        { label: 'Später', primary: false, onClick: dismissUpdateToast },
-      ])
+    // Changelog-Text (aus latest.yml) sauber formatieren: Bullet-Zeilen (•/-/*)
+    // werden zu Listenpunkten, andere Zeilen zu Absätzen. Sicher als Text.
+    function renderChangelog(container, notes) {
+      container.innerHTML = ''
+      const lines = String(notes || '').split('\n')
+      let ul = null
+      for (const raw of lines) {
+        const line = raw.trim()
+        if (!line) { ul = null; continue }
+        const m = line.match(/^[•\-\*]\s*(.*)$/)
+        if (m) {
+          if (!ul) { ul = document.createElement('ul'); ul.className = 'changelog-list'; container.appendChild(ul) }
+          const li = document.createElement('li'); li.textContent = m[1]; ul.appendChild(li)
+        } else {
+          ul = null
+          const p = document.createElement('p'); p.className = 'changelog-intro'; p.textContent = line; container.appendChild(p)
+        }
+      }
+      if (!container.children.length) {
+        const p = document.createElement('p'); p.className = 'changelog-intro'
+        p.textContent = 'Verbesserungen und Fehlerbehebungen.'; container.appendChild(p)
+      }
+    }
+
+    const updateOverlay = document.getElementById('updateOverlay')
+    function hideUpdateDialog() { updateOverlay.style.display = 'none' }
+    function startUpdateDownload() {
+      hideUpdateDialog()
+      upTitle.textContent = 'Update wird geladen'
+      upText.textContent = 'Bitte einen Moment…'
+      upTrack.style.display = 'block'
+      upFill.style.width = '0%'
+      setUpdateActions([])
       showUpdateToast()
+      ipcRenderer.invoke('download-update')
+    }
+
+    ipcRenderer.on('update-available', (e, info) => {
+      document.getElementById('updateVersion').textContent = info.version
+      renderChangelog(document.getElementById('updateChangelog'), info.notes)
+      updateOverlay.style.display = 'flex'
     })
 
     ipcRenderer.on('update-progress', (e, { percent }) => {
       upTrack.style.display = 'block'
       upFill.style.width = percent + '%'
-      upText.textContent = 'Update wird geladen… ' + percent + '%'
+      upText.textContent = 'Wird geladen… ' + percent + '%'
     })
 
     ipcRenderer.on('update-ready', (e, info) => {
       upTitle.textContent = 'Update bereit'
-      upText.textContent = 'Lumora ' + info.version + ' wurde geladen. Zum Abschließen neu starten.'
+      upText.textContent = 'Lumora ' + info.version + ' wurde geladen.'
       upTrack.style.display = 'none'
       setUpdateActions([
         { label: 'Neu starten & installieren', primary: true, onClick: () => ipcRenderer.invoke('install-update') },
@@ -1805,6 +1839,7 @@ ipcRenderer.on('launch-status', (event, status) => {
       ['settingsOverlay', () => hideSettings()],
       ['optionsOverlay', () => hideOptions()],
       ['coverSearchOverlay', () => hideCoverSearch()],
+      ['updateOverlay', () => hideUpdateDialog()],
     ]
     function navOpenOverlay() {
       for (const [id, hide] of NAV_OVERLAYS) {
