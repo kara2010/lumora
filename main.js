@@ -110,6 +110,7 @@ function registerToggleHotkey() {
   // Test-Hotkey fuer das OSD (spaeter frei konfigurierbar). Global, damit es auch
   // funktioniert, waehrend ein Spiel im Vordergrund ist.
   try { globalShortcut.register('Alt+O', toggleOverlay) } catch {}
+  try { globalShortcut.register('Alt+Shift+O', toggleOsdEdit) } catch {}
   const acc = appSettings.toggleHotkey
   if (!acc) return true
   try { return globalShortcut.register(acc, toggleMainWindow) }
@@ -179,6 +180,24 @@ function toggleOverlay() {
   saveAppSettings()
   if (appSettings.osdEnabled) showOverlay(); else hideOverlay()
 }
+
+// --- Live-Edit-Modus: OSD direkt ueber dem Spiel anfassbar machen -------------
+// Der Hotkey macht das Overlay kurz interaktiv (faengt Maus): ziehen = Position
+// (rastet in die naechste Ecke), Mausrad = Groesse. "Fertig" schaltet zurueck.
+let osdEditActive = false
+function setOsdEditMode(on) {
+  const w = createOverlayWindow()
+  if (on) {
+    if (!appSettings.osdEnabled) { appSettings.osdEnabled = true; saveAppSettings() }
+    showOverlay()
+    w.setIgnoreMouseEvents(false)             // Maus wird jetzt gefangen
+  } else {
+    w.setIgnoreMouseEvents(true, { forward: true })   // wieder klick-durchlaessig
+  }
+  osdEditActive = on
+  w.webContents.send('osd-edit', on)
+}
+function toggleOsdEdit() { setOsdEditMode(!osdEditActive) }
 
 // --- Nativer Gamepad-Hotkey (funktioniert auch minimiert / während Spielen) ---
 // Der Renderer-Gamepad-Code friert ein, sobald das Fenster den Fokus verliert.
@@ -1550,6 +1569,20 @@ ipcMain.handle('toggle-window', () => { toggleMainWindow() })
 
 // OSD-Overlay ein-/ausblenden (spaeter ueber einen Button/Hotkey in der App).
 ipcMain.handle('toggle-osd', () => { toggleOverlay() })
+
+// Live-Edit: Position (Ecke) und Groesse werden im Overlay geaendert und hier
+// dauerhaft gespeichert.
+ipcMain.handle('osd-edit-corner', (e, corner) => {
+  if (['tl', 'tr', 'bl', 'br'].includes(corner)) { appSettings.osdCorner = corner; saveAppSettings() }
+})
+ipcMain.handle('osd-edit-scale', (e, delta) => {
+  let z = (Number(appSettings.osdScale) || 1) + (delta > 0 ? 0.05 : -0.05)
+  z = Math.max(0.5, Math.min(2, Math.round(z * 100) / 100))
+  appSettings.osdScale = z
+  saveAppSettings()
+  if (overlayWindow && !overlayWindow.isDestroyed()) { try { overlayWindow.webContents.setZoomFactor(z) } catch {} }
+})
+ipcMain.handle('osd-edit-done', () => setOsdEditMode(false))
 
 ipcMain.handle('check-for-updates', () => { checkForUpdates(true) })
 ipcMain.handle('download-update', () => { if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {}) })
