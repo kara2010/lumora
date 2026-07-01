@@ -75,6 +75,7 @@
       </select>
       <div class="game-list" id="gameList"></div>
       <div class="sidebar-footer">
+        <button class="btn-about" onclick="showReview()" title="Spielzeit-Rückblick">📊 Rückblick</button>
         <button class="btn-about" onclick="showSettings()">⚙ Einstellungen</button>
         <button class="btn-about" onclick="showAbout()">ⓘ Über</button>
         <span class="app-version" id="appVersion"></span>
@@ -371,6 +372,20 @@
       <div class="dialog-actions">
         <button class="btn-cancel" onclick="hideCoverSearch()">Abbrechen</button>
         <button class="btn-primary" id="coverApplyBtn" onclick="applyCoverChoice()" disabled>Übernehmen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Spielzeit-Rückblick -->
+  <div class="overlay" id="reviewOverlay" style="display:none">
+    <div class="dialog review-dialog">
+      <div class="review-head">
+        <h2>Dein Spielzeit-Rückblick</h2>
+        <button class="btn-delete" onclick="hideReview()" title="Schließen">✕</button>
+      </div>
+      <div id="reviewBody"></div>
+      <div class="dialog-actions">
+        <button class="btn-primary" onclick="hideReview()">Schließen</button>
       </div>
     </div>
   </div>
@@ -897,6 +912,7 @@
       if (document.getElementById('settingsOverlay').style.display === 'flex') hideSettings()
       if (document.getElementById('optionsOverlay').style.display === 'flex') hideOptions()
       if (document.getElementById('updateOverlay').style.display === 'flex') hideUpdateDialog()
+      if (document.getElementById('reviewOverlay').style.display === 'flex') hideReview()
     })
 
     function saveGames() {
@@ -1331,6 +1347,71 @@ ipcRenderer.on('launch-status', (event, status) => {
     function showAbout() { document.getElementById('aboutOverlay').style.display = 'flex' }
     function hideAbout() { document.getElementById('aboutOverlay').style.display = 'none' }
     function openExternal(url) { require('electron').shell.openExternal(url) }
+
+    // ---- Spielzeit-Rückblick --------------------------------------------
+    function hideReview() { document.getElementById('reviewOverlay').style.display = 'none' }
+    // Spielzeit gross formatieren: "42 Std" / "42 Std 30 Min" / "30 Min"
+    function fmtBig(sec) {
+      sec = Math.floor(sec || 0)
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60)
+      if (h === 0) return { num: m, unit: m === 1 ? 'Minute' : 'Minuten' }
+      return { num: h, unit: h === 1 ? 'Stunde' : 'Stunden', extra: m ? (m + ' Min') : '' }
+    }
+    function showReview() {
+      const body = document.getElementById('reviewBody')
+      const played = games.filter(g => (g.playtime || 0) > 0)
+      const totalSec = games.reduce((s, g) => s + (g.playtime || 0), 0)
+
+      if (!played.length) {
+        body.innerHTML = '<div class="review-empty"><div class="review-empty-icon">🎮</div>' +
+          '<p>Noch keine Spielzeit erfasst.</p><span>Starte ein Spiel über Lumora – dein Rückblick füllt sich dann automatisch.</span></div>'
+        document.getElementById('reviewOverlay').style.display = 'flex'
+        return
+      }
+
+      const top = [...played].sort((a, b) => (b.playtime || 0) - (a.playtime || 0))
+      const maxSec = top[0].playtime || 1
+      const favCount = games.filter(g => g.favorite).length
+      // Lieblings-Genre nach Spielzeit gewichtet
+      const genreSec = {}
+      for (const g of played) for (const gen of ((g.info && g.info.genres) || [])) genreSec[gen] = (genreSec[gen] || 0) + (g.playtime || 0)
+      const topGenre = Object.entries(genreSec).sort((a, b) => b[1] - a[1])[0]
+      const big = fmtBig(totalSec)
+
+      const statCard = (label, value, sub) =>
+        `<div class="review-stat"><div class="review-stat-value">${esc(value)}</div><div class="review-stat-label">${esc(label)}</div>${sub ? `<div class="review-stat-sub">${esc(sub)}</div>` : ''}</div>`
+
+      const rows = top.slice(0, 6).map((g, i) => {
+        const pct = Math.max(6, Math.round((g.playtime || 0) / maxSec * 100))
+        const cover = g.cover
+          ? `<span class="review-cover" style="background-image:url('${mediaSrc(g.cover)}')"></span>`
+          : `<span class="review-cover review-cover-empty">${gameIcon(g)}</span>`
+        return `<div class="review-row">
+            <span class="review-rank">${i + 1}</span>
+            ${cover}
+            <div class="review-row-main">
+              <div class="review-row-name">${esc(g.name)}</div>
+              <div class="review-bar"><div class="review-bar-fill" style="width:${pct}%"></div></div>
+            </div>
+            <span class="review-row-time">${esc(formatPlaytime(g.playtime))}</span>
+          </div>`
+      }).join('')
+
+      body.innerHTML =
+        `<div class="review-hero">
+           <div class="review-hero-num">${big.num}<span class="review-hero-unit">${big.unit}${big.extra ? ' ' + big.extra : ''}</span></div>
+           <div class="review-hero-sub">Gesamtspielzeit über ${played.length} ${played.length === 1 ? 'Spiel' : 'Spiele'}</div>
+         </div>
+         <div class="review-stats">
+           ${statCard('Meistgespielt', top[0].name, formatPlaytime(top[0].playtime))}
+           ${statCard('Lieblings-Genre', topGenre ? topGenre[0] : '–', topGenre ? formatPlaytime(topGenre[1]) : '')}
+           ${statCard('Favoriten', String(favCount), favCount === 1 ? 'Spiel' : 'Spiele')}
+         </div>
+         <div class="review-section-label">Top-Spiele nach Spielzeit</div>
+         <div class="review-top">${rows}</div>`
+
+      document.getElementById('reviewOverlay').style.display = 'flex'
+    }
 
     async function showSettings() {
       document.getElementById('settingsOverlay').style.display = 'flex'
@@ -1840,6 +1921,7 @@ ipcRenderer.on('launch-status', (event, status) => {
       ['optionsOverlay', () => hideOptions()],
       ['coverSearchOverlay', () => hideCoverSearch()],
       ['updateOverlay', () => hideUpdateDialog()],
+      ['reviewOverlay', () => hideReview()],
     ]
     function navOpenOverlay() {
       for (const [id, hide] of NAV_OVERLAYS) {

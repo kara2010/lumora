@@ -1797,6 +1797,83 @@ body:not(.nav-mode) .cover-cell:hover { border-color: #3a3a3a; }
   box-shadow: 0 0 0 3px var(--accent-bg);
 }
 
+/* --- Spielzeit-Rückblick --- */
+.review-dialog { width: 560px; gap: 16px; }
+.review-head { display: flex; align-items: center; justify-content: space-between; }
+.review-head h2 { font-size: 16px; font-weight: 600; color: #fff; }
+
+.review-hero {
+  text-align: center;
+  padding: 22px 16px 20px;
+  border-radius: 14px;
+  background:
+    radial-gradient(ellipse 70% 120% at 50% 0%, var(--accent-bg), transparent 75%),
+    #141519;
+  border: 1px solid var(--accent-border);
+}
+.review-hero-num {
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  letter-spacing: -1px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+}
+.review-hero-unit { font-size: 17px; font-weight: 600; color: var(--accent-light); letter-spacing: 0; }
+.review-hero-sub { margin-top: 10px; font-size: 13px; color: #8a8a92; }
+
+.review-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.review-stat {
+  background: #16171b;
+  border: 1px solid #24252b;
+  border-radius: 11px;
+  padding: 12px 13px;
+  min-width: 0;
+}
+.review-stat-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.review-stat-label { margin-top: 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #6a6a74; }
+.review-stat-sub { margin-top: 4px; font-size: 12px; color: var(--accent-light); }
+
+.review-section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: #6a6a74; }
+
+.review-top { display: flex; flex-direction: column; gap: 10px; max-height: 40vh; overflow-y: auto; padding-right: 4px; }
+.review-top::-webkit-scrollbar { width: 6px; }
+.review-top::-webkit-scrollbar-thumb { background: #2f2f36; border-radius: 3px; }
+
+.review-row { display: flex; align-items: center; gap: 12px; }
+.review-rank { width: 16px; text-align: center; font-size: 13px; font-weight: 700; color: #55555f; flex-shrink: 0; }
+.review-cover {
+  width: 34px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background-size: cover;
+  background-position: center;
+  background-color: #1d1d26;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.review-cover-empty { display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.review-row-main { flex: 1; min-width: 0; }
+.review-row-name { font-size: 13.5px; color: #e0e0e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px; }
+.review-bar { height: 7px; background: #24252b; border-radius: 4px; overflow: hidden; }
+.review-bar-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-light)); }
+.review-row-time { font-size: 12.5px; color: #9a9aa2; flex-shrink: 0; white-space: nowrap; }
+
+.review-empty { text-align: center; padding: 40px 20px; }
+.review-empty-icon { font-size: 40px; margin-bottom: 12px; }
+.review-empty p { font-size: 15px; color: #ddd; margin-bottom: 6px; }
+.review-empty span { font-size: 13px; color: #777; }
+
 .update-toast-actions {
   display: flex;
   flex-direction: column;
