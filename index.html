@@ -1827,8 +1827,15 @@ ipcRenderer.on('launch-status', (event, status) => {
         const sel = 'input:not([type=hidden]):not([type=file]), select, textarea, button, summary, .cover-cell, .accent-swatch, .mode-option'
         return Array.from(o.el.querySelectorAll(sel)).filter(isNavVisible)
       }
-      const main = '.btn-header-icon, #searchInput, #favFilterBtn, #sortSelect, .game-item, .grid-card, .hdr-toggle-row .switch, #launchBtn, .btn-delete, .btn-about'
-      return Array.from(document.querySelectorAll(main)).filter(isNavVisible)
+      // Werkzeugleiste + Fußleiste sind immer erreichbar. Für die Spiele selbst
+      // gilt: In der RASTER-Ansicht navigiert man die Raster-Kacheln (das rechte
+      // Fenster); die linke Liste ist dort redundant und wird ausgelassen. In der
+      // DETAIL-Ansicht navigiert man die linke Liste (mit Live-Vorschau rechts).
+      const tools = '.btn-header-icon, #searchInput, #favFilterBtn, #sortSelect, .btn-about'
+      const games = (libView === 'grid')
+        ? '.grid-card'
+        : '.game-item, .hdr-toggle-row .switch, #launchBtn, .btn-delete'
+      return Array.from(document.querySelectorAll(tools + ', ' + games)).filter(isNavVisible)
     }
     function setNavMode(on) { document.body.classList.toggle('nav-mode', on) }
     function setNavFocus(el, scroll) {
@@ -1971,7 +1978,7 @@ ipcRenderer.on('launch-status', (event, status) => {
       const o = navOpenOverlay()
       if (o) { o.hide(); navSyncContext(); return }
       if (isEditingField()) { document.activeElement.blur(); return }
-      if (libView === 'detail') { setLibView('grid'); return }
+      // B ist reine Zurück-/Schließen-Taste – kein Umschalten der Ansicht mehr.
     }
     function navFocusedIdx() {
       const el = navFocusEl
