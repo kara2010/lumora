@@ -1862,7 +1862,17 @@ ipcRenderer.on('launch-status', (event, status) => {
         const score = along + perp * 2
         if (score < bestScore) { bestScore = score; best = el }
       }
-      if (best) setNavFocus(best)
+      if (best) {
+        setNavFocus(best)
+        // Beim Durchzappen der Spieleliste das Spiel gleich im Content-Fenster
+        // anzeigen (wie ein Klick). Nur für Listen-Einträge; selectGame zeichnet
+        // die Liste neu, gpReapplyFocus setzt den Fokus danach aufs selbe Spiel
+        // (keine Rekursion, da hier nur bei echter Navigation aufgerufen).
+        if (best.classList.contains('game-item')) {
+          const gi = Number(best.dataset.idx)
+          if (gi >= 0 && gi !== selectedIndex) selectGame(gi)
+        }
+      }
     }
     function navActivate() {
       const el = navFocusEl
