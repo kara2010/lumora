@@ -47,7 +47,9 @@ let tray = null
 let appSettingsFile = null
 let gamesFile = null
 let prefsFile = null
-const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L', gamepadHotkey: [] }
+const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L', gamepadHotkey: [],
+  // OSD-Overlay: sichtbar?, Skalierung (Zoomfaktor), Ecke (tl/tr/bl/br), Panel-Deckkraft
+  osdEnabled: false, osdScale: 1, osdCorner: 'tl', osdOpacity: 0.55 }
 app.isQuitting = false
 
 // Entfernt ein evtl. vorangestelltes UTF-8 BOM – sonst schlaegt JSON.parse fehl
@@ -119,14 +121,14 @@ function registerToggleHotkey() {
 // folgen ab Meilenstein 2 ueber das 'osd-data'-Event an overlayWindow.
 let overlayWindow = null
 
+// Das Overlay-Fenster deckt die GANZE Bildschirmflaeche ab (transparent +
+// klick-durchlaessig). Dadurch ist die Panel-Position nur noch CSS (Ecke) und die
+// Groesse ein einziger Zoomfaktor – kein Fenster-Verschieben/-Skalieren noetig.
 function createOverlayWindow() {
   if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow
-  const wa = screen.getPrimaryDisplay().workArea
+  const b = screen.getPrimaryDisplay().bounds
   overlayWindow = new BrowserWindow({
-    width: 380,
-    height: 600,
-    x: wa.x + 24,
-    y: wa.y + 24,
+    x: b.x, y: b.y, width: b.width, height: b.height,
     frame: false,
     transparent: true,
     resizable: false,
@@ -143,15 +145,39 @@ function createOverlayWindow() {
   overlayWindow.setAlwaysOnTop(true, 'screen-saver')            // ueber randlosen Spielen
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   overlayWindow.loadFile('osd.html')
+  overlayWindow.webContents.once('did-finish-load', () => applyOsdConfig())
   overlayWindow.on('closed', () => { overlayWindow = null })
   return overlayWindow
 }
 
-function toggleOverlay() {
+// Uebertraegt die aktuelle OSD-Konfiguration ins Overlay: Zoom = Groesse,
+// Ecke + Deckkraft ans Renderer-Panel.
+function applyOsdConfig() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return
+  const z = Math.max(0.4, Math.min(3, Number(appSettings.osdScale) || 1))
+  try { overlayWindow.webContents.setZoomFactor(z) } catch {}
+  overlayWindow.webContents.send('osd-config', {
+    corner: appSettings.osdCorner || 'tl',
+    opacity: appSettings.osdOpacity != null ? appSettings.osdOpacity : 0.55,
+  })
+}
+
+function showOverlay() {
   const w = createOverlayWindow()
-  if (w.isVisible()) { w.hide(); return }
   w.showInactive()                                 // anzeigen, ohne zu fokussieren
   w.setAlwaysOnTop(true, 'screen-saver')
+  applyOsdConfig()
+}
+
+function hideOverlay() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide()
+}
+
+function toggleOverlay() {
+  const visible = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()
+  appSettings.osdEnabled = !visible
+  saveAppSettings()
+  if (appSettings.osdEnabled) showOverlay(); else hideOverlay()
 }
 
 // --- Nativer Gamepad-Hotkey (funktioniert auch minimiert / während Spielen) ---
@@ -1449,6 +1475,12 @@ ipcMain.handle('set-app-settings', (event, partial) => {
   applyAutostart()
   if (appSettings.minimizeToTray) createTray()
   else destroyTray()
+  // OSD live nachziehen, wenn eine OSD-Einstellung dabei war.
+  if (partial && Object.keys(partial).some(k => k.startsWith('osd'))) {
+    if (appSettings.osdEnabled) showOverlay()
+    else hideOverlay()
+    applyOsdConfig()
+  }
   return appSettings
 })
 
@@ -1530,7 +1562,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => showMainWindow())
 
-  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); registerToggleHotkey(); setupGamepadHotkey() })
+  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); registerToggleHotkey(); setupGamepadHotkey(); if (appSettings.osdEnabled) showOverlay() })
 
   // HDR abschalten, falls der Launcher es für ein noch laufendes Spiel aktiviert hatte
   app.on('before-quit', () => {

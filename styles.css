@@ -383,6 +383,49 @@ body::before {
   color: #bbb;
 }
 
+/* OSD-Layout-Steuerelemente */
+.osd-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+}
+.osd-field-label {
+  min-width: 74px;
+  font-size: 13px;
+  color: #bbb;
+}
+.osd-field input[type="range"] { flex: 1; accent-color: var(--accent); }
+.osd-field-val {
+  min-width: 46px;
+  text-align: right;
+  font-size: 13px;
+  color: #ddd;
+  font-variant-numeric: tabular-nums;
+}
+.osd-corners {
+  display: grid;
+  grid-template-columns: repeat(2, 34px);
+  grid-auto-rows: 34px;
+  gap: 5px;
+}
+.osd-corner {
+  background: #1b1b1b;
+  border: 1px solid #333;
+  color: #888;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.osd-corner:hover { border-color: var(--accent); color: #ccc; }
+.osd-corner.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
 /* Akzentfarben-Auswahl */
 .accent-swatches {
   display: flex;
