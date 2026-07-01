@@ -49,6 +49,23 @@ foreach ($t in $targets) {
   if (Test-Path (Split-Path $t)) { Copy-Item $out $t -Force; Write-Host "Deployed -> $t  ($((Get-Item $t).LastWriteTime.ToString('HH:mm:ss')))" }
 }
 
+# app-update.yml mitkopieren: electron-updater liest daraus die Feed-URL. Fehlt sie
+# (installiert aus altem Build ohne publish-Config), schlaegt die Update-Pruefung
+# fehl. Quelle ist der letzte electron-builder-Build; sonst inline erzeugen.
+$updSrc = "$src\dist\win-unpacked\resources\app-update.yml"
+if (-not (Test-Path $updSrc)) {
+  @"
+provider: generic
+url: https://kara-webdesign.de/hdr-launcher/updates/
+updaterCacheDirName: lumora-updater
+"@ | Set-Content -Encoding UTF8 $updSrc
+}
+foreach ($t in $targets) {
+  $resDir = Split-Path $t
+  if (Test-Path $resDir) { Copy-Item $updSrc (Join-Path $resDir "app-update.yml") -Force }
+}
+Write-Host "app-update.yml mitgeliefert."
+
 # Optionale Verifikation: main.js/index.html/styles.css aus dem DEPLOYTEN asar
 # ins TEMP extrahieren und ueber ALLE pruefen (Muster kann in jeder Datei stehen).
 # (NIE package.json extrahieren – electron-builder minimiert sie und wuerde den
