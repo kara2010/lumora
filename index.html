@@ -1965,6 +1965,20 @@ ipcRenderer.on('launch-status', (event, status) => {
       else if (dir === 'down') { if (i + cols < n) j = i + cols }
       return j >= 0 ? tiles[j] : null
     }
+    // Zeilenbewusste lineare Navigation in DOM-Reihenfolge – für Formular-Dialoge
+    // (Einstellungen usw.). hoch/runter = nächste/vorherige Zeile, links/rechts =
+    // Nachbar in derselben Zeile. Vorhersehbar, hakt nicht, überspringt nichts.
+    function navLinearMove(dir, items, fromEl) {
+      const idx = items.indexOf(fromEl)
+      if (idx < 0) return null
+      const fromTop = fromEl.getBoundingClientRect().top
+      const sameRow = (el) => Math.abs(el.getBoundingClientRect().top - fromTop) < 12
+      if (dir === 'left') { const p = items[idx - 1]; return (p && sameRow(p)) ? p : null }
+      if (dir === 'right') { const p = items[idx + 1]; return (p && sameRow(p)) ? p : null }
+      if (dir === 'down') { for (let k = idx + 1; k < items.length; k++) if (!sameRow(items[k])) return items[k]; return null }
+      for (let k = idx - 1; k >= 0; k--) if (!sameRow(items[k])) return items[k]   // up
+      return null
+    }
     function navMove(dir) {
       if (isEditingField()) document.activeElement.blur()
       setNavMode(true)
@@ -1975,14 +1989,22 @@ ipcRenderer.on('launch-status', (event, status) => {
       if (!items.length) return
       if (!navFocusEl || !items.includes(navFocusEl)) { setNavFocus(navPickStart(items)); return }
       const fromEl = navFocusEl
+      const inDialog = !!(navOpenOverlay() || navContextOpen())
       let best = null
-      // Innerhalb eines Kachel-/Listen-Rasters logisch navigieren; an den Rändern
-      // geometrisch heraus.
       if (fromEl.matches('.cover-cell, .grid-card, .game-item')) {
+        // Kachel-/Listen-Raster: nach Zeile/Spalte; an den Rändern heraus
+        // (im Dialog linear, sonst geometrisch).
         const tileSel = fromEl.matches('.game-item') ? '.game-item' : '.cover-cell, .grid-card'
         best = navGridMove(dir, items.filter(el => el.matches(tileSel)), fromEl)
+        if (!best) best = inDialog ? navLinearMove(dir, items, fromEl)
+                                   : navBestInDir(items.filter(el => el !== fromEl), fromEl.getBoundingClientRect(), dir)
+      } else if (inDialog) {
+        // Formular-Dialog: lineare, vorhersehbare Navigation in Lese-Reihenfolge.
+        best = navLinearMove(dir, items, fromEl)
+      } else {
+        // Hauptoberfläche: geometrisch.
+        best = navBestInDir(items.filter(el => el !== fromEl), fromEl.getBoundingClientRect(), dir)
       }
-      if (!best) best = navBestInDir(items.filter(el => el !== fromEl), fromEl.getBoundingClientRect(), dir)
       if (best) {
         setNavFocus(best)
         // Beim Durchzappen der Spieleliste das Spiel gleich im Content-Fenster
