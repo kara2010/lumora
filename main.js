@@ -1336,7 +1336,11 @@ function setupAutoUpdate() {
   autoUpdater.autoInstallOnAppQuit = false   // Installation steuern wir selbst
 
   autoUpdater.on('update-available', (info) => {
-    sendToUi('update-available', { version: info.version, notes: typeof info.releaseNotes === 'string' ? info.releaseNotes : '' })
+    // releaseNotes kann String ODER Liste ({version, note}) sein – beides zu Text.
+    let notes = ''
+    if (typeof info.releaseNotes === 'string') notes = info.releaseNotes
+    else if (Array.isArray(info.releaseNotes)) notes = info.releaseNotes.map(n => (n && n.note) || '').join('\n\n')
+    sendToUi('update-available', { version: info.version, notes })
   })
   autoUpdater.on('update-not-available', () => {
     if (updateManualCheck) sendToUi('update-none', {})

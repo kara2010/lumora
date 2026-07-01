@@ -1,0 +1,8 @@
+Diese Version macht Lumora komplett gamepad-tauglich – ideal fürs Wohnzimmer am TV:
+
+• Komplette Gamepad-Steuerung der Oberfläche (D-Pad/Stick bewegen, A wählt/startet, B zurück)
+• Frei belegbarer globaler Hotkey – als Tastenkombination oder Gamepad-Knopf-Kombi (inkl. Xbox-Knopf)
+• Info-Tooltips beim Navigieren mit Controller/Tastatur
+• Rechter Analogstick scrollt Listen; Live-Vorschau beim Durchblättern der Spiele
+• Release-Notes direkt im Update-Dialog
+• Viele Feinschliffe an der Navigation: Fokus-Ring überall sichtbar, sauberes Scrollen, konsistente Dialog- und Rasterbedienung
