@@ -1820,6 +1820,24 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
   animation: updateToastIn 0.25s ease;
 }
 
+/* Info-Tooltip für das per Gamepad/Tastatur fokussierte Element */
+.nav-tooltip {
+  position: fixed;
+  z-index: 330;
+  padding: 6px 11px;
+  background: #1b1c20;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  color: #eee;
+  font-size: 12.5px;
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+
 /* --- Hotkey-Konfiguration --- */
 .hotkey-row {
   display: flex;
