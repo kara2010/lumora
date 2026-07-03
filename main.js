@@ -84,10 +84,43 @@ function applyAutostart() {
   })
 }
 
+// HWND eines Electron-Fensters als Zahl (0 wenn weg) – fuer Foreground-Vergleiche.
+function nativeHwnd(win) {
+  try { return win && !win.isDestroyed() ? Number(win.getNativeWindowHandle().readBigUInt64LE(0)) : 0 } catch { return 0 }
+}
+
+// Gibt den Vordergrund EXPLIZIT an das Fenster zurueck, dem wir ihn beim Hoch-
+// holen genommen haben (i.d.R. das laufende Spiel). Nur minimize()/hide() reicht
+// insbesondere GDK-/Xbox-Spielen (Forza & Co.) nicht: Windows aktiviert dann zwar
+// irgendein Fenster, aber ohne echten Foreground-Wechsel bleibt das Spiel halb
+// aktiv haengen – das Menue reagiert erst wieder nach einem manuellen Alt+Tab.
+// Dieser Aufruf ist genau dieses "Alt+Tab" in Software. Wichtig: Er muss laufen,
+// SOLANGE Lumora noch das Vordergrundfenster ist – nur dann erlaubt Windows
+// einem Prozess, den Vordergrund weiterzureichen.
+function restoreGameFocus() {
+  try {
+    if (!fgWin || !prevGameHwnd) return
+    if (!fgWin.isWin(prevGameHwnd)) { prevGameHwnd = 0; return }   // Spiel inzwischen beendet
+    // Hat der erzwungene Wechsel das Vollbild-Spiel minimiert (Windows kickt
+    // exklusives Vollbild beim Vordergrund-Verlust)? Dann erst wiederherstellen.
+    if (fgWin.isIconic(prevGameHwnd)) fgWin.showWin(prevGameHwnd, 9 /*SW_RESTORE*/)
+    const ok = fgWin.set(prevGameHwnd)
+    osdDbg('[focus] Vordergrund-Rueckgabe an hwnd=' + prevGameHwnd + ' ok=' + ok)
+  } catch {}
+}
+
 function showMainWindow() {
   // Fenster weg/zerstoert (z.B. wurde geschlossen, App lief noch)? Neu aufbauen,
   // statt auf einem toten Objekt zu operieren ("Object has been destroyed").
   if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return }
+  // Merken, wem wir gleich den Fokus wegnehmen (z.B. dem laufenden Spiel) –
+  // beim Verstecken gibt restoreGameFocus() ihn exakt dorthin zurueck.
+  try {
+    if (fgWin) {
+      const fg = Number(fgWin.get())
+      if (fg && fg !== nativeHwnd(mainWindow) && fg !== nativeHwnd(overlayWindow)) prevGameHwnd = fg
+    }
+  } catch {}
   if (mainWindow.isMinimized()) mainWindow.restore()
   // Windows verweigert SetForegroundWindow, wenn der Aufruf aus dem Hintergrund
   // kommt (Hotkey/Tray) – das Fenster blinkt dann nur in der Taskleiste, statt
@@ -102,12 +135,32 @@ function showMainWindow() {
   setTimeout(() => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false)
   }, 150)
+  // Kontrolle: Sind wir nach dem sanften Anheben WIRKLICH vorn? Vollbild-Spiele
+  // mit Input-Besitz (z.B. das Forza-Intro) blocken es ueber die Windows-
+  // Foreground-Sperre – ohne sichtbare Reaktion (Taskleiste versteckt), Lumora
+  // wirkt dann "abgestuerzt". Dann: Sperre per synthetischem Alt-Tipp loesen und
+  // den Vordergrund explizit erzwingen. Greift NUR im Fehlerfall.
+  setTimeout(() => {
+    try {
+      if (!fgWin || !mainWindow || mainWindow.isDestroyed()) return
+      const own = nativeHwnd(mainWindow)
+      if (!own || Number(fgWin.get()) === own) return   // sanfter Weg hat gereicht
+      osdDbg('[focus] sanftes Anheben geblockt -> erzwinge Vordergrund (Alt-Trick)')
+      fgWin.kbd(0x12, 0, 0, 0); fgWin.kbd(0x12, 0, 2 /*KEYUP*/, 0)
+      fgWin.set(own)
+      mainWindow.show()
+      mainWindow.focus()
+    } catch {}
+  }, 250)
 }
 
 // Globaler Hotkey: holt Lumora nach vorne bzw. versteckt es wieder (Toggle).
 function toggleMainWindow() {
   if (!mainWindow) return
   if (mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()) {
+    // ERST dem Spiel den Vordergrund sauber zurueckgeben (nur jetzt, als
+    // Vordergrund-Prozess, duerfen wir das), DANN verstecken.
+    restoreGameFocus()
     if (appSettings.minimizeToTray) mainWindow.hide()
     else mainWindow.minimize()
   } else {
@@ -1388,6 +1441,8 @@ let xinputPoll = null
 let xinputGetState = null
 let timeEndPeriodFn = null       // winmm.timeEndPeriod – bei Quit die 1-ms-Timer-Aufloesung freigeben
 let lastPollAt = 0               // Diagnose: Abstand zwischen Poll-Ticks (Timer-Traegheit erkennen)
+let fgWin = null                 // user32 GetForegroundWindow/SetForegroundWindow/IsWindow (HWNDs als Zahlen)
+let prevGameHwnd = 0             // Fenster, dem wir beim Hochholen den Fokus genommen haben (i.d.R. das Spiel)
 let gpHotkeyDown = false
 let gpOsdHotkeyDown = false
 // Release-Debounce statt Cooldown: XInput liest eine gehaltene Kombi nicht
@@ -1453,6 +1508,23 @@ function setupGamepadHotkey() {
     timeBeginPeriod(1)
     console.log('[hotkey] Timer-Aufloesung auf 1 ms gesetzt (praeziser Hintergrund-Poll)')
   } catch (e) { console.log('[hotkey] timeBeginPeriod nicht verfuegbar:', e && e.message) }
+  // Foreground-API fuer die saubere Fokus-Rueckgabe ans Spiel (siehe
+  // restoreGameFocus). HWNDs bewusst als Zahlen (uintptr) statt Pointer –
+  // einfacher zu merken und zu vergleichen.
+  try {
+    const u32 = koffi.load('user32.dll')
+    fgWin = {
+      get: u32.func('uintptr_t __stdcall GetForegroundWindow()'),
+      set: u32.func('int __stdcall SetForegroundWindow(uintptr_t hWnd)'),
+      isWin: u32.func('int __stdcall IsWindow(uintptr_t hWnd)'),
+      isIconic: u32.func('int __stdcall IsIconic(uintptr_t hWnd)'),
+      showWin: u32.func('int __stdcall ShowWindow(uintptr_t hWnd, int nCmdShow)'),
+      // Synthetischer Tastendruck: ein kurzes Alt "entsperrt" SetForegroundWindow
+      // (dokumentiertes Windows-Verhalten) – noetig gegen die Foreground-Sperre
+      // von Vollbild-Spielen (z.B. Forza-Intro).
+      kbd: u32.func('void __stdcall keybd_event(uint8 bVk, uint8 bScan, uint32 dwFlags, uintptr_t dwExtraInfo)'),
+    }
+  } catch (e) { fgWin = null; console.log('[hotkey] Foreground-API nicht ladbar:', e && e.message) }
   // Poll starten, sobald wenigstens EINE native Eingabe verfuegbar ist. 25 Hz reichen
   // fuer reaktive Hotkeys und halten die XInput-Last niedrig.
   if ((xinputGetState || getAsyncKey) && !xinputPoll) xinputPoll = setInterval(pollNativeHotkeys, 40)
