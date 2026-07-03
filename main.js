@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage, globalShortcut } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const os = require('os')
 const https = require('https')
 const { exec, spawn, execSync } = require('child_process')
 const crypto = require('crypto')
@@ -48,8 +49,11 @@ let appSettingsFile = null
 let gamesFile = null
 let prefsFile = null
 const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L', gamepadHotkey: [],
-  // OSD-Overlay: sichtbar?, Skalierung (Zoomfaktor), Ecke (tl/tr/bl/br), Panel-Deckkraft
-  osdEnabled: false, osdScale: 1, osdCorner: 'tl', osdOpacity: 0.55 }
+  // OSD-Overlay: sichtbar?, Skalierung (Zoomfaktor), Ecke (tl/tr/bl/br), Panel-Deckkraft, FPS-Messung
+  osdEnabled: false, osdScale: 1, osdCorner: 'tl', osdOpacity: 0.55, osdFps: false, osdFpsSource: 'auto', osdHotkey: 'Alt+O',
+  // OSD-Aussehen: Theme + welche Werte je Gruppe angezeigt werden + Akzentfarbe
+  osdTheme: 'compact', osdAccent: '#74e857',
+  osdFields: { gpu: ['load','temp','power','clock','vram'], cpu: ['load','temp','clock','power','ram'], fps: ['fps','frametime','graph'] } }
 app.isQuitting = false
 
 // Entfernt ein evtl. vorangestelltes UTF-8 BOM – sonst schlaegt JSON.parse fehl
@@ -75,7 +79,9 @@ function applyAutostart() {
 }
 
 function showMainWindow() {
-  if (!mainWindow) return
+  // Fenster weg/zerstoert (z.B. wurde geschlossen, App lief noch)? Neu aufbauen,
+  // statt auf einem toten Objekt zu operieren ("Object has been destroyed").
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return }
   if (mainWindow.isMinimized()) mainWindow.restore()
   // Windows verweigert SetForegroundWindow, wenn der Aufruf aus dem Hintergrund
   // kommt (Hotkey/Tray) – das Fenster blinkt dann nur in der Taskleiste, statt
@@ -103,13 +109,43 @@ function toggleMainWindow() {
   }
 }
 
-// (Neu-)Registriert den konfigurierten Toggle-Hotkey. Gibt true/false zurueck,
-// je nachdem ob die Kombination angenommen wurde (kann vom OS belegt sein).
+// --- Tastatur-Hotkeys --------------------------------------------------------
+// globalShortcut wird von Vollbild-Spielen/erhoehten Rechten (UIPI) abgefangen.
+// Deshalb pollen wir die Hotkeys fokusunabhaengig mit GetAsyncKeyState (siehe
+// pollNativeHotkeys) – das greift auch im Spiel. khHotkeys ist die aktive Liste.
+let khHotkeys = []   // [{ vk, alt, ctrl, shift, action, _down }]
+
+function accelKeyToVk(k) {
+  k = String(k || '').toLowerCase()
+  if (/^[a-z]$/.test(k)) return k.toUpperCase().charCodeAt(0)
+  if (/^[0-9]$/.test(k)) return k.charCodeAt(0)
+  const fm = k.match(/^f(\d{1,2})$/); if (fm && +fm[1] >= 1 && +fm[1] <= 24) return 0x6F + +fm[1]
+  return ({ space: 0x20, tab: 0x09, enter: 0x0d, return: 0x0d, esc: 0x1b, escape: 0x1b,
+    up: 0x26, down: 0x28, left: 0x25, right: 0x27, home: 0x24, end: 0x23,
+    insert: 0x2d, delete: 0x2e, pageup: 0x21, pagedown: 0x22, plus: 0xbb, '+': 0xbb })[k] || 0
+}
+function parseAccel(a) {
+  if (!a) return null
+  const parts = String(a).split('+').map(s => s.trim().toLowerCase()).filter(Boolean)
+  const vk = accelKeyToVk(parts[parts.length - 1]); if (!vk) return null
+  const mods = parts.slice(0, -1)
+  return { vk, alt: mods.includes('alt'), ctrl: mods.some(m => /^(ctrl|control|commandorcontrol|cmdorctrl)$/.test(m)), shift: mods.includes('shift') }
+}
+function rebuildHotkeys() {
+  khHotkeys = []
+  const add = (accel, action) => { const p = parseAccel(accel); if (p) khHotkeys.push(Object.assign(p, { action })) }
+  add(appSettings.toggleHotkey, toggleMainWindow)
+  add(appSettings.osdHotkey || 'Alt+O', toggleOverlay)
+  add('Alt+Shift+O', toggleOsdEdit)
+}
+// (Neu-)Registriert die Hotkeys. Ist der native Poll (GetAsyncKeyState) aktiv,
+// uebernimmt der die Tastatur-Hotkeys – auch im Spiel. Nur wenn der nicht
+// verfuegbar ist, faellt es auf globalShortcut zurueck (greift NICHT im Vollbild).
 function registerToggleHotkey() {
   globalShortcut.unregisterAll()
-  // Test-Hotkey fuer das OSD (spaeter frei konfigurierbar). Global, damit es auch
-  // funktioniert, waehrend ein Spiel im Vordergrund ist.
-  try { globalShortcut.register('Alt+O', toggleOverlay) } catch {}
+  rebuildHotkeys()
+  if (getAsyncKey) return true   // Poll erledigt die Tastatur-Hotkeys
+  try { globalShortcut.register(appSettings.osdHotkey || 'Alt+O', toggleOverlay) } catch {}
   try { globalShortcut.register('Alt+Shift+O', toggleOsdEdit) } catch {}
   const acc = appSettings.toggleHotkey
   if (!acc) return true
@@ -160,27 +196,664 @@ function setupNvml() {
   }
 }
 
-function readGpu() {
-  if (!nvml) return null
+// --- AMD-GPU-Sensoren via ADL — treiberfrei, aus dem AMD-Treiber (atiadlxx.dll) -
+// Pendant zu NVML: laeuft nur, wenn ein AMD-Treiber installiert ist (sonst inert –
+// atiadlxx.dll fehlt). Wir nehmen den modernen Weg ADL2_New_QueryPMLogData_Get,
+// der alle Sensoren in ein Array {supported,value}[256] fuellt (Buffer geparst,
+// robuster als koffi-Structs). Sensor-IDs laut ADL SDK.
+let adl = null
+// Einmal-Diagnose in eine EIGENE Datei (kein Laufzeit-Spam, unabhaengig von
+// OSD_DEBUG): zeigt Adapter + welche Sensoren die AMD-GPU liefert. -> justieren.
+function gpuDiag(msg) { try { fs.appendFileSync(path.join(app.getPath('temp'), 'lumora-gpu.log'), Date.now() + ' ' + msg + '\n') } catch {} }
+const ADL_PM = { gfxclk: 1, tempEdge: 8, gfxActivity: 19, asicPower: 23, tempHotspot: 27, tempGfx: 28, gfxPower: 30 }
+function setupAdl() {
+  let koffi
+  try { koffi = require('koffi') } catch { return }
+  let lib
+  try { lib = koffi.load('atiadlxx.dll') } catch { return }   // kein AMD-Treiber -> inert
   try {
-    const { f, device } = nvml
-    const u = {}, m = {}, t = [0], p = [0], c = [0]
-    f.util(device, u); f.temp(device, 0, t); f.power(device, p); f.clock(device, 0, c); f.mem(device, m)
-    return { name: nvml.model, load: u.gpu, temp: t[0], power: +(p[0] / 1000).toFixed(1), clock: c[0], vram: Math.round(Number(m.used) / 1048576) }
+    const malloc = koffi.load('msvcrt.dll').func('void* malloc(size_t size)')
+    const MALLOC = koffi.proto('void* ADLMalloc(int size)')
+    const mallocCb = koffi.register((s) => malloc(s), koffi.pointer(MALLOC))
+    const create = lib.func('int ADL2_Main_Control_Create(void* cb, int adapters, _Out_ void** ctx)')
+    const numGet = lib.func('int ADL2_Adapter_NumberOfAdapters_Get(void* ctx, _Out_ int* num)')
+    const infoGet = lib.func('int ADL2_Adapter_AdapterInfo_Get(void* ctx, void* info, int size)')
+    const queryGet = lib.func('int ADL2_New_QueryPMLogData_Get(void* ctx, int adapter, void* out)')
+    const ctx = [null]
+    if (create(mallocCb, 1, ctx) !== 0 || !ctx[0]) throw new Error('Main_Control_Create')
+    const num = [0]
+    if (numGet(ctx[0], num) !== 0 || !num[0]) throw new Error('NumberOfAdapters')
+    const INFO = 1572
+    const buf = Buffer.alloc(num[0] * INFO)
+    if (infoGet(ctx[0], buf, buf.length) !== 0) throw new Error('AdapterInfo_Get')
+    // AMD-VendorID: ADL liefert 1002 DEZIMAL (nicht den PCI-Hexwert 0x1002) – beide
+    // zulassen, damit es ueber Treiber-/GPU-Varianten hinweg greift.
+    const isAmd = (v) => v === 1002 || v === 0x1002
+    let found = null; const seen = []; const amdIdxs = []
+    for (let i = 0; i < num[0]; i++) {
+      const o = i * INFO
+      const vendor = buf.readInt32LE(o + 276), present = buf.readInt32LE(o + 792), idx = buf.readInt32LE(o + 4)
+      const nz = buf.indexOf(0, o + 280); const name = buf.toString('latin1', o + 280, nz < 0 ? o + 280 : nz)
+      seen.push('#' + idx + ' vendor=0x' + (vendor >>> 0).toString(16) + ' present=' + present + ' "' + name + '"')
+      if (isAmd(vendor) && present) { if (!found) found = { idx, name }; if (!amdIdxs.includes(idx)) amdIdxs.push(idx) }
+    }
+    gpuDiag('[ADL] ' + num[0] + ' Adapter: ' + seen.join(' | '))
+    adl = found ? { queryGet, ctx: ctx[0], idx: found.idx, name: found.name, _cb: mallocCb } : null
+    if (adl) {
+      // Diagnose + Auswahl: Sensoren jedes AMD-Adapter-Index dumpen und den ERSTEN
+      // nehmen, der wirklich Werte liefert (bei iGPUs ist "present" nicht zwingend
+      // der Adapter mit PMLog-Daten).
+      let bestIdx = -1
+      for (const ai of amdIdxs) {
+        const dump = Buffer.alloc(2052)
+        if (queryGet(ctx[0], ai, dump) === 0) {
+          const parts = []
+          for (let id = 0; id < 256; id++) { const o = 4 + id * 8; if (dump.readInt32LE(o)) parts.push(id + '=' + dump.readInt32LE(o + 4)) }
+          gpuDiag('[ADL] idx=' + ai + ' Sensoren [id=value]: ' + (parts.join(' ') || '(keine supported)'))
+          if (bestIdx < 0 && parts.length) bestIdx = ai
+        } else gpuDiag('[ADL] idx=' + ai + ' QueryPMLogData fehlgeschlagen')
+      }
+      if (bestIdx >= 0) adl.idx = bestIdx
+      gpuDiag('[ADL] aktiver Index fuer Auslesen: ' + adl.idx)
+      console.log('[osd] ADL aktiv:', found.name)
+    } else gpuDiag('[ADL] kein aktiver AMD-Adapter (VendorID 1002/0x1002) gefunden')
+  } catch (e) { gpuDiag('[ADL] Setup-Fehler: ' + (e && e.message)); adl = null }
+}
+function readAdlGpu() {
+  if (!adl) return null
+  try {
+    const buf = Buffer.alloc(2052)
+    if (adl.queryGet(adl.ctx, adl.idx, buf) !== 0) return null
+    const val = (id) => { const o = 4 + id * 8; return buf.readInt32LE(o) ? buf.readInt32LE(o + 4) : null }
+    // Temp: Edge/Hotspot (dedizierte Radeon) – fehlen bei iGPUs, dort GFX-Temp (28).
+    const temp = val(ADL_PM.tempEdge) ?? val(ADL_PM.tempHotspot) ?? val(ADL_PM.tempGfx)
+    const clock = val(ADL_PM.gfxclk)
+    const power = val(ADL_PM.gfxPower) ?? val(ADL_PM.asicPower)
+    const load = val(ADL_PM.gfxActivity)
+    if (temp == null && clock == null && power == null && load == null) return null
+    const u = (x) => x == null ? undefined : x
+    const nm = (adl.name || gpuName || 'GPU').replace(/\((R|TM)\)/gi, '').replace(/^AMD\s+/i, '').replace(/\s+Graphics$/i, '').trim()
+    return { brand: 'AMD', name: nm, load: u(load), temp: u(temp), power: u(power), clock: u(clock), vram: undefined }
   } catch { return null }
+}
+
+function readGpu() {
+  if (nvml) {
+    try {
+      const { f, device } = nvml
+      const u = {}, m = {}, t = [0], p = [0], c = [0]
+      f.util(device, u); f.temp(device, 0, t); f.power(device, p); f.clock(device, 0, c); f.mem(device, m)
+      return { brand: 'NVIDIA', name: nvml.model, load: u.gpu, temp: t[0], power: +(p[0] / 1000).toFixed(1), clock: c[0], vram: Math.round(Number(m.used) / 1048576) }
+    } catch { return null }
+  }
+  // Keine NVIDIA: erst ADL (treiberfrei, immer bei AMD), sonst Afterburner (MAHM).
+  const a = readAdlGpu()
+  if (a) return a
+  const m = readMahm()
+  if (m && m.gpuTemp != null) {
+    return { brand: 'GPU', name: gpuName, load: m.gpuLoad, temp: m.gpuTemp, power: m.gpuPower, clock: m.gpuClock, vram: m.gpuVram }
+  }
+  return null
+}
+// GPU-Name treiberfrei einmalig via WMI (fuer Nicht-NVIDIA; NVIDIA nutzt NVML).
+let gpuName = null
+function setupGpuName() {
+  try {
+    require('child_process').exec(
+      'powershell -NoProfile -Command "(Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch \'Microsoft|Basic|Remote\' } | Select-Object -First 1 -ExpandProperty Name)"',
+      { windowsHide: true, timeout: 5000 },
+      (err, stdout) => {
+        if (!err && stdout && stdout.trim()) {
+          gpuName = stdout.trim().replace(/\((R|TM|C)\)/gi, '').replace(/^AMD\s+Radeon\s*/i, 'RADEON ').replace(/^AMD\s+/i, '').replace(/\s+Graphics$/i, '').trim() || null
+        }
+      })
+  } catch {}
+}
+
+// --- CPU-Auslastung + RAM — treiberfrei ueber Node/Windows-Bordmittel ---------
+// Last/RAM immer treiberfrei. Temp/Takt/Power: Takt geht treiberfrei (PDH), Temp
+// und Power brauchen ein Sensor-Tool -> wir lesen sie aus Afterburner (MAHM),
+// falls aktiv; sonst bleiben sie null und werden im OSD ausgeblendet.
+let prevCpu = null
+function cpuLoadPercent() {
+  const cpus = os.cpus()
+  let idle = 0, total = 0
+  for (const c of cpus) { for (const k in c.times) total += c.times[k]; idle += c.times.idle }
+  if (!prevCpu) { prevCpu = { idle, total }; return 0 }
+  const di = idle - prevCpu.idle, dt = total - prevCpu.total
+  prevCpu = { idle, total }
+  return dt > 0 ? Math.max(0, Math.min(100, Math.round((1 - di / dt) * 100))) : 0
+}
+function readCpu() {
+  const raw = (os.cpus()[0] && os.cpus()[0].model) || 'CPU'
+  const brand = /intel/i.test(raw) ? 'INTEL' : /amd|ryzen/i.test(raw) ? 'AMD' : 'CPU'
+  const model = raw.replace(/\((R|TM)\)/gi, '').replace(/^AMD\s+/i, '').replace(/^Intel\s+/i, '')
+    .replace(/\s+w\/.*$/i, '').replace(/\s+with\s+.*$/i, '')   // "w/ Radeon 780M Graphics" weg (GPU hat eigenen Block)
+    .replace(/\s+\d+-Core Processor.*$/i, '').replace(/\s+CPU.*$/i, '').trim()
+  // Temp/Takt/Power aus Afterburner (falls aktiv). Ohne Afterburner nur der Takt
+  // treiberfrei (PDH); Temp/Power bleiben null -> im OSD ausgeblendet.
+  const m = readMahm()
+  let temp = null, clock = null, power = null
+  if (m && m.cpuTemp != null) { temp = m.cpuTemp; clock = m.cpuClock; power = m.cpuPower }
+  else { clock = readCpuClockMhz() }
+  return {
+    brand,
+    name: model,
+    load: cpuLoadPercent(),
+    ram: Math.round((os.totalmem() - os.freemem()) / 1048576),
+    temp, clock, power,
+  }
+}
+
+// --- FPS/Frametime via PresentMon (ETW, keine Injection) ----------------------
+// PresentMon schreibt CSV in eine Temp-Datei; wir "tailen" sie und rechnen daraus
+// FPS/Frametime des gerade aktivsten (praesentierenden) Spiels. PresentMon braucht
+// Adminrechte -> wird elevated gestartet (ein UAC-Dialog). Faellt weg/scheitert,
+// bleiben FPS einfach auf "—".
+// --- FPS-Quelle 1 (bevorzugt): RivaTuner Statistics Server (RTSS) -------------
+// Laeuft RTSS/Afterburner ohnehin, lesen wir FPS/Frametime direkt aus dessen
+// Shared Memory – kein Admin, kein UAC, kein ETW-Konflikt.
+let rtss = null
+function setupRtss() {
+  let koffi
+  try { koffi = require('koffi') } catch { return }
+  try {
+    const k32 = koffi.load('kernel32.dll')
+    rtss = {
+      koffi,
+      open: k32.func('void* OpenFileMappingA(uint32 access, int inherit, str name)'),
+      map: k32.func('void* MapViewOfFile(void* h, uint32 access, uint32 offHi, uint32 offLo, size_t bytes)'),
+      unmap: k32.func('int UnmapViewOfFile(void* p)'),
+      close: k32.func('int CloseHandle(void* h)'),
+      ticks: k32.func('uint32 GetTickCount()'),
+      HDR: koffi.struct({ dwSignature: 'uint32', dwVersion: 'uint32', dwAppEntrySize: 'uint32', dwAppArrOffset: 'uint32', dwAppArrSize: 'uint32', dwOSDEntrySize: 'uint32', dwOSDArrOffset: 'uint32', dwOSDArrSize: 'uint32', dwOSDFrame: 'uint32' }),
+      APP: koffi.struct({ dwProcessID: 'uint32', szName: koffi.array('uint8', 260), dwFlags: 'uint32', dwTime0: 'uint32', dwTime1: 'uint32', dwFrames: 'uint32', dwFrameTime: 'uint32' }),
+      base: 0, handle: 0,   // dauerhaft offene Zuordnung fuer schnelle Reads
+    }
+    console.log('[fps] RTSS-Leser bereit')
+  } catch (e) { console.log('[fps] RTSS-Setup fehlgeschlagen:', e && e.message); rtss = null }
+}
+function rtssApi(flags) {
+  return ({ 1: 'OpenGL', 2: 'DirectDraw', 3: 'D3D8', 4: 'D3D9', 5: 'D3D9', 6: 'D3D10', 7: 'D3D11', 8: 'D3D12', 9: 'D3D12', 10: 'Vulkan' })[flags & 0xffff] || null
+}
+function rtssAvailable() {
+  if (!rtss) return false
+  const h = rtss.open(0x0004, 0, 'RTSSSharedMemoryV2')
+  if (h) { try { rtss.close(h) } catch {} return true }
+  return false
+}
+// Liest den zuletzt aktualisierten, aktiv praesentierenden App-Eintrag.
+// Pro Aufruf oeffnen/schliessen – bewaehrt und robust (koffi mag wiederverwendete
+// Map-Zeiger nicht). Bei 30 Hz ist der Overhead vernachlaessigbar.
+function readRtssFps() {
+  if (!rtss) return null
+  const h = rtss.open(0x0004, 0, 'RTSSSharedMemoryV2')
+  if (!h) return null
+  let base = 0
+  try {
+    base = rtss.map(h, 0x0004, 0, 0, 0)
+    if (!base) return null
+    const hdr = rtss.koffi.decode(base, rtss.HDR)
+    const now = rtss.ticks()
+    let best = null
+    const n = Math.min(hdr.dwAppArrSize, 4096)
+    for (let i = 0; i < n; i++) {
+      const e = rtss.koffi.decode(base, hdr.dwAppArrOffset + i * hdr.dwAppEntrySize, rtss.APP)
+      if (!e.dwProcessID || !e.dwFrameTime) continue
+      if (((now - e.dwTime1) >>> 0) > 1500) continue   // veralteter Eintrag (Spiel praesentiert nicht mehr)
+      if (!best || e.dwTime1 > best.dwTime1) best = e
+    }
+    if (!best) return null
+    const dt = best.dwTime1 - best.dwTime0
+    return {
+      fps: dt > 0 ? Math.round(best.dwFrames * 1000 / dt) : Math.round(1000000 / best.dwFrameTime),
+      frametime: +(best.dwFrameTime / 1000).toFixed(1),   // momentane Frametime -> lebendiger Graph
+      api: rtssApi(best.dwFlags),
+    }
+  } catch { return null }
+  finally {
+    if (base) { try { rtss.unmap(base) } catch {} }
+    try { rtss.close(h) } catch {}
+  }
+}
+
+// --- CPU-Temp/Takt/Power aus MSI Afterburner ("MAHMSharedMemory") --------------
+// Treiberfrei bei uns: laeuft Afterburner, schreibt es alle Sensoren in ein Shared
+// Memory. Wir lesen die Aggregat-Eintraege "CPU temperature/clock/power" – exakt
+// wie der RTSS-FPS-Leser (pro Aufruf open/map/decode/unmap; koffi mag keine
+// dauerhaft wiederverwendeten Map-Zeiger). Laeuft Afterburner nicht -> null.
+let mahm = null
+let mahmOffsets = null         // { numEntries, <key>: dataOffset } – einmal gesucht
+let mahmVal, mahmValAt = 0     // Ergebnis-Cache: ein echter Read pro OSD-Tick (readCpu+readGpu teilen ihn)
+const MAHM_SIG = 0x4D41484D    // 'MAHM'
+// Gesuchte Aggregat-Sensoren (Afterburner-Namen) -> interner Schluessel
+const MAHM_SENSORS = {
+  cpuTemp: 'CPU temperature', cpuClock: 'CPU clock', cpuPower: 'CPU power',
+  gpuTemp: 'GPU temperature', gpuClock: 'Core clock', gpuPower: 'Power',
+  gpuLoad: 'GPU usage', gpuVram: 'Memory usage',
+}
+function setupMahm() {
+  let koffi
+  try { koffi = require('koffi') } catch { return }
+  try {
+    const k32 = koffi.load('kernel32.dll')
+    mahm = {
+      koffi,
+      open: k32.func('void* OpenFileMappingA(uint32 access, int inherit, str name)'),
+      map: k32.func('void* MapViewOfFile(void* h, uint32 access, uint32 offHi, uint32 offLo, size_t bytes)'),
+      unmap: k32.func('int UnmapViewOfFile(void* p)'),
+      close: k32.func('int CloseHandle(void* h)'),
+      HDR: koffi.struct({ sig: 'uint32', ver: 'uint32', headerSize: 'uint32', numEntries: 'uint32', entrySize: 'uint32' }),
+      NAME: koffi.array('uint8', 32),
+    }
+    console.log('[osd] MAHM-Leser bereit (CPU-Werte aus Afterburner, falls aktiv)')
+  } catch (e) { console.log('[osd] MAHM-Setup fehlgeschlagen:', e && e.message); mahm = null }
+}
+function readMahmRaw() {
+  if (!mahm) return null
+  const h = mahm.open(0x0004 /*FILE_MAP_READ*/, 0, 'MAHMSharedMemory')
+  if (!h) { mahmOffsets = null; return null }   // Afterburner laeuft nicht
+  let base = 0
+  try {
+    base = mahm.map(h, 0x0004, 0, 0, 0)
+    if (!base) return null
+    const hdr = mahm.koffi.decode(base, mahm.HDR)
+    if (hdr.sig !== MAHM_SIG || !hdr.numEntries) return null
+    // Die gesuchten Aggregat-Sensoren einmal suchen und ihre data-Offsets cachen
+    // (aendern sich waehrend einer Afterburner-Sitzung nicht; neu bei geaenderter
+    // Eintragszahl). Eintrag: 5x char[260], dann float data (Offset 5*260).
+    if (!mahmOffsets || mahmOffsets.numEntries !== hdr.numEntries) {
+      const off = { numEntries: hdr.numEntries }
+      const wanted = new Map(Object.entries(MAHM_SENSORS).map(([k, n]) => [n, k]))
+      for (let i = 0; i < hdr.numEntries; i++) {
+        const eOff = hdr.headerSize + i * hdr.entrySize
+        const nb = Buffer.from(mahm.koffi.decode(base, eOff, mahm.NAME))
+        const z = nb.indexOf(0); const name = nb.toString('latin1', 0, z < 0 ? nb.length : z)
+        const key = wanted.get(name)
+        if (key) off[key] = eOff + 5 * 260
+      }
+      mahmOffsets = off
+    }
+    const f = (k) => mahmOffsets[k] ? Math.round(mahm.koffi.decode(base, mahmOffsets[k], 'float')) : null
+    return {
+      cpuTemp: f('cpuTemp'), cpuClock: f('cpuClock'), cpuPower: f('cpuPower'),
+      gpuTemp: f('gpuTemp'), gpuClock: f('gpuClock'), gpuPower: f('gpuPower'),
+      gpuLoad: f('gpuLoad'), gpuVram: f('gpuVram'),
+    }
+  } catch { return null }
+  finally {
+    if (base) { try { mahm.unmap(base) } catch {} }
+    try { mahm.close(h) } catch {}
+  }
+}
+// Ein echter Shared-Memory-Read pro OSD-Tick; readCpu und readGpu teilen sich das
+// Ergebnis (sie werden im selben tick() direkt nacheinander aufgerufen).
+function readMahm() {
+  const now = Date.now()
+  if (mahmVal !== undefined && (now - mahmValAt) < 150) return mahmVal
+  mahmVal = readMahmRaw(); mahmValAt = now
+  return mahmVal
+}
+
+// --- CPU-Takt treiberfrei via PDH-Performance-Counter -------------------------
+// Fallback ohne Afterburner: "% Processor Performance" (kann >100 = Boost) x
+// Basistakt = aktueller Takt – genau wie der Windows-Task-Manager. PdhAddEnglish-
+// Counter -> sprachunabhaengig. Temp/Power gibt es so NICHT (nur mit Sensor-Tool).
+let cpuClock = null
+function setupCpuClock() {
+  let koffi
+  try { koffi = require('koffi') } catch { return }
+  try {
+    const pdh = koffi.load('pdh.dll')
+    const openQ = pdh.func('long PdhOpenQueryA(str src, uintptr user, _Out_ void** q)')
+    const addC = pdh.func('long PdhAddEnglishCounterA(void* q, str path, uintptr user, _Out_ void** c)')
+    const collect = pdh.func('long PdhCollectQueryData(void* q)')
+    koffi.struct('PDH_FMT_COUNTERVALUE', { CStatus: 'uint32', _pad: 'uint32', doubleValue: 'double' })
+    const getVal = pdh.func('long PdhGetFormattedCounterValue(void* c, uint32 fmt, void* type, _Out_ PDH_FMT_COUNTERVALUE* v)')
+    const q = [null]
+    if (openQ(null, 0, q) !== 0) throw new Error('PdhOpenQuery')
+    const c = [null]
+    if (addC(q[0], '\\Processor Information(_Total)\\% Processor Performance', 0, c) !== 0) throw new Error('PdhAddEnglishCounter')
+    collect(q[0])   // erstes Sample (Ratenzaehler braucht zwei)
+    cpuClock = { collect, getVal, q: q[0], c: c[0] }
+    console.log('[osd] PDH-Takt-Leser bereit (treiberfreier Boost-Takt)')
+  } catch (e) { console.log('[osd] PDH-Takt nicht verfuegbar:', e && e.message); cpuClock = null }
+}
+function readCpuClockMhz() {
+  if (!cpuClock) return null
+  try {
+    cpuClock.collect(cpuClock.q)
+    const v = {}
+    if (cpuClock.getVal(cpuClock.c, 0x00000200 /*PDH_FMT_DOUBLE*/, null, v) !== 0) return null
+    const base = (os.cpus()[0] || {}).speed || 0
+    const mhz = Math.round(base * v.doubleValue / 100)
+    return mhz > 0 ? mhz : null
+  } catch { return null }
+}
+
+function getPresentMonPath() {
+  return app.isPackaged ? path.join(process.resourcesPath, 'PresentMon.exe') : path.join(__dirname, 'PresentMon.exe')
+}
+
+// --- Shared Memory zwischen elevated Broker und normaler App ------------------
+// Der Broker (Lumora.exe --fps-broker, via geplanter Aufgabe mit hoechsten
+// Rechten) misst FPS und schreibt sie hier hinein; die App liest sie – ganz
+// ohne UAC/Abmelden im Betrieb. Heartbeat (appTick/wanted) beendet den Broker
+// sauber, sobald die App ihn nicht mehr braucht.
+const FPS_TASK = 'LumoraOSD-FPS'
+const SHM_NAME = 'Local\\LumoraOSDFps'
+const SHM_MAGIC = 0x4C4F5344   // 'LOSD'
+// Diagnose-Log fuer den OSD-/Broker-/FPS-Pfad. Standardmaessig AUS (kein Spam im
+// Normalbetrieb). Zum Einschalten die Flag-Datei anlegen und Lumora neu starten:
+//   type nul > "%TEMP%\lumora-osd-debug.on"
+// Beim Start EINMAL geprueft; gilt fuer App UND (separaten) Broker-Prozess, da
+// beide dasselbe %TEMP% nutzen. Danach schreiben alle osdDbg()-Aufrufe nach
+// %TEMP%\lumora-osd.log; ist die Flag-Datei aus, kostet osdDbg praktisch nichts.
+const OSD_DEBUG = (() => { try { return fs.existsSync(path.join(app.getPath('temp'), 'lumora-osd-debug.on')) } catch { return false } })()
+function osdDbg(msg) { if (!OSD_DEBUG) return; try { fs.appendFileSync(path.join(app.getPath('temp'), 'lumora-osd.log'), Date.now() + ' ' + msg + '\n') } catch {} }
+let shm = null
+let shmStructs = null   // koffi-Structs nur EINMAL definieren (sonst wirft koffi bei Wiederholung)
+function shmemInit() {
+  if (shm) return true
+  let koffi
+  try { koffi = require('koffi') } catch (e) { osdDbg('shmemInit: koffi fehlt ' + (e && e.message)); return false }
+  try {
+    const k32 = koffi.load('kernel32.dll')
+    const CreateFileMappingA = k32.func('void* CreateFileMappingA(void* hFile, void* sec, uint32 protect, uint32 maxHi, uint32 maxLo, str name)')
+    if (!shmStructs) {
+      // Getrennte Schreibbereiche: Broker @0 (magic..pid), App @24 (appTick,wanted).
+      shmStructs = {
+        FULL: koffi.struct('LumoraFpsFull', { magic: 'uint32', brokerTick: 'uint32', fps: 'uint32', frametimeX100: 'uint32', apiCode: 'uint32', pid: 'uint32', appTick: 'uint32', wanted: 'uint32' }),
+        BROKER: koffi.struct('LumoraFpsBroker', { magic: 'uint32', brokerTick: 'uint32', fps: 'uint32', frametimeX100: 'uint32', apiCode: 'uint32', pid: 'uint32' }),
+        APP: koffi.struct('LumoraFpsApp', { appTick: 'uint32', wanted: 'uint32' }),
+      }
+    }
+    // Handle bleibt dauerhaft offen (haelt die Section am Leben). ABER: gemappt wird
+    // PRO Zugriff frisch (map/decode|encode/unmap) – exakt wie beim RTSS-Leser. Ein
+    // dauerhaft wiederverwendeter Map-Zeiger liefert mit koffi PROZESSUEBERGREIFEND
+    // inkohaerente Snapshots (magic=0 trotz fps>0) – genau der Fehler, den wir beim
+    // RTSS-Pfad schon hatten. Frisches Mapping je Aufruf behebt das.
+    const h = CreateFileMappingA(koffi.as(-1, 'void*'), null, 0x04 /*PAGE_READWRITE*/, 0, 64, SHM_NAME)
+    if (!h) { osdDbg('shmemInit: CreateFileMapping=0'); return false }
+    shm = {
+      koffi, handle: h, FULL: shmStructs.FULL, BROKER: shmStructs.BROKER, APP: shmStructs.APP,
+      map: k32.func('void* MapViewOfFile(void* h, uint32 access, uint32 offHi, uint32 offLo, size_t bytes)'),
+      unmap: k32.func('int UnmapViewOfFile(void* p)'),
+      ticks: k32.func('uint32 GetTickCount()'),
+    }
+    osdDbg('shmemInit OK (pid=' + process.pid + ')')
+    return true
+  } catch (e) { osdDbg('shmemInit throw: ' + (e && e.message)); return false }
+}
+function shmReadFull() {
+  if (!shm) return null
+  const base = shm.map(shm.handle, 0xF001F /*FILE_MAP_ALL_ACCESS*/, 0, 0, 0)
+  if (!base) return null
+  try { return shm.koffi.decode(base, shm.FULL) }
+  catch { return null }
+  finally { try { shm.unmap(base) } catch {} }
+}
+function shmWriteBroker(o) {
+  if (!shm) return
+  const base = shm.map(shm.handle, 0xF001F, 0, 0, 0)
+  if (!base) return
+  try { shm.koffi.encode(base, 0, shm.BROKER, o) } catch {}
+  finally { try { shm.unmap(base) } catch {} }
+}
+function shmWriteApp(appTick, wanted) {
+  if (!shm) return
+  const base = shm.map(shm.handle, 0xF001F, 0, 0, 0)
+  if (!base) return
+  try { shm.koffi.encode(base, 24, shm.APP, { appTick, wanted }) } catch {}
+  finally { try { shm.unmap(base) } catch {} }
+}
+
+// Broker-Prozess: laeuft elevated, misst FPS via PresentMon und fuellt den
+// Shared Memory. Beendet sich (und PresentMon) sauber, wenn die App weg ist.
+function runFpsBroker() {
+  if (!shmemInit()) { app.quit(); return }
+  // Laeuft bereits ein anderer Broker (frischer brokerTick)? Dann SOFORT raus –
+  // niemals PresentMon starten, sonst wuergt --stop_existing_session die laufende
+  // ETW-Session ab (= genau die ~2s-Aussetzer). Es darf nur EIN Broker leben.
+  const s0 = shmReadFull()
+  if (s0 && s0.magic === SHM_MAGIC && s0.brokerTick && ((shm.ticks() - s0.brokerTick) >>> 0) < 2500) {
+    osdDbg('[broker] anderer Broker bereits aktiv – beende mich sofort'); app.quit(); return
+  }
+  const frames = new Map()
+  let partial = '', cols = null
+  let rawLines = 0
+  const seenApps = new Set()   // ALLE App-Namen, die PresentMon meldet (auch ignorierte)
+  const exe = getPresentMonPath()
+  const args = ['--output_stdout', '--session_name', 'LumoraOSD', '--stop_existing_session', '--no_console_stats', '--v1_metrics']
+  let child = null
+  try { child = spawn(exe, args, { windowsHide: true }) } catch { app.quit(); return }
+  osdDbg('[broker] gestartet, PresentMon pid=' + child.pid)
+  child.stderr.on('data', (d) => osdDbg('[broker] PM-stderr: ' + d.toString().trim()))
+
+  child.stdout.on('data', (d) => {
+    const lines = (partial + d.toString('utf8')).split(/\r?\n/)
+    partial = lines.pop()
+    for (const line of lines) {
+      if (!line) continue
+      const p = line.split(',')
+      if (!cols) {
+        const idx = (n) => p.findIndex(h => h.trim().toLowerCase() === n)
+        cols = { app: idx('application'), pid: idx('processid'), t: idx('timeinseconds'), ft: idx('msbetweenpresents') }
+        continue
+      }
+      const pid = p[cols.pid], appn = (p[cols.app] || '').trim()
+      const t = parseFloat(p[cols.t]), ft = parseFloat(p[cols.ft])
+      rawLines++
+      if (appn && seenApps.size < 40) seenApps.add(appn.toLowerCase())
+      if (!pid || isNaN(t) || isNaN(ft) || PM_IGNORE.has(appn.toLowerCase())) continue
+      let e = frames.get(pid); if (!e) { e = { pid: Number(pid), times: [], ft: [] }; frames.set(pid, e) }
+      e.times.push(t); e.ft.push(ft); if (e.times.length > 400) { e.times.shift(); e.ft.shift() }
+    }
+  })
+
+  const startTick = shm.ticks()
+  let lastFreshApp = shm.ticks()   // letzter Zeitpunkt mit frischem App-Heartbeat
+  let brokerDbg = 0, brokerWriteDbg = 0
+  const wtimer = setInterval(() => {
+    const now = shm.ticks()
+    const s = shmReadFull()
+    if (Date.now() - brokerDbg > 2000) {   // Diagnose: liefert PresentMon ueberhaupt Daten?
+      brokerDbg = Date.now()
+      osdDbg('[broker] PM rawLines=' + rawLines + ' nichtIgnorierteProzesse=' + frames.size + ' apps=[' + [...seenApps].join(',') + ']')
+    }
+    // App lebt, solange appTick frisch ist. wanted wird bewusst IGNORIERT, weil es
+    // beim Umschalten kurz auf 0 zucken kann – nur dauerhaftes Ausbleiben zaehlt.
+    if (s && s.appTick && ((now - s.appTick) >>> 0) < 3000) lastFreshApp = now
+    if (((now - startTick) >>> 0) > 8000 && ((now - lastFreshApp) >>> 0) > 5000) {
+      osdDbg('[broker] Exit: kein frischer App-Heartbeat seit 5s (App zu / FPS aus)')
+      cleanup(); return
+    }
+    // Aktivsten Praesentierer der letzten 0,5 s bestimmen (reaktiver als 1 s).
+    const WIN = 0.5
+    let best = null, bestC = 0, tmax = 0
+    for (const e of frames.values()) if (e.times.length) tmax = Math.max(tmax, e.times[e.times.length - 1])
+    for (const e of frames.values()) {
+      let c = 0
+      for (let i = e.times.length - 1; i >= 0 && e.times[i] >= tmax - WIN; i--) c++
+      // fps = Frames im Fenster / Fensterlaenge (stabile Zahl), Frametime = letzte (momentan)
+      if (c > bestC) { bestC = c; best = { pid: e.pid, fps: Math.round(c / WIN), ft: e.ft[e.ft.length - 1] } }
+    }
+    const outFps = best && bestC >= 2 ? best.fps : 0
+    shmWriteBroker({
+      magic: SHM_MAGIC, brokerTick: now,
+      fps: outFps, frametimeX100: best && bestC >= 2 ? Math.round(best.ft * 100) : 0,
+      apiCode: 0, pid: best ? best.pid : 0,
+    })
+    // Diagnose: Was RECHNET/SCHREIBT der Broker – und liest er den App-Heartbeat?
+    if (Date.now() - brokerWriteDbg > 1000) {
+      brokerWriteDbg = Date.now()
+      osdDbg('[broker] schreibe fps=' + outFps + ' bestC=' + bestC + ' procs=' + frames.size + ' appTickGesehen=' + ((s && s.appTick) >>> 0) + ' brokerNow=' + now)
+    }
+  }, 16)   // ~60 Hz
+
+  let cleaned = false
+  function cleanup() { if (cleaned) return; cleaned = true; clearInterval(wtimer); try { child.kill() } catch {} app.quit() }
+  child.on('exit', (code, sig) => { osdDbg('[broker] PresentMon EXIT code=' + code + ' sig=' + sig); cleanup() })
+  app.on('window-all-closed', (e) => { e.preventDefault() })   // Broker hat kein Fenster
+}
+const PM_IGNORE = new Set(['dwm.exe', 'explorer.exe', 'lumora.exe', 'presentmon.exe', 'searchhost.exe',
+  'textinputhost.exe', 'shellexperiencehost.exe', 'startmenuexperiencehost.exe', 'applicationframehost.exe'])
+// --- App-Seite des Brokers ----------------------------------------------------
+// Startet den elevated Broker per geplanter Aufgabe (kein UAC) und liest dessen
+// FPS aus dem Shared Memory. Existiert die Aufgabe nicht -> Einrichtungs-Hinweis.
+let brokerSpawnAt = 0
+// Lebt gerade ein Broker? (Frischer brokerTick im Shared Memory.)
+function brokerAlive() {
+  if (!shm) return false
+  const s = shmReadFull()
+  return !!(s && s.magic === SHM_MAGIC && s.brokerTick && ((shm.ticks() - s.brokerTick) >>> 0) < 2500)
+}
+// Ist die geplante FPS-Aufgabe bereits registriert?
+function fpsTaskPresent() {
+  try { return require('child_process').spawnSync('schtasks', ['/query', '/tn', FPS_TASK], { windowsHide: true }).status === 0 }
+  catch { return false }
+}
+// Legt die Aufgabe EINMAL elevated an (ein UAC-Dialog). Danach startet der Broker
+// per schtasks /run ganz ohne weiteres UAC. Register-ScheduledTask laeuft in der
+// interaktiven Nutzer-Session mit hoechsten Rechten -> selber "Local\"-Namespace
+// fuers Shared Memory UND Adminrechte fuer PresentMon/ETW.
+function createFpsTaskElevated() {
+  const exe = process.execPath.replace(/'/g, "''")
+  const ps = [
+    `$a=New-ScheduledTaskAction -Execute '${exe}' -Argument '--fps-broker'`,
+    `$p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive`,
+    `$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew`,
+    `Register-ScheduledTask -TaskName '${FPS_TASK}' -Action $a -Principal $p -Settings $s -Force`,
+  ].join('; ')
+  const b64 = Buffer.from(ps, 'utf16le').toString('base64')
+  const outer = `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand ${b64}'`
+  try { spawn('powershell', ['-NoProfile', '-Command', outer], { windowsHide: true }) } catch (e) { osdDbg('createFpsTask: ' + (e && e.message)) }
+}
+function runFpsTask() {
+  osdDbg('startBroker: schtasks /run ' + FPS_TASK)
+  const p = spawn('schtasks', ['/run', '/tn', FPS_TASK], { windowsHide: true })
+  let bad = false, errOut = ''
+  p.stderr.on('data', (d) => { bad = true; errOut += d.toString() })
+  p.on('error', (e) => { bad = true; errOut += (e && e.message) })
+  p.on('exit', (code) => osdDbg('startBroker: schtasks exit code=' + code + ' bad=' + bad + ' ' + errOut.trim()))
+}
+let fpsTaskCreating = false
+function startBroker() {
+  if (!shmemInit()) { osdDbg('startBroker: shmemInit FAIL'); return }
+  shmWriteApp(shm.ticks(), 1)                 // will FPS -> Broker soll laufen
+  // Idempotent: nur starten, wenn KEIN Broker lebt UND wir nicht gerade eben
+  // schon einen angestossen haben (er braucht ~1-2s bis zum ersten brokerTick).
+  // Ohne das entsteht ein Spawn-Sturm -> mehrere PresentMon-Instanzen reissen
+  // sich gegenseitig die ETW-Session weg -> ~2s-Aussetzer bei jedem Neustart.
+  const now = Date.now()
+  if (brokerAlive() || (now - brokerSpawnAt) < 4000) { osdDbg('startBroker: Broker laeuft/startet bereits – kein Neustart'); return }
+  brokerSpawnAt = now
+  // Aufgabe noch nicht da (frisches System)? Erst dem Nutzer ERKLAEREN, was gleich
+  // passiert (sonst ist der Windows-UAC-Dialog voellig kontextlos), dann EINMAL
+  // elevated anlegen (UAC), auf die Erstellung warten, starten. Ohne die Aufgabe
+  // gaebe es nie FPS.
+  if (!fpsTaskPresent()) {
+    if (fpsTaskCreating) return
+    fpsTaskCreating = true
+    const parent = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : null
+    dialog.showMessageBox(parent, {
+      type: 'info', noLink: true,
+      title: 'FPS-Anzeige einrichten',
+      message: 'FPS-Anzeige einrichten',
+      detail: 'Damit Lumora die Bildrate (FPS) im Spiel messen kann, richtet es einmalig einen kleinen Hintergrunddienst ein.\n\nGleich fragt Windows nach deiner Bestaetigung mit Administratorrechten (ein Dialog von "Windows PowerShell"). Das ist nur fuer diese einmalige Einrichtung noetig – danach nie wieder.',
+      buttons: ['Einrichten', 'Abbrechen'], defaultId: 0, cancelId: 1,
+    }).then((r) => {
+      if (r.response !== 0) {                         // abgelehnt -> FPS aus, nicht staendig neu fragen
+        fpsTaskCreating = false
+        appSettings.osdFps = false; saveAppSettings(); stopFps()
+        if (parent) parent.webContents.send('osd-fps-off')
+        osdDbg('startBroker: Einrichtung abgelehnt -> FPS aus')
+        return
+      }
+      osdDbg('startBroker: Aufgabe fehlt -> lege sie elevated an (UAC)')
+      createFpsTaskElevated()
+      let tries = 0
+      const wait = setInterval(() => {
+        if (fpsTaskPresent()) { clearInterval(wait); fpsTaskCreating = false; osdDbg('startBroker: Aufgabe angelegt'); runFpsTask() }
+        else if (++tries >= 30) { clearInterval(wait); fpsTaskCreating = false; osdDbg('startBroker: Aufgabe nicht angelegt (UAC abgelehnt?)') }
+      }, 1000)
+    }).catch(() => { fpsTaskCreating = false })
+    return
+  }
+  runFpsTask()
+}
+function stopBroker() {
+  shmWriteApp(0, 0)                           // Broker beendet sich (+ PresentMon)
+}
+let lastGoodFps = null, lastGoodAt = 0, readDbgAt = 0
+function readBrokerFps() {
+  if (!shm) return null
+  const now = shm.ticks()
+  shmWriteApp(now, 1)                          // Heartbeat
+  const s = shmReadFull()
+  // Diagnose: liest die App ihren EIGENEN appTick@24 zurueck (Mapping ok?) und was
+  // steht in magic@0/fps@8 (Broker-Bereich)? appEcho ~ now => App liest ihre eigene
+  // Section korrekt; ist dann magic=0, schreiben App+Broker in GETRENNTE Sections.
+  if (Date.now() - readDbgAt > 1000) {
+    readDbgAt = Date.now()
+    osdDbg('[app] read: magic=0x' + ((s && s.magic) >>> 0).toString(16) + ' brokerTick=' + ((s && s.brokerTick) >>> 0) + ' fps=' + (s && s.fps) + ' appEcho=' + ((s && s.appTick) >>> 0) + ' now=' + now + ' d=' + (s ? ((now - s.appTick) >>> 0) : '-'))
+  }
+  const brokerAge = s && s.brokerTick ? ((now - s.brokerTick) >>> 0) : 999999
+  const fresh = s && s.magic === SHM_MAGIC && brokerAge <= 1500 && s.fps
+  if (fresh) {
+    lastGoodFps = { fps: s.fps, frametime: s.frametimeX100 / 100, api: null }
+    lastGoodAt = Date.now()
+    return lastGoodFps
+  }
+  // Aussetzer ueberbruecken: letzten gueltigen Wert bis 1,5 s halten – egal ob
+  // brokerTick kurz "stale" oder fps momentan 0.
+  if (lastGoodFps && Date.now() - lastGoodAt < 1500) return lastGoodFps
+  return null
+}
+
+// FPS-Sende-Schleife: bevorzugt RTSS (kein Admin), sonst PresentMon-Broker.
+let fpsTimer = null, fpsUseRtss = false
+function startFps() {
+  if (fpsTimer) return
+  const src = appSettings.osdFpsSource || 'auto'
+  fpsUseRtss = src === 'rtss' ? true : src === 'presentmon' ? false : rtssAvailable()
+  if (!fpsUseRtss) startBroker()
+  console.log('[fps] Quelle:', fpsUseRtss ? 'RTSS' : 'PresentMon-Broker')
+  fpsTimer = setInterval(() => {
+    if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return
+    const f = fpsUseRtss ? readRtssFps() : readBrokerFps()
+    if (f) overlayWindow.webContents.send('osd-data', { fps: f.fps, frametime: f.frametime, api: f.api || undefined })
+    else overlayWindow.webContents.send('osd-data', { fps: '…' })
+  }, 33)   // ~30 Hz fuer den Frametime-Graphen; die Zahlen drosselt das OSD auf lesbare ~4 Hz
+}
+function stopFps() {
+  if (fpsTimer) { clearInterval(fpsTimer); fpsTimer = null }
+  if (!fpsUseRtss) stopBroker()
+}
+
+// Startet/stoppt die FPS-Messung idempotent, passend zum gewuenschten Zustand
+// (Overlay sichtbar UND FPS aktiviert). Verhindert Spawn-/Kill-Stuerme, wenn
+// set-app-settings bei jeder Slider-Bewegung erneut aufgerufen wird.
+function syncFps() {
+  const vis = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()
+  const want = !!(appSettings.osdEnabled && appSettings.osdFps && vis)
+  if (want && !fpsTimer) startFps()
+  else if (!want && fpsTimer) stopFps()
 }
 
 // Sensor-Pump: solange das Overlay sichtbar ist, 1x/s Werte ans Overlay senden.
 let osdDataInterval = null
 function startOsdData() {
   if (osdDataInterval) return
+  prevCpu = null
   const tick = () => {
     if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return
-    const gpu = readGpu()
-    if (gpu) overlayWindow.webContents.send('osd-data', { gpu })
+    const payload = { gpu: readGpu(), cpu: readCpu() }
+    if (!appSettings.osdFps) payload.fps = '—'   // FPS-Messung aus; sonst sendet die FPS-Schleife
+    overlayWindow.webContents.send('osd-data', payload)
   }
   tick()
-  osdDataInterval = setInterval(tick, 1000)
+  osdDataInterval = setInterval(tick, 200)   // 5 Hz – Temps/Power/Takt fluessig
 }
 function stopOsdData() {
   if (osdDataInterval) { clearInterval(osdDataInterval); osdDataInterval = null }
@@ -189,11 +862,55 @@ function stopOsdData() {
 // Das Overlay-Fenster deckt die GANZE Bildschirmflaeche ab (transparent +
 // klick-durchlaessig). Dadurch ist die Panel-Position nur noch CSS (Ecke) und die
 // Groesse ein einziger Zoomfaktor – kein Fenster-Verschieben/-Skalieren noetig.
+// Ermittelt Kante + Dicke der Windows-Taskleiste (auch der auto-ausgeblendeten)
+// via SHAppBarMessage. So kann das Overlay diesen Streifen freilassen, damit die
+// Taskleiste sich einblenden UND anklicken laesst (sonst deckt das oberste
+// Overlay sie ab). Faellt es aus, wird nichts freigelassen (edge=null).
+function getTaskbarStrip() {
+  let koffi
+  try { koffi = require('koffi') } catch { return null }
+  try {
+    if (!getTaskbarStrip._fn) {
+      const shell = koffi.load('shell32.dll')
+      koffi.struct('LM_RECT', { left: 'int32', top: 'int32', right: 'int32', bottom: 'int32' })
+      koffi.struct('LM_APPBARDATA', { cbSize: 'uint32', hWnd: 'uintptr', uCallbackMessage: 'uint32', uEdge: 'uint32', rc: 'LM_RECT', lParam: 'int64' })
+      getTaskbarStrip._fn = shell.func('uintptr __stdcall SHAppBarMessage(uint32 dwMessage, _Inout_ LM_APPBARDATA* pData)')
+    }
+    const data = { cbSize: koffi.sizeof('LM_APPBARDATA'), hWnd: 0, uCallbackMessage: 0, uEdge: 0, rc: { left: 0, top: 0, right: 0, bottom: 0 }, lParam: 0 }
+    if (!getTaskbarStrip._fn(0x5 /*ABM_GETTASKBARPOS*/, data)) return null
+    const r = data.rc
+    const EDGE = { 0: 'left', 1: 'top', 2: 'right', 3: 'bottom' }
+    const state = getTaskbarStrip._fn(0x4 /*ABM_GETSTATE*/, data)   // ABS_AUTOHIDE = 0x1
+    return {
+      edge: EDGE[data.uEdge] || null,
+      thickness: (data.uEdge === 1 || data.uEdge === 3) ? (r.bottom - r.top) : (r.right - r.left),
+      autohide: (Number(state) & 1) === 1,
+    }
+  } catch { return null }
+}
+
 function createOverlayWindow() {
   if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow
   const b = screen.getPrimaryDisplay().bounds
+  // Overlay auf den Bildschirm legen, aber den Taskleisten-Streifen freilassen –
+  // sonst deckt das oberste, klick-durchlaessige Overlay die (auto-ausgeblendete)
+  // Taskleiste ab und sie laesst sich weder einblenden noch anklicken.
+  let x = b.x, y = b.y, width = b.width, height = b.height
+  const tb = getTaskbarStrip()
+  if (tb) {
+    // Auto-Hide: nur einen schmalen Reveal-Streifen freilassen -> OSD kommt fast
+    // bis an den Rand UND die Leiste laesst sich noch einblenden. Dauerhaft
+    // sichtbare Leiste: vollen Streifen freilassen, damit das OSD davor sitzt.
+    const gap = tb.autohide ? 3 : tb.thickness
+    if (tb.edge === 'bottom') height -= gap
+    else if (tb.edge === 'top') { y += gap; height -= gap }
+    else if (tb.edge === 'left') { x += gap; width -= gap }
+    else if (tb.edge === 'right') width -= gap
+  } else {
+    height -= 1   // Fallback: 1px unten frei (bricht Vollbild-Erkennung)
+  }
   overlayWindow = new BrowserWindow({
-    x: b.x, y: b.y, width: b.width, height: b.height,
+    x, y, width, height,
     frame: false,
     transparent: true,
     resizable: false,
@@ -207,7 +924,7 @@ function createOverlayWindow() {
     webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false },
   })
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })   // Klicks gehen ans Spiel
-  overlayWindow.setAlwaysOnTop(true, 'screen-saver')            // ueber randlosen Spielen
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver')           // hoechste Ebene – liegt auch ueber einem bereits im Vordergrund laufenden Vollbild-Spiel
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   overlayWindow.loadFile('osd.html')
   overlayWindow.webContents.once('did-finish-load', () => applyOsdConfig())
@@ -224,25 +941,38 @@ function applyOsdConfig() {
   overlayWindow.webContents.send('osd-config', {
     corner: appSettings.osdCorner || 'tl',
     opacity: appSettings.osdOpacity != null ? appSettings.osdOpacity : 0.55,
+    theme: appSettings.osdTheme || 'compact',
+    fields: appSettings.osdFields,
+    accent: appSettings.osdAccent || '#74e857',
   })
 }
 
 function showOverlay() {
   const w = createOverlayWindow()
+  // Beim (Wieder-)Einblenden ALLE Overlay-Eigenschaften neu setzen: ein zuvor
+  // verstecktes Fenster verliert ueber einem Vollbild-Spiel sonst Klick-
+  // Durchlaessigkeit / oberste Lage und erscheint gar nicht bzw. hinter dem Spiel.
+  w.setIgnoreMouseEvents(true, { forward: true })
+  w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   w.showInactive()                                 // anzeigen, ohne zu fokussieren
-  w.setAlwaysOnTop(true, 'screen-saver')
+  w.setAlwaysOnTop(true, 'screen-saver')           // hoechste Ebene – auch ueber laufendem Vollbild-Spiel
+  w.moveTop()                                      // erzwingt oberste Lage ueber dem Spiel
   applyOsdConfig()
   startOsdData()
+  syncFps()
+  try { osdDbg('showOverlay: isVisible=' + w.isVisible() + ' onTop=' + w.isAlwaysOnTop() + ' bounds=' + JSON.stringify(w.getBounds())) } catch {}
 }
 
 function hideOverlay() {
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide()
   stopOsdData()
+  syncFps()
 }
 
 function toggleOverlay() {
   const visible = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()
   appSettings.osdEnabled = !visible
+  osdDbg('toggleOverlay: war sichtbar=' + visible + ' -> osdEnabled=' + appSettings.osdEnabled)
   saveAppSettings()
   if (appSettings.osdEnabled) showOverlay(); else hideOverlay()
 }
@@ -280,6 +1010,7 @@ function toggleOsdEdit() { setOsdEditMode(!osdEditActive) }
 let xinputPoll = null
 let xinputGetState = null
 let gpHotkeyDown = false
+let getAsyncKey = null   // GetAsyncKeyState – fuer Tastatur-Hotkeys via Polling (greift auch im Spiel)
 
 // Standard-Gamepad-API-Index -> Prüf-Funktion auf dem XINPUT_GAMEPAD-Struct.
 const XI_MASK = {
@@ -312,33 +1043,44 @@ function setupGamepadHotkey() {
     })
     koffi.struct('XINPUT_STATE', { dwPacketNumber: 'uint32', Gamepad: 'XINPUT_GAMEPAD' })
     xinputGetState = lib.func('uint32 __stdcall XInputGetState(uint32 dwUserIndex, _Out_ XINPUT_STATE *pState)')
-
-    xinputPoll = setInterval(pollGamepadHotkey, 45)
     console.log('[gamepad] nativer XInput-Hotkey aktiv')
   } catch (e) {
-    console.log('[gamepad] XInput-Init fehlgeschlagen – nativer Hotkey deaktiviert:', e && e.message)
+    console.log('[gamepad] XInput-Init fehlgeschlagen:', e && e.message)
     xinputGetState = null
   }
+  // Tastatur-Hotkeys: GetAsyncKeyState pollen (fokusunabhaengig -> greift auch im
+  // Spiel, im Gegensatz zu globalShortcut/LL-Hook, die vom Spiel abgefangen werden).
+  try { getAsyncKey = koffi.load('user32.dll').func('int16 GetAsyncKeyState(int vKey)') }
+  catch (e) { getAsyncKey = null; console.log('[hotkey] GetAsyncKeyState nicht ladbar:', e && e.message) }
+  // Poll starten, sobald wenigstens EINE native Eingabe verfuegbar ist.
+  if ((xinputGetState || getAsyncKey) && !xinputPoll) xinputPoll = setInterval(pollNativeHotkeys, 40)
 }
 
-function pollGamepadHotkey() {
+function pollNativeHotkeys() {
+  // 1) Gamepad-Kombi (XInput)
   const combo = appSettings.gamepadHotkey
-  if (!combo || !combo.length || !xinputGetState) { gpHotkeyDown = false; return }
-  // Guide-Taste (Index 16) gibt es im Standard-XInput nicht -> Kombi nie erfüllbar.
-  if (combo.some(i => !XI_MASK[i])) { gpHotkeyDown = false; return }
+  if (xinputGetState && combo && combo.length && !combo.some(i => !XI_MASK[i])) {
+    let anyDown = false
+    for (let slot = 0; slot < 4 && !anyDown; slot++) {
+      const st = {}; let ret
+      try { ret = xinputGetState(slot, st) } catch { continue }
+      if (ret !== 0) continue
+      if (combo.every(i => XI_MASK[i](st.Gamepad))) anyDown = true
+    }
+    if (anyDown && !gpHotkeyDown) toggleMainWindow()   // steigende Flanke
+    gpHotkeyDown = anyDown
+  } else gpHotkeyDown = false
 
-  let anyDown = false
-  for (let slot = 0; slot < 4 && !anyDown; slot++) {
-    const st = {}
-    let ret
-    try { ret = xinputGetState(slot, st) } catch { continue }
-    if (ret !== 0) continue // Slot nicht verbunden
-    const g = st.Gamepad
-    if (combo.every(i => XI_MASK[i](g))) anyDown = true
+  // 2) Tastatur-Hotkeys (GetAsyncKeyState, steigende Flanke je Hotkey)
+  if (getAsyncKey && khHotkeys.length) {
+    const dn = (vk) => (getAsyncKey(vk) & 0x8000) !== 0
+    const alt = dn(0x12), ctrl = dn(0x11), shift = dn(0x10)
+    for (const h of khHotkeys) {
+      const on = dn(h.vk) && h.alt === alt && h.ctrl === ctrl && h.shift === shift
+      if (on && !h._down) h.action()
+      h._down = on
+    }
   }
-
-  if (anyDown && !gpHotkeyDown) toggleMainWindow() // steigende Flanke
-  gpHotkeyDown = anyDown
 }
 
 function createTray() {
@@ -464,7 +1206,12 @@ function createWindow() {
     if (appSettings.minimizeToTray && !app.isQuitting) {
       e.preventDefault()
       mainWindow.hide()
+      return
     }
+    // Echtes Schliessen -> App ganz beenden. Sonst haelt ein offenes OSD-Overlay-
+    // Fenster die App im Hintergrund am Leben (window-all-closed feuert nie).
+    app.isQuitting = true
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.destroy()
   })
 
   mainWindow.loadFile('index.html')
@@ -1562,6 +2309,7 @@ ipcMain.handle('save-prefs', (event, json) => {
 ipcMain.handle('get-app-settings', () => appSettings)
 
 ipcMain.handle('set-app-settings', (event, partial) => {
+  const prevSource = appSettings.osdFpsSource
   Object.assign(appSettings, partial)
   saveAppSettings()
   applyAutostart()
@@ -1572,6 +2320,11 @@ ipcMain.handle('set-app-settings', (event, partial) => {
     if (appSettings.osdEnabled) showOverlay()
     else hideOverlay()
     applyOsdConfig()
+    // NUR bei echtem Quellenwechsel neu waehlen. Sonst wuerde jede Slider-
+    // Bewegung stopFps/startFps ausloesen -> wanted flattert 0/1 -> der Broker
+    // erwischt ein wanted=0 und beendet sich (genau der "…"-Bug).
+    if (appSettings.osdFpsSource !== prevSource) stopFps()
+    syncFps()
   }
   return appSettings
 })
@@ -1657,18 +2410,33 @@ ipcMain.handle('osd-edit-scale', (e, delta) => {
 })
 ipcMain.handle('osd-edit-done', () => setOsdEditMode(false))
 
+// Einmalige Freigabe fuer PresentMon ohne Admin: aktuellen Nutzer in die Gruppe
+// "Leistungsprotokollbenutzer" (SID S-1-5-32-559, sprachunabhaengig) aufnehmen.
+// Ein UAC-Dialog; danach muss sich der Nutzer einmal ab-/anmelden.
+ipcMain.handle('fps-grant-access', () => {
+  const inner = 'Add-LocalGroupMember -SID S-1-5-32-559 -Member $env:USERNAME'
+  const b64 = Buffer.from(inner, 'utf16le').toString('base64')
+  const outer = `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand ${b64}'`
+  try { spawn('powershell', ['-NoProfile', '-Command', outer], { windowsHide: true }) } catch (e) { return { ok: false, error: e && e.message } }
+  return { ok: true }
+})
+
 ipcMain.handle('check-for-updates', () => { checkForUpdates(true) })
 ipcMain.handle('download-update', () => { if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {}) })
 ipcMain.handle('install-update', () => { if (autoUpdater) { app.isQuitting = true; autoUpdater.quitAndInstall() } })
 
 // Nur eine Instanz zulassen: ein zweiter Start holt das vorhandene (ggf. im Tray
 // versteckte) Fenster nach vorne, statt eine neue Instanz zu öffnen.
-if (!app.requestSingleInstanceLock()) {
+if (process.argv.includes('--fps-broker')) {
+  // Broker-Instanz: kein Fenster, keine Single-Instance-Sperre, nur FPS messen.
+  try { app.disableHardwareAcceleration() } catch {}   // schlanker (keine GPU-Prozesse)
+  app.whenReady().then(runFpsBroker)
+} else if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => showMainWindow())
 
-  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); registerToggleHotkey(); setupGamepadHotkey(); setupNvml(); if (appSettings.osdEnabled) showOverlay() })
+  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupNvml(); setupAdl(); setupRtss(); setupMahm(); setupCpuClock(); setupGpuName(); if (appSettings.osdEnabled) showOverlay() })
 
   // HDR abschalten, falls der Launcher es für ein noch laufendes Spiel aktiviert hatte
   app.on('before-quit', () => {
@@ -1678,7 +2446,7 @@ if (!app.requestSingleInstanceLock()) {
     }
   })
 
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll) })
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll); stopFps() })
 
   app.on('window-all-closed', () => {
     if (hdrPollInterval) clearInterval(hdrPollInterval)

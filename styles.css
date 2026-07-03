@@ -426,6 +426,24 @@ body::before {
   background: rgba(var(--accent-rgb), 0.14);
 }
 
+/* Werte-Auswahl (welche Sensoren das OSD zeigt) – sauberes 5-Spalten-Gitter,
+   Chips über alle Gruppen ausgerichtet. Label als Überschrift (volle Breite). */
+.osd-values-block { display: flex; flex-direction: column; gap: 9px; padding: 6px 0 2px; }
+.osd-fields { display: flex; flex-direction: column; gap: 12px; }
+.osd-fields-grp .grp { font-size: 11px; letter-spacing: 0.09em; color: #888; text-transform: uppercase; margin-bottom: 5px; }
+.osd-chips-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.osd-chip {
+  background: #1b1b1b; border: 1px solid #333; color: #8f8f8f;
+  border-radius: 999px; padding: 4px 4px; font-size: 12px; cursor: pointer;
+  text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.osd-chip:hover { border-color: var(--accent); color: #ccc; }
+.osd-chip.on {
+  border-color: var(--accent); color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
 /* Akzentfarben-Auswahl */
 .accent-swatches {
   display: flex;
@@ -1221,6 +1239,31 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
   font-weight: 500;
   color: #fff;
 }
+
+/* Einstellungs-Reiter */
+.settings-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #2a2a2a;
+  margin-top: -6px;
+}
+.settings-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #8f8f8f;
+  padding: 9px 4px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  border-radius: 6px 6px 0 0;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.settings-tab:hover { color: #ccc; background: rgba(255,255,255,0.03); }
+.settings-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.settings-panel { display: flex; flex-direction: column; gap: 20px; }
+.settings-panel[hidden] { display: none; }
 
 .form-group {
   display: flex;
