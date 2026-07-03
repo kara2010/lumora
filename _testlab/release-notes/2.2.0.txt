@@ -1,0 +1,10 @@
+Großes Update – das Gaming-OSD ist da:
+
+• Performance-OSD: FPS, Frametime-Graph, GPU- und CPU-Werte über jedem randlos laufenden Spiel – mit 6 Designs, freier Werte-Auswahl sowie einstellbarer Größe, Transparenz und Position.
+• Ohne Zusatzsoftware: FPS misst Lumora über PresentMon, CPU-Temperatur und -Verbrauch über den signierten Open-Source-Treiber PawnIO. Die Einrichtung übernimmt Lumora komplett – ein Dialog, eine Windows-Bestätigung, fertig. Afterburner/RTSS werden automatisch genutzt, falls vorhanden.
+• Live-Edit direkt im Spiel: OSD per Maus verschieben, Design durchschalten, Werte an-/abwählen – auch komplett per Gamepad.
+• OSD-Hotkeys frei belegbar – als Tastenkombination und als Gamepad-Kombi, funktioniert mitten im Spiel.
+• Einstellungen neu gestaltet: Reiter direkt in der Oberfläche (wie bei Steam) statt Dialog; neue Datenquellen-Anzeige zeigt, woher jeder Wert kommt.
+• Mehrere Grafikkarten: automatische Wahl der dedizierten GPU plus manuelle Auswahl; VRAM-Anzeige jetzt auch für AMD.
+• Spielzeit-Rückblick aufgeräumt (nur noch eine dezente Scrollleiste) und viele Feinschliffe an Layout und Gamepad-Bedienung.
+• Saubere Deinstallation: Lumora entfernt seine Hintergrund-Aufgaben beim Deinstallieren automatisch.

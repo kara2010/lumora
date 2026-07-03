@@ -435,9 +435,20 @@
         Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation
         der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.
       </p>
+      <p class="about-text"><strong>Lumora steht auf den Schultern großartiger Open-Source-Projekte.</strong> Eingesetzte Komponenten und ihre Urheber:</p>
+      <ul class="about-credits">
+        <li><strong>HDRTray / HDRCmd</strong> — HDR-Steuerung · Frank Richter (res2k) · GPL&nbsp;v3 · <span class="about-link" onclick="openExternal('https://github.com/res2k/HDRTray')">GitHub</span></li>
+        <li><strong>PresentMon</strong> — FPS-/Frametime-Messung · Intel Corporation · MIT · <span class="about-link" onclick="openExternal('https://github.com/GameTechDev/PresentMon')">GitHub</span></li>
+        <li><strong>PawnIO</strong> — signierter Treiber für CPU-Sensorik · namazso · GPL&nbsp;2.0; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps &amp; Features" entfernbar · <span class="about-link" onclick="openExternal('https://pawnio.eu')">pawnio.eu</span></li>
+        <li><strong>PawnIO-Module</strong> (AMDFamily17, IntelMSR) — Sensor-Definitionen · namazso · LGPL&nbsp;2.1 · <span class="about-link" onclick="openExternal('https://github.com/namazso/PawnIO.Modules')">GitHub</span></li>
+        <li><strong>Electron</strong> &amp; <strong>electron-updater</strong> — App-Framework und Auto-Updates · OpenJS Foundation / Electron-Userland · MIT</li>
+        <li><strong>koffi</strong> — Windows-API-Anbindung · Niels Martignène · MIT · <span class="about-link" onclick="openExternal('https://koffi.dev')">koffi.dev</span></li>
+        <li><strong>SteamGridDB</strong> — optionale Community-Artworks (eigener API-Key) · <span class="about-link" onclick="openExternal('https://www.steamgriddb.com')">steamgriddb.com</span></li>
+      </ul>
       <p class="about-text">
-        HDR-Steuerung via <strong>HDRTray</strong> von Frank Richter (GPL&nbsp;v3) ·
-        <span class="about-link" onclick="openExternal('https://github.com/res2k/HDRTray')">github.com/res2k/HDRTray</span>
+        Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML),
+        dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten
+        liegen im Installationsordner (<em>resources</em>) bei.
       </p>
       <div class="dialog-actions">
         <button class="btn-primary" onclick="hideAbout()">Schließen</button>

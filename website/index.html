@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lumora – Alle deine Spiele aus jedem Store in einer schönen Bibliothek</title>
-  <meta name="description" content="Lumora vereint deine Spiele aus Steam, Epic, GOG, Xbox, EA &amp; Co. in einer aufgeräumten Cover-Bibliothek – am Schreibtisch mit Maus, auf dem Sofa komplett per Gamepad. HDR aktiviert sich beim Spielstart automatisch. Kostenlos für Windows 10 &amp; 11.">
-  <meta name="keywords" content="Game Launcher, Spiele-Launcher, alle Spiele an einem Ort, Steam Epic GOG Xbox zusammen, Spielbibliothek Windows, Launcher mit Gamepad, Couch Gaming PC, Big Picture Alternative, HDR automatisch, kostenlos">
+  <title>Lumora – Alle Spiele in einer Bibliothek, automatisches HDR &amp; Gaming-OSD</title>
+  <meta name="description" content="Lumora vereint deine Spiele aus Steam, Epic, GOG, Xbox, EA &amp; Co. in einer schönen Cover-Bibliothek – komplett per Gamepad bedienbar. HDR schaltet sich pro Spiel automatisch. Neu: Performance-OSD mit FPS, GPU- und CPU-Werten – ganz ohne Afterburner/RTSS. Kostenlos für Windows 10 &amp; 11.">
+  <meta name="keywords" content="Game Launcher, Spiele-Launcher, alle Spiele an einem Ort, Steam Epic GOG Xbox zusammen, Spielbibliothek Windows, Launcher mit Gamepad, Couch Gaming PC, Big Picture Alternative, HDR automatisch, FPS Anzeige, OSD Overlay, GPU CPU Temperatur anzeigen, MSI Afterburner Alternative, kostenlos">
   <meta name="robots" content="index, follow">
   <meta name="author" content="Lumora">
   <link rel="canonical" href="https://kara-webdesign.de/hdr-launcher/">
@@ -17,14 +17,14 @@
   <!-- Open Graph (Facebook, Discord, WhatsApp …) -->
   <meta property="og:type"        content="website">
   <meta property="og:url"         content="https://kara-webdesign.de/hdr-launcher/">
-  <meta property="og:title"       content="Lumora – Alle deine Spiele. Eine schöne Bibliothek.">
-  <meta property="og:description" content="Steam, Epic, GOG, Xbox, EA & Co. in einer aufgeräumten Cover-Bibliothek – für Schreibtisch und Sofa, komplett per Gamepad bedienbar. HDR automatisch. Kostenlos für Windows 10 / 11.">
+  <meta property="og:title"       content="Lumora – Alle deine Spiele. Automatisches HDR. Gaming-OSD.">
+  <meta property="og:description" content="Steam, Epic, GOG, Xbox, EA & Co. in einer schönen Cover-Bibliothek – komplett per Gamepad bedienbar. HDR automatisch pro Spiel. Neu: FPS-, GPU- & CPU-Anzeige im Spiel, ohne Afterburner/RTSS. Kostenlos für Windows 10 / 11.">
   <meta property="og:locale"      content="de_DE">
 
   <!-- Twitter Card -->
   <meta name="twitter:card"        content="summary_large_image">
-  <meta name="twitter:title"       content="Lumora – Alle deine Spiele. Eine schöne Bibliothek.">
-  <meta name="twitter:description" content="Steam, Epic, GOG, Xbox, EA & Co. in einer aufgeräumten Cover-Bibliothek – für Schreibtisch und Sofa, komplett per Gamepad bedienbar. HDR automatisch. Kostenlos für Windows 10 / 11.">
+  <meta name="twitter:title"       content="Lumora – Alle deine Spiele. Automatisches HDR. Gaming-OSD.">
+  <meta name="twitter:description" content="Steam, Epic, GOG, Xbox, EA & Co. in einer schönen Cover-Bibliothek – komplett per Gamepad bedienbar. HDR automatisch pro Spiel. Neu: FPS-, GPU- & CPU-Anzeige im Spiel, ohne Afterburner/RTSS. Kostenlos für Windows 10 / 11.">
   <meta name="twitter:image"       content="https://kara-webdesign.de/hdr-launcher/screenshot.png">
 
   <!-- og:image -->
@@ -39,11 +39,11 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Lumora",
-    "version": "2.1.3",
+    "version": "2.2.0",
     "operatingSystem": "Windows 10, Windows 11",
     "applicationCategory": "GameApplication",
     "applicationSubCategory": "Utility",
-    "description": "Lumora vereint alle Spiele aus Steam, Epic, GOG, Ubisoft, Xbox Game Pass, EA, Battle.net, Rockstar, Amazon und Riot in einer schönen Cover-Bibliothek – am Schreibtisch mit der Maus, auf dem Sofa komplett per Xbox-Gamepad, mit Spielzeit-Tracking, Favoriten und automatischem HDR. Kostenlos.",
+    "description": "Lumora vereint alle Spiele aus Steam, Epic, GOG, Ubisoft, Xbox Game Pass, EA, Battle.net, Rockstar, Amazon und Riot in einer schönen Cover-Bibliothek – am Schreibtisch mit der Maus, auf dem Sofa komplett per Xbox-Gamepad, mit Spielzeit-Tracking, Favoriten, automatischem HDR und einem Performance-OSD (FPS, GPU- und CPU-Werte im Spiel, ohne Zusatzsoftware). Kostenlos.",
     "offers": {
       "@type": "Offer",
       "price": "0",
@@ -54,13 +54,17 @@
     "featureList": [
       "Alle Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon und Riot an einem Ort",
       "Schöne Cover-Bibliothek mit Raster- und Listenansicht",
-      "Spielzeit-Tracking und zuletzt gespielt",
+      "Performance-OSD im Spiel: FPS, Frametime-Graph, GPU- und CPU-Werte – ohne Afterburner/RTSS",
+      "OSD-Live-Edit direkt im Spiel: Position, Design, Transparenz und Werte per Maus oder Gamepad",
+      "6 OSD-Designs, per Hotkey oder Gamepad-Kombination ein-/ausblendbar",
+      "CPU-Temperatur und -Verbrauch über signierten Open-Source-Treiber (PawnIO), Einrichtung mit einem Klick",
+      "Spielzeit-Tracking, zuletzt gespielt und Spielzeit-Rückblick",
       "Favoriten, Suche und flexible Sortierung",
       "HDR automatisch beim Spielstart aktivieren und beim Beenden deaktivieren",
       "HDR pro Spiel ein- und ausschaltbar",
       "Spielecover und -beschreibungen automatisch laden",
       "Komplette Bedienung per Xbox-Gamepad (wohnzimmertauglich am TV)",
-      "Frei belegbarer globaler Hotkey (Tastatur- oder Gamepad-Kombination)",
+      "Frei belegbare globale Hotkeys (Tastatur- oder Gamepad-Kombination)",
       "Automatische Updates",
       "Wählbare Akzentfarben, System-Tray und Autostart"
     ],
@@ -184,11 +188,32 @@
     }
 
     .hero p {
-      max-width: 540px;
-      margin: 0 auto 40px;
+      max-width: 560px;
+      margin: 0 auto 26px;
       font-size: 17px;
       color: var(--muted);
       line-height: 1.7;
+    }
+    .hero p strong { color: var(--text); }
+
+    /* Die vier Saeulen als kompakte Pills unter dem Hero-Text */
+    .hero-pills {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 0 auto 36px;
+      max-width: 640px;
+    }
+    .hero-pill {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: 20px;
+      white-space: nowrap;
     }
 
     .hero-actions {
@@ -857,14 +882,20 @@
 <!-- HERO -->
 <section class="hero">
   <div class="hero-badge">⬡ Kostenlos · Windows 10 / 11</div>
-  <h1>Alle deine Spiele.<br><em>Eine schöne Bibliothek — für Schreibtisch und Sofa.</em></h1>
-  <p>Steam, Epic, GOG, Xbox, EA, Ubisoft &amp; mehr — Lumora vereint deine ganze Spielesammlung in einer aufgeräumten Cover-Bibliothek. Am Schreibtisch mit der Maus, auf dem Sofa komplett per Gamepad. Und HDR schaltet sich beim Spielstart automatisch an — und danach wieder aus.</p>
+  <h1>Alle deine Spiele. Ein Launcher.<br><em>Mit automatischem HDR und Gaming-OSD.</em></h1>
+  <p>Steam, Epic, GOG, Xbox, EA, Ubisoft &amp; mehr — Lumora vereint deine ganze Spielesammlung in einer schönen Cover-Bibliothek. Am Schreibtisch mit der Maus, auf dem Sofa komplett per Gamepad. HDR schaltet sich pro Spiel automatisch. Und das neue Performance-OSD zeigt dir FPS, GPU und CPU direkt im Spiel — <strong>ganz ohne Afterburner &amp; Co.</strong></p>
+  <div class="hero-pills">
+    <span class="hero-pill">🗂 Alle Stores vereint</span>
+    <span class="hero-pill">🌈 HDR vollautomatisch</span>
+    <span class="hero-pill">📊 OSD ohne Zusatztools</span>
+    <span class="hero-pill">🎮 100 % Gamepad-tauglich</span>
+  </div>
   <div class="hero-actions">
     <button class="btn-dl" onclick="startDownload()">
       ⬇ Download &nbsp;·&nbsp; 98 MB
     </button>
-    <a class="btn-ghost" href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">
-      ↗ HDRTray auf GitHub
+    <a class="btn-ghost" href="#osd">
+      ✨ Neu: das Gaming-OSD
     </a>
   </div>
 
@@ -958,6 +989,66 @@
   </div>
 </section>
 
+<!-- GAMING-OSD (Highlight-Sektion) -->
+<section id="osd" style="background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+  <div class="container">
+    <div class="hero-badge" style="margin-bottom:16px;">✨ Neu in Lumora 2.2</div>
+    <h2>Dein Spiel. Deine Werte. Dein Stil.</h2>
+    <p class="section-sub">
+      Das Performance-OSD legt FPS, GPU- und CPU-Werte über jedes randlos laufende Spiel —
+      und zwar <strong style="color:var(--text)">ohne MSI Afterburner, ohne RTSS, ohne Bastelei</strong>.
+      Einschalten, zocken, alles im Blick.
+    </p>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="feature-icon">📈</div>
+        <div>
+          <h3>FPS &amp; Frametime-Graph</h3>
+          <p>Präzise Messung über Intels PresentMon-Technik — für jedes Spiel, jede Engine. Läuft RTSS bereits bei dir? Dann nutzt Lumora es einfach automatisch mit.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🌡</div>
+        <div>
+          <h3>CPU-Temperatur &amp; -Verbrauch — endlich ohne Zusatztools</h3>
+          <p>Was sonst nur mit Afterburner &amp; Co. geht, erledigt Lumora über den signierten Open-Source-Treiber PawnIO: ein Klick, eine Windows-Bestätigung, fertig. AMD Ryzen und Intel Core.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🎛</div>
+        <div>
+          <h3>GPU-Werte direkt vom Treiber</h3>
+          <p>Last, Temperatur, Takt, Verbrauch und VRAM — direkt aus NVIDIA- (NVML) bzw. AMD-Treiber (ADL). Mehrere Grafikkarten? Lumora nimmt automatisch die schnelle, du kannst aber auch fest wählen.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🎨</div>
+        <div>
+          <h3>6 Designs, deine Werte</h3>
+          <p>Von „Kompakt" bis zur horizontalen Kachel-Leiste — plus freie Auswahl, welche Werte du sehen willst. Größe, Transparenz und Bildschirm-Position inklusive.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🕹</div>
+        <div>
+          <h3>Live-Edit — direkt im Spiel</h3>
+          <p>Das Alleinstellungsmerkmal: OSD im laufenden Spiel umgestalten. Per Maus ziehen, Design durchschalten, Werte an- und abwählen — oder das alles bequem mit dem Gamepad vom Sofa aus.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <div>
+          <h3>Blitzschnell ein- und ausgeblendet</h3>
+          <p>Frei belegbarer Hotkey auf Tastatur <strong>und</strong> Gamepad-Kombination — funktioniert mitten im Spiel, auch im randlosen Vollbild.</p>
+        </div>
+      </div>
+    </div>
+    <p class="section-sub" style="margin-top:36px; margin-bottom:0;">
+      Einrichtung? <strong style="color:var(--text)">Ein Dialog, eine Windows-Bestätigung — Lumora erledigt den Rest</strong> und zeigt dir dabei transparent jeden Schritt an. In den Einstellungen siehst du jederzeit, aus welcher Quelle jeder Wert kommt.
+    </p>
+  </div>
+</section>
+
 <!-- FEATURES -->
 <section class="features" id="features">
   <div class="container">
@@ -982,8 +1073,15 @@
       <div class="feature">
         <div class="feature-icon">⏱</div>
         <div>
-          <h3>Spielzeit &amp; zuletzt gespielt</h3>
-          <p>Erfasst deine Spielzeit store-übergreifend — etwas, das Steam &amp; Co. dir nicht in einem Ort zeigen.</p>
+          <h3>Spielzeit, zuletzt gespielt &amp; Rückblick</h3>
+          <p>Erfasst deine Spielzeit store-übergreifend — etwas, das Steam &amp; Co. dir nicht an einem Ort zeigen. Der Spielzeit-Rückblick fasst Gesamtzeit, Top-Spiele und Lieblings-Genre hübsch zusammen.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">📊</div>
+        <div>
+          <h3>Performance-OSD im Spiel</h3>
+          <p>FPS, Frametime-Graph, GPU- und CPU-Werte über jedem randlosen Spiel — ohne Afterburner oder RTSS, live im Spiel anpassbar. <a href="#osd" style="color:var(--accent2)">Alle Details ↑</a></p>
         </div>
       </div>
       <div class="feature">
@@ -1063,8 +1161,21 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">2.1.3</span>
+          <span class="release-ver">2.2.0</span>
           <span class="release-tag">aktuell</span>
+        </div>
+        <ul>
+          <li><strong>Gaming-OSD</strong>: FPS, Frametime-Graph, GPU- und CPU-Werte über jedem randlosen Spiel — 6 Designs, freie Werte-Auswahl, Größe/Transparenz/Position einstellbar.</li>
+          <li><strong>Ohne Zusatzsoftware</strong>: FPS über PresentMon, CPU-Temperatur &amp; -Verbrauch über den signierten PawnIO-Treiber — Einrichtung mit einem Dialog und einer Windows-Bestätigung. Afterburner/RTSS werden automatisch genutzt, falls vorhanden.</li>
+          <li><strong>Live-Edit im Spiel</strong>: OSD per Maus verschieben, Design und Werte direkt im Spiel umschalten — auch komplett per Gamepad.</li>
+          <li><strong>OSD-Hotkeys</strong> für Tastatur und Gamepad-Kombination, frei belegbar.</li>
+          <li><strong>Einstellungen neu</strong>: Steam-artige Reiter direkt in der Oberfläche statt Dialog; Datenquellen-Anzeige zeigt, woher jeder Wert kommt.</li>
+          <li>Multi-GPU-Erkennung mit manueller Auswahl · VRAM-Anzeige auch für AMD · saubere Deinstallation.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">2.1.3</span>
         </div>
         <ul>
           <li><strong>Spielzeit-Rückblick</strong>: Überblick über Gesamtspielzeit, meistgespielte Titel, Lieblings-Genre und Favoriten.</li>
@@ -1108,7 +1219,7 @@
     <div class="install-steps">
       <div class="install-step">
         <div class="num">1</div>
-        <p>Setup-Datei <strong>Lumora Setup 2.1.3.exe</strong> herunterladen.</p>
+        <p>Setup-Datei <strong>Lumora Setup 2.2.0.exe</strong> herunterladen.</p>
       </div>
       <div class="install-step">
         <div class="num">2</div>
@@ -1133,7 +1244,7 @@
       <div class="req-item"><div class="req-dot"></div> Windows 10 (Version 1809+) oder Windows 11</div>
       <div class="req-item"><div class="req-dot"></div> HDR-fähiger Monitor — optional, nur für die HDR-Funktion</div>
       <div class="req-item"><div class="req-dot"></div> Auch ohne HDR als reiner Game-Launcher nutzbar</div>
-      <div class="req-item"><div class="req-dot"></div> Keine Administratorrechte erforderlich</div>
+      <div class="req-item"><div class="req-dot"></div> Keine Administratorrechte erforderlich — nur die optionale OSD-Vollausstattung (FPS/CPU-Sensorik) fragt einmalig nach einer Windows-Bestätigung</div>
     </div>
   </div>
 </section>
@@ -1189,6 +1300,45 @@
               <small style="color:var(--muted)">© 2022–2025 Frank Richter</small></td>
         </tr>
         <tr>
+          <td><strong>PresentMon</strong></td>
+          <td>2.5.1</td>
+          <td>Praezise FPS-/Frametime-Messung fuer das OSD (ETW-basiert, keine Spiel-Injection)</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://github.com/GameTechDev/PresentMon" target="_blank" rel="noopener">github.com/GameTechDev/PresentMon</a><br>
+              <small style="color:var(--muted)">© Intel Corporation</small></td>
+        </tr>
+        <tr>
+          <td><strong>PawnIO</strong></td>
+          <td>2.x</td>
+          <td>Signierter Kernel-Treiber für CPU-Sensorik (Temperatur/Verbrauch) — wird <em>nicht</em> mitgeliefert, sondern auf Wunsch von der offiziellen Quelle installiert (Signatur wird geprüft) und ist über „Apps &amp; Features" deinstallierbar</td>
+          <td><span class="badge badge-gpl">GPL v2</span></td>
+          <td><a href="https://pawnio.eu" target="_blank" rel="noopener">pawnio.eu</a><br>
+              <small style="color:var(--muted)">© namazso</small></td>
+        </tr>
+        <tr>
+          <td><strong>PawnIO-Module</strong><br><small style="color:var(--muted)">AMDFamily17, IntelMSR</small></td>
+          <td>0.2.9</td>
+          <td>Offizielle, geprüfte Sensor-Definitionen für AMD-/Intel-CPUs (laufen sandboxed im PawnIO-Treiber)</td>
+          <td><span class="badge badge-gpl">LGPL 2.1</span></td>
+          <td><a href="https://github.com/namazso/PawnIO.Modules" target="_blank" rel="noopener">github.com/namazso/PawnIO.Modules</a><br>
+              <small style="color:var(--muted)">© namazso</small></td>
+        </tr>
+        <tr>
+          <td><strong>koffi</strong></td>
+          <td>3.1</td>
+          <td>Anbindung an Windows-APIs (Sensoren, Gamepad, Shared Memory)</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://koffi.dev" target="_blank" rel="noopener">koffi.dev</a><br>
+              <small style="color:var(--muted)">© Niels Martignène</small></td>
+        </tr>
+        <tr>
+          <td><strong>electron-updater</strong></td>
+          <td>6.x</td>
+          <td>Automatische Updates</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://www.electron.build" target="_blank" rel="noopener">electron.build</a></td>
+        </tr>
+        <tr>
           <td><strong>electron-builder</strong></td>
           <td>26.8.1</td>
           <td>Build-Tool zur Erstellung des Installers (nicht in der App enthalten)</td>
@@ -1206,6 +1356,17 @@
       bei und ist im HDRTray-GitHub-Repository einsehbar.
     </div>
 
+    <div class="note-box">
+      <strong>Hinweis zu PawnIO:</strong>
+      Der Treiber wird nur installiert, wenn du die CPU-Sensorik im OSD nutzen möchtest — Lumora fragt vorher
+      und zeigt jeden Schritt an. Der Installer stammt direkt von der offiziellen Quelle, seine digitale Signatur
+      wird vor der Ausführung geprüft. PawnIO ist dasselbe Fundament, das auch bekannte Tools wie
+      LibreHardwareMonitor, FanControl und OpenRGB verwenden, und lässt sich jederzeit über
+      „Apps &amp; Features" wieder entfernen. Lumora kommuniziert mit dem Treiber ausschließlich über dessen
+      öffentliche Schnittstelle; bei der Deinstallation von Lumora werden alle von Lumora angelegten
+      Hintergrund-Aufgaben entfernt.
+    </div>
+
     <div class="note-box note-neutral">
       <strong>Rechtlicher Hinweis:</strong>
       Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam, Microsoft
@@ -1218,8 +1379,10 @@
 
 <footer>
   <p>
-    Lumora 2.1.3 · Kostenlos &amp; Open-Source-basiert ·
-    HDR-Steuerung via <a href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">HDRTray</a> von Frank Richter (GPL v3)
+    Lumora 2.2.0 · Kostenlos &amp; Open-Source-basiert ·
+    HDR via <a href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">HDRTray</a> (Frank Richter, GPL v3) ·
+    FPS via <a href="https://github.com/GameTechDev/PresentMon" target="_blank" rel="noopener">PresentMon</a> (Intel, MIT) ·
+    CPU-Sensorik via <a href="https://pawnio.eu" target="_blank" rel="noopener">PawnIO</a> (namazso, GPL v2)
   </p>
   <p style="margin-top:10px; font-size:12px; opacity:0.7;">
     Inoffizielles Tool · nicht verbunden mit Valve/Steam oder Microsoft · alle Marken und Coverbilder gehören den jeweiligen Rechteinhabern.
