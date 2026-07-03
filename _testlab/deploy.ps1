@@ -47,7 +47,9 @@ if (Test-Path $unpackDir) { Remove-Item -Recurse -Force $unpackDir }
 # Rechten NICHT per Stop-Process killen ("Zugriff verweigert") – er sperrt aber
 # app.asar mit. Darum zuerst die Aufgabe sauber beenden (das darf man am eigenen
 # Task ohne Elevation), dann die normale App.
-schtasks /End /TN "LumoraOSD-FPS" 2>$null | Out-Null
+# cmd-Wrapper: schtasks meckert auf stderr, wenn die Aufgabe (noch) nicht existiert –
+# mit 2>$null wuerde PowerShell 5.1 das trotz ErrorActionPreference=Stop als Fehler werten.
+foreach ($task in 'LumoraOSD-FPS','LumoraOSD-Sensors') { cmd /c "schtasks /End /TN `"$task`" >nul 2>nul" }
 Start-Sleep -Milliseconds 500
 $running = Get-Process -Name "Lumora","HDR Launcher" -ErrorAction SilentlyContinue
 if ($running) { $running | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 1000; Write-Host "Lumora beendet (fuer Deploy)." }
@@ -86,7 +88,7 @@ Write-Host "app-update.yml mitgeliefert."
 
 # Gebuendelte Binaries (extraResources, liegen NEBEN dem asar). Muessen beim
 # Dev-Deploy mitkopiert werden, da sie nicht im asar stecken.
-foreach ($bin in 'PresentMon.exe','PresentMon-LICENSE.txt') {
+foreach ($bin in 'PresentMon.exe','PresentMon-LICENSE.txt','AMDFamily17.bin','IntelMSR.bin','PawnIO-Modules-LICENSE.txt') {
   $binSrc = Join-Path $src $bin
   if (Test-Path $binSrc) {
     foreach ($t in $targets) {
@@ -113,3 +115,4 @@ if ($Verify) {
   Write-Host "Verify '$Verify' im Deploy:" $found
 }
 Write-Host "Fertig. Lumora bitte neu starten."
+exit 0   # letzter nativer Exit-Code (z.B. schtasks auf fehlende Aufgabe) soll den Lauf nicht als Fehler markieren

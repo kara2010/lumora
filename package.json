@@ -22,7 +22,8 @@
       "!icon-source.png",
       "!color.png",
       "!tray-icon.png",
-      "!afterpack.js"
+      "!afterpack.js",
+      "!installer.nsh"
     ],
     "compression": "maximum",
     "asarUnpack": [
@@ -40,6 +41,9 @@
       "target": "nsis",
       "icon": "icon.ico"
     },
+    "nsis": {
+      "include": "installer.nsh"
+    },
     "extraResources": [
       {
         "from": "HDRCmd.exe",
@@ -56,6 +60,18 @@
       {
         "from": "PresentMon-LICENSE.txt",
         "to": "PresentMon-LICENSE.txt"
+      },
+      {
+        "from": "AMDFamily17.bin",
+        "to": "AMDFamily17.bin"
+      },
+      {
+        "from": "IntelMSR.bin",
+        "to": "IntelMSR.bin"
+      },
+      {
+        "from": "PawnIO-Modules-LICENSE.txt",
+        "to": "PawnIO-Modules-LICENSE.txt"
       }
     ]
   },

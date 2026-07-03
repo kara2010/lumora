@@ -50,7 +50,11 @@ let gamesFile = null
 let prefsFile = null
 const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L', gamepadHotkey: [], gamepadOsdHotkey: [],
   // OSD-Overlay: sichtbar?, Skalierung (Zoomfaktor), Ecke (tl/tr/bl/br), Panel-Deckkraft, FPS-Messung
-  osdEnabled: false, osdScale: 1, osdCorner: 'tl', osdOpacity: 0.55, osdFps: false, osdFpsSource: 'auto', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O',
+  // OSD an = alle Werte inkl. FPS (kein separater FPS-Schalter mehr). osdSetupDeclined
+  // merkt sich nur, dass der Nutzer die einmalige Einrichtung (UAC) abgelehnt hat –
+  // dann fehlen FPS/CPU-Sensorwerte und wir fragen nicht staendig neu
+  // ("Jetzt einrichten" im Overlay-Tab holt es nach).
+  osdEnabled: false, osdScale: 1, osdCorner: 'tl', osdOpacity: 0.55, osdSetupDeclined: false, osdFpsSource: 'auto', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O',
   // Grafikkarte fuer die OSD-Sensoren: 'auto' (schnellste automatisch) oder feste ID 'nvml:<idx>' / 'adl:<idx>'
   osdGpu: 'auto',
   // OSD-Aussehen: Theme + welche Werte je Gruppe angezeigt werden + Akzentfarbe
@@ -296,7 +300,8 @@ function readAdlIdx(idx, name) {
     if (temp == null && clock == null && power == null && load == null) return null
     const u = (x) => x == null ? undefined : x
     const nm = (name || adl.name || gpuName || 'GPU').replace(/\((R|TM)\)/gi, '').replace(/^AMD\s+/i, '').replace(/\s+Graphics$/i, '').trim()
-    return { brand: 'AMD', name: nm, load: u(load), temp: u(temp), power: u(power), clock: u(clock), vram: undefined }
+    // VRAM liefert ADL-PMLog nicht -> treiberfrei ueber den PDH-Zaehler nachreichen.
+    return { brand: 'AMD', name: nm, load: u(load), temp: u(temp), power: u(power), clock: u(clock), vram: u(readPdhVramMb()) }
   } catch { return null }
 }
 function readAdlGpu() { return adl ? readAdlIdx(adl.idx, adl.name) : null }
@@ -385,12 +390,16 @@ function readCpu() {
   const model = raw.replace(/\((R|TM)\)/gi, '').replace(/^AMD\s+/i, '').replace(/^Intel\s+/i, '')
     .replace(/\s+w\/.*$/i, '').replace(/\s+with\s+.*$/i, '')   // "w/ Radeon 780M Graphics" weg (GPU hat eigenen Block)
     .replace(/\s+\d+-Core Processor.*$/i, '').replace(/\s+CPU.*$/i, '').trim()
-  // Temp/Takt/Power aus Afterburner (falls aktiv). Ohne Afterburner nur der Takt
-  // treiberfrei (PDH); Temp/Power bleiben null -> im OSD ausgeblendet.
+  // Temp/Takt/Power: Kette Afterburner (falls aktiv) -> PawnIO-Sensor-Broker
+  // (falls eingerichtet) -> nur PDH-Takt. Fehlende Werte blendet das OSD aus.
   const m = readMahm()
   let temp = null, clock = null, power = null
   if (m && m.cpuTemp != null) { temp = m.cpuTemp; clock = m.cpuClock; power = m.cpuPower }
-  else { clock = readCpuClockMhz() }
+  else {
+    const p = readSenseCpu()
+    if (p) { temp = p.temp; power = p.power }
+    clock = readCpuClockMhz()
+  }
   return {
     brand,
     name: model,
@@ -586,6 +595,50 @@ function readCpuClockMhz() {
   } catch { return null }
 }
 
+// --- VRAM-Belegung treiberfrei via PDH ("GPU Adapter Memory / Dedicated Usage") --
+// Fuer GPUs, deren Sensor-API keinen VRAM liefert (AMD/ADL-PMLog). Zaehler-Instanzen
+// heissen "luid_0x..._phys_0" (eine je Adapter); wir nehmen den groessten Wert –
+// die dedizierte Karte belegt stets deutlich mehr als iGPU-Reservate. Kein Treiber,
+// kein Admin: gleiche Technik wie der PDH-CPU-Takt oben.
+let vramPdh = null
+function setupVramCounter() {
+  let koffi
+  try { koffi = require('koffi') } catch { return }
+  try {
+    const pdh = koffi.load('pdh.dll')
+    const openQ = pdh.func('long PdhOpenQueryA(str src, uintptr user, _Out_ void** q)')
+    const addC = pdh.func('long PdhAddEnglishCounterA(void* q, str path, uintptr user, _Out_ void** c)')
+    const collect = pdh.func('long PdhCollectQueryData(void* q)')
+    const getArr = pdh.func('long PdhGetFormattedCounterArrayA(void* c, uint32 fmt, _Inout_ uint32* size, _Out_ uint32* count, void* buf)')
+    const q = [null]
+    if (openQ(null, 0, q) !== 0) throw new Error('PdhOpenQuery')
+    const c = [null]
+    if (addC(q[0], '\\GPU Adapter Memory(*)\\Dedicated Usage', 0, c) !== 0) throw new Error('PdhAddEnglishCounter')
+    collect(q[0])
+    vramPdh = { collect, getArr, q: q[0], c: c[0] }
+    console.log('[osd] PDH-VRAM-Leser bereit (treiberfrei)')
+  } catch (e) { console.log('[osd] PDH-VRAM nicht verfuegbar:', e && e.message); vramPdh = null }
+}
+function readPdhVramMb() {
+  if (!vramPdh) return null
+  try {
+    vramPdh.collect(vramPdh.q)
+    const size = [0], count = [0]
+    const r0 = vramPdh.getArr(vramPdh.c, 0x00000400 /*PDH_FMT_LARGE*/, size, count, null)
+    if ((r0 >>> 0) !== 0x800007D2 /*PDH_MORE_DATA*/ || !size[0]) return null
+    const buf = Buffer.alloc(size[0])
+    if (vramPdh.getArr(vramPdh.c, 0x00000400, size, count, buf) !== 0) return null
+    // PDH_FMT_COUNTERVALUE_ITEM_A (x64): szName-Zeiger (8) + {CStatus u32, Pad u32,
+    // largeValue i64} (16) = 24 Bytes je Instanz; Wert liegt bei Offset 16.
+    let best = 0
+    for (let i = 0; i < count[0]; i++) {
+      const v = Number(buf.readBigInt64LE(i * 24 + 16))
+      if (v > best) best = v
+    }
+    return best > 0 ? Math.round(best / 1048576) : null
+  } catch { return null }
+}
+
 function getPresentMonPath() {
   return app.isPackaged ? path.join(process.resourcesPath, 'PresentMon.exe') : path.join(__dirname, 'PresentMon.exe')
 }
@@ -772,18 +825,6 @@ function fpsTaskPresent() {
 // per schtasks /run ganz ohne weiteres UAC. Register-ScheduledTask laeuft in der
 // interaktiven Nutzer-Session mit hoechsten Rechten -> selber "Local\"-Namespace
 // fuers Shared Memory UND Adminrechte fuer PresentMon/ETW.
-function createFpsTaskElevated() {
-  const exe = process.execPath.replace(/'/g, "''")
-  const ps = [
-    `$a=New-ScheduledTaskAction -Execute '${exe}' -Argument '--fps-broker'`,
-    `$p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive`,
-    `$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew`,
-    `Register-ScheduledTask -TaskName '${FPS_TASK}' -Action $a -Principal $p -Settings $s -Force`,
-  ].join('; ')
-  const b64 = Buffer.from(ps, 'utf16le').toString('base64')
-  const outer = `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand ${b64}'`
-  try { spawn('powershell', ['-NoProfile', '-Command', outer], { windowsHide: true }) } catch (e) { osdDbg('createFpsTask: ' + (e && e.message)) }
-}
 function runFpsTask() {
   osdDbg('startBroker: schtasks /run ' + FPS_TASK)
   const p = spawn('schtasks', ['/run', '/tn', FPS_TASK], { windowsHide: true })
@@ -792,7 +833,6 @@ function runFpsTask() {
   p.on('error', (e) => { bad = true; errOut += (e && e.message) })
   p.on('exit', (code) => osdDbg('startBroker: schtasks exit code=' + code + ' bad=' + bad + ' ' + errOut.trim()))
 }
-let fpsTaskCreating = false
 function startBroker() {
   if (!shmemInit()) { osdDbg('startBroker: shmemInit FAIL'); return }
   shmWriteApp(shm.ticks(), 1)                 // will FPS -> Broker soll laufen
@@ -803,43 +843,323 @@ function startBroker() {
   const now = Date.now()
   if (brokerAlive() || (now - brokerSpawnAt) < 4000) { osdDbg('startBroker: Broker laeuft/startet bereits – kein Neustart'); return }
   brokerSpawnAt = now
-  // Aufgabe noch nicht da (frisches System)? Erst dem Nutzer ERKLAEREN, was gleich
-  // passiert (sonst ist der Windows-UAC-Dialog voellig kontextlos), dann EINMAL
-  // elevated anlegen (UAC), auf die Erstellung warten, starten. Ohne die Aufgabe
-  // gaebe es nie FPS.
-  if (!fpsTaskPresent()) {
-    if (fpsTaskCreating) return
-    fpsTaskCreating = true
-    const parent = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : null
-    dialog.showMessageBox(parent, {
-      type: 'info', noLink: true,
-      title: 'FPS-Anzeige einrichten',
-      message: 'FPS-Anzeige einrichten',
-      detail: 'Damit Lumora die Bildrate (FPS) im Spiel messen kann, richtet es einmalig einen kleinen Hintergrunddienst ein.\n\nGleich fragt Windows nach deiner Bestaetigung mit Administratorrechten (ein Dialog von "Windows PowerShell"). Das ist nur fuer diese einmalige Einrichtung noetig – danach nie wieder.',
-      buttons: ['Einrichten', 'Abbrechen'], defaultId: 0, cancelId: 1,
-    }).then((r) => {
-      if (r.response !== 0) {                         // abgelehnt -> FPS aus, nicht staendig neu fragen
-        fpsTaskCreating = false
-        appSettings.osdFps = false; saveAppSettings(); stopFps()
-        if (parent) parent.webContents.send('osd-fps-off')
-        osdDbg('startBroker: Einrichtung abgelehnt -> FPS aus')
-        return
-      }
-      osdDbg('startBroker: Aufgabe fehlt -> lege sie elevated an (UAC)')
-      createFpsTaskElevated()
-      let tries = 0
-      const wait = setInterval(() => {
-        if (fpsTaskPresent()) { clearInterval(wait); fpsTaskCreating = false; osdDbg('startBroker: Aufgabe angelegt'); runFpsTask() }
-        else if (++tries >= 30) { clearInterval(wait); fpsTaskCreating = false; osdDbg('startBroker: Aufgabe nicht angelegt (UAC abgelehnt?)') }
-      }, 1000)
-    }).catch(() => { fpsTaskCreating = false })
-    return
-  }
+  // Aufgabe noch nicht da (frisches System)? Die gemeinsame OSD-Einrichtung
+  // uebernimmt (Erklaer-Dialog + EIN UAC fuer alles, was fehlt).
+  if (!fpsTaskPresent()) { ensureOsdSetup(); return }
   runFpsTask()
 }
 function stopBroker() {
   shmWriteApp(0, 0)                           // Broker beendet sich (+ PresentMon)
 }
+
+// === CPU-Sensor-Broker (PawnIO) ===============================================
+// CPU-Temp/-Verbrauch OHNE Afterburner: PawnIO (signierter Kernel-Treiber, der
+// WinRing0-Nachfolger; pawnio.eu) liefert MSR/SMN-Lesezugriff ueber signierte
+// Module. pawnio_open braucht Adminrechte -> das Auslesen laeuft, wie die FPS,
+// in einem elevated Broker (geplante Aufgabe LumoraOSD-Sensors) und die Werte
+// wandern per Shared Memory zur App. Gleiches Heartbeat-Muster wie der FPS-Broker.
+const SENSE_TASK = 'LumoraOSD-Sensors'
+const SENSE_SHM_NAME = 'Local\\LumoraOSDSense'
+const SENSE_MAGIC = 0x4C4F5345   // 'LOSE'
+let senseShm = null
+let senseStructs = null
+function senseInit() {
+  if (senseShm) return true
+  let koffi
+  try { koffi = require('koffi') } catch { return false }
+  try {
+    const k32 = koffi.load('kernel32.dll')
+    const CreateFileMappingA = k32.func('void* CreateFileMappingA(void* hFile, void* sec, uint32 protect, uint32 maxHi, uint32 maxLo, str name)')
+    if (!senseStructs) {
+      // Broker schreibt @0 (magic..pid), App @24 (appTick,wanted) – wie beim FPS-SHM.
+      senseStructs = {
+        FULL: koffi.struct('LumoraSenseFull', { magic: 'uint32', brokerTick: 'uint32', tempX10: 'int32', powerX10: 'int32', pid: 'uint32', _r: 'uint32', appTick: 'uint32', wanted: 'uint32' }),
+        BROKER: koffi.struct('LumoraSenseBroker', { magic: 'uint32', brokerTick: 'uint32', tempX10: 'int32', powerX10: 'int32', pid: 'uint32', _r: 'uint32' }),
+        APP: koffi.struct('LumoraSenseApp', { appTick: 'uint32', wanted: 'uint32' }),
+      }
+    }
+    const h = CreateFileMappingA(koffi.as(-1, 'void*'), null, 0x04 /*PAGE_READWRITE*/, 0, 64, SENSE_SHM_NAME)
+    if (!h) return false
+    senseShm = {
+      koffi, handle: h, FULL: senseStructs.FULL, BROKER: senseStructs.BROKER, APP: senseStructs.APP,
+      map: k32.func('void* MapViewOfFile(void* h, uint32 access, uint32 offHi, uint32 offLo, size_t bytes)'),
+      unmap: k32.func('int UnmapViewOfFile(void* p)'),
+      ticks: k32.func('uint32 GetTickCount()'),
+    }
+    return true
+  } catch (e) { osdDbg('senseInit throw: ' + (e && e.message)); return false }
+}
+function senseReadFull() {
+  if (!senseShm) return null
+  const base = senseShm.map(senseShm.handle, 0xF001F, 0, 0, 0)
+  if (!base) return null
+  try { return senseShm.koffi.decode(base, senseShm.FULL) }
+  catch { return null }
+  finally { try { senseShm.unmap(base) } catch {} }
+}
+function senseWriteBroker(o) {
+  if (!senseShm) return
+  const base = senseShm.map(senseShm.handle, 0xF001F, 0, 0, 0)
+  if (!base) return
+  try { senseShm.koffi.encode(base, 0, senseShm.BROKER, o) } catch {}
+  finally { try { senseShm.unmap(base) } catch {} }
+}
+function senseWriteApp(appTick, wanted) {
+  if (!senseShm) return
+  const base = senseShm.map(senseShm.handle, 0xF001F, 0, 0, 0)
+  if (!base) return
+  try { senseShm.koffi.encode(base, 24, senseShm.APP, { appTick, wanted }) } catch {}
+  finally { try { senseShm.unmap(base) } catch {} }
+}
+function getPawnioDir() { return path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PawnIO') }
+function pawnioInstalled() { try { return fs.existsSync(path.join(getPawnioDir(), 'PawnIOLib.dll')) } catch { return false } }
+function getPawnioModulePath(name) {
+  return app.isPackaged ? path.join(process.resourcesPath, name) : path.join(__dirname, name)
+}
+// Passendes (gebuendeltes, LGPL-lizenziertes) PawnIO-Modul fuer diese CPU.
+function cpuPawnioModule() {
+  const m = (os.cpus()[0] && os.cpus()[0].model) || ''
+  if (/amd|ryzen/i.test(m)) return 'AMDFamily17.bin'   // Zen 1-5 (Family 17h-1Ah, prueft selbst)
+  if (/intel/i.test(m)) return 'IntelMSR.bin'
+  return null
+}
+
+// Broker-Prozess (elevated, Lumora.exe --sensor-broker): PawnIO oeffnen, Modul
+// laden, 1x/s CPU-Temp/-Power in den Shared Memory schreiben. Beendet sich selbst,
+// sobald der App-Heartbeat ausbleibt (App zu / OSD aus).
+function runSensorBroker() {
+  if (!senseInit()) { app.quit(); return }
+  const s0 = senseReadFull()
+  if (s0 && s0.magic === SENSE_MAGIC && s0.brokerTick && ((senseShm.ticks() - s0.brokerTick) >>> 0) < 3500) {
+    osdDbg('[sense] anderer Sensor-Broker aktiv – beende mich'); app.quit(); return
+  }
+  let pio = null
+  try {
+    const koffi = require('koffi')
+    const lib = koffi.load(path.join(getPawnioDir(), 'PawnIOLib.dll'))
+    const pioOpen = lib.func('long __stdcall pawnio_open(_Out_ void** handle)')
+    const pioLoad = lib.func('long __stdcall pawnio_load(void* h, void* blob, size_t size)')
+    const pioExec = lib.func('long __stdcall pawnio_execute(void* h, str name, void* inBuf, size_t inCount, void* outBuf, size_t outCount, _Out_ size_t* retCount)')
+    const pioClose = lib.func('long __stdcall pawnio_close(void* h)')
+    const modName = cpuPawnioModule()
+    if (!modName) throw new Error('CPU nicht unterstuetzt')
+    const h = [null]
+    const rO = pioOpen(h)
+    if (rO !== 0) throw new Error('pawnio_open 0x' + (rO >>> 0).toString(16) + ' (Adminrechte?)')
+    const blob = fs.readFileSync(getPawnioModulePath(modName))
+    const rL = pioLoad(h[0], blob, blob.length)
+    if (rL !== 0) throw new Error('pawnio_load ' + modName + ' 0x' + (rL >>> 0).toString(16))
+    const inB = Buffer.alloc(8), outB = Buffer.alloc(8), retC = [0]
+    const rd = (name, v) => {
+      inB.writeBigUInt64LE(BigInt.asUintN(64, BigInt(v)))
+      try { return pioExec(h[0], name, inB, 1, outB, 1, retC) === 0 ? outB.readBigUInt64LE(0) : null } catch { return null }
+    }
+    pio = { close: () => { try { pioClose(h[0]) } catch {} }, rd, amd: modName === 'AMDFamily17.bin' }
+    osdDbg('[sense] PawnIO bereit, Modul ' + modName)
+  } catch (e) { osdDbg('[sense] Init-Fehler: ' + (e && e.message)); app.quit(); return }
+
+  // Intel: TjMax einmalig (MSR_TEMPERATURE_TARGET 0x1A2, Bits 23:16); AMD braucht keins.
+  let tjMax = 100
+  if (!pio.amd) {
+    const t = pio.rd('ioctl_read_msr', 0x1A2)
+    if (t != null) { const v = Number((t >> 16n) & 0xffn); if (v > 40 && v < 130) tjMax = v }
+  }
+  // RAPL-Energie-Einheit (AMD 0xC0010299 / Intel 0x606, ESU in Bits 12:8).
+  const energyMsr = pio.amd ? 0xC001029B : 0x611
+  let esu = 16
+  { const u = pio.rd('ioctl_read_msr', pio.amd ? 0xC0010299 : 0x606); if (u != null) esu = Number((u >> 8n) & 0x1fn) }
+  const jPerTick = 1 / Math.pow(2, esu)
+
+  let lastE = null, lastT = 0, watts = -1
+  const startTick = senseShm.ticks()
+  let lastFreshApp = senseShm.ticks()
+  const timer = setInterval(() => {
+    const now = senseShm.ticks()
+    const s = senseReadFull()
+    if (s && s.appTick && ((now - s.appTick) >>> 0) < 3000) lastFreshApp = now
+    if (((now - startTick) >>> 0) > 8000 && ((now - lastFreshApp) >>> 0) > 5000) {
+      osdDbg('[sense] Exit: kein App-Heartbeat'); cleanup(); return
+    }
+    // Temperatur: AMD Tctl via SMN THM_TCON_CUR_TMP; Intel via IA32_THERM_STATUS (TjMax-DTS).
+    let temp = null
+    if (pio.amd) {
+      const r = pio.rd('ioctl_read_smn', 0x00059800)
+      if (r != null) {
+        const raw = Number(r & 0xffffffffn)
+        let t = (raw >>> 21) * 0.125
+        if (raw & 0x80000) t -= 49
+        if (t > -20 && t < 150) temp = t
+      }
+    } else {
+      const r = pio.rd('ioctl_read_msr', 0x19C)
+      if (r != null) {
+        const raw = Number(r & 0xffffffffn)
+        if (raw & 0x80000000) temp = tjMax - ((raw >>> 16) & 0x7f)   // Reading-Valid-Bit
+      }
+    }
+    // Package-Power: kumulativer Energiezaehler -> Watt = Delta-Energie / Delta-Zeit.
+    const e = pio.rd('ioctl_read_msr', energyMsr)
+    const tNow = Date.now()
+    if (e != null) {
+      const cur = Number(BigInt.asUintN(32, e))
+      if (lastE != null && tNow > lastT) {
+        let dE = cur - lastE; if (dE < 0) dE += 0x100000000   // 32-bit-Wrap
+        const w = dE * jPerTick / ((tNow - lastT) / 1000)
+        if (w >= 0 && w < 1000) watts = w
+      }
+      lastE = cur; lastT = tNow
+    }
+    senseWriteBroker({
+      magic: SENSE_MAGIC, brokerTick: now,
+      tempX10: temp != null ? Math.round(temp * 10) : -1,
+      powerX10: watts >= 0 ? Math.round(watts * 10) : -1,
+      pid: process.pid, _r: 0,
+    })
+  }, 1000)
+  let cleaned = false
+  function cleanup() { if (cleaned) return; cleaned = true; clearInterval(timer); if (pio) pio.close(); app.quit() }
+  app.on('window-all-closed', (e) => e.preventDefault())   // Broker hat kein Fenster
+}
+
+// --- App-Seite des Sensor-Brokers ---------------------------------------------
+let senseSpawnAt = 0
+function senseTaskPresent() {
+  try { return require('child_process').spawnSync('schtasks', ['/query', '/tn', SENSE_TASK], { windowsHide: true }).status === 0 }
+  catch { return false }
+}
+function runSenseTask() { try { spawn('schtasks', ['/run', '/tn', SENSE_TASK], { windowsHide: true }) } catch {} }
+function senseBrokerAlive() {
+  if (!senseShm) return false
+  const s = senseReadFull()
+  return !!(s && s.magic === SENSE_MAGIC && s.brokerTick && ((senseShm.ticks() - s.brokerTick) >>> 0) < 3500)
+}
+function stopSensorBroker() { if (senseShm) senseWriteApp(0, 0) }
+// Liest CPU-Temp/-Power des Brokers; startet ihn bei Bedarf (lazy, gedrosselt).
+// Zeigt KEINEN Setup-Dialog – der laeuft nur beim OSD-Einschalten (ensureOsdSetup),
+// damit mitten im Spiel niemals ungefragt ein Dialog aufpoppt.
+function readSenseCpu() {
+  if (appSettings.osdSetupDeclined || !cpuPawnioModule()) return null
+  if (!senseInit()) return null
+  senseWriteApp(senseShm.ticks(), 1)           // Heartbeat: App will Sensorwerte
+  if (!senseBrokerAlive()) {
+    const now = Date.now()
+    if (now - senseSpawnAt > 5000 && pawnioInstalled() && senseTaskPresent()) {
+      senseSpawnAt = now
+      runSenseTask()
+    }
+    return null
+  }
+  const s = senseReadFull()
+  if (!s) return null
+  return { temp: s.tempX10 >= 0 ? s.tempX10 / 10 : null, power: s.powerX10 >= 0 ? s.powerX10 / 10 : null }
+}
+
+// --- Gemeinsame OSD-Einrichtung (EIN Erklaer-Dialog, EIN UAC) -------------------
+// Richtet beim OSD-Einschalten alles ein, was fuer die Vollausstattung fehlt:
+// FPS-Task (wenn PresentMon gebraucht wird), PawnIO-Treiber (Download von der
+// offiziellen Quelle + Signaturpruefung + Silent-Install) und Sensor-Task.
+// Alles Elevated laeuft in EINEM PowerShell-Aufruf -> ein einziger UAC-Dialog.
+let osdSetupRunning = false
+function psRun(cmd) {
+  return new Promise((resolve) => {
+    try {
+      require('child_process').execFile('powershell', ['-NoProfile', '-Command', cmd], { windowsHide: true, timeout: 180000 }, (err, stdout) => resolve(String(stdout || '') + (err ? ' ERR:' + err.message : '')))
+    } catch (e) { resolve('ERR:' + (e && e.message)) }
+  })
+}
+function fpsNeedsSetup() {
+  const src = appSettings.osdFpsSource || 'auto'
+  const useRtss = src === 'rtss' ? true : src === 'presentmon' ? false : rtssAvailable()
+  return !useRtss && !fpsTaskPresent()
+}
+function sensorsNeedSetup() {
+  if (!cpuPawnioModule()) return false
+  const m = readMahm()
+  if (m && m.cpuTemp != null) return false     // Afterburner liefert bereits
+  return !pawnioInstalled() || !senseTaskPresent()
+}
+async function ensureOsdSetup() {
+  if (osdSetupRunning || appSettings.osdSetupDeclined) return
+  const needFps = fpsNeedsSetup()
+  const sensorGap = sensorsNeedSetup()
+  const needPawnio = sensorGap && !pawnioInstalled()
+  const needSense = sensorGap && !senseTaskPresent()
+  if (!needFps && !needPawnio && !needSense) return
+  osdSetupRunning = true
+  try {
+    const parts = []
+    if (needFps) parts.push('• FPS-Messung: kleiner Hintergrunddienst (PresentMon, liegt Lumora bei)')
+    if (needPawnio) parts.push('• CPU-Temperatur & -Verbrauch: signierter Open-Source-Treiber PawnIO (wird von der offiziellen Quelle geladen)')
+    else if (needSense) parts.push('• CPU-Temperatur & -Verbrauch: Hintergrunddienst fuer den PawnIO-Treiber')
+    const parent = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : null
+    const r = await dialog.showMessageBox(parent, {
+      type: 'info', noLink: true,
+      title: 'OSD einrichten',
+      message: 'OSD vollstaendig einrichten',
+      detail: 'Damit das OSD alle Werte anzeigen kann, richtet Lumora einmalig ein:\n\n' + parts.join('\n') + '\n\nGleich fragt Windows EINMAL nach deiner Bestaetigung (Administratorrechte). Danach laeuft alles automatisch – ohne weitere Nachfragen.',
+      buttons: ['Einrichten', 'Abbrechen'], defaultId: 0, cancelId: 1,
+    })
+    if (r.response !== 0) {                       // abgelehnt -> merken, nicht staendig neu fragen
+      appSettings.osdSetupDeclined = true; saveAppSettings(); stopFps()
+      if (parent) parent.webContents.send('osd-fps-off')
+      osdDbg('ensureOsdSetup: abgelehnt')
+      return
+    }
+    // Status-Toast im Hauptfenster: macht jede Phase sichtbar (Download dauert
+    // einen Moment, bis der UAC-Dialog kommt – ohne Anzeige wirkt das wie haengen).
+    const status = (msg, done) => { try { if (parent && !parent.isDestroyed()) parent.webContents.send('osd-setup-status', msg, !!done) } catch {} }
+    // 1) PawnIO-Installer non-elevated laden + Authenticode-Signatur pruefen.
+    let setupExe = null
+    if (needPawnio) {
+      status('OSD-Einrichtung: Lade PawnIO-Treiber herunter und pruefe die Signatur …')
+      setupExe = path.join(app.getPath('temp'), 'PawnIO_setup.exe')
+      const q = (s) => s.replace(/'/g, "''")
+      const out = await psRun(`Invoke-WebRequest -Uri 'https://github.com/namazso/PawnIO.Setup/releases/latest/download/PawnIO_setup.exe' -OutFile '${q(setupExe)}' -UseBasicParsing; (Get-AuthenticodeSignature '${q(setupExe)}').Status`)
+      if (!/\bValid\b/.test(out)) {
+        osdDbg('ensureOsdSetup: PawnIO-Download/Signatur FEHLER: ' + out.trim())
+        status(null)
+        if (parent) dialog.showMessageBox(parent, { type: 'error', noLink: true, message: 'PawnIO-Download fehlgeschlagen', detail: 'Der Treiber konnte nicht geladen oder verifiziert werden. Bitte Internetverbindung pruefen – die Einrichtung wird beim naechsten Einschalten des OSD erneut angeboten.' })
+        return
+      }
+      osdDbg('ensureOsdSetup: PawnIO geladen, Signatur Valid')
+    }
+    // 2) EIN elevated Aufruf: [PawnIO-Silent-Install] + [FPS-Task] + [Sensor-Task].
+    const exe = process.execPath.replace(/'/g, "''")
+    const taskPs = (task, arg, v) => [
+      `$a${v}=New-ScheduledTaskAction -Execute '${exe}' -Argument '${arg}'`,
+      `$p${v}=New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive`,
+      `$s${v}=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew`,
+      `Register-ScheduledTask -TaskName '${task}' -Action $a${v} -Principal $p${v} -Settings $s${v} -Force`,
+    ]
+    const ps = []
+    if (needPawnio) ps.push(`Start-Process -FilePath '${setupExe.replace(/'/g, "''")}' -ArgumentList '-install','-silent' -Wait`)
+    if (needFps) ps.push(...taskPs(FPS_TASK, '--fps-broker', ''))
+    if (needSense || needPawnio) ps.push(...taskPs(SENSE_TASK, '--sensor-broker', '2'))
+    const b64 = Buffer.from(ps.join('; '), 'utf16le').toString('base64')
+    const outer = `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand ${b64}'`
+    status('OSD-Einrichtung: Warte auf deine Bestaetigung (Windows-Sicherheitsabfrage) …')
+    try { spawn('powershell', ['-NoProfile', '-Command', outer], { windowsHide: true }) } catch (e) { osdDbg('ensureOsdSetup spawn: ' + (e && e.message)); status(null); return }
+    // 3) Warten, bis alles da ist (Install braucht Momente), dann Broker anwerfen.
+    let tries = 0, working = false
+    const ok = await new Promise((resolve) => {
+      const wait = setInterval(() => {
+        const fpsOk = !needFps || fpsTaskPresent()
+        const pioOk = !needPawnio || pawnioInstalled()
+        const senseOk = (!needSense && !needPawnio) || senseTaskPresent()
+        // Sobald das ERSTE tatsaechlich benoetigte Teil auftaucht, wurde der UAC
+        // bestaetigt -> Statuswechsel von "warte auf Bestaetigung" zu "installiere".
+        const progressed = (needPawnio && pawnioInstalled()) || (needFps && fpsTaskPresent()) || ((needSense || needPawnio) && senseTaskPresent())
+        if (!working && progressed) { working = true; status('OSD-Einrichtung: Installiere und richte Hintergrunddienste ein …') }
+        if (fpsOk && pioOk && senseOk) { clearInterval(wait); osdDbg('ensureOsdSetup: Einrichtung komplett'); resolve(true) }
+        else if (++tries >= 90) { clearInterval(wait); osdDbg('ensureOsdSetup: Timeout (UAC abgelehnt?)'); resolve(false) }
+      }, 1000)
+    })
+    if (ok) status('OSD-Einrichtung abgeschlossen – alle Werte kommen gleich rein. ✓', true)
+    else status('OSD-Einrichtung nicht abgeschlossen – erneut ueber Einstellungen → Overlay.', true)
+    syncFps()          // FPS-Broker starten, falls gebraucht (Sensor-Broker startet lazy via readSenseCpu)
+  } finally { osdSetupRunning = false }
+}
+
 let lastGoodFps = null, lastGoodAt = 0, readDbgAt = 0
 function readBrokerFps() {
   if (!shm) return null
@@ -891,7 +1211,7 @@ function stopFps() {
 // set-app-settings bei jeder Slider-Bewegung erneut aufgerufen wird.
 function syncFps() {
   const vis = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()
-  const want = !!(appSettings.osdEnabled && appSettings.osdFps && vis)
+  const want = !!(appSettings.osdEnabled && !appSettings.osdSetupDeclined && vis)
   if (want && !fpsTimer) startFps()
   else if (!want && fpsTimer) stopFps()
 }
@@ -904,7 +1224,7 @@ function startOsdData() {
   const tick = () => {
     if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return
     const payload = { gpu: readGpu(), cpu: readCpu() }
-    if (!appSettings.osdFps) payload.fps = '—'   // FPS-Messung aus; sonst sendet die FPS-Schleife
+    if (appSettings.osdSetupDeclined) payload.fps = '—'   // Einrichtung abgelehnt; sonst sendet die FPS-Schleife
     overlayWindow.webContents.send('osd-data', payload)
   }
   tick()
@@ -912,6 +1232,7 @@ function startOsdData() {
 }
 function stopOsdData() {
   if (osdDataInterval) { clearInterval(osdDataInterval); osdDataInterval = null }
+  stopSensorBroker()   // wanted=0 -> Sensor-Broker beendet sich zeitnah
 }
 
 // Das Overlay-Fenster deckt die GANZE Bildschirmflaeche ab (transparent +
@@ -1015,6 +1336,7 @@ function showOverlay() {
   applyOsdConfig()
   startOsdData()
   syncFps()
+  ensureOsdSetup()   // fehlt noch etwas fuer die Vollausstattung? EIN Dialog, EIN UAC.
   try { osdDbg('showOverlay: isVisible=' + w.isVisible() + ' onTop=' + w.isAlwaysOnTop() + ' bounds=' + JSON.stringify(w.getBounds())) } catch {}
 }
 
@@ -2378,6 +2700,37 @@ ipcMain.handle('save-prefs', (event, json) => {
 
 ipcMain.handle('get-app-settings', () => appSettings)
 ipcMain.handle('list-gpus', () => listGpus())
+// "Jetzt einrichten" (FPS): fruehere Ablehnung zuruecknehmen und die Einrichtung
+// (Erklaer-Dialog + UAC) erneut anstossen – laeuft ueber den normalen syncFps-Weg.
+// Datenquellen-Transparenz fuer den Overlay-Tab: Woher kommt (bzw. kaeme) welcher
+// Wert gerade? Beantwortet "warum fehlt X" ohne Ferndiagnose.
+ipcMain.handle('osd-sources', () => {
+  const m = readMahm()
+  const gpu = nvml ? 'NVIDIA-Treiber (NVML)'
+    : adl ? 'AMD-Treiber (ADL)'
+    : (m && m.gpuTemp != null) ? 'MSI Afterburner'
+    : 'keine erkannt'
+  const cpu = (m && m.cpuTemp != null) ? 'MSI Afterburner'
+    : senseBrokerAlive() ? 'PawnIO-Treiber'
+    : (cpuPawnioModule() && pawnioInstalled() && senseTaskPresent()) ? 'PawnIO-Treiber (startet mit dem OSD)'
+    : appSettings.osdSetupDeclined ? 'nicht eingerichtet (nur Last/RAM/Takt)'
+    : 'Einrichtung folgt beim OSD-Start (bis dahin Last/RAM/Takt)'
+  const src = appSettings.osdFpsSource || 'auto'
+  const useRtss = src === 'rtss' ? true : src === 'presentmon' ? false : rtssAvailable()
+  const fps = useRtss ? 'RTSS/Afterburner'
+    : fpsTaskPresent() ? 'PresentMon'
+    : appSettings.osdSetupDeclined ? 'nicht eingerichtet'
+    : 'PresentMon (Einrichtung folgt beim OSD-Start)'
+  return { gpu, cpu, fps }
+})
+
+ipcMain.handle('setup-osd', () => {
+  appSettings.osdSetupDeclined = false
+  saveAppSettings()
+  ensureOsdSetup()   // Dialog+UAC sofort anbieten (zeigt nur, was wirklich fehlt)
+  syncFps()
+  return appSettings
+})
 
 ipcMain.handle('set-app-settings', (event, partial) => {
   const prevSource = appSettings.osdFpsSource
@@ -2514,12 +2867,16 @@ if (process.argv.includes('--fps-broker')) {
   // Broker-Instanz: kein Fenster, keine Single-Instance-Sperre, nur FPS messen.
   try { app.disableHardwareAcceleration() } catch {}   // schlanker (keine GPU-Prozesse)
   app.whenReady().then(runFpsBroker)
+} else if (process.argv.includes('--sensor-broker')) {
+  // Sensor-Broker: elevated via geplanter Aufgabe, liest CPU-Temp/-Power via PawnIO.
+  try { app.disableHardwareAcceleration() } catch {}
+  app.whenReady().then(runSensorBroker)
 } else if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', () => showMainWindow())
 
-  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupNvml(); setupAdl(); setupRtss(); setupMahm(); setupCpuClock(); setupGpuName(); if (appSettings.osdEnabled) showOverlay() })
+  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupNvml(); setupAdl(); setupRtss(); setupMahm(); setupCpuClock(); setupVramCounter(); setupGpuName(); if (appSettings.osdEnabled) showOverlay() })
 
   // HDR abschalten, falls der Launcher es für ein noch laufendes Spiel aktiviert hatte
   app.on('before-quit', () => {
@@ -2529,7 +2886,7 @@ if (process.argv.includes('--fps-broker')) {
     }
   })
 
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll); stopFps() })
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll); stopFps(); stopSensorBroker() })
 
   app.on('window-all-closed', () => {
     if (hdrPollInterval) clearInterval(hdrPollInterval)

@@ -20,3 +20,11 @@ Desktop.ini
 
 # grosse Website-Demo nicht ins Repo
 website/demo.mp4
+
+# PawnIO-Testlab-Artefakte (Downloads/Referenzquellen, kein Projektcode)
+_testlab/PawnIO_setup.exe
+_testlab/pawnio-modules.zip
+_testlab/pawnio-modules/
+_testlab/pawnio-out.txt
+_testlab/*.p
+_testlab/PawnIOLib.h

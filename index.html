@@ -299,6 +299,7 @@
           <div class="form-group">
             <label>Performance-Overlay (OSD)</label>
             <p class="settings-hint">Blendet GPU-/CPU-Auslastung, Temperaturen und FPS über dem Spiel ein – funktioniert über randlos laufenden Spielen.</p>
+            <p class="settings-hint" id="osdSourcesInfo" style="display:none"></p>
             <span class="osd-field-label" style="margin-top:2px">Ein-/ausblenden</span>
             <div class="hotkey-row">
               <span class="hotkey-kind" title="Tastatur">⌨️</span>
@@ -346,9 +347,10 @@
               <span class="osd-field-label">Werte</span>
               <div id="osdFieldsUi" class="osd-fields"></div>
             </div>
-            <div class="setting-toggle-row">
-              <span class="setting-toggle-label">FPS/Frametime messen</span>
-              <label class="switch"><input type="checkbox" id="setOsdFps" onchange="onOsdSettingChange()"><span class="switch-slider"></span></label>
+            <div class="osd-field" id="osdSetupRow" style="display:none">
+              <span class="osd-field-label">Einrichtung</span>
+              <span class="settings-hint" style="flex:1;margin:0">Abgelehnt – FPS und CPU-Sensorwerte fehlen.</span>
+              <button class="btn-browse" onclick="setupOsdNow()">Jetzt einrichten</button>
             </div>
             <div class="osd-field">
               <span class="osd-field-label">FPS-Quelle</span>
@@ -1410,7 +1412,19 @@
     }
 
 // FPS-Einrichtung abgelehnt: Schalter wieder auf "aus" (sonst fragt es erneut).
-ipcRenderer.on('osd-fps-off', () => { const el = document.getElementById('setOsdFps'); if (el) el.checked = false })
+ipcRenderer.on('osd-fps-off', () => { const el = document.getElementById('osdSetupRow'); if (el) el.style.display = 'flex' })
+// OSD-Einrichtungs-Status: Phasen-Meldungen aus dem Hauptprozess (Download/UAC/
+// Dienste). Sticky-Toast: bleibt bis zur naechsten Phase stehen; done=true blendet
+// nach ein paar Sekunden aus, msg=null sofort.
+ipcRenderer.on('osd-setup-status', (e, msg, done) => {
+  const t = document.getElementById('gamepadToast')
+  if (!t) return
+  clearTimeout(t._timer)
+  if (!msg) { t.style.display = 'none'; return }
+  t.textContent = '⚙️ ' + msg
+  t.style.display = 'block'
+  if (done) t._timer = setTimeout(() => { t.style.display = 'none' }, 5000)
+})
 
 ipcRenderer.on('launch-status', (event, status) => {
   const btn = document.getElementById('launchBtn')
@@ -1556,7 +1570,12 @@ ipcRenderer.on('launch-status', (event, status) => {
       document.getElementById('setOsdTheme').value = s.osdTheme || 'compact'
       renderGpuOptions(s.osdGpu || 'auto')
       renderOsdFields(s.osdFields)
-      document.getElementById('setOsdFps').checked = !!s.osdFps
+      document.getElementById('osdSetupRow').style.display = s.osdSetupDeclined ? 'flex' : 'none'
+      // Datenquellen live anzeigen (GPU/CPU/FPS) – beantwortet "woher kommen die Werte".
+      ipcRenderer.invoke('osd-sources').then(q => {
+        const el = document.getElementById('osdSourcesInfo')
+        if (el && q) { el.textContent = 'Datenquellen — GPU: ' + q.gpu + ' · CPU: ' + q.cpu + ' · FPS: ' + q.fps; el.style.display = 'block' }
+      }).catch(() => {})
       document.getElementById('setOsdFpsSource').value = s.osdFpsSource || 'auto'
       const oScale = s.osdScale || 1, oOp = s.osdOpacity != null ? s.osdOpacity : 0.55
       document.getElementById('setOsdScale').value = oScale
@@ -1621,7 +1640,6 @@ ipcRenderer.on('launch-status', (event, status) => {
         osdEnabled: document.getElementById('setOsdEnabled').checked,
         osdTheme: document.getElementById('setOsdTheme').value,
         osdFields: osdFieldsState,
-        osdFps: document.getElementById('setOsdFps').checked,
         osdFpsSource: document.getElementById('setOsdFpsSource').value,
         osdScale: parseFloat(document.getElementById('setOsdScale').value),
         osdOpacity: parseFloat(document.getElementById('setOsdOpacity').value),
@@ -1630,6 +1648,12 @@ ipcRenderer.on('launch-status', (event, status) => {
     }
     function onOsdGpuChange() {
       ipcRenderer.invoke('set-app-settings', { osdGpu: document.getElementById('setOsdGpu').value })
+    }
+    // OSD-Einrichtung (FPS-Dienst + PawnIO-CPU-Sensorik) nach frueherer Ablehnung
+    // erneut anstossen: Erklaer-Dialog + ein UAC, nur fuer das, was wirklich fehlt.
+    async function setupOsdNow() {
+      document.getElementById('osdSetupRow').style.display = 'none'
+      await ipcRenderer.invoke('setup-osd')
     }
     // Erkannte GPUs ins Dropdown laden. Labels via textContent (GPU-Namen kommen aus
     // Hardware/WMI -> nicht als HTML interpretieren). Ist die gespeicherte GPU nicht
