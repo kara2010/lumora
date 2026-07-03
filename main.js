@@ -48,9 +48,11 @@ let tray = null
 let appSettingsFile = null
 let gamesFile = null
 let prefsFile = null
-const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L', gamepadHotkey: [],
+const appSettings = { autostart: false, startMinimized: false, minimizeToTray: false, steamGridDbKey: '', toggleHotkey: 'Alt+L', gamepadHotkey: [], gamepadOsdHotkey: [],
   // OSD-Overlay: sichtbar?, Skalierung (Zoomfaktor), Ecke (tl/tr/bl/br), Panel-Deckkraft, FPS-Messung
-  osdEnabled: false, osdScale: 1, osdCorner: 'tl', osdOpacity: 0.55, osdFps: false, osdFpsSource: 'auto', osdHotkey: 'Alt+O',
+  osdEnabled: false, osdScale: 1, osdCorner: 'tl', osdOpacity: 0.55, osdFps: false, osdFpsSource: 'auto', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O',
+  // Grafikkarte fuer die OSD-Sensoren: 'auto' (schnellste automatisch) oder feste ID 'nvml:<idx>' / 'adl:<idx>'
+  osdGpu: 'auto',
   // OSD-Aussehen: Theme + welche Werte je Gruppe angezeigt werden + Akzentfarbe
   osdTheme: 'compact', osdAccent: '#74e857',
   osdFields: { gpu: ['load','temp','power','clock','vram'], cpu: ['load','temp','clock','power','ram'], fps: ['fps','frametime','graph'] } }
@@ -135,8 +137,8 @@ function rebuildHotkeys() {
   khHotkeys = []
   const add = (accel, action) => { const p = parseAccel(accel); if (p) khHotkeys.push(Object.assign(p, { action })) }
   add(appSettings.toggleHotkey, toggleMainWindow)
-  add(appSettings.osdHotkey || 'Alt+O', toggleOverlay)
-  add('Alt+Shift+O', toggleOsdEdit)
+  add(appSettings.osdHotkey, toggleOverlay)          // leer -> parseAccel null -> aus
+  add(appSettings.osdEditHotkey, toggleOsdEdit)
 }
 // (Neu-)Registriert die Hotkeys. Ist der native Poll (GetAsyncKeyState) aktiv,
 // uebernimmt der die Tastatur-Hotkeys – auch im Spiel. Nur wenn der nicht
@@ -145,8 +147,8 @@ function registerToggleHotkey() {
   globalShortcut.unregisterAll()
   rebuildHotkeys()
   if (getAsyncKey) return true   // Poll erledigt die Tastatur-Hotkeys
-  try { globalShortcut.register(appSettings.osdHotkey || 'Alt+O', toggleOverlay) } catch {}
-  try { globalShortcut.register('Alt+Shift+O', toggleOsdEdit) } catch {}
+  if (appSettings.osdHotkey) try { globalShortcut.register(appSettings.osdHotkey, toggleOverlay) } catch {}
+  if (appSettings.osdEditHotkey) try { globalShortcut.register(appSettings.osdEditHotkey, toggleOsdEdit) } catch {}
   const acc = appSettings.toggleHotkey
   if (!acc) return true
   try { return globalShortcut.register(acc, toggleMainWindow) }
@@ -174,6 +176,7 @@ function setupNvml() {
     koffi.struct('nvmlMemory_t', { total: 'uint64', free: 'uint64', used: 'uint64' })
     const f = {
       init:   lib.func('int nvmlInit_v2()'),
+      count:  lib.func('int nvmlDeviceGetCount_v2(_Out_ uint32* count)'),
       handle: lib.func('int nvmlDeviceGetHandleByIndex_v2(uint32 index, _Out_ nvmlDevice_t* device)'),
       name:   lib.func('int nvmlDeviceGetName(nvmlDevice_t device, _Out_ char* name, uint32 length)'),
       util:   lib.func('int nvmlDeviceGetUtilizationRates(nvmlDevice_t device, _Out_ nvmlUtilization_t* u)'),
@@ -183,13 +186,22 @@ function setupNvml() {
       mem:    lib.func('int nvmlDeviceGetMemoryInfo(nvmlDevice_t device, _Out_ nvmlMemory_t* m)'),
     }
     if (f.init() !== 0) throw new Error('nvmlInit_v2 fehlgeschlagen')
-    const dev = [null]
-    if (f.handle(0, dev) !== 0) throw new Error('GetHandleByIndex fehlgeschlagen')
-    const nameBuf = Buffer.alloc(96)
-    f.name(dev[0], nameBuf, 96)
-    const model = nameBuf.toString('utf8').split('\0')[0].replace(/^NVIDIA\s+/i, '').replace(/GeForce\s+/i, '').trim()
-    nvml = { f, device: dev[0], model }
-    console.log('[osd] NVML aktiv:', model)
+    // Alle NVIDIA-Karten aufzaehlen (fuer die manuelle GPU-Auswahl). Aktive =
+    // Index 0 (bei einer dGPU immer diese; NVIDIA hat praktisch keine iGPUs).
+    const cnt = [0]; try { f.count(cnt) } catch {}   // fehlt das Symbol -> nur Index 0
+    const n = Math.max(1, cnt[0] || 1)
+    const devices = []
+    for (let i = 0; i < n; i++) {
+      const dev = [null]
+      if (f.handle(i, dev) !== 0) continue
+      const nameBuf = Buffer.alloc(96)
+      f.name(dev[0], nameBuf, 96)
+      const model = nameBuf.toString('utf8').split('\0')[0].replace(/^NVIDIA\s+/i, '').replace(/GeForce\s+/i, '').trim()
+      devices.push({ index: i, handle: dev[0], model })
+    }
+    if (!devices.length) throw new Error('keine NVIDIA-Geraete')
+    nvml = { f, devices, device: devices[0].handle, model: devices[0].model }
+    console.log('[osd] NVML aktiv:', devices.map(d => '#' + d.index + ' ' + d.model).join(', '))
   } catch (e) {
     console.log('[osd] NVML nicht verfügbar:', e && e.message)
     nvml = null
@@ -229,41 +241,52 @@ function setupAdl() {
     // AMD-VendorID: ADL liefert 1002 DEZIMAL (nicht den PCI-Hexwert 0x1002) – beide
     // zulassen, damit es ueber Treiber-/GPU-Varianten hinweg greift.
     const isAmd = (v) => v === 1002 || v === 0x1002
-    let found = null; const seen = []; const amdIdxs = []
+    let found = null; const seen = []; const amdIdxs = []; const amdNames = {}
     for (let i = 0; i < num[0]; i++) {
       const o = i * INFO
       const vendor = buf.readInt32LE(o + 276), present = buf.readInt32LE(o + 792), idx = buf.readInt32LE(o + 4)
       const nz = buf.indexOf(0, o + 280); const name = buf.toString('latin1', o + 280, nz < 0 ? o + 280 : nz)
       seen.push('#' + idx + ' vendor=0x' + (vendor >>> 0).toString(16) + ' present=' + present + ' "' + name + '"')
-      if (isAmd(vendor) && present) { if (!found) found = { idx, name }; if (!amdIdxs.includes(idx)) amdIdxs.push(idx) }
+      if (isAmd(vendor) && present) { if (!found) found = { idx, name }; if (!amdIdxs.includes(idx)) { amdIdxs.push(idx); amdNames[idx] = name } }
     }
     gpuDiag('[ADL] ' + num[0] + ' Adapter: ' + seen.join(' | '))
     adl = found ? { queryGet, ctx: ctx[0], idx: found.idx, name: found.name, _cb: mallocCb } : null
     if (adl) {
-      // Diagnose + Auswahl: Sensoren jedes AMD-Adapter-Index dumpen und den ERSTEN
-      // nehmen, der wirklich Werte liefert (bei iGPUs ist "present" nicht zwingend
-      // der Adapter mit PMLog-Daten).
-      let bestIdx = -1
+      // Je AMD-Adapter die Sensoren pruefen: liefert er ueberhaupt Werte (hasSensors),
+      // und ist er eine *dedizierte* Radeon? Dedizierte melden Edge- (8) oder Hotspot-
+      // Temp (27); iGPUs haben nur die GFX-Temp (28). So bevorzugen wir bei mehreren
+      // AMD-Karten automatisch die schnelle dGPU. Bei nur einem Adapter bleibt alles
+      // wie gehabt (erster mit Sensoren) -> kein Rueckschritt auf reinen iGPU-Systemen.
+      const adapters = []
       for (const ai of amdIdxs) {
         const dump = Buffer.alloc(2052)
         if (queryGet(ctx[0], ai, dump) === 0) {
+          const sup = (id) => dump.readInt32LE(4 + id * 8) !== 0
           const parts = []
           for (let id = 0; id < 256; id++) { const o = 4 + id * 8; if (dump.readInt32LE(o)) parts.push(id + '=' + dump.readInt32LE(o + 4)) }
           gpuDiag('[ADL] idx=' + ai + ' Sensoren [id=value]: ' + (parts.join(' ') || '(keine supported)'))
-          if (bestIdx < 0 && parts.length) bestIdx = ai
-        } else gpuDiag('[ADL] idx=' + ai + ' QueryPMLogData fehlgeschlagen')
+          adapters.push({ idx: ai, name: amdNames[ai] || found.name, hasSensors: parts.length > 0, dedicated: sup(ADL_PM.tempEdge) || sup(ADL_PM.tempHotspot) })
+        } else {
+          gpuDiag('[ADL] idx=' + ai + ' QueryPMLogData fehlgeschlagen')
+          adapters.push({ idx: ai, name: amdNames[ai] || found.name, hasSensors: false, dedicated: false })
+        }
       }
-      if (bestIdx >= 0) adl.idx = bestIdx
-      gpuDiag('[ADL] aktiver Index fuer Auslesen: ' + adl.idx)
-      console.log('[osd] ADL aktiv:', found.name)
+      adl.adapters = adapters.filter(a => a.hasSensors)   // nur auslesbare zur Auswahl anbieten
+      const ded = adapters.find(a => a.hasSensors && a.dedicated)   // 1) dedizierte Radeon
+      const anySens = adapters.find(a => a.hasSensors)              // 2) sonst erste mit Sensoren
+      const pick = ded || anySens
+      if (pick) { adl.idx = pick.idx; adl.name = pick.name }
+      gpuDiag('[ADL] aktiver Index fuer Auslesen: ' + adl.idx + (ded ? ' (dediziert erkannt)' : ''))
+      console.log('[osd] ADL aktiv:', adl.name, '(idx ' + adl.idx + ')')
     } else gpuDiag('[ADL] kein aktiver AMD-Adapter (VendorID 1002/0x1002) gefunden')
   } catch (e) { gpuDiag('[ADL] Setup-Fehler: ' + (e && e.message)); adl = null }
 }
-function readAdlGpu() {
+// Liest ADL-Sensoren fuer einen bestimmten Adapter-Index (name = Anzeigename).
+function readAdlIdx(idx, name) {
   if (!adl) return null
   try {
     const buf = Buffer.alloc(2052)
-    if (adl.queryGet(adl.ctx, adl.idx, buf) !== 0) return null
+    if (adl.queryGet(adl.ctx, idx, buf) !== 0) return null
     const val = (id) => { const o = 4 + id * 8; return buf.readInt32LE(o) ? buf.readInt32LE(o + 4) : null }
     // Temp: Edge/Hotspot (dedizierte Radeon) – fehlen bei iGPUs, dort GFX-Temp (28).
     const temp = val(ADL_PM.tempEdge) ?? val(ADL_PM.tempHotspot) ?? val(ADL_PM.tempGfx)
@@ -272,21 +295,41 @@ function readAdlGpu() {
     const load = val(ADL_PM.gfxActivity)
     if (temp == null && clock == null && power == null && load == null) return null
     const u = (x) => x == null ? undefined : x
-    const nm = (adl.name || gpuName || 'GPU').replace(/\((R|TM)\)/gi, '').replace(/^AMD\s+/i, '').replace(/\s+Graphics$/i, '').trim()
+    const nm = (name || adl.name || gpuName || 'GPU').replace(/\((R|TM)\)/gi, '').replace(/^AMD\s+/i, '').replace(/\s+Graphics$/i, '').trim()
     return { brand: 'AMD', name: nm, load: u(load), temp: u(temp), power: u(power), clock: u(clock), vram: undefined }
+  } catch { return null }
+}
+function readAdlGpu() { return adl ? readAdlIdx(adl.idx, adl.name) : null }
+// Liest NVML-Sensoren fuer ein bestimmtes Geraete-Handle.
+function readNvmlHandle(handle, model) {
+  if (!nvml) return null
+  try {
+    const { f } = nvml
+    const u = {}, m = {}, t = [0], p = [0], c = [0]
+    f.util(handle, u); f.temp(handle, 0, t); f.power(handle, p); f.clock(handle, 0, c); f.mem(handle, m)
+    return { brand: 'NVIDIA', name: model, load: u.gpu, temp: t[0], power: +(p[0] / 1000).toFixed(1), clock: c[0], vram: Math.round(Number(m.used) / 1048576) }
   } catch { return null }
 }
 
 function readGpu() {
-  if (nvml) {
-    try {
-      const { f, device } = nvml
-      const u = {}, m = {}, t = [0], p = [0], c = [0]
-      f.util(device, u); f.temp(device, 0, t); f.power(device, p); f.clock(device, 0, c); f.mem(device, m)
-      return { brand: 'NVIDIA', name: nvml.model, load: u.gpu, temp: t[0], power: +(p[0] / 1000).toFixed(1), clock: c[0], vram: Math.round(Number(m.used) / 1048576) }
-    } catch { return null }
+  const sel = appSettings.osdGpu || 'auto'
+  // Feste Auswahl (manuell im Menue gesetzt). Ist die gewaehlte GPU nicht (mehr)
+  // vorhanden oder liefert nichts, faellt es unten auf die Automatik zurueck.
+  if (sel !== 'auto') {
+    const s = /^(nvml|adl):(\d+)$/.exec(sel)
+    if (s) {
+      if (s[1] === 'nvml' && nvml) {
+        const d = nvml.devices.find(x => x.index === +s[2])
+        if (d) { const r = readNvmlHandle(d.handle, d.model); if (r) return r }
+      }
+      if (s[1] === 'adl' && adl) {
+        const a = (adl.adapters || []).find(x => x.idx === +s[2])
+        const r = readAdlIdx(+s[2], a && a.name); if (r) return r
+      }
+    }
   }
-  // Keine NVIDIA: erst ADL (treiberfrei, immer bei AMD), sonst Afterburner (MAHM).
+  // Automatik: NVIDIA (NVML) -> AMD (ADL) -> Afterburner (MAHM).
+  if (nvml) { const r = readNvmlHandle(nvml.device, nvml.model); if (r) return r }
   const a = readAdlGpu()
   if (a) return a
   const m = readMahm()
@@ -294,6 +337,18 @@ function readGpu() {
     return { brand: 'GPU', name: gpuName, load: m.gpuLoad, temp: m.gpuTemp, power: m.gpuPower, clock: m.gpuClock, vram: m.gpuVram }
   }
   return null
+}
+// Alle auslesbaren GPUs fuer die manuelle Auswahl (NVIDIA via NVML, AMD via ADL).
+// Fallback-GPUs (nur MAHM/WMI-Name, keine echten Sensor-Quellen) tauchen nicht auf –
+// dort gibt es ohnehin nichts umzuschalten.
+function listGpus() {
+  const out = []
+  if (nvml && nvml.devices) for (const d of nvml.devices) out.push({ id: 'nvml:' + d.index, label: d.model || 'NVIDIA' })
+  if (adl && adl.adapters) for (const a of adl.adapters) {
+    const nm = (a.name || 'AMD').replace(/\((R|TM)\)/gi, '').replace(/^AMD\s+/i, '').replace(/\s+Graphics$/i, '').trim()
+    out.push({ id: 'adl:' + a.idx, label: nm + (a.dedicated ? '' : ' (Onboard)') })
+  }
+  return out
 }
 // GPU-Name treiberfrei einmalig via WMI (fuer Nicht-NVIDIA; NVIDIA nutzt NVML).
 let gpuName = null
@@ -1010,6 +1065,13 @@ function toggleOsdEdit() { setOsdEditMode(!osdEditActive) }
 let xinputPoll = null
 let xinputGetState = null
 let gpHotkeyDown = false
+let gpOsdHotkeyDown = false
+// Entprellung: nach dem Auslösen kurz sperren. Sonst kann ein einzelner Read-
+// Aussetzer waehrend des Combo-Haltens (Button-Bit wackelt / Spiel pollt den
+// Controller) die steigende Flanke ein zweites Mal ausloesen -> Lumora kommt vor
+// und wird gleich wieder versteckt ("komme im Spiel nicht ran").
+let gpHotkeyCooldownUntil = 0
+let gpOsdHotkeyCooldownUntil = 0
 let getAsyncKey = null   // GetAsyncKeyState – fuer Tastatur-Hotkeys via Polling (greift auch im Spiel)
 
 // Standard-Gamepad-API-Index -> Prüf-Funktion auf dem XINPUT_GAMEPAD-Struct.
@@ -1056,20 +1118,28 @@ function setupGamepadHotkey() {
   if ((xinputGetState || getAsyncKey) && !xinputPoll) xinputPoll = setInterval(pollNativeHotkeys, 40)
 }
 
+// Ist die gegebene Knopf-Kombi auf irgendeinem der 4 XInput-Slots vollstaendig gedrueckt?
+function gamepadComboDown(combo) {
+  if (!xinputGetState || !combo || !combo.length || combo.some(i => !XI_MASK[i])) return false
+  for (let slot = 0; slot < 4; slot++) {
+    const st = {}; let ret
+    try { ret = xinputGetState(slot, st) } catch { continue }
+    if (ret !== 0) continue
+    if (combo.every(i => XI_MASK[i](st.Gamepad))) return true
+  }
+  return false
+}
+
 function pollNativeHotkeys() {
-  // 1) Gamepad-Kombi (XInput)
-  const combo = appSettings.gamepadHotkey
-  if (xinputGetState && combo && combo.length && !combo.some(i => !XI_MASK[i])) {
-    let anyDown = false
-    for (let slot = 0; slot < 4 && !anyDown; slot++) {
-      const st = {}; let ret
-      try { ret = xinputGetState(slot, st) } catch { continue }
-      if (ret !== 0) continue
-      if (combo.every(i => XI_MASK[i](st.Gamepad))) anyDown = true
-    }
-    if (anyDown && !gpHotkeyDown) toggleMainWindow()   // steigende Flanke
-    gpHotkeyDown = anyDown
-  } else gpHotkeyDown = false
+  // 1) Gamepad-Kombis (XInput) – Oberflaeche + OSD, je auf steigende Flanke,
+  //    mit 700 ms Entprellung gegen Mehrfach-Auslösung durch Read-Aussetzer.
+  const now = Date.now()
+  const downMain = gamepadComboDown(appSettings.gamepadHotkey)
+  if (downMain && !gpHotkeyDown && now >= gpHotkeyCooldownUntil) { toggleMainWindow(); gpHotkeyCooldownUntil = now + 700 }
+  gpHotkeyDown = downMain
+  const downOsd = gamepadComboDown(appSettings.gamepadOsdHotkey)
+  if (downOsd && !gpOsdHotkeyDown && now >= gpOsdHotkeyCooldownUntil) { toggleOverlay(); gpOsdHotkeyCooldownUntil = now + 700 }
+  gpOsdHotkeyDown = downOsd
 
   // 2) Tastatur-Hotkeys (GetAsyncKeyState, steigende Flanke je Hotkey)
   if (getAsyncKey && khHotkeys.length) {
@@ -2307,6 +2377,7 @@ ipcMain.handle('save-prefs', (event, json) => {
 })
 
 ipcMain.handle('get-app-settings', () => appSettings)
+ipcMain.handle('list-gpus', () => listGpus())
 
 ipcMain.handle('set-app-settings', (event, partial) => {
   const prevSource = appSettings.osdFpsSource
@@ -2383,8 +2454,9 @@ function checkForUpdates(manual) {
 // Toggle-Hotkey aus den Einstellungen setzen. Leerer String = deaktiviert.
 // Liefert { ok } zurueck – false, wenn die Kombination nicht registriert werden
 // konnte (z.B. schon vom System/anderer App belegt).
-ipcMain.handle('set-hotkey', (event, accelerator) => {
-  appSettings.toggleHotkey = accelerator || ''
+ipcMain.handle('set-hotkey', (event, accelerator, which) => {
+  const key = which === 'osd' ? 'osdHotkey' : which === 'osdEdit' ? 'osdEditHotkey' : 'toggleHotkey'
+  appSettings[key] = accelerator || ''
   saveAppSettings()
   const ok = registerToggleHotkey()
   return { ok }
@@ -2407,6 +2479,17 @@ ipcMain.handle('osd-edit-scale', (e, delta) => {
   appSettings.osdScale = z
   saveAppSettings()
   if (overlayWindow && !overlayWindow.isDestroyed()) { try { overlayWindow.webContents.setZoomFactor(z) } catch {} }
+})
+// Live-Edit: Design/Deckkraft/Werte direkt am Overlay – schreibt dieselben
+// Einstellungen wie der Dialog (beide bleiben synchron) und zieht das OSD sofort nach.
+ipcMain.handle('osd-edit-theme', (e, theme) => {
+  if (['compact', 'min', 'bar', 'neon', 'strip', 'tiles'].includes(theme)) { appSettings.osdTheme = theme; saveAppSettings(); applyOsdConfig() }
+})
+ipcMain.handle('osd-edit-opacity', (e, op) => {
+  appSettings.osdOpacity = Math.max(0.2, Math.min(0.95, Number(op) || 0.55)); saveAppSettings(); applyOsdConfig()
+})
+ipcMain.handle('osd-edit-fields', (e, fields) => {
+  if (fields && typeof fields === 'object') { appSettings.osdFields = fields; saveAppSettings(); applyOsdConfig() }
 })
 ipcMain.handle('osd-edit-done', () => setOsdEditMode(false))
 

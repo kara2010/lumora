@@ -7,6 +7,7 @@
   html, body {
     background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none;
     font-family: 'Consolas', 'DejaVu Sans Mono', 'Courier New', monospace; font-weight: 700;
+    font-variant-numeric: tabular-nums; font-feature-settings: "tnum";  /* Ziffern gleich breit -> keine Sprünge */
   }
   :root {
     --nv: #74e857; --amd: #ff8a1e; --val: #ffe100; --fps: #ffffff; --ft: #6fe86f;
@@ -122,19 +123,62 @@
   /* -------- Live-Edit -------- */
   body.edit #panel { outline: 2px dashed #4f8ef7; outline-offset: 5px; cursor: move; }
   #editbar { display: none; position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
-    align-items: center; gap: 14px; white-space: nowrap; padding: 10px 12px 10px 16px;
-    background: rgba(15,17,24,.94); border: 1px solid rgba(255,255,255,.16); border-radius: 11px;
+    z-index: 10; flex-direction: column; gap: 9px; white-space: nowrap; padding: 11px 14px;
+    background: rgba(15,17,24,.96); border: 1px solid rgba(255,255,255,.16); border-radius: 12px;
     color: #d8d8e2; font-family: 'Segoe UI','DejaVu Sans',sans-serif; font-weight: 400; font-size: 13px; text-shadow: none; }
   body.edit #editbar { display: flex; }
+  /* Leiste IMMER gegenueber vom OSD, damit sie es nie verdeckt (v.a. horizontale
+     Themes, die oben/unten mittig sitzen): OSD oben -> Leiste unten und umgekehrt. */
+  body.pos-tl #editbar, body.pos-tr #editbar { top: auto; bottom: 14px; }
+  body.pos-bl #editbar, body.pos-br #editbar { top: 14px; bottom: auto; }
   #editbar b { color: #fff; font-weight: 600; }
-  #editDone { background: #4f8ef7; color: #fff; border: none; border-radius: 7px; padding: 6px 15px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .eb-corners { display: grid; grid-template-columns: repeat(2, 20px); grid-auto-rows: 20px; gap: 3px; }
+  .eb-corners.horiz { grid-template-columns: 20px; }   /* nur oben/unten -> untereinander */
+  .eb-corner { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #b8bcc8;
+    border-radius: 4px; cursor: pointer; font-size: 11px; line-height: 1; padding: 0; }
+  .eb-corner:hover { border-color: #4f8ef7; color: #fff; }
+  .eb-corner.on { border-color: #4f8ef7; color: #4f8ef7; background: rgba(79,142,247,.2); }
+  .eb-top { display: flex; align-items: center; gap: 18px; }
+  .eb-ctl { display: flex; align-items: center; gap: 8px; }
+  .eb-lbl { color: #9aa0b0; font-size: 12px; }
+  .eb-arrow { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #fff;
+    width: 22px; height: 22px; border-radius: 6px; cursor: pointer; font-size: 15px; line-height: 1; padding: 0; }
+  .eb-arrow:hover { background: rgba(255,255,255,.18); }
+  .eb-theme { min-width: 78px; text-align: center; color: #fff; font-weight: 600; }
+  #ebOpacity { width: 92px; accent-color: #4f8ef7; }
+  .eb-fields { display: flex; flex-direction: column; gap: 5px; }
+  .eb-frow { display: flex; align-items: center; gap: 6px; }
+  .eb-grp { min-width: 30px; font-size: 11px; color: #9aa0b0; letter-spacing: .04em; }
+  .eb-chip { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); color: #b8bcc8;
+    border-radius: 999px; padding: 2px 10px; font-size: 11px; cursor: pointer; }
+  .eb-chip:hover { border-color: #4f8ef7; color: #dfe3ee; }
+  .eb-chip.on { background: rgba(79,142,247,.22); border-color: #4f8ef7; color: #fff; }
+  .eb-hint { color: #7a8090; font-size: 11px; }
+  #editDone { background: #4f8ef7; color: #fff; border: none; border-radius: 7px; padding: 6px 15px; font-size: 13px; font-weight: 600; cursor: pointer; margin-left: auto; }
   #editDone:hover { background: #6ba0f8; }
 </style>
 </head>
 <body class="pos-tl theme-compact">
   <div id="editbar">
-    <span>Verschieben: <b>ziehen</b> &nbsp;·&nbsp; Größe: <b>Mausrad</b></span>
-    <button id="editDone">Fertig</button>
+    <div class="eb-top">
+      <div class="eb-ctl">
+        <span class="eb-lbl">Design</span>
+        <button class="eb-arrow" id="ebPrev" title="Vorheriges Design">‹</button>
+        <span class="eb-theme" id="ebThemeName">Kompakt</span>
+        <button class="eb-arrow" id="ebNext" title="Nächstes Design">›</button>
+      </div>
+      <div class="eb-ctl">
+        <span class="eb-lbl">Deckkraft</span>
+        <input type="range" id="ebOpacity" min="0.2" max="0.95" step="0.05">
+      </div>
+      <div class="eb-ctl">
+        <span class="eb-lbl">Position</span>
+        <div class="eb-corners" id="ebCorners"></div>
+      </div>
+      <button id="editDone">Fertig</button>
+    </div>
+    <div class="eb-fields" id="ebFields"></div>
+    <div class="eb-hint">Ziehen = Position &nbsp;·&nbsp; Mausrad = Größe</div>
   </div>
   <div id="panel"></div>
 
@@ -147,7 +191,14 @@
     cpu: ['load','temp','clock','power','ram'],
     fps: ['fps','frametime','graph'],
   };
-  let cfg = { theme: 'compact', fields: JSON.parse(JSON.stringify(ALL)), accent: '#74e857' };
+  let cfg = { theme: 'compact', fields: JSON.parse(JSON.stringify(ALL)), accent: '#74e857', opacity: 0.55 };
+  // Fuer die Live-Edit-Leiste: Design-Namen + Kurzlabels der waehlbaren Werte
+  const EB_THEMES = [['compact','Kompakt'],['min','Minimal'],['bar','Balken'],['neon','Neon'],['strip','Leiste'],['tiles','Kacheln']];
+  const EB_FLD = {
+    gpu: [['load','Last'],['temp','Temp'],['power','Watt'],['clock','Takt'],['vram','VRAM']],
+    cpu: [['load','Last'],['temp','Temp'],['clock','Takt'],['power','Watt'],['ram','RAM']],
+    fps: [['fps','FPS'],['frametime','ms'],['graph','Graph']],
+  };
   let data = { gpu: null, cpu: null, fps: null, frametime: null, api: null };
 
   const panel = document.getElementById('panel');
@@ -306,6 +357,17 @@
   }
 
   // ===================== Werte einsetzen ================================
+  // Feste Nachkommastellen je Feld -> die Textbreite springt nicht, wenn z. B.
+  // Watt von 10.1 auf 10 faellt (waere sonst "10" statt "10.0" -> Position ruckt).
+  // Zusammen mit tabular-nums (CSS) bleiben auch verschiedene Ziffern gleich breit.
+  const VAL_DEC = { load: 0, temp: 0, power: 1, clock: 0, vram: 0, ram: 0, frametime: 1, fps: 0 };
+  function fmtVal(field, v) {
+    if (v == null) return null;
+    const d = VAL_DEC[field];
+    if (d == null) return v;
+    const n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(d) : v;   // Nicht-Zahlen (z. B. "…") unveraendert
+  }
   function setRole(role, v) { panel.querySelectorAll(`[data-role="${role}"]`).forEach(el => { el.textContent = (v == null ? '–' : v); }); }
   function setRow(rowKey, show) { panel.querySelectorAll(`[data-row="${rowKey}"]`).forEach(el => el.classList.toggle('hidden', !show)); }
 
@@ -320,7 +382,7 @@
       setRole(cat+'.brand', d ? d.brand : '');
       for (const f of ['load','temp','power','clock','vram','ram']) {
         const v = d ? d[f] : null;
-        setRole(cat+'.'+f, v);
+        setRole(cat+'.'+f, fmtVal(f, v));
         setRow(cat+'.'+f, v != null);            // Zeile aus, wenn Sensor nichts liefert
         if (f === 'load') { const bar = panel.querySelector(`[data-role="${cat}.loadbar"]`); if (bar && v != null) bar.style.width = Math.max(0, Math.min(100, v)) + '%'; }
       }
@@ -329,8 +391,8 @@
     // FPS-Zahlen gedrosselt (Graph läuft flüssig separat)
     if (nowMs() - lastFpsTextAt >= 240) {
       lastFpsTextAt = nowMs();
-      if (data.fps != null) setRole('fps.fps', data.fps);
-      if (data.frametime != null) setRole('fps.frametime', data.frametime);
+      if (data.fps != null) setRole('fps.fps', fmtVal('fps', data.fps));
+      if (data.frametime != null) setRole('fps.frametime', fmtVal('frametime', data.frametime));
       setRow('fps.frametime', data.frametime != null);
     }
   }
@@ -353,14 +415,68 @@
     if (c.fields) { cfg.fields = c.fields; rebuild = true; }
     if (c.accent) { cfg.accent = c.accent; document.documentElement.style.setProperty('--accent', c.accent); }
     if (c.corner) { document.body.classList.remove('pos-tl','pos-tr','pos-bl','pos-br'); document.body.classList.add('pos-' + c.corner); }
-    if (c.opacity != null) document.documentElement.style.setProperty('--panel-op', c.opacity);
+    if (c.opacity != null) { cfg.opacity = c.opacity; document.documentElement.style.setProperty('--panel-op', c.opacity); }
     if (rebuild) renderPanel();
+    if (editing) renderEditbar(false);   // Live-Edit-Leiste mitziehen (ohne den Slider zu ueberschreiben)
   }
 
   // ===================== Live-Edit + IPC ===============================
   let editing = false, drag = null;
   function setEdit(on) { editing = on; document.body.classList.toggle('edit', on);
+    if (on) renderEditbar(true);
     if (!on) { panel.style.left = panel.style.top = panel.style.right = panel.style.bottom = ''; } }
+
+  // --- Live-Edit-Leiste: Design durchschalten, Deckkraft, Werte an/aus ---------
+  function renderEditbar(full) {
+    const tn = (EB_THEMES.find(t => t[0] === cfg.theme) || EB_THEMES[0])[1];
+    document.getElementById('ebThemeName').textContent = tn;
+    if (full) document.getElementById('ebOpacity').value = cfg.opacity != null ? cfg.opacity : 0.55;
+    // Positions-Knoepfe je Theme: horizontale Themes (Leiste/Kacheln) sitzen mittig
+    // oben/unten -> nur oben/unten anbieten; vertikale Themes -> vier Ecken.
+    const horiz = (cfg.theme === 'strip' || cfg.theme === 'tiles');
+    const cur = ['tl','tr','bl','br'].find(c => document.body.classList.contains('pos-' + c)) || 'tl';
+    const posSet = horiz
+      ? [['tl','▀','Oben'],['bl','▄','Unten']]
+      : [['tl','◤','Oben links'],['tr','◥','Oben rechts'],['bl','◣','Unten links'],['br','◢','Unten rechts']];
+    const curActive = horiz ? (cur[0] === 't' ? 'tl' : 'bl') : cur;
+    const ebc = document.getElementById('ebCorners');
+    ebc.classList.toggle('horiz', horiz);
+    ebc.innerHTML = posSet.map(([c, sym, ti]) => `<button class="eb-corner${c === curActive ? ' on' : ''}" data-corner="${c}" title="${ti}">${sym}</button>`).join('');
+    document.getElementById('ebFields').innerHTML = Object.keys(EB_FLD).map(cat =>
+      `<div class="eb-frow"><span class="eb-grp">${cat.toUpperCase()}</span>` +
+      EB_FLD[cat].map(([f, lbl]) => `<button class="eb-chip${(cfg.fields[cat] || []).includes(f) ? ' on' : ''}" data-cat="${cat}" data-f="${f}">${lbl}</button>`).join('') +
+      `</div>`).join('');
+  }
+  function ebStepTheme(dir) {
+    const i = EB_THEMES.findIndex(t => t[0] === cfg.theme);
+    const ni = ((i < 0 ? 0 : i) + dir + EB_THEMES.length) % EB_THEMES.length;
+    if (ipcRenderer) ipcRenderer.invoke('osd-edit-theme', EB_THEMES[ni][0]);
+  }
+  document.getElementById('ebPrev').addEventListener('click', () => ebStepTheme(-1));
+  document.getElementById('ebNext').addEventListener('click', () => ebStepTheme(1));
+  document.getElementById('ebOpacity').addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    document.documentElement.style.setProperty('--panel-op', v);   // sofort sichtbar
+    if (ipcRenderer) ipcRenderer.invoke('osd-edit-opacity', v);
+  });
+  document.getElementById('ebFields').addEventListener('click', (e) => {
+    const chip = e.target.closest('.eb-chip'); if (!chip) return;
+    const cat = chip.dataset.cat, f = chip.dataset.f;
+    const arr = (cfg.fields[cat] || []).slice();
+    const idx = arr.indexOf(f);
+    if (idx >= 0) arr.splice(idx, 1);
+    else { arr.push(f); const ord = EB_FLD[cat].map(d => d[0]); arr.sort((a, b) => ord.indexOf(a) - ord.indexOf(b)); }
+    const nf = Object.assign({}, cfg.fields, { [cat]: arr });
+    if (ipcRenderer) ipcRenderer.invoke('osd-edit-fields', nf);
+  });
+  document.getElementById('ebCorners').addEventListener('click', (e) => {
+    const btn = e.target.closest('.eb-corner'); if (!btn) return;
+    const corner = btn.dataset.corner;
+    document.body.classList.remove('pos-tl','pos-tr','pos-bl','pos-br');
+    document.body.classList.add('pos-' + corner);
+    renderEditbar(false);   // aktiver Button + Leisten-Seite (via CSS) nachziehen
+    if (ipcRenderer) ipcRenderer.invoke('osd-edit-corner', corner);
+  });
   panel.addEventListener('pointerdown', (e) => {
     if (!editing || e.target.closest('#editDone')) return;
     const r = panel.getBoundingClientRect();
@@ -379,9 +495,10 @@
     const corner = (cy < window.innerHeight/2 ? 't' : 'b') + (cx < window.innerWidth/2 ? 'l' : 'r');
     panel.style.left = panel.style.top = panel.style.margin = panel.style.transform = '';
     document.body.classList.add('pos-' + corner);
+    renderEditbar(false);   // Ecken-Button + Leisten-Seite an die neue Position anpassen
     if (ipcRenderer) ipcRenderer.invoke('osd-edit-corner', corner);
   });
-  window.addEventListener('wheel', (e) => { if (!editing) return; e.preventDefault(); if (ipcRenderer) ipcRenderer.invoke('osd-edit-scale', e.deltaY < 0 ? 1 : -1); }, { passive: false });
+  window.addEventListener('wheel', (e) => { if (!editing || e.target.closest('#editbar')) return; e.preventDefault(); if (ipcRenderer) ipcRenderer.invoke('osd-edit-scale', e.deltaY < 0 ? 1 : -1); }, { passive: false });
   document.getElementById('editDone').addEventListener('click', () => { if (ipcRenderer) ipcRenderer.invoke('osd-edit-done'); });
 
   let ipcRenderer = null;
