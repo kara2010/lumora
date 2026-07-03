@@ -1471,8 +1471,8 @@ function gamepadComboDown(combo) {
 }
 
 function pollNativeHotkeys() {
-  // 1) Gamepad-Kombis (XInput) – Oberflaeche + OSD, je auf steigende Flanke,
-  //    mit 700 ms Entprellung gegen Mehrfach-Auslösung durch Read-Aussetzer.
+  // 1) Gamepad-Kombis (XInput) – Oberflaeche + OSD, je auf steigende Flanke, mit
+  //    Release-Debounce (GP_RELEASE_MS) gegen Read-Aussetzer einer gehaltenen Kombi.
   const now = Date.now()
   // Diagnose (nur mit Debug-Flag): feuert der 40-ms-Timer im Hintergrund traege?
   if (lastPollAt && (now - lastPollAt) > 120) osdDbg('[poll] Timer-Traegheit: ' + (now - lastPollAt) + ' ms seit letztem Tick (Soll ~40)')
