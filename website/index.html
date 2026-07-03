@@ -954,6 +954,10 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
         Cover-Ansicht
       </button>
+      <button id="tabOsd" onclick="setView('osd')" role="tab" aria-selected="false">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 17 8 11 12 14 17 7 21 10"/><line x1="3" y1="21" x2="21" y2="21"/></svg>
+        Gaming-OSD
+      </button>
     </div>
     <div class="screenshot-wrap" onclick="openLightbox()">
       <img id="shot" src="1.jpg" alt="Lumora – Listenansicht" class="screenshot-img">
@@ -1403,7 +1407,8 @@
 <script>
   const VIEWS = {
     list:  { img: '1.jpg', alt: 'Lumora – Listenansicht', cap: 'Listenansicht – Details, Beschreibung &amp; HDR-Schalter pro Spiel' },
-    cover: { img: '2.jpg', alt: 'Lumora – Cover-Ansicht', cap: 'Cover-Ansicht – deine Bibliothek als Raster aus Spiel-Covern' }
+    cover: { img: '2.jpg', alt: 'Lumora – Cover-Ansicht', cap: 'Cover-Ansicht – deine Bibliothek als Raster aus Spiel-Covern' },
+    osd:   { img: '3.jpg', alt: 'Lumora – Gaming-OSD mit GPU-, CPU- und FPS-Werten', cap: 'Gaming-OSD – GPU, CPU &amp; FPS live über dem Spiel, hier über der Bibliothek (echte Werte)' }
   };
   function setView(v) {
     const d = VIEWS[v];
@@ -1411,18 +1416,18 @@
     shot.src = d.img;
     shot.alt = d.alt;
     document.getElementById('viewCaption').innerHTML = d.cap;
-    const isList = v === 'list';
-    const tabList = document.getElementById('tabList');
-    const tabCover = document.getElementById('tabCover');
-    tabList.classList.toggle('active', isList);
-    tabCover.classList.toggle('active', !isList);
-    tabList.setAttribute('aria-selected', isList);
-    tabCover.setAttribute('aria-selected', !isList);
+    for (const [key, id] of [['list', 'tabList'], ['cover', 'tabCover'], ['osd', 'tabOsd']]) {
+      const b = document.getElementById(id);
+      if (!b) continue;
+      b.classList.toggle('active', v === key);
+      b.setAttribute('aria-selected', v === key);
+    }
   }
   // Galerie für die Vergrößerung – Reihenfolge = Reihenfolge der Ansichten
   const GALLERY = [
     { img: '1.jpg', alt: 'Lumora – Listenansicht', cap: 'Listenansicht' },
-    { img: '2.jpg', alt: 'Lumora – Cover-Ansicht',  cap: 'Cover-Ansicht' }
+    { img: '2.jpg', alt: 'Lumora – Cover-Ansicht',  cap: 'Cover-Ansicht' },
+    { img: '3.jpg', alt: 'Lumora – Gaming-OSD',     cap: 'Gaming-OSD (Live-Werte)' }
   ];
   let lightboxIndex = 0;
   function lightboxSet(i) {
