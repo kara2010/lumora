@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lumora – Game-Launcher mit automatischem HDR für Windows</title>
-  <meta name="description" content="Lumora vereint alle deine Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon und Riot in einer schönen Oberfläche – mit Cover-Bibliothek, Spielzeit und automatischem HDR. Kostenlos für Windows 10 und 11.">
-  <meta name="keywords" content="Game Launcher, Spiele-Launcher, Lumora, alle Spiele an einem Ort, Steam Epic GOG zusammen, Windows HDR, HDR automatisch aktivieren, HDR Gaming, Spielbibliothek Windows, HDR Tool kostenlos">
+  <title>Lumora – Alle deine Spiele aus jedem Store in einer schönen Bibliothek</title>
+  <meta name="description" content="Lumora vereint deine Spiele aus Steam, Epic, GOG, Xbox, EA &amp; Co. in einer aufgeräumten Cover-Bibliothek – am Schreibtisch mit Maus, auf dem Sofa komplett per Gamepad. HDR aktiviert sich beim Spielstart automatisch. Kostenlos für Windows 10 &amp; 11.">
+  <meta name="keywords" content="Game Launcher, Spiele-Launcher, alle Spiele an einem Ort, Steam Epic GOG Xbox zusammen, Spielbibliothek Windows, Launcher mit Gamepad, Couch Gaming PC, Big Picture Alternative, HDR automatisch, kostenlos">
   <meta name="robots" content="index, follow">
   <meta name="author" content="Lumora">
   <link rel="canonical" href="https://kara-webdesign.de/hdr-launcher/">
@@ -17,14 +17,14 @@
   <!-- Open Graph (Facebook, Discord, WhatsApp …) -->
   <meta property="og:type"        content="website">
   <meta property="og:url"         content="https://kara-webdesign.de/hdr-launcher/">
-  <meta property="og:title"       content="Lumora – Game-Launcher mit automatischem HDR für Windows">
-  <meta property="og:description" content="Alle deine Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon & Riot in einer schönen Cover-Bibliothek – mit Spielzeit und automatischem HDR. Kostenlos für Windows 10 / 11.">
+  <meta property="og:title"       content="Lumora – Alle deine Spiele. Eine schöne Bibliothek.">
+  <meta property="og:description" content="Steam, Epic, GOG, Xbox, EA & Co. in einer aufgeräumten Cover-Bibliothek – für Schreibtisch und Sofa, komplett per Gamepad bedienbar. HDR automatisch. Kostenlos für Windows 10 / 11.">
   <meta property="og:locale"      content="de_DE">
 
   <!-- Twitter Card -->
   <meta name="twitter:card"        content="summary_large_image">
-  <meta name="twitter:title"       content="Lumora – Game-Launcher mit automatischem HDR für Windows">
-  <meta name="twitter:description" content="Alle deine Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon & Riot in einer schönen Cover-Bibliothek – mit Spielzeit und automatischem HDR. Kostenlos für Windows 10 / 11.">
+  <meta name="twitter:title"       content="Lumora – Alle deine Spiele. Eine schöne Bibliothek.">
+  <meta name="twitter:description" content="Steam, Epic, GOG, Xbox, EA & Co. in einer aufgeräumten Cover-Bibliothek – für Schreibtisch und Sofa, komplett per Gamepad bedienbar. HDR automatisch. Kostenlos für Windows 10 / 11.">
   <meta name="twitter:image"       content="https://kara-webdesign.de/hdr-launcher/screenshot.png">
 
   <!-- og:image -->
@@ -43,7 +43,7 @@
     "operatingSystem": "Windows 10, Windows 11",
     "applicationCategory": "GameApplication",
     "applicationSubCategory": "Utility",
-    "description": "Lumora ist ein Game-Launcher, der alle Spiele aus Steam, Epic, GOG, Ubisoft, Xbox Game Pass, EA, Battle.net, Rockstar, Amazon und Riot in einer Cover-Bibliothek vereint – mit Spielzeit-Tracking, Favoriten und automatischem HDR. Kostenlos.",
+    "description": "Lumora vereint alle Spiele aus Steam, Epic, GOG, Ubisoft, Xbox Game Pass, EA, Battle.net, Rockstar, Amazon und Riot in einer schönen Cover-Bibliothek – am Schreibtisch mit der Maus, auf dem Sofa komplett per Xbox-Gamepad, mit Spielzeit-Tracking, Favoriten und automatischem HDR. Kostenlos.",
     "offers": {
       "@type": "Offer",
       "price": "0",
@@ -803,6 +803,43 @@
       .screenshot-tap-hint { display: block; }
       .screenshot-wrap { cursor: zoom-in; }
     }
+
+    /* ── Mobil-Weiche ────────────────────── */
+    .mobile-cta {
+      display: none;
+      max-width: 460px;
+      margin: 8px auto 0;
+      padding: 24px 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      text-align: center;
+    }
+    .mobile-cta-icon  { font-size: 34px; margin-bottom: 8px; }
+    .mobile-cta-title { font-size: 19px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .mobile-cta-text  { font-size: 15px; color: var(--muted); margin-bottom: 18px; }
+    .mobile-cta-actions { display: flex; flex-direction: column; gap: 10px; }
+    .mobile-cta-actions .btn-dl { width: 100%; }
+    .mobile-cta-ok    { display: none; margin-top: 14px; color: var(--success); font-size: 14px; font-weight: 600; }
+    /* Auf dem Smartphone: Download-Button + PC-Hinweise aus, Weiche an. */
+    body.is-mobile .hero-actions,
+    body.is-mobile .dl-meta,
+    body.is-mobile .ss-hint { display: none; }
+    body.is-mobile .mobile-cta { display: block; }
+
+    /* ── Demo-Clip ───────────────────────── */
+    .demo-section { padding: 8px 24px 64px; text-align: center; }
+    .demo-wrap {
+      max-width: 940px;
+      margin: 0 auto;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+      background: #000;
+    }
+    .demo-video { display: block; width: 100%; height: auto; }
+    @media (max-width: 640px) { .demo-section { padding: 8px 16px 48px; } }
   </style>
 </head>
 <body>
@@ -819,9 +856,9 @@
 
 <!-- HERO -->
 <section class="hero">
-  <div class="hero-badge">⬡ Version 2.1.3 · Windows 10 / 11</div>
-  <h1>Alle deine Spiele.<br><em>Ein Launcher. Mit automatischem HDR.</em></h1>
-  <p>Lumora vereint deine Spiele aus Steam, Epic, GOG, Ubisoft, Xbox, EA, Battle.net, Rockstar, Amazon &amp; Riot in einer schönen Cover-Bibliothek — mit Spielzeit, Favoriten und HDR, das beim Spielstart automatisch an- und danach wieder ausgeht.</p>
+  <div class="hero-badge">⬡ Kostenlos · Windows 10 / 11</div>
+  <h1>Alle deine Spiele.<br><em>Eine schöne Bibliothek — für Schreibtisch und Sofa.</em></h1>
+  <p>Steam, Epic, GOG, Xbox, EA, Ubisoft &amp; mehr — Lumora vereint deine ganze Spielesammlung in einer aufgeräumten Cover-Bibliothek. Am Schreibtisch mit der Maus, auf dem Sofa komplett per Gamepad. Und HDR schaltet sich beim Spielstart automatisch an — und danach wieder aus.</p>
   <div class="hero-actions">
     <button class="btn-dl" onclick="startDownload()">
       ⬇ Download &nbsp;·&nbsp; 98 MB
@@ -829,6 +866,19 @@
     <a class="btn-ghost" href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">
       ↗ HDRTray auf GitHub
     </a>
+  </div>
+
+  <!-- Mobil-Weiche: erscheint nur auf Smartphones (per JS), da sich eine Windows-.exe
+       dort nicht installieren laesst. Bringt den Besucher an seinen PC. -->
+  <div class="mobile-cta" id="mobileCta">
+    <div class="mobile-cta-icon">🖥️</div>
+    <p class="mobile-cta-title">Lumora ist ein Windows-Programm</p>
+    <p class="mobile-cta-text">Auf dem Handy lässt es sich nicht installieren. Öffne diese Seite an deinem Windows-PC — oder schick sie dir schnell selbst rüber:</p>
+    <div class="mobile-cta-actions">
+      <button class="btn-dl" type="button" onclick="copyPageLink()">🔗 Link kopieren</button>
+      <a class="btn-ghost" id="mailSelf" href="#">✉ Link an mich mailen</a>
+    </div>
+    <p class="mobile-cta-ok" id="copyOk">✓ Link kopiert – jetzt am PC einfügen</p>
   </div>
   <p class="dl-meta">
     <strong>Kostenlos</strong> · Keine Registrierung · Nur für Windows
@@ -847,6 +897,18 @@
     <span class="dl-count-num loading" id="dlCount">—</span>
     Downloads
   </p>
+</section>
+
+<!-- DEMO-CLIP (erscheint automatisch, sobald demo.mp4 vorhanden ist) -->
+<section class="demo-section" id="demoSection" style="display:none;">
+  <div class="container">
+    <div class="demo-wrap">
+      <video id="demoVideo" class="demo-video" autoplay muted loop playsinline preload="metadata" poster="1.jpg">
+        <source src="demo.mp4" type="video/mp4">
+      </video>
+    </div>
+    <p class="view-caption">Lumora in Aktion — Bibliothek, Spielstart mit automatischem HDR, Bedienung per Gamepad</p>
+  </div>
 </section>
 
 <!-- SCREENSHOT -->
@@ -1263,6 +1325,43 @@
     // Anzeige nach kurzem Delay aktualisieren
     setTimeout(loadCount, 1200)
   }
+
+  // ── Mobil-Weiche ──────────────────────────
+  // Eine Windows-.exe laesst sich am Handy nicht installieren. Statt eines
+  // nutzlosen Downloads bekommt der Besucher einen Weg, die Seite an seinen
+  // PC zu bringen (Link kopieren / sich selbst mailen).
+  function isMobileDevice() {
+    return /Android|iPhone|iPad|iPod|IEMobile|BlackBerry|Opera Mini|Mobile/i.test(navigator.userAgent || '');
+  }
+  function copyPageLink() {
+    var url = location.href.split('#')[0];
+    var ok = document.getElementById('copyOk');
+    var done = function () { if (ok) ok.style.display = 'block'; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done).catch(done);
+    } else { done(); }
+  }
+  (function setupMobile() {
+    var url = location.href.split('#')[0];
+    var mail = document.getElementById('mailSelf');
+    if (mail) mail.href = 'mailto:?subject=' + encodeURIComponent('Lumora – alle deine Spiele in einer Bibliothek')
+      + '&body=' + encodeURIComponent('An deinem Windows-PC öffnen und herunterladen:\n\n' + url);
+    if (isMobileDevice()) document.body.classList.add('is-mobile');
+  })();
+
+  // ── Demo-Clip: nur einblenden, wenn demo.mp4 wirklich abspielbar ist ─────────
+  (function setupDemo() {
+    var v = document.getElementById('demoVideo');
+    var sec = document.getElementById('demoSection');
+    if (!v || !sec) return;
+    var show = function () { sec.style.display = 'block'; };
+    var hide = function () { sec.style.display = 'none'; };
+    v.addEventListener('canplay', show);
+    v.addEventListener('loadeddata', show);
+    v.addEventListener('error', hide);
+    var src = v.querySelector('source');
+    if (src) src.addEventListener('error', hide);
+  })();
 
   loadCount()
 </script>

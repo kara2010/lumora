@@ -48,6 +48,14 @@
       {
         "from": "HDRTray-LICENSE.html",
         "to": "HDRTray-LICENSE.html"
+      },
+      {
+        "from": "PresentMon.exe",
+        "to": "PresentMon.exe"
+      },
+      {
+        "from": "PresentMon-LICENSE.txt",
+        "to": "PresentMon-LICENSE.txt"
       }
     ]
   },

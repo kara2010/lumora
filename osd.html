@@ -5,264 +5,406 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
-    background: transparent;
-    overflow: hidden;
-    user-select: none;
-    -webkit-user-select: none;
-    font-family: 'Consolas', 'DejaVu Sans Mono', 'Courier New', monospace;
-    font-weight: 700;
+    background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none;
+    font-family: 'Consolas', 'DejaVu Sans Mono', 'Courier New', monospace; font-weight: 700;
   }
-  /* Das eigentliche Panel – halbtransparenter dunkler Hintergrund für Lesbarkeit
-     über beliebigen Spielszenen. Der Rest des Fensters bleibt transparent und
-     (per setIgnoreMouseEvents) klick-durchlässig. */
+  :root {
+    --nv: #74e857; --amd: #ff8a1e; --val: #ffe100; --fps: #ffffff; --ft: #6fe86f;
+    --accent: #74e857;              /* Akzentfarbe (überschreibbar per Config) */
+    --panel-op: 0.55;
+  }
+  /* Panel sitzt absolut in der gewählten Ecke; horizontale Themes zentrieren am Rand */
   #panel {
-    position: absolute;
-    margin: 18px;
-    padding: 14px 16px 16px;
-    background: rgba(8, 8, 12, var(--panel-op, 0.55));
-    border-radius: 10px;
-    backdrop-filter: blur(2px);
-    line-height: 1.05;
-    color: #fff;
+    position: absolute; margin: 18px; color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,.9); font-variant-numeric: tabular-nums;
   }
-  /* Ecken-Positionierung (Fenster deckt die ganze Flaeche ab) */
   body.pos-tl #panel { top: 0;    left: 0; }
   body.pos-tr #panel { top: 0;    right: 0; }
   body.pos-bl #panel { bottom: 0; left: 0; }
   body.pos-br #panel { bottom: 0; right: 0; }
+  .osd i { font-style: normal; font-size: .6em; margin-left: 2px; opacity: .95; }
+  .hidden { display: none !important; }
 
-  .group { margin-bottom: 16px; }
-  .group:last-child { margin-bottom: 0; }
+  /* ============================ THEMES ============================ */
 
-  .g-label {
-    color: #8a8a8a;
-    font-size: 13px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    margin-bottom: 1px;
-  }
+  /* -------- KOMPAKT -------- */
+  body.theme-compact #panel { width: 232px; padding: 13px 15px 14px;
+    background: rgba(8,8,12,var(--panel-op)); border-radius: 10px; backdrop-filter: blur(2px); }
+  .t-compact .grp { margin-bottom: 13px; } .t-compact .grp:last-child { margin-bottom: 0; }
+  .t-compact .lbl { font-size: 11px; letter-spacing: .16em; color: #8a8a8a; margin-bottom: 1px; }
+  .t-compact .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .t-compact .name { font-size: 21px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-compact .big  { font-size: 21px; color: var(--val); flex: 0 0 auto; }
+  .t-compact .row  { display: flex; justify-content: space-between; align-items: baseline; margin-top: 1px; }
+  .t-compact .row .k { font-size: 15px; } .t-compact .row .v { font-size: 15px; color: var(--val); }
+  .t-compact .nv .name, .t-compact .nv .row .k { color: var(--nv); }
+  .t-compact .amd .name, .t-compact .amd .row .k { color: var(--amd); }
+  .t-compact .fps .name { color: var(--nv); } .t-compact .fps .big { font-size: 27px; color: #fff; }
+  .t-compact .track, .t-compact .stats { display: none; }
+  .t-compact canvas { display: block; width: 100%; height: 42px; margin-top: 4px; }
+  .t-compact .ftline { font-size: 13px; color: #9a9a9a; margin-top: 5px; }
+  .t-compact .ftline .v { color: var(--ft); }
 
-  /* Kopfzeile jeder Gruppe: großer Name links, große Kennzahl rechts */
-  .g-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 2px;
-  }
-  .g-name { font-size: 30px; letter-spacing: 1px; }
-  .g-headval { font-size: 30px; }
-  .g-headval .u { font-size: 15px; margin-left: 4px; }
+  /* -------- MINIMAL -------- */
+  body.theme-min #panel { display: flex; flex-direction: column; gap: 7px; }
+  .t-min .line { display: flex; align-items: baseline; gap: 9px; }
+  .t-min .k { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; opacity: .85; }
+  .t-min .k.nv { color: var(--nv); } .t-min .k.amd { color: var(--amd); } .t-min .k.fp { color: #fff; }
+  .t-min .v { font-size: 24px; color: #fff; } .t-min .v.big { font-size: 33px; }
+  .t-min .sub { font-size: 15px; opacity: .85; }
+  .t-min canvas, .t-min .track, .t-min .lbl { display: none; }
 
-  /* Werte-Zeilen: Beschriftung links, Wert + Einheit rechtsbündig */
-  .row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-top: 1px;
-  }
-  .row .k { font-size: 22px; }
-  .row .v { font-size: 22px; color: #ffe100; text-align: right; }
-  .row .v .u { font-size: 12px; color: #ffe100; margin-left: 4px; }
+  /* -------- BALKEN -------- */
+  body.theme-bar #panel { width: 244px; padding: 14px 15px;
+    background: rgba(10,10,14,calc(var(--panel-op) + .07)); border-radius: 10px; border: 1px solid rgba(255,255,255,.06); }
+  .t-bar .grp { margin-bottom: 14px; } .t-bar .grp:last-child { margin-bottom: 0; }
+  .t-bar .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; gap: 8px; }
+  .t-bar .name { font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-bar .nv .name { color: var(--nv); } .t-bar .amd .name { color: var(--amd); } .t-bar .fps .name { color: var(--nv); }
+  .t-bar .big { font-size: 17px; color: #fff; flex: 0 0 auto; } .t-bar .fps .big { font-size: 26px; }
+  .t-bar .fps .big i { color: var(--nv); }
+  .t-bar .lbl { display: none; }
+  .t-bar .track { height: 7px; border-radius: 4px; background: rgba(255,255,255,.12); overflow: hidden; margin-bottom: 7px; }
+  .t-bar .fill { height: 100%; border-radius: 4px; transition: width .2s; }
+  .t-bar .nv .fill { background: linear-gradient(90deg, #3f8f45, var(--nv)); }
+  .t-bar .amd .fill { background: linear-gradient(90deg, #a5561a, var(--amd)); }
+  .t-bar .row { display: inline-flex; gap: 4px; margin-right: 12px; font-size: 13px; color: #d6d6d6; }
+  .t-bar .row .v { color: var(--val); } .t-bar .stats { margin-top: -2px; }
+  .t-bar .fps .track, .t-bar .fps-rows { display: none; }
+  .t-bar canvas { display: block; width: 100%; height: 40px; margin-top: 4px; }
 
-  /* Farbschemata je Gruppe */
-  .nv .g-name, .nv .row .k { color: #74e857; }
-  .amd .g-name, .amd .row .k { color: #ff8a1e; }
+  /* -------- NEON -------- */
+  body.theme-neon #panel { width: 226px; padding: 13px 15px; background: rgba(6,8,16,calc(var(--panel-op) + .25));
+    border-radius: 6px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.5), 0 0 20px color-mix(in srgb, var(--accent) 22%, transparent); }
+  .t-neon .grp { margin-bottom: 12px; padding-left: 9px; border-left: 2px solid; }
+  .t-neon .grp:last-child { margin-bottom: 0; }
+  .t-neon .grp.nv { border-color: var(--nv); } .t-neon .grp.amd { border-color: var(--amd); } .t-neon .grp.fps { border-color: #4bd6ff; }
+  .t-neon .lbl { display: none; }
+  .t-neon .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .t-neon .name { font-size: 16px; letter-spacing: .03em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-neon .nv .name { color: var(--nv); text-shadow: 0 0 8px rgba(116,232,87,.55); }
+  .t-neon .amd .name { color: var(--amd); text-shadow: 0 0 8px rgba(255,138,30,.5); }
+  .t-neon .fps .name { color: #4bd6ff; text-shadow: 0 0 8px rgba(75,214,255,.5); }
+  .t-neon .big { font-size: 18px; color: #fff; flex: 0 0 auto; } .t-neon .fps .big { font-size: 24px; }
+  .t-neon .row { display: inline-flex; gap: 3px; margin-right: 10px; margin-top: 3px; font-size: 12.5px; color: #cfd3da; }
+  .t-neon .row .v { color: var(--val); } .t-neon .stats { margin-top: 1px; }
+  .t-neon .track { display: none; } .t-neon canvas { display: none; }
 
-  .nv .g-headval, .amd .g-headval { color: #ffe100; }
-  .nv .g-headval .u, .amd .g-headval .u { color: #ffe100; }
+  /* -------- LEISTE (horizontal) -------- */
+  body.theme-strip #panel { margin: 14px; }
+  body.theme-strip.pos-tl #panel, body.theme-strip.pos-tr #panel { left: 50%; right: auto; transform: translateX(-50%); }
+  body.theme-strip.pos-bl #panel, body.theme-strip.pos-br #panel { left: 50%; right: auto; transform: translateX(-50%); }
+  .t-strip { display: flex; align-items: center; background: rgba(8,8,12,var(--panel-op));
+    border-radius: 9px; padding: 8px 4px; backdrop-filter: blur(2px); }
+  .t-strip .seg { display: flex; align-items: baseline; gap: 7px; padding: 2px 15px; }
+  .t-strip .seg + .seg { border-left: 1px solid rgba(255,255,255,.14); }
+  .t-strip .nm { font-size: 12px; letter-spacing: .06em; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-strip .nv .nm { color: var(--nv); } .t-strip .amd .nm { color: var(--amd); } .t-strip .fps .nm { color: #fff; }
+  .t-strip .m { font-size: 15px; color: #fff; } .t-strip .m .v { color: var(--val); }
+  .t-strip .fps .m { font-size: 20px; }
+  .t-strip .lbl, .t-strip .track, .t-strip canvas { display: none; }
 
-  /* FPS-Gruppe */
-  .fps .g-name { color: #74e857; }
-  .fps-line { display: flex; justify-content: space-between; align-items: baseline; }
-  .fps-big { font-size: 40px; color: #ffffff; }
-  .fps-unit { font-size: 18px; color: #74e857; }
-  .ft-label { color: #9a9a9a; font-size: 20px; margin-top: 6px; }
-  .ft-val { color: #6fe86f; font-size: 20px; text-align: center; margin-top: 2px; }
-  #ftGraph { display: block; width: 100%; height: 46px; margin-top: 4px; }
+  /* -------- KACHELN (horizontal) -------- */
+  body.theme-tiles #panel { margin: 14px; }
+  body.theme-tiles.pos-tl #panel, body.theme-tiles.pos-tr #panel,
+  body.theme-tiles.pos-bl #panel, body.theme-tiles.pos-br #panel { left: 50%; right: auto; transform: translateX(-50%); }
+  .t-tiles { display: flex; gap: 8px; }
+  .t-tiles .tile { background: rgba(8,8,12,calc(var(--panel-op) + .07)); border-radius: 9px; padding: 9px 14px; min-width: 92px; border-top: 2px solid; }
+  .t-tiles .tile.nv { border-color: var(--nv); } .t-tiles .tile.amd { border-color: var(--amd); } .t-tiles .tile.fps { border-color: #fff; }
+  .t-tiles .cap { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: #9aa0aa; margin-bottom: 3px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-tiles .tile.nv .cap { color: var(--nv); } .t-tiles .tile.amd .cap { color: var(--amd); }
+  .t-tiles .num { font-size: 24px; color: #fff; line-height: 1; } .t-tiles .num .v { color: var(--val); font-size: .5em; }
+  .t-tiles .tile.fps .num { font-size: 30px; }
+  .t-tiles .sub { font-size: 11.5px; color: #c4c8d0; margin-top: 4px; } .t-tiles .sub .v { color: var(--val); }
+  .t-tiles .lbl, .t-tiles .track, .t-tiles canvas { display: none; }
 
-  /* Text gut lesbar auch auf hellen Szenen */
-  #panel { text-shadow: 0 1px 2px rgba(0,0,0,0.9); }
-
-  /* Live-Edit-Modus */
+  /* -------- Live-Edit -------- */
   body.edit #panel { outline: 2px dashed #4f8ef7; outline-offset: 5px; cursor: move; }
-  #editbar {
-    display: none;
-    position: absolute;
-    left: 50%; top: 14px;
-    transform: translateX(-50%);
-    align-items: center;
-    gap: 14px;
-    white-space: nowrap;
-    padding: 10px 12px 10px 16px;
-    background: rgba(15, 17, 24, 0.94);
-    border: 1px solid rgba(255,255,255,0.16);
-    border-radius: 11px;
-    color: #d8d8e2;
-    font-family: 'Segoe UI', 'DejaVu Sans', sans-serif;
-    font-weight: 400;
-    font-size: 13px;
-    text-shadow: none;
-  }
+  #editbar { display: none; position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
+    align-items: center; gap: 14px; white-space: nowrap; padding: 10px 12px 10px 16px;
+    background: rgba(15,17,24,.94); border: 1px solid rgba(255,255,255,.16); border-radius: 11px;
+    color: #d8d8e2; font-family: 'Segoe UI','DejaVu Sans',sans-serif; font-weight: 400; font-size: 13px; text-shadow: none; }
   body.edit #editbar { display: flex; }
   #editbar b { color: #fff; font-weight: 600; }
-  #editDone {
-    background: #4f8ef7; color: #fff; border: none;
-    border-radius: 7px; padding: 6px 15px;
-    font-size: 13px; font-weight: 600; cursor: pointer;
-  }
+  #editDone { background: #4f8ef7; color: #fff; border: none; border-radius: 7px; padding: 6px 15px; font-size: 13px; font-weight: 600; cursor: pointer; }
   #editDone:hover { background: #6ba0f8; }
 </style>
 </head>
-<body class="pos-tl">
+<body class="pos-tl theme-compact">
   <div id="editbar">
     <span>Verschieben: <b>ziehen</b> &nbsp;·&nbsp; Größe: <b>Mausrad</b></span>
     <button id="editDone">Fertig</button>
   </div>
-  <div id="panel">
-    <div class="group nv">
-      <div class="g-label" id="nvLabel">NVIDIA</div>
-      <div class="g-head">
-        <span class="g-name" id="nvName">5080</span>
-        <span class="g-headval"><span id="nvLoad">1</span><span class="u">%</span></span>
-      </div>
-      <div class="row"><span class="k">temp</span>  <span class="v"><span id="nvTemp">42</span><span class="u">°C</span></span></div>
-      <div class="row"><span class="k">power</span> <span class="v"><span id="nvPower">53.1</span><span class="u">W</span></span></div>
-      <div class="row"><span class="k">clock</span> <span class="v"><span id="nvClock">2730</span><span class="u">MHz</span></span></div>
-      <div class="row"><span class="k">VRAM</span>  <span class="v"><span id="nvVram">4667</span><span class="u">MB</span></span></div>
-    </div>
-
-    <div class="group amd">
-      <div class="g-label" id="cpuLabel">AMD RYZEN</div>
-      <div class="g-head">
-        <span class="g-name" id="cpuName">7950X3D</span>
-        <span class="g-headval"><span id="cpuLoad">17</span><span class="u">%</span></span>
-      </div>
-      <div class="row"><span class="k">temp</span>  <span class="v"><span id="cpuTemp">78</span><span class="u">°C</span></span></div>
-      <div class="row"><span class="k">clock</span> <span class="v"><span id="cpuClock">5100</span><span class="u">MHz</span></span></div>
-      <div class="row"><span class="k">power</span> <span class="v"><span id="cpuPower">63.7</span><span class="u">W</span></span></div>
-      <div class="row"><span class="k">RAM</span>   <span class="v"><span id="cpuRam">18059</span><span class="u">MB</span></span></div>
-    </div>
-
-    <div class="group fps">
-      <div class="g-label" id="apiLabel">D3D12</div>
-      <div class="fps-line">
-        <span class="g-name">FPS</span>
-        <span><span class="fps-big" id="fpsVal">30</span> <span class="fps-unit">FPS</span></span>
-      </div>
-      <div class="ft-label">Frametime</div>
-      <canvas id="ftGraph" width="320" height="46"></canvas>
-      <div class="ft-val"><span id="ftVal">33.9</span> ms</div>
-    </div>
-  </div>
+  <div id="panel"></div>
 
 <script>
-  // --- Frametime-Graph (Ringpuffer) -------------------------------------------
-  const ftCanvas = document.getElementById('ftGraph')
-  const ftCtx = ftCanvas.getContext('2d')
-  const FT_MAX = 120
-  let ftBuf = new Array(FT_MAX).fill(0)
+  // ===================== Konfiguration & Daten ==========================
+  const UNIT = { load:'%', temp:'°C', power:'W', clock:'MHz', vram:'MB', ram:'MB', frametime:'ms' };
+  const LABEL = { temp:'temp', power:'power', clock:'clock', vram:'VRAM', ram:'RAM' };
+  const ALL = {
+    gpu: ['load','temp','power','clock','vram'],
+    cpu: ['load','temp','clock','power','ram'],
+    fps: ['fps','frametime','graph'],
+  };
+  let cfg = { theme: 'compact', fields: JSON.parse(JSON.stringify(ALL)), accent: '#74e857' };
+  let data = { gpu: null, cpu: null, fps: null, frametime: null, api: null };
 
+  const panel = document.getElementById('panel');
+  const has = (cat, f) => (cfg.fields[cat] || []).includes(f);
+  const esc = s => String(s == null ? '' : s);
+
+  // ---- kleine HTML-Helfer ----
+  // Wertspan mit data-role für Live-Updates: <span data-role="gpu.temp">–</span><i>°C</i>
+  const val = (role, unit) => `<span class="v" data-role="${role}">–</span>${unit ? `<i>${unit}</i>` : ''}`;
+
+  // ===================== Renderer je Theme ==============================
+  function catList(cat) { return (cfg.fields[cat] || []); }
+
+  function rowsFor(cat) {                 // Zeilen (ohne load/fps – die stehen im Kopf)
+    const skip = cat === 'fps' ? ['fps','frametime','graph'] : ['load'];
+    return catList(cat).filter(f => !skip.includes(f));
+  }
+
+  function buildCompact() {
+    let h = '<div class="osd t-compact">';
+    for (const cat of ['gpu','cpu','fps']) {
+      if (!catList(cat).length) continue;
+      h += `<div class="grp ${cat === 'gpu' ? 'nv' : cat === 'cpu' ? 'amd' : 'fps'}">`;
+      if (cat !== 'fps') {
+        h += `<div class="lbl" data-role="${cat}.brand">–</div>`;
+        h += `<div class="head"><span class="name" data-role="${cat}.name">–</span>`;
+        h += has(cat,'load') ? `<span class="big">${val(cat+'.load','%')}</span></div>` : `<span class="big"></span></div>`;
+        for (const f of rowsFor(cat)) h += `<div class="row" data-row="${cat}.${f}"><span class="k">${LABEL[f]}</span><span>${val(cat+'.'+f, UNIT[f])}</span></div>`;
+      } else {
+        h += `<div class="head"><span class="name">FPS</span>`;
+        h += has('fps','fps') ? `<span class="big"><span data-role="fps.fps">–</span></span></div>` : `<span></span></div>`;
+        if (has('fps','graph')) h += `<canvas data-role="ftgraph" width="320" height="46"></canvas>`;
+        if (has('fps','frametime')) h += `<div class="ftline" data-row="fps.frametime">frametime ${val('fps.frametime','ms')}</div>`;
+      }
+      h += '</div>';
+    }
+    return h + '</div>';
+  }
+
+  function buildMin() {
+    let h = '<div class="osd t-min">';
+    for (const cat of ['gpu','cpu']) {
+      const rs = rowsFor(cat); if (!catList(cat).length) continue;
+      h += `<div class="line"><span class="k ${cat==='gpu'?'nv':'amd'}">${cat.toUpperCase()}</span>`;
+      const parts = [];
+      if (has(cat,'temp')) parts.push(`<span class="v">${val(cat+'.temp','°')}</span>`);
+      const rest = rs.filter(f => f !== 'temp');
+      for (const f of rest) parts.push(`<span class="sub">${val(cat+'.'+f, UNIT[f]==='MHz'?'':'' )}<i>${UNIT[f]}</i></span>`);
+      if (has(cat,'load')) parts.push(`<span class="sub">${val(cat+'.load','%')}</span>`);
+      h += parts.join('<span class="sub" style="opacity:.4">·</span>') + '</div>';
+    }
+    if (catList('fps').length && has('fps','fps'))
+      h += `<div class="line"><span class="k fp">FPS</span><span class="v big" data-role="fps.fps">–</span>${has('fps','frametime')?`<span class="sub">${val('fps.frametime','ms')}</span>`:''}</div>`;
+    return h + '</div>';
+  }
+
+  function buildBar() {
+    let h = '<div class="osd t-bar">';
+    for (const cat of ['gpu','cpu']) {
+      if (!catList(cat).length) continue;
+      h += `<div class="grp ${cat==='gpu'?'nv':'amd'}">`;
+      h += `<div class="head"><span class="name" data-role="${cat}.name">–</span>`;
+      h += has(cat,'load') ? `<span class="big">${val(cat+'.load','%')}</span></div>` : `<span></span></div>`;
+      if (has(cat,'load')) h += `<div class="track"><div class="fill" data-role="${cat}.loadbar" style="width:0%"></div></div>`;
+      h += `<div class="stats">`;
+      for (const f of rowsFor(cat)) h += `<span class="row" data-row="${cat}.${f}">${LABEL[f]} ${val(cat+'.'+f, UNIT[f])}</span>`;
+      h += `</div></div>`;
+    }
+    if (catList('fps').length) {
+      h += `<div class="grp fps"><div class="head"><span class="name">FPS${has('fps','frametime')?` · <span data-role="fps.frametime">–</span> ms`:''}</span>`;
+      h += has('fps','fps') ? `<span class="big"><span data-role="fps.fps">–</span></span></div>` : `<span></span></div>`;
+      if (has('fps','graph')) h += `<canvas data-role="ftgraph" width="320" height="40"></canvas>`;
+      h += `</div>`;
+    }
+    return h + '</div>';
+  }
+
+  function buildNeon() {
+    let h = '<div class="osd t-neon">';
+    for (const cat of ['gpu','cpu','fps']) {
+      if (!catList(cat).length) continue;
+      const cls = cat==='gpu'?'nv':cat==='cpu'?'amd':'fps';
+      h += `<div class="grp ${cls}"><div class="head">`;
+      h += cat!=='fps' ? `<span class="name" data-role="${cat}.name">–</span>` : `<span class="name">FPS</span>`;
+      if (cat!=='fps') h += has(cat,'load') ? `<span class="big">${val(cat+'.load','%')}</span></div>` : `<span></span></div>`;
+      else h += has('fps','fps') ? `<span class="big"><span data-role="fps.fps">–</span></span></div>` : `<span></span></div>`;
+      if (cat!=='fps') { h += `<div class="stats">`; for (const f of rowsFor(cat)) h += `<span class="row" data-row="${cat}.${f}">${val(cat+'.'+f, UNIT[f])}</span>`; h += `</div>`; }
+      else if (has('fps','frametime')) h += `<div class="stats"><span class="row" data-row="fps.frametime">frametime ${val('fps.frametime','ms')}</span></div>`;
+      h += `</div>`;
+    }
+    return h + '</div>';
+  }
+
+  function buildStrip() {
+    let h = '<div class="osd t-strip">';
+    for (const cat of ['gpu','cpu']) {
+      if (!catList(cat).length) continue;
+      h += `<div class="seg ${cat==='gpu'?'nv':'amd'}"><span class="nm" data-role="${cat}.name">–</span>`;
+      if (has(cat,'load')) h += `<span class="m">${val(cat+'.load','%')}</span>`;
+      for (const f of rowsFor(cat)) h += `<span class="m" data-row="${cat}.${f}">${val(cat+'.'+f, UNIT[f])}</span>`;
+      h += `</div>`;
+    }
+    if (catList('fps').length) {
+      h += `<div class="seg fps"><span class="nm">FPS</span>`;
+      if (has('fps','fps')) h += `<span class="m"><span data-role="fps.fps">–</span></span>`;
+      if (has('fps','frametime')) h += `<span class="m" style="font-size:13px" data-row="fps.frametime">${val('fps.frametime','ms')}</span>`;
+      h += `</div>`;
+    }
+    return h + '</div>';
+  }
+
+  function buildTiles() {
+    let h = '<div class="osd t-tiles">';
+    for (const cat of ['gpu','cpu']) {
+      if (!catList(cat).length) continue;
+      h += `<div class="tile ${cat==='gpu'?'nv':'amd'}"><div class="cap" data-role="${cat}.name">–</div>`;
+      h += has(cat,'load') ? `<div class="num">${val(cat+'.load','%')}</div>` : `<div class="num">–</div>`;
+      const subs = rowsFor(cat).map(f => `<span data-row="${cat}.${f}">${val(cat+'.'+f, UNIT[f]==='°C'?'°':UNIT[f]==='MHz'?'':'')}<i>${UNIT[f]==='°C'?'':UNIT[f]}</i></span>`);
+      if (subs.length) h += `<div class="sub">${subs.join(' · ')}</div>`;
+      h += `</div>`;
+    }
+    if (catList('fps').length) {
+      h += `<div class="tile fps"><div class="cap">FPS</div>`;
+      h += has('fps','fps') ? `<div class="num"><span data-role="fps.fps">–</span></div>` : `<div class="num">–</div>`;
+      if (has('fps','frametime')) h += `<div class="sub" data-row="fps.frametime"><span data-role="fps.frametime">–</span> ms</div>`;
+      h += `</div>`;
+    }
+    return h + '</div>';
+  }
+
+  const BUILD = { compact: buildCompact, min: buildMin, bar: buildBar, neon: buildNeon, strip: buildStrip, tiles: buildTiles };
+
+  // ===================== Panel bauen + Frametime-Graph ==================
+  let ftCanvas = null, ftCtx = null;
+  const FT_MAX = 300; let ftBuf = new Array(FT_MAX).fill(0);
   function drawFtGraph() {
-    const w = ftCanvas.width, h = ftCanvas.height
-    ftCtx.clearRect(0, 0, w, h)
-    // Skala relativ zum Maximum im Puffer (mind. 20 ms), damit der Graph "atmet".
-    const peak = Math.max(20, ...ftBuf)
-    ftCtx.strokeStyle = '#6fe86f'
-    ftCtx.lineWidth = 1.5
-    ftCtx.beginPath()
-    for (let i = 0; i < FT_MAX; i++) {
-      const x = (i / (FT_MAX - 1)) * w
-      const y = h - (ftBuf[i] / peak) * (h - 2) - 1
-      if (i === 0) ftCtx.moveTo(x, y); else ftCtx.lineTo(x, y)
+    if (!ftCtx) return;
+    const w = ftCanvas.width, h = ftCanvas.height;
+    ftCtx.clearRect(0,0,w,h);
+    const peak = Math.max(20, ...ftBuf);
+    ftCtx.strokeStyle = '#6fe86f'; ftCtx.lineWidth = 1.5; ftCtx.beginPath();
+    for (let i = 0; i < FT_MAX; i++) { const x = (i/(FT_MAX-1))*w, y = h-(ftBuf[i]/peak)*(h-2)-1; i?ftCtx.lineTo(x,y):ftCtx.moveTo(x,y); }
+    ftCtx.stroke();
+  }
+  function pushFrametime(ms) { ftBuf.push(ms); if (ftBuf.length > FT_MAX) ftBuf.shift(); drawFtGraph(); }
+
+  function renderPanel() {
+    document.body.classList.remove('theme-compact','theme-min','theme-bar','theme-neon','theme-strip','theme-tiles');
+    document.body.classList.add('theme-' + cfg.theme);
+    panel.innerHTML = (BUILD[cfg.theme] || buildCompact)();
+    ftCanvas = panel.querySelector('canvas[data-role="ftgraph"]');
+    ftCtx = ftCanvas ? ftCanvas.getContext('2d') : null;
+    drawFtGraph();
+    lastFpsTextAt = 0;   // FPS-Zahl sofort setzen (nicht auf die Drosselung warten)
+    paintValues();       // aktuelle Werte gleich einsetzen
+  }
+
+  // ===================== Werte einsetzen ================================
+  function setRole(role, v) { panel.querySelectorAll(`[data-role="${role}"]`).forEach(el => { el.textContent = (v == null ? '–' : v); }); }
+  function setRow(rowKey, show) { panel.querySelectorAll(`[data-row="${rowKey}"]`).forEach(el => el.classList.toggle('hidden', !show)); }
+
+  let lastFpsTextAt = 0;
+  function nowMs() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+
+  function paintValues() {
+    // GPU / CPU
+    for (const cat of ['gpu','cpu']) {
+      const d = data[cat];
+      setRole(cat+'.name', d ? d.name : '–');
+      setRole(cat+'.brand', d ? d.brand : '');
+      for (const f of ['load','temp','power','clock','vram','ram']) {
+        const v = d ? d[f] : null;
+        setRole(cat+'.'+f, v);
+        setRow(cat+'.'+f, v != null);            // Zeile aus, wenn Sensor nichts liefert
+        if (f === 'load') { const bar = panel.querySelector(`[data-role="${cat}.loadbar"]`); if (bar && v != null) bar.style.width = Math.max(0, Math.min(100, v)) + '%'; }
+      }
     }
-    ftCtx.stroke()
+    if (data.api != null) setRole('gpu.api', data.api);
+    // FPS-Zahlen gedrosselt (Graph läuft flüssig separat)
+    if (nowMs() - lastFpsTextAt >= 240) {
+      lastFpsTextAt = nowMs();
+      if (data.fps != null) setRole('fps.fps', data.fps);
+      if (data.frametime != null) setRole('fps.frametime', data.frametime);
+      setRow('fps.frametime', data.frametime != null);
+    }
   }
 
-  function pushFrametime(ms) {
-    ftBuf.push(ms); if (ftBuf.length > FT_MAX) ftBuf.shift()
-    drawFtGraph()
-  }
-
-  // --- Live-Datenschnittstelle (ab Meilenstein 2 gefüttert) -------------------
-  // data = { gpu:{name,load,temp,power,clock,vram}, cpu:{...}, fps, frametime, api }
-  function setText(id, val) { const el = document.getElementById(id); if (el != null && val != null) el.textContent = val }
   function updateOsd(d) {
-    if (!d) return
-    if (d.gpu) { const g = d.gpu
-      setText('nvName', g.name); setText('nvLoad', g.load); setText('nvTemp', g.temp)
-      setText('nvPower', g.power); setText('nvClock', g.clock); setText('nvVram', g.vram) }
-    if (d.cpu) { const c = d.cpu
-      setText('cpuName', c.name); setText('cpuLoad', c.load); setText('cpuTemp', c.temp)
-      setText('cpuClock', c.clock); setText('cpuPower', c.power); setText('cpuRam', c.ram) }
-    if (d.fps != null) setText('fpsVal', d.fps)
-    if (d.api) setText('apiLabel', d.api)
-    if (d.frametime != null) { setText('ftVal', d.frametime); pushFrametime(Number(d.frametime)) }
+    if (!d) return;
+    if ('gpu' in d) data.gpu = d.gpu;
+    if ('cpu' in d) data.cpu = d.cpu;
+    if (d.api != null) data.api = d.api;
+    if (d.fps != null) data.fps = d.fps;
+    if (d.frametime != null) { data.frametime = d.frametime; pushFrametime(Number(d.frametime)); }
+    paintValues();
   }
 
-  // Layout-Konfiguration: Ecke (Body-Klasse) + Panel-Deckkraft (CSS-Variable).
+  // ===================== Config anwenden ================================
   function applyConfig(c) {
-    if (!c) return
-    if (c.corner) {
-      document.body.classList.remove('pos-tl', 'pos-tr', 'pos-bl', 'pos-br')
-      document.body.classList.add('pos-' + c.corner)
-    }
-    if (c.opacity != null) document.documentElement.style.setProperty('--panel-op', c.opacity)
+    if (!c) return;
+    let rebuild = false;
+    if (c.theme && c.theme !== cfg.theme) { cfg.theme = c.theme; rebuild = true; }
+    if (c.fields) { cfg.fields = c.fields; rebuild = true; }
+    if (c.accent) { cfg.accent = c.accent; document.documentElement.style.setProperty('--accent', c.accent); }
+    if (c.corner) { document.body.classList.remove('pos-tl','pos-tr','pos-bl','pos-br'); document.body.classList.add('pos-' + c.corner); }
+    if (c.opacity != null) document.documentElement.style.setProperty('--panel-op', c.opacity);
+    if (rebuild) renderPanel();
   }
 
-  let ipcRenderer = null
-  try { ipcRenderer = require('electron').ipcRenderer } catch (e) {}
-  if (ipcRenderer) {
-    ipcRenderer.on('osd-data', (e, d) => updateOsd(d))
-    ipcRenderer.on('osd-config', (e, c) => applyConfig(c))
-    ipcRenderer.on('osd-edit', (e, on) => setEdit(on))
-  }
-
-  // --- Live-Edit: ziehen (rastet in naechste Ecke) + Mausrad = Groesse --------
-  const panel = document.getElementById('panel')
-  let editing = false, drag = null
-  function setEdit(on) {
-    editing = on
-    document.body.classList.toggle('edit', on)
-    if (!on) { panel.style.left = panel.style.top = panel.style.right = panel.style.bottom = '' }
-  }
+  // ===================== Live-Edit + IPC ===============================
+  let editing = false, drag = null;
+  function setEdit(on) { editing = on; document.body.classList.toggle('edit', on);
+    if (!on) { panel.style.left = panel.style.top = panel.style.right = panel.style.bottom = ''; } }
   panel.addEventListener('pointerdown', (e) => {
-    if (!editing || e.target.closest('#editDone')) return
-    const r = panel.getBoundingClientRect()
-    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top }
-    document.body.classList.remove('pos-tl', 'pos-tr', 'pos-bl', 'pos-br')
-    panel.style.right = panel.style.bottom = ''
-    panel.style.margin = '0'
-    panel.style.left = r.left + 'px'; panel.style.top = r.top + 'px'
-    try { panel.setPointerCapture(e.pointerId) } catch (er) {}
-    e.preventDefault()
-  })
-  panel.addEventListener('pointermove', (e) => {
-    if (!drag) return
-    panel.style.left = (e.clientX - drag.dx) + 'px'
-    panel.style.top = (e.clientY - drag.dy) + 'px'
-  })
+    if (!editing || e.target.closest('#editDone')) return;
+    const r = panel.getBoundingClientRect();
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    document.body.classList.remove('pos-tl','pos-tr','pos-bl','pos-br');
+    panel.style.right = panel.style.bottom = ''; panel.style.margin = '0'; panel.style.transform = 'none';
+    panel.style.left = r.left + 'px'; panel.style.top = r.top + 'px';
+    try { panel.setPointerCapture(e.pointerId); } catch (er) {}
+    e.preventDefault();
+  });
+  panel.addEventListener('pointermove', (e) => { if (!drag) return; panel.style.left = (e.clientX - drag.dx) + 'px'; panel.style.top = (e.clientY - drag.dy) + 'px'; });
   panel.addEventListener('pointerup', () => {
-    if (!drag) return
-    drag = null
-    const r = panel.getBoundingClientRect()
-    const cx = r.left + r.width / 2, cy = r.top + r.height / 2
-    const corner = (cy < window.innerHeight / 2 ? 't' : 'b') + (cx < window.innerWidth / 2 ? 'l' : 'r')
-    panel.style.left = panel.style.top = panel.style.margin = ''
-    document.body.classList.add('pos-' + corner)
-    if (ipcRenderer) ipcRenderer.invoke('osd-edit-corner', corner)
-  })
-  window.addEventListener('wheel', (e) => {
-    if (!editing) return
-    e.preventDefault()
-    if (ipcRenderer) ipcRenderer.invoke('osd-edit-scale', e.deltaY < 0 ? 1 : -1)
-  }, { passive: false })
-  document.getElementById('editDone').addEventListener('click', () => {
-    if (ipcRenderer) ipcRenderer.invoke('osd-edit-done')
-  })
+    if (!drag) return; drag = null;
+    const r = panel.getBoundingClientRect();
+    const cx = r.left + r.width/2, cy = r.top + r.height/2;
+    const corner = (cy < window.innerHeight/2 ? 't' : 'b') + (cx < window.innerWidth/2 ? 'l' : 'r');
+    panel.style.left = panel.style.top = panel.style.margin = panel.style.transform = '';
+    document.body.classList.add('pos-' + corner);
+    if (ipcRenderer) ipcRenderer.invoke('osd-edit-corner', corner);
+  });
+  window.addEventListener('wheel', (e) => { if (!editing) return; e.preventDefault(); if (ipcRenderer) ipcRenderer.invoke('osd-edit-scale', e.deltaY < 0 ? 1 : -1); }, { passive: false });
+  document.getElementById('editDone').addEventListener('click', () => { if (ipcRenderer) ipcRenderer.invoke('osd-edit-done'); });
 
-  // Platzhalter-Wellenform, bis echte Frametimes kommen (Meilenstein 1: Optik).
-  for (let i = 0; i < FT_MAX; i++) ftBuf[i] = 33 + Math.sin(i / 4) * 2 + (i % 7 === 0 ? 6 : 0)
-  drawFtGraph()
+  let ipcRenderer = null;
+  try { ipcRenderer = require('electron').ipcRenderer; } catch (e) {}
+  if (ipcRenderer) {
+    ipcRenderer.on('osd-data', (e, d) => updateOsd(d));
+    ipcRenderer.on('osd-config', (e, c) => applyConfig(c));
+    ipcRenderer.on('osd-edit', (e, on) => setEdit(on));
+    renderPanel();
+  } else {
+    // -------- Demo-Modus (im Browser ohne Electron): Beispielwerte + Theme-Umschalter
+    data = { gpu:{brand:'NVIDIA',name:'RTX 5080',load:45,temp:62,power:210,clock:2730,vram:8420},
+             cpu:{brand:'AMD',name:'7950X3D',load:38,temp:68,power:95,clock:5000,ram:24560},
+             fps:144, frametime:6.9, api:'D3D12' };
+    renderPanel();
+    let n = 0; setInterval(() => { data.fps = 138 + Math.round(Math.random()*12); data.frametime = +(1000/data.fps).toFixed(1); data.gpu.load = 40+Math.round(Math.random()*20); pushFrametime(data.frametime); paintValues(); }, 300);
+    const themes = ['compact','min','bar','neon','strip','tiles'];
+    const sw = document.createElement('div');
+    sw.style.cssText = 'position:fixed;top:8px;left:8px;display:flex;gap:6px;font-family:sans-serif;font-weight:400;z-index:99';
+    themes.forEach(t => { const b = document.createElement('button'); b.textContent = t; b.style.cssText='padding:5px 10px;border-radius:6px;border:1px solid #444;background:#1a1d24;color:#ddd;cursor:pointer;font-size:12px'; b.onclick = () => applyConfig({ theme: t }); sw.appendChild(b); });
+    document.body.appendChild(sw);
+    document.body.style.background = 'linear-gradient(158deg,#1d2b24,#0f171d 62%,#101a22)';
+  }
 </script>
 </body>
 </html>

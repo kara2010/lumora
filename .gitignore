@@ -17,3 +17,6 @@ website/updates/
 Thumbs.db
 Desktop.ini
 *.log
+
+# grosse Website-Demo nicht ins Repo
+website/demo.mp4

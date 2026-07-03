@@ -43,8 +43,14 @@ if (Test-Path $unpackDir) { Remove-Item -Recurse -Force $unpackDir }
 & "$src\node_modules\.bin\asar.cmd" pack $tmp $out --unpack "**/*.node"
 
 # 1) ERST beenden  2) DANN kopieren
+# Der FPS-Broker laeuft ELEVATED (geplante Aufgabe) und laesst sich mit normalen
+# Rechten NICHT per Stop-Process killen ("Zugriff verweigert") – er sperrt aber
+# app.asar mit. Darum zuerst die Aufgabe sauber beenden (das darf man am eigenen
+# Task ohne Elevation), dann die normale App.
+schtasks /End /TN "LumoraOSD-FPS" 2>$null | Out-Null
+Start-Sleep -Milliseconds 500
 $running = Get-Process -Name "Lumora","HDR Launcher" -ErrorAction SilentlyContinue
-if ($running) { $running | Stop-Process -Force; Start-Sleep -Milliseconds 1000; Write-Host "Lumora beendet (fuer Deploy)." }
+if ($running) { $running | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 1000; Write-Host "Lumora beendet (fuer Deploy)." }
 $targets = @(
   "$env:LOCALAPPDATA\Programs\hdr-launcher\resources\app.asar",
   "$env:LOCALAPPDATA\Programs\lumora\resources\app.asar"
@@ -77,6 +83,19 @@ foreach ($t in $targets) {
   if (Test-Path $resDir) { Copy-Item $updSrc (Join-Path $resDir "app-update.yml") -Force }
 }
 Write-Host "app-update.yml mitgeliefert."
+
+# Gebuendelte Binaries (extraResources, liegen NEBEN dem asar). Muessen beim
+# Dev-Deploy mitkopiert werden, da sie nicht im asar stecken.
+foreach ($bin in 'PresentMon.exe','PresentMon-LICENSE.txt') {
+  $binSrc = Join-Path $src $bin
+  if (Test-Path $binSrc) {
+    foreach ($t in $targets) {
+      $resDir = Split-Path $t
+      if (Test-Path $resDir) { Copy-Item $binSrc (Join-Path $resDir $bin) -Force }
+    }
+  }
+}
+Write-Host "PresentMon mitgeliefert."
 
 # Optionale Verifikation: main.js/index.html/styles.css aus dem DEPLOYTEN asar
 # ins TEMP extrahieren und ueber ALLE pruefen (Muster kann in jeder Datei stehen).
