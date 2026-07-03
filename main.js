@@ -1386,14 +1386,19 @@ function toggleOsdEdit() { setOsdEditMode(!osdEditActive) }
 // funktioniert der Gamepad-Hotkey eben nur im Vordergrund (Renderer-Fallback).
 let xinputPoll = null
 let xinputGetState = null
+let timeEndPeriodFn = null       // winmm.timeEndPeriod – bei Quit die 1-ms-Timer-Aufloesung freigeben
+let lastPollAt = 0               // Diagnose: Abstand zwischen Poll-Ticks (Timer-Traegheit erkennen)
 let gpHotkeyDown = false
 let gpOsdHotkeyDown = false
-// Entprellung: nach dem Auslösen kurz sperren. Sonst kann ein einzelner Read-
-// Aussetzer waehrend des Combo-Haltens (Button-Bit wackelt / Spiel pollt den
-// Controller) die steigende Flanke ein zweites Mal ausloesen -> Lumora kommt vor
-// und wird gleich wieder versteckt ("komme im Spiel nicht ran").
-let gpHotkeyCooldownUntil = 0
-let gpOsdHotkeyCooldownUntil = 0
+// Release-Debounce statt Cooldown: XInput liest eine gehaltene Kombi nicht
+// durchgehend – einzelne Button-Bits fallen fuer einen Poll-Zyklus weg. Ohne
+// Entprellung erzeugt das am laufenden Band neue "steigende Flanken" -> der
+// Hotkey feuert mehrfach pro Druck. Loesung: die Kombi gilt erst als LOSGELASSEN,
+// wenn sie GP_RELEASE_MS durchgehend nicht mehr gelesen wurde. Ein Aussetzer wird
+// so ueberbrueckt -> ein Druck loest genau EINMAL aus, egal wie stark es flackert.
+const GP_RELEASE_MS = 150
+let gpHotkeyLastSeen = 0
+let gpOsdHotkeyLastSeen = 0
 let getAsyncKey = null   // GetAsyncKeyState – fuer Tastatur-Hotkeys via Polling (greift auch im Spiel)
 
 // Standard-Gamepad-API-Index -> Prüf-Funktion auf dem XINPUT_GAMEPAD-Struct.
@@ -1436,7 +1441,20 @@ function setupGamepadHotkey() {
   // Spiel, im Gegensatz zu globalShortcut/LL-Hook, die vom Spiel abgefangen werden).
   try { getAsyncKey = koffi.load('user32.dll').func('int16 GetAsyncKeyState(int vKey)') }
   catch (e) { getAsyncKey = null; console.log('[hotkey] GetAsyncKeyState nicht ladbar:', e && e.message) }
-  // Poll starten, sobald wenigstens EINE native Eingabe verfuegbar ist.
+  // Windows-Timer-Aufloesung auf 1 ms halten, solange der Poll laeuft. Sonst gibt
+  // Chromium sie frei, sobald Lumora minimiert ist -> der 40-ms-Timer feuert im
+  // Hintergrund nur noch alle paar hundert ms und der Gamepad-Hotkey reagiert
+  // spuerbar verzoegert. timeBeginPeriod(1) haelt setInterval praezise (genau das
+  // tun Afterburner/RTSS & andere Hintergrund-Overlays ebenfalls).
+  try {
+    const winmm = koffi.load('winmm.dll')
+    const timeBeginPeriod = winmm.func('uint32 __stdcall timeBeginPeriod(uint32 uPeriod)')
+    timeEndPeriodFn = winmm.func('uint32 __stdcall timeEndPeriod(uint32 uPeriod)')
+    timeBeginPeriod(1)
+    console.log('[hotkey] Timer-Aufloesung auf 1 ms gesetzt (praeziser Hintergrund-Poll)')
+  } catch (e) { console.log('[hotkey] timeBeginPeriod nicht verfuegbar:', e && e.message) }
+  // Poll starten, sobald wenigstens EINE native Eingabe verfuegbar ist. 25 Hz reichen
+  // fuer reaktive Hotkeys und halten die XInput-Last niedrig.
   if ((xinputGetState || getAsyncKey) && !xinputPoll) xinputPoll = setInterval(pollNativeHotkeys, 40)
 }
 
@@ -1456,12 +1474,19 @@ function pollNativeHotkeys() {
   // 1) Gamepad-Kombis (XInput) – Oberflaeche + OSD, je auf steigende Flanke,
   //    mit 700 ms Entprellung gegen Mehrfach-Auslösung durch Read-Aussetzer.
   const now = Date.now()
-  const downMain = gamepadComboDown(appSettings.gamepadHotkey)
-  if (downMain && !gpHotkeyDown && now >= gpHotkeyCooldownUntil) { toggleMainWindow(); gpHotkeyCooldownUntil = now + 700 }
-  gpHotkeyDown = downMain
-  const downOsd = gamepadComboDown(appSettings.gamepadOsdHotkey)
-  if (downOsd && !gpOsdHotkeyDown && now >= gpOsdHotkeyCooldownUntil) { toggleOverlay(); gpOsdHotkeyCooldownUntil = now + 700 }
-  gpOsdHotkeyDown = downOsd
+  // Diagnose (nur mit Debug-Flag): feuert der 40-ms-Timer im Hintergrund traege?
+  if (lastPollAt && (now - lastPollAt) > 120) osdDbg('[poll] Timer-Traegheit: ' + (now - lastPollAt) + ' ms seit letztem Tick (Soll ~40)')
+  lastPollAt = now
+  const rawMain = gamepadComboDown(appSettings.gamepadHotkey)
+  if (rawMain) gpHotkeyLastSeen = now
+  const heldMain = rawMain || (gpHotkeyLastSeen && (now - gpHotkeyLastSeen) < GP_RELEASE_MS)   // Read-Aussetzer ueberbruecken
+  if (heldMain && !gpHotkeyDown) { osdDbg('[hk] Haupt-Hotkey AUSGELOEST'); toggleMainWindow() }
+  gpHotkeyDown = heldMain
+  const rawOsd = gamepadComboDown(appSettings.gamepadOsdHotkey)
+  if (rawOsd) gpOsdHotkeyLastSeen = now
+  const heldOsd = rawOsd || (gpOsdHotkeyLastSeen && (now - gpOsdHotkeyLastSeen) < GP_RELEASE_MS)
+  if (heldOsd && !gpOsdHotkeyDown) { osdDbg('[hk] OSD-Hotkey AUSGELOEST'); toggleOverlay() }
+  gpOsdHotkeyDown = heldOsd
 
   // 2) Tastatur-Hotkeys (GetAsyncKeyState, steigende Flanke je Hotkey)
   if (getAsyncKey && khHotkeys.length) {
@@ -2886,7 +2911,7 @@ if (process.argv.includes('--fps-broker')) {
     }
   })
 
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll); stopFps(); stopSensorBroker() })
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll); if (timeEndPeriodFn) try { timeEndPeriodFn(1) } catch {}; stopFps(); stopSensorBroker() })
 
   app.on('window-all-closed', () => {
     if (hdrPollInterval) clearInterval(hdrPollInterval)
