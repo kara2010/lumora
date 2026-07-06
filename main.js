@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage, globalShortcut } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage, globalShortcut, desktopCapturer, session } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -10,6 +10,19 @@ const crypto = require('crypto')
 // statt die ganze App am Start abstuerzen zu lassen.
 let autoUpdater = null
 try { autoUpdater = require('electron-updater').autoUpdater } catch (e) { console.warn('electron-updater nicht verfügbar:', e.message) }
+
+// Sicherheitsnetz: einen unerwarteten Fehler (typischerweise aus einem Kind-
+// prozess der Streaming-Pipeline – FFmpeg/mediamtx) protokollieren, statt die
+// ganze App abstuerzen zu lassen. Ohne diesen Handler beendet Electron den
+// Hauptprozess bei jeder uncaught exception.
+try {
+  process.on('uncaughtException', (err) => {
+    try { fs.appendFileSync(path.join(app.getPath('temp'), 'lumora-crash.log'), Date.now() + ' uncaught: ' + ((err && err.stack) || err) + '\n') } catch (e) {}
+  })
+  process.on('unhandledRejection', (reason) => {
+    try { fs.appendFileSync(path.join(app.getPath('temp'), 'lumora-crash.log'), Date.now() + ' unhandled: ' + ((reason && reason.stack) || reason) + '\n') } catch (e) {}
+  })
+} catch (e) {}
 
 function httpsGet(url, extraHeaders) {
   return new Promise((resolve, reject) => {
@@ -55,8 +68,21 @@ const appSettings = { autostart: false, startMinimized: false, minimizeToTray: f
   // dann fehlen FPS/CPU-Sensorwerte und wir fragen nicht staendig neu
   // ("Jetzt einrichten" im Overlay-Tab holt es nach).
   osdEnabled: false, osdScale: 1, osdCorner: 'tl', osdOpacity: 0.55, osdSetupDeclined: false, osdFpsSource: 'auto', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O',
+  // Afterburner-Block: Lumora rendert die in Afterburner fuers OSD angehakten
+  // Sensoren SELBST links oben in den Spiel-Frame (RTSS-Modus) - getrennt vom
+  // Lumora-Panel schaltbar. ABs eigenes OSD bleibt dafuer in AB deaktiviert.
+  osdAbBlock: false, osdAbHotkey: 'Alt+B',
+  // Live-Stream (native Pipeline): konstante Encode-Bitrate in kbit/s. Bei CBR
+  // begrenzt sie zugleich, was der Zuschauer empfangen muss -> mobilfunktauglich
+  // waehlen. Default 12 Mbit (gutes Full-HD). Dazu Ziel-Framerate + Aufloesung.
+  streamUploadKbit: 12000, streamFps: 60, streamQuality: 'auto', streamBufferMs: 120,
+  streamTurnEnabled: false, streamTurnUrl: '', streamTurnUser: '', streamTurnPass: '',
+  streamSource: '',   // '' = Hauptbildschirm bzw. 'screen:<idx>' (ddagrab-Monitor)
   // Grafikkarte fuer die OSD-Sensoren: 'auto' (schnellste automatisch) oder feste ID 'nvml:<idx>' / 'adl:<idx>'
   osdGpu: 'auto',
+  // Anzeige-Art des OSD: 'window' = eigenes Overlay-Fenster (Standard),
+  // 'rtss' = IM Spiel gerendert via RTSS (streambar, exklusives Vollbild ok)
+  osdRenderer: 'window',
   // OSD-Aussehen: Theme + welche Werte je Gruppe angezeigt werden + Akzentfarbe
   osdTheme: 'compact', osdAccent: '#74e857',
   osdFields: { gpu: ['load','temp','power','clock','vram'], cpu: ['load','temp','clock','power','ram'], fps: ['fps','frametime','graph'] } }
@@ -78,10 +104,27 @@ function saveAppSettings() {
 }
 
 function applyAutostart() {
+  cleanupLegacyAutostart()
   app.setLoginItemSettings({
     openAtLogin: !!appSettings.autostart,
     args: appSettings.startMinimized ? ['--minimized'] : [],
   })
+}
+// Rebrand-Altlast: VOR dem Namenswechsel „HDR Launcher" -> „Lumora" legte die App
+// unter dem alten Namen einen Autostart-Eintrag „electron.app.HDR Launcher" an.
+// Den kennt die heutige App nicht (setLoginItemSettings verwaltet nur den Eintrag
+// zum aktuellen app.name), also bleibt er liegen und startet bei jedem Login die
+// uralte 1.3.0 aus dem alten Ordner — trotz Update auf Lumora. Einmal je Start
+// gezielt entfernen (idempotent; schadet nicht, wenn er schon weg ist).
+let _legacyAutostartCleaned = false
+function cleanupLegacyAutostart() {
+  if (_legacyAutostartCleaned || process.platform !== 'win32') return
+  _legacyAutostartCleaned = true
+  try {
+    require('child_process').execFile('reg',
+      ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'electron.app.HDR Launcher', '/f'],
+      { windowsHide: true }, () => {})
+  } catch {}
 }
 
 // HWND eines Electron-Fensters als Zahl (0 wenn weg) – fuer Foreground-Vergleiche.
@@ -196,6 +239,7 @@ function rebuildHotkeys() {
   add(appSettings.toggleHotkey, toggleMainWindow)
   add(appSettings.osdHotkey, toggleOverlay)          // leer -> parseAccel null -> aus
   add(appSettings.osdEditHotkey, toggleOsdEdit)
+  add(appSettings.osdAbHotkey, toggleAbBlock)
 }
 // (Neu-)Registriert die Hotkeys. Ist der native Poll (GetAsyncKeyState) aktiv,
 // uebernimmt der die Tastatur-Hotkeys – auch im Spiel. Nur wenn der nicht
@@ -206,6 +250,7 @@ function registerToggleHotkey() {
   if (getAsyncKey) return true   // Poll erledigt die Tastatur-Hotkeys
   if (appSettings.osdHotkey) try { globalShortcut.register(appSettings.osdHotkey, toggleOverlay) } catch {}
   if (appSettings.osdEditHotkey) try { globalShortcut.register(appSettings.osdEditHotkey, toggleOsdEdit) } catch {}
+  if (appSettings.osdAbHotkey) try { globalShortcut.register(appSettings.osdAbHotkey, toggleAbBlock) } catch {}
   const acc = appSettings.toggleHotkey
   if (!acc) return true
   try { return globalShortcut.register(acc, toggleMainWindow) }
@@ -502,6 +547,43 @@ function rtssAvailable() {
 // Liest den zuletzt aktualisierten, aktiv praesentierenden App-Eintrag.
 // Pro Aufruf oeffnen/schliessen – bewaehrt und robust (koffi mag wiederverwendete
 // Map-Zeiger nicht). Bei 30 Hz ist der Overhead vernachlaessigbar.
+// WICHTIG: Lumora selbst wird von RTSS gehookt (Chromium praesentiert per DXGI).
+// Ohne Selbst-Ausschluss gewinnt abwechselnd das eigene Fenster den "zuletzt
+// aktiv"-Vergleich: falsche FPS und springende OSD-Positionen (gemessen).
+const RTSS_SELF_EXE = (() => { try { return require('path').basename(process.execPath).toLowerCase() } catch { return '' } })()
+function rtssIsSelf(e) {
+  const nm = Buffer.from(e.szName)
+  const z = nm.indexOf(0)
+  const bn = nm.toString('latin1', 0, z < 0 ? nm.length : z).split('\\').pop().toLowerCase()
+  return bn === RTSS_SELF_EXE
+}
+// Das "aktive Spiel" bestimmen: RTSS pflegt selbst den zuletzt im Vordergrund
+// praesentierenden Eintrag (dwLastForegroundApp @64, v2.16+) – stabil und exakt
+// die richtige Semantik. "Zuletzt aktualisiert" wechselte dagegen im Sekunden-
+// takt zwischen ALLEN gehookten Fenstern (Lumora selbst, Chat-Fenster, ...) und
+// liess FPS-Wert und OSD-Position springen (per Slot-Log gemessen 04.07.2026).
+function rtssBestApp(base, hdr, now) {
+  const fresh = (e) => e.dwProcessID && e.dwFrameTime && (((now - e.dwTime1) >>> 0) <= 1500) && !rtssIsSelf(e)
+  try {
+    if ((hdr.dwVersion >>> 0) >= 0x20010) {
+      const idx = rtss.koffi.decode(base, 64, 'uint32')
+      if (idx < (hdr.dwAppArrSize >>> 0)) {
+        const off = hdr.dwAppArrOffset + idx * hdr.dwAppEntrySize
+        const e = rtss.koffi.decode(base, off, rtss.APP)
+        if (fresh(e)) return { e, off }
+      }
+    }
+  } catch {}
+  let best = null, bestOff = 0
+  const n = Math.min(hdr.dwAppArrSize, 4096)
+  for (let i = 0; i < n; i++) {
+    const off = hdr.dwAppArrOffset + i * hdr.dwAppEntrySize
+    const e = rtss.koffi.decode(base, off, rtss.APP)
+    if (!fresh(e)) continue
+    if (!best || e.dwTime1 > best.dwTime1) { best = e; bestOff = off }
+  }
+  return best ? { e: best, off: bestOff } : null
+}
 function readRtssFps() {
   if (!rtss) return null
   const h = rtss.open(0x0004, 0, 'RTSSSharedMemoryV2')
@@ -511,16 +593,9 @@ function readRtssFps() {
     base = rtss.map(h, 0x0004, 0, 0, 0)
     if (!base) return null
     const hdr = rtss.koffi.decode(base, rtss.HDR)
-    const now = rtss.ticks()
-    let best = null
-    const n = Math.min(hdr.dwAppArrSize, 4096)
-    for (let i = 0; i < n; i++) {
-      const e = rtss.koffi.decode(base, hdr.dwAppArrOffset + i * hdr.dwAppEntrySize, rtss.APP)
-      if (!e.dwProcessID || !e.dwFrameTime) continue
-      if (((now - e.dwTime1) >>> 0) > 1500) continue   // veralteter Eintrag (Spiel praesentiert nicht mehr)
-      if (!best || e.dwTime1 > best.dwTime1) best = e
-    }
-    if (!best) return null
+    const bestA = rtssBestApp(base, hdr, rtss.ticks())
+    if (!bestA) return null
+    const best = bestA.e
     const dt = best.dwTime1 - best.dwTime0
     return {
       fps: dt > 0 ? Math.round(best.dwFrames * 1000 / dt) : Math.round(1000000 / best.dwFrameTime),
@@ -532,6 +607,292 @@ function readRtssFps() {
     if (base) { try { rtss.unmap(base) } catch {} }
     try { rtss.close(h) } catch {}
   }
+}
+
+// --- RTSS-OSD-Schreiber: rendert Lumoras OSD IM Spiel --------------------------
+// RTSS ist ein "OSD-Server": Programme schreiben Hypertext in einen OSD-Slot des
+// Shared Memory, RTSS zeichnet ihn mit seiner signierten, bei Anti-Cheats
+// etablierten Injection direkt in den Spiel-Frame (gleiche Technik wie
+// Afterburner/HWiNFO). Dadurch ist das OSD in Discord/OBS-Streams sichtbar und
+// funktioniert auch im exklusiven Vollbild. Wir belegen einen Slot (Owner
+// "Lumora"), aktualisieren dwOSDFrame und raeumen den Slot beim Deaktivieren.
+let rtssSlotIdx = -1
+let rtssOsdActive = false
+function rtssEnc(base, off, buf) {
+  rtss.koffi.encode(base, off, rtss.koffi.array('uint8', buf.length), Array.from(buf))
+}
+function rtssOsdMap(cb) {
+  if (!rtss) return false
+  const h = rtss.open(0x0006 /*READ|WRITE*/, 0, 'RTSSSharedMemoryV2')
+  if (!h) return false
+  let base = 0, ok = false
+  try {
+    base = rtss.map(h, 0x0006, 0, 0, 0)
+    if (base) {
+      const hdr = rtss.koffi.decode(base, rtss.HDR)
+      if (hdr.dwSignature === 0x52545353 /*'RTSS'*/) ok = cb(base, hdr) !== false
+    }
+  } catch (e) { osdDbg('[rtss-osd] map/write: ' + (e && e.message)) }
+  finally {
+    if (base) { try { rtss.unmap(base) } catch {} }
+    try { rtss.close(h) } catch {}
+  }
+  return ok
+}
+const RTSS_EX2_OFF = 256 + 256 + 4096 + 262144   // szOSDEx2 @266752 (Format v2.20+)
+function rtssOsdWrite(mainLines, abLines) {
+  abLines = abLines || []
+  const res = rtssResolution()
+  return rtssOsdMap((base, hdr) => {
+    const n = Math.min(hdr.dwOSDArrSize >>> 0, 32)
+    const es = hdr.dwOSDEntrySize >>> 0
+    const off0 = hdr.dwOSDArrOffset >>> 0
+    // Unseren Slot wiederfinden, sonst ersten freien belegen (Slot 0 gehoert
+    // traditionell Afterburner und bleibt tabu).
+    let mine = -1, free = -1
+    for (let i = 0; i < n; i++) {
+      const ob = rtss.koffi.decode(base, off0 + i * es + 256, rtss.koffi.array('uint8', 16))
+      const owner = Buffer.from(ob).toString('latin1').split('\0')[0]
+      if (owner === 'Lumora') { if (mine < 0) mine = i; continue }
+      if (!owner && free < 0 && i > 0) free = i
+    }
+    const slot = mine >= 0 ? mine : free
+    if (slot < 0) return false
+    rtssSlotIdx = slot
+    const so = off0 + slot * es
+    if (mine < 0) rtssEnc(base, so + 256, Buffer.from('Lumora\0', 'latin1'))
+    // RTSS rendert szOSD, szOSDEx UND szOSDEx2, wenn befuellt – also exakt EIN
+    // Textfeld beschreiben und die anderen leeren (sonst Doppelbild, gemessen).
+    const zero = Buffer.from([0])
+    if (es >= RTSS_EX2_OFF + 32768) {
+      // Modernes RTSS: Layout-Feld mit freier Positionierung (siehe unten).
+      rtssEnc(base, so + RTSS_EX2_OFF, Buffer.from(rtssComposeEx2(mainLines, abLines, res).slice(0, 32000) + '\0', 'latin1'))
+      rtssEnc(base, so + 512, zero)
+      rtssEnc(base, so, zero)
+    } else if (es >= 512 + 4096) {
+      rtssEnc(base, so + 512, Buffer.from([...abLines, ...mainLines].join('\n').slice(0, 4000) + '\0', 'latin1'))
+      rtssEnc(base, so, zero)
+    } else {
+      rtssEnc(base, so, Buffer.from([...abLines, ...mainLines].join('\n').slice(0, 255) + '\0', 'latin1'))
+    }
+    const frame = rtss.koffi.decode(base, 32, 'uint32')
+    rtss.koffi.encode(base, 32, 'uint32', (frame + 1) >>> 0)        // RTSS neu zeichnen lassen
+    return true
+  })
+}
+function rtssOsdClear() {
+  if (rtssSlotIdx < 0) return
+  rtssOsdMap((base, hdr) => {
+    const es = hdr.dwOSDEntrySize >>> 0
+    const so = (hdr.dwOSDArrOffset >>> 0) + rtssSlotIdx * es
+    const zero = Buffer.from([0])
+    rtssEnc(base, so, zero)
+    rtssEnc(base, so + 256, zero)
+    if (es >= 512 + 4096) rtssEnc(base, so + 512, zero)
+    if (es >= RTSS_EX2_OFF + 32768) rtssEnc(base, so + RTSS_EX2_OFF, zero)
+    const frame = rtss.koffi.decode(base, 32, 'uint32')
+    rtss.koffi.encode(base, 32, 'uint32', (frame + 1) >>> 0)
+  })
+  rtssSlotIdx = -1
+}
+
+// RTSS-Profil-API (RTSSHooks64.dll, gleiche Schnittstelle wie CapFrameX & Co.):
+// stellt beim Einschalten unseres Im-Spiel-OSD die GLOBALE OSD-Sichtbarkeit von
+// RTSS sicher. Ohne das haengt unser Block am Afterburner-OSD-Hotkey (der schaltet
+// den ganzen Kanal) – mit diesem Aufruf ist Lumoras Hotkey autark: AN heisst AN.
+let rtssHooks = null
+function setupRtssHooks() {
+  if (rtssHooks !== null) return rtssHooks
+  rtssHooks = false
+  try {
+    const koffi = require('koffi')
+    let lib = null
+    for (const p of [
+      'C:\\Program Files (x86)\\RivaTuner Statistics Server\\RTSSHooks64.dll',
+      'C:\\Program Files\\RivaTuner Statistics Server\\RTSSHooks64.dll',
+    ]) { try { lib = koffi.load(p); break } catch {} }
+    if (lib) {
+      // Nur die Laufzeit-Flags: Die Profil-API (Load/Save/SetProfileProperty)
+      // schreibt nach Program Files und scheitert ohne Adminrechte still –
+      // fuer Profil-Aenderungen ist sie aus einem Nutzerprozess wertlos.
+      rtssHooks = {
+        getFlags: lib.func('uint32 __cdecl GetFlags()'),
+        setFlags: lib.func('void __cdecl SetFlags(uint32 dwAND, uint32 dwXOR)'),
+      }
+    }
+  } catch (e) { osdDbg('[rtss-osd] Hooks nicht ladbar: ' + (e && e.message)) }
+  return rtssHooks
+}
+// Freie Positionierung (Format v2.20+, am 04.07.2026 gegen RTSS 7.3.7 gemessen):
+// Im vierten Slot-Textfeld szOSDEx2 fuehrt der RTSS-Renderer die Layout-Tags des
+// Overlay-Editors aus – <P=x,y> setzt ABSOLUTE Pixel im Swapchain-Raum (Pixel ==
+// Client-Pixel), <FNT=..> erzwingt einen festen Font und ignoriert Nutzer-Font/
+// Zoom. Damit steht unser Block in jeder Ecke, waehrend Afterburners Block am
+// klassischen Anker unberuehrt bleibt. (In szOSD/szOSDEx werden dieselben Tags
+// geparst, aber verschluckt – deshalb schlugen fruehere <P>-Versuche fehl.)
+// Die Swapchain-Aufloesung liefert der App-Eintrag: dwResolutionX/Y ab Format
+// v2.20 bei Offset 9224 im pack(1)-Layout (per SDK-Header + Messung verifiziert).
+function readRtssResolution() {
+  if (!rtss) return null
+  const h = rtss.open(0x0004, 0, 'RTSSSharedMemoryV2')
+  if (!h) return null
+  let base = 0
+  try {
+    base = rtss.map(h, 0x0004, 0, 0, 0)
+    if (!base) return null
+    const hdr = rtss.koffi.decode(base, rtss.HDR)
+    if ((hdr.dwVersion >>> 0) < 0x20014 || hdr.dwAppEntrySize < 9232) return null
+    const bestA = rtssBestApp(base, hdr, rtss.ticks())
+    if (!bestA) return null
+    const rb = Buffer.from(rtss.koffi.decode(base, bestA.off + 9224, rtss.koffi.array('uint8', 8)))
+    const x = rb.readUInt32LE(0), y = rb.readUInt32LE(4)
+    return x >= 320 && x <= 16384 && y >= 240 && y <= 16384 ? { x, y } : null
+  } catch { return null }
+  finally {
+    if (base) { try { rtss.unmap(base) } catch {} }
+    try { rtss.close(h) } catch {}
+  }
+}
+// Aufloesung mit Gedaechtnis: Spiele in Menues/Dialogen praesentieren oft nur
+// sporadisch Frames – dann liefert der Live-Read nichts und das Panel wuerde
+// zwischen Ecke und Stapel-Fluss springen (gemessen in Groschengrab). Also die
+// letzte bekannte Aufloesung behalten; vor dem ersten Spielkontakt naehert der
+// Primaermonitor (physische Pixel) die Vollbild-Groesse an.
+let rtssResCache = null
+function rtssResolution() {
+  const r = readRtssResolution()
+  if (r) rtssResCache = r
+  if (rtssResCache) return rtssResCache
+  try {
+    const d = screen.getPrimaryDisplay()
+    return { x: Math.round(d.size.width * d.scaleFactor), y: Math.round(d.size.height * d.scaleFactor) }
+  } catch { return null }
+}
+// Setzt die Bloecke frei positioniert um: Lumora-Panel an der Wunsch-Ecke,
+// Afterburner-Block (falls aktiv) fix links oben. Ohne Aufloesung (altes RTSS)
+// faellt alles in den klassischen Stapel-Fluss zurueck.
+function rtssComposeEx2(mainLines, abLines, res) {
+  const corner = appSettings.osdCorner || 'tl'
+  // Klassischer Stapel-Fluss (nativer Font, dockt automatisch unter fremde
+  // Anbieter wie ein aktives natives AB-OSD): wenn freie Positionierung nicht
+  // moeglich (altes RTSS) oder nicht noetig (Ecke "oben links" ohne AB-Block).
+  if (!res || (corner === 'tl' && !abLines.length)) return [...abLines, ...mainLines].join('\n')
+  const fh = Math.max(14, Math.round(res.y / 68))   // Fonthoehe skaliert mit der Spielaufloesung
+  const charW = fh * 0.55                           // Consolas-Vorschub (gemessen: 8.8 px bei -16)
+  const lineH = Math.round(fh * 1.3)
+  const margin = fh
+  const vis = (s) => String(s).replace(/<[^>]*>/g, '').length
+  let out = `<FNT=Consolas,${-fh},700,1>`
+  if (abLines.length) {
+    abLines.forEach((l, i) => { out += `<P=${margin},${margin + i * lineH}>` + l })
+  }
+  if (mainLines.length) {
+    const wMax = Math.max(...mainLines.map(vis)) * charW
+    const x = (corner === 'tr' || corner === 'br') ? Math.max(0, Math.round(res.x - margin - wMax)) : margin
+    let y0 = (corner === 'bl' || corner === 'br') ? Math.max(0, res.y - margin - mainLines.length * lineH) : margin
+    // Beide links oben? Lumora-Panel unter den Afterburner-Block setzen.
+    if (corner === 'tl' && abLines.length) y0 += (abLines.length + 1) * lineH
+    mainLines.forEach((l, i) => { out += `<P=${x},${y0 + i * lineH}>` + l })
+  }
+  return out
+}
+// Stellt die LAUFZEIT-Sichtbarkeit des RTSS-OSD sicher (RTSSHOOKSFLAG_OSD_VISIBLE,
+// Bit 0). GENAU dieses Flag schaltet Afterburners OSD-Hotkey um – nicht das
+// Profil-Setting "EnableOSD" (per Diagnose verifiziert: Profil stand auf 1,
+// waehrend das Flag 0 war und der Kanal dunkel blieb). Flags = (Flags & AND) ^ XOR.
+let rtssFlagWasOff = false   // wir haben das Master-Bit von 0 auf 1 gehoben
+function rtssEnsureOsdVisible() {
+  try {
+    const h = setupRtssHooks()
+    if (!h) return
+    const before = h.getFlags()
+    if (before & 1) return                        // schon sichtbar
+    rtssFlagWasOff = true                         // beim Ausschalten wiederherstellen
+    h.setFlags((~1) >>> 0, 1)
+    osdDbg('[rtss-osd] OSD_VISIBLE gesetzt (Flags 0x' + before.toString(16) + ' -> 0x' + h.getFlags().toString(16) + ')')
+  } catch (e) { osdDbg('[rtss-osd] SetFlags fehlgeschlagen: ' + (e && e.message)) }
+}
+// Gegenstueck: Hatten WIR das Master-Bit angehoben, stellen wir beim Ausschalten
+// den vorherigen Zustand wieder her – sonst bleibt z.B. ein zuvor per Hotkey
+// ausgeschaltetes Afterburner-OSD nach unserem Aus dauerhaft sichtbar (gemessen).
+function rtssReleaseVisible() {
+  if (!rtssFlagWasOff) return
+  rtssFlagWasOff = false
+  try {
+    const h = setupRtssHooks()
+    if (h && (h.getFlags() & 1)) {
+      h.setFlags((~1) >>> 0, 0)
+      osdDbg('[rtss-osd] OSD_VISIBLE restauriert (aus)')
+    }
+  } catch (e) { osdDbg('[rtss-osd] Restore fehlgeschlagen: ' + (e && e.message)) }
+}
+
+// Hypertext-Fassungen unserer Themes (Kompakt/Minimal/Balken) fuer den RTSS-Modus.
+// RTSS-Tags: <C=AARRGGBB> Farbe, <C> Reset, <S=..> Groesse (50/100/200 = native
+// Sprites, alles andere wird matschig skaliert -> nur native Stufen verwenden).
+// Der RTSS-Rasterfont ist MONOSPACE: saubere Spalten entstehen zuverlaessig durch
+// Zeichen-Padding, nicht durch fragile Alignment-Tags.
+const RTAG = { nv: '<C=FF74E857>', amd: '<C=FFFF8A1E>', val: '<C=FFFFE100>', dim: '<C=FF8A8A96>', fps: '<C=FFFFFFFF>', ft: '<C=FF6FE86F>', off: '<C>' }
+function rtssAsciiBar(pct, width) {
+  const p = Math.max(0, Math.min(100, Math.round(pct || 0)))
+  const full = Math.round(p / 100 * width)
+  return '='.repeat(full) + '-'.repeat(width - full)
+}
+function buildRtssOsd(theme, gpu, cpu, f, fields) {
+  const gf = (fields && fields.gpu) || [], cf = (fields && fields.cpu) || [], ff = (fields && fields.fps) || []
+  const num = (v, w) => String(v).padStart(w)
+  // Ein Messwert als feste Spalte: Zahl gelb, Einheit gedimmt. null -> Leerraum
+  // gleicher Breite, damit GPU-/CPU-Zeile spaltengenau untereinander stehen.
+  const cell = (on, v, unit, w) => (on && v != null)
+    ? `${RTAG.val}${num(v, w)}${RTAG.dim}${unit}${RTAG.off}`
+    : ' '.repeat(w + unit.length)
+  const mark = (tag, s) => `${tag}${s}${RTAG.off}`
+  const gcol = gpu && gpu.brand === 'AMD' ? RTAG.amd : RTAG.nv
+  const L = []
+
+  if (theme === 'min') {
+    const parts = []
+    if (gpu && gf.includes('load') && gpu.load != null) {
+      let s = `${gcol}GPU${RTAG.off} ${RTAG.val}${num(gpu.load, 3)}%${RTAG.off}`
+      if (gf.includes('temp') && gpu.temp != null) s += ` ${RTAG.val}${num(Math.round(gpu.temp), 3)}\xB0${RTAG.off}`
+      parts.push(s)
+    }
+    if (cpu && cf.includes('load') && cpu.load != null) {
+      let s = `${RTAG.amd}CPU${RTAG.off} ${RTAG.val}${num(cpu.load, 3)}%${RTAG.off}`
+      if (cf.includes('temp') && cpu.temp != null) s += ` ${RTAG.val}${num(Math.round(cpu.temp), 3)}\xB0${RTAG.off}`
+      parts.push(s)
+    }
+    if (f && ff.includes('fps')) parts.push(`${RTAG.fps}${num(f.fps, 4)} FPS${RTAG.off}`)
+    return [parts.join('  ')]
+  }
+
+  // 'compact'/'bar': Tabellenlayout – Markenspalte, dann spaltengenaue Werte.
+  // Dezente Kennzeile: trennt unseren Block sichtbar von anderen OSD-Lieferanten
+  // (z.B. Afterburner direkt darueber) und macht den A/B-Vergleich eindeutig.
+  L.push('<S=50>' + mark(gcol, 'LUMORA') + '<S>')
+  const gpuRow = gpu ? mark(gcol, 'GPU ') + mark(RTAG.dim, String(gpu.name || '').slice(0, 14).padEnd(14)) +
+    cell(gf.includes('load'), gpu.load, '%', 4) +
+    cell(gf.includes('temp'), gpu.temp != null ? Math.round(gpu.temp) : null, '\xB0C', 4) +
+    cell(gf.includes('power'), gpu.power != null ? Math.round(gpu.power) : null, 'W', 5) +
+    cell(gf.includes('clock'), gpu.clock, 'MHz', 5) +
+    cell(gf.includes('vram'), gpu.vram, 'MB', 6) : null
+  const cpuRow = cpu ? mark(RTAG.amd, 'CPU ') + mark(RTAG.dim, String(cpu.name || '').slice(0, 14).padEnd(14)) +
+    cell(cf.includes('load'), cpu.load, '%', 4) +
+    cell(cf.includes('temp'), cpu.temp != null ? Math.round(cpu.temp) : null, '\xB0C', 4) +
+    cell(cf.includes('power'), cpu.power != null ? Math.round(cpu.power) : null, 'W', 5) +
+    cell(cf.includes('clock'), cpu.clock, 'MHz', 5) +
+    cell(cf.includes('ram'), cpu.ram, 'MB', 6) : null
+  if (gpuRow) L.push(gpuRow)
+  if (theme === 'bar' && gpu && gf.includes('load') && gpu.load != null) L.push('    ' + mark(gcol, rtssAsciiBar(gpu.load, 28)))
+  if (cpuRow) L.push(cpuRow)
+  if (theme === 'bar' && cpu && cf.includes('load') && cpu.load != null) L.push('    ' + mark(RTAG.amd, rtssAsciiBar(cpu.load, 28)))
+  if (f && (ff.includes('fps') || ff.includes('frametime'))) {
+    let row = ''
+    if (ff.includes('fps')) row += `${RTAG.fps}${num(f.fps, 4)} FPS${RTAG.off}`
+    if (ff.includes('frametime') && f.frametime != null) row += `   ${RTAG.ft}${num(f.frametime.toFixed(1), 5)} ms${RTAG.off}`
+    L.push(row)
+  }
+  return L.filter(Boolean)
 }
 
 // --- CPU-Temp/Takt/Power aus MSI Afterburner ("MAHMSharedMemory") --------------
@@ -610,6 +971,58 @@ function readMahm() {
   if (mahmVal !== undefined && (now - mahmValAt) < 150) return mahmVal
   mahmVal = readMahmRaw(); mahmValAt = now
   return mahmVal
+}
+// Alle Sensoren, die der Nutzer in Afterburner fuers OSD angehakt hat
+// (MAHM_SHARED_MEMORY_ENTRY_FLAG_SHOW_IN_OSD, Offsets per SDK-Header
+// verifiziert: Strings @0/260/520/780/1040, data @1300, dwFlags @1312).
+// Damit rendert Lumora den klassischen Afterburner-Block SELBST – ABs
+// eigener OSD-Renderer bleibt aus und beide Anzeigen sind getrennt schaltbar.
+// Reihenfolge = ABs Monitoring-Reihenfolge; FLT_MAX = Wert nicht verfuegbar.
+function readMahmOsdList() {
+  if (!mahm) return null
+  const h = mahm.open(0x0004, 0, 'MAHMSharedMemory')
+  if (!h) return null
+  let base = 0
+  try {
+    base = mahm.map(h, 0x0004, 0, 0, 0)
+    if (!base) return null
+    const hdr = mahm.koffi.decode(base, mahm.HDR)
+    if (hdr.sig !== MAHM_SIG || !hdr.numEntries) return null
+    const out = []
+    const cstr = (b, off, len) => { const e = b.indexOf(0, off); return b.toString('latin1', off, e < 0 || e > off + len ? off + len : e) }
+    for (let i = 0; i < Math.min(hdr.numEntries, 96); i++) {
+      const eOff = hdr.headerSize + i * hdr.entrySize
+      const raw = Buffer.from(mahm.koffi.decode(base, eOff, mahm.koffi.array('uint8', 1316)))
+      if (!(raw.readUInt32LE(1312) & 1)) continue          // SHOW_IN_OSD
+      const name = cstr(raw, 520, 260) || cstr(raw, 0, 260)
+      const units = cstr(raw, 780, 260) || cstr(raw, 260, 260)
+      const fmt = cstr(raw, 1040, 260)
+      const val = raw.readFloatLE(1300)
+      const dec = (() => { const m = /%\.(\d)f/.exec(fmt); return m ? Math.min(+m[1], 3) : 0 })()
+      out.push({
+        name, units,
+        value: (Number.isFinite(val) && val < 3.4e38) ? val.toFixed(dec) : '—',
+      })
+    }
+    return out
+  } catch { return null }
+  finally {
+    if (base) { try { mahm.unmap(base) } catch {} }
+    try { mahm.close(h) } catch {}
+  }
+}
+// Hypertext-Zeilen des Afterburner-Blocks (klassischer Look: Name links,
+// Wert rechtsbuendig, Einheit gedimmt; Kennzeile trennt vom Lumora-Panel).
+function buildAbOsdLines() {
+  const list = readMahmOsdList()
+  if (!list || !list.length) return []
+  const L = ['<S=50><C=FFFF8A1E>AFTERBURNER<C><S>']
+  const nw = Math.min(22, Math.max(...list.map(s => s.name.length)))
+  for (const s of list.slice(0, 24)) {
+    L.push('<C=FFCFCFCF>' + s.name.slice(0, nw).padEnd(nw) + '<C><C=FFFFFFFF>' + String(s.value).padStart(9) + '<C>' +
+      (s.units ? '<C=FF8A8A96> ' + s.units + '<C>' : ''))
+  }
+  return L
 }
 
 // --- CPU-Takt treiberfrei via PDH-Performance-Counter -------------------------
@@ -1243,7 +1656,9 @@ function readBrokerFps() {
 let fpsTimer = null, fpsUseRtss = false
 function startFps() {
   if (fpsTimer) return
-  const src = appSettings.osdFpsSource || 'auto'
+  // Im RTSS-Renderer-Modus kommen die FPS zwingend von RTSS (laeuft dort per
+  // Definition) – kein PresentMon-Broker noetig, egal was die Quelle sagt.
+  const src = rtssOsdActive ? 'rtss' : (appSettings.osdFpsSource || 'auto')
   fpsUseRtss = src === 'rtss' ? true : src === 'presentmon' ? false : rtssAvailable()
   if (!fpsUseRtss) startBroker()
   console.log('[fps] Quelle:', fpsUseRtss ? 'RTSS' : 'PresentMon-Broker')
@@ -1263,18 +1678,52 @@ function stopFps() {
 // (Overlay sichtbar UND FPS aktiviert). Verhindert Spawn-/Kill-Stuerme, wenn
 // set-app-settings bei jeder Slider-Bewegung erneut aufgerufen wird.
 function syncFps() {
-  const vis = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()
+  const vis = rtssOsdActive || (overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible())
   const want = !!(appSettings.osdEnabled && !appSettings.osdSetupDeclined && vis)
   if (want && !fpsTimer) startFps()
   else if (!want && fpsTimer) stopFps()
 }
 
-// Sensor-Pump: solange das Overlay sichtbar ist, 1x/s Werte ans Overlay senden.
+// Sensor-Pump: solange das OSD aktiv ist, Werte liefern – im Fenster-Modus als
+// IPC ans Overlay, im RTSS-Modus als Hypertext in den RTSS-OSD-Slot.
 let osdDataInterval = null
 function startOsdData() {
   if (osdDataInterval) return
   prevCpu = null
+  let lastRtssWrite = 0
   const tick = () => {
+    if (rtssOsdActive) {
+      // Im-Spiel-Rendering: FPS kommen direkt von RTSS (das laeuft hier per
+      // Definition). Auf ~2 Hz gedrosselt – ruhige Zahlen statt Flackern.
+      const now = Date.now()
+      if (now - lastRtssWrite < 450) return
+      lastRtssWrite = now
+      // Das globale OSD_VISIBLE-Bit ist RTSS' EINZIGER, GEMEINSAMER Sichtbarkeits-
+      // schalter: Afterburners OSD-Hotkey schaltet genau dieses Bit, sein Slot-
+      // Text bleibt dabei stehen (gemessen 04.07.2026). Wuerden wir es hier
+      // zurueckzwingen, waere der AB-Hotkey wirkungslos. Also respektieren:
+      // Bit extern aus -> unser OSD folgt sauber (Slot raeumen, Setting aus).
+      // Getrennt schalten: AB ueber seine eigene "Show OSD"-Option (leert den
+      // Slot), Lumora ueber Alt+O – dann funkt keiner dem anderen dazwischen.
+      try {
+        const h = setupRtssHooks()
+        if (h && (h.getFlags() & 1) === 0) {
+          osdDbg('[rtss-osd] Master-Bit extern ausgeschaltet -> Lumora-OSD folgt')
+          appSettings.osdEnabled = false
+          appSettings.osdAbBlock = false
+          saveAppSettings()
+          hideOverlay()
+          return
+        }
+      } catch {}
+      // Beide Anzeigen getrennt: Lumora-Panel nur wenn osdEnabled, der
+      // Afterburner-Block nur wenn osdAbBlock – jede haengt an ihrem Schalter.
+      const mainLines = appSettings.osdEnabled
+        ? buildRtssOsd(appSettings.osdTheme, readGpu(), readCpu(), readRtssFps(), appSettings.osdFields) : []
+      const abLines = appSettings.osdAbBlock ? buildAbOsdLines() : []
+      rtssOsdWrite(mainLines, abLines)
+      return
+    }
     if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return
     const payload = { gpu: readGpu(), cpu: readCpu() }
     if (appSettings.osdSetupDeclined) payload.fps = '—'   // Einrichtung abgelehnt; sonst sendet die FPS-Schleife
@@ -1377,6 +1826,24 @@ function applyOsdConfig() {
 }
 
 function showOverlay() {
+  // Im-Spiel-Rendering (RTSS): kein eigenes Fenster – wir beliefern den RTSS-Slot.
+  // Faellt automatisch auf das Overlay-Fenster zurueck, wenn RTSS nicht laeuft.
+  if (appSettings.osdRenderer === 'rtss' && rtssAvailable()) {
+    rtssOsdActive = true
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide()
+    // Beim bewussten Einschalten heben wir das globale Sichtbarkeits-Bit an
+    // (sonst koennten wir gar nicht rendern) und merken uns den Vorzustand.
+    // Systembedingt wird dabei auch ein per RTSS-Hotkey ausgeblendetes
+    // Afterburner-OSD wieder sichtbar, denn dessen Slot-Text bleibt stehen –
+    // wer AB getrennt aus haben will, schaltet es in Afterburner selbst aus.
+    rtssEnsureOsdVisible()
+    startOsdData()
+    syncFps()
+    ensureOsdSetup()
+    osdDbg('showOverlay: RTSS-Modus aktiv (im Spiel gerendert)')
+    return
+  }
+  if (rtssOsdActive) { rtssOsdActive = false; rtssOsdClear() }
   const w = createOverlayWindow()
   // Beim (Wieder-)Einblenden ALLE Overlay-Eigenschaften neu setzen: ein zuvor
   // verstecktes Fenster verliert ueber einem Vollbild-Spiel sonst Klick-
@@ -1394,17 +1861,32 @@ function showOverlay() {
 }
 
 function hideOverlay() {
+  if (rtssOsdActive) { rtssOsdActive = false; rtssOsdClear(); rtssReleaseVisible() }
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide()
   stopOsdData()
   syncFps()
 }
 
+// Zentrale Sichtbarkeit: Das Spiel-OSD laeuft, solange MINDESTENS EINE der
+// beiden Anzeigen aktiv ist – Lumora-Panel (osdEnabled, Alt+O) oder
+// Afterburner-Block (osdAbBlock, Alt+B; nur im RTSS-Modus). Jede Anzeige hat
+// ihren eigenen Schalter; hier wird nur der Gesamt-Kanal an-/abgeschaltet.
+function syncOsdVisibility() {
+  const any = appSettings.osdEnabled ||
+    (appSettings.osdAbBlock && appSettings.osdRenderer === 'rtss' && rtssAvailable())
+  if (any) showOverlay(); else hideOverlay()
+}
 function toggleOverlay() {
-  const visible = overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible()
-  appSettings.osdEnabled = !visible
-  osdDbg('toggleOverlay: war sichtbar=' + visible + ' -> osdEnabled=' + appSettings.osdEnabled)
+  appSettings.osdEnabled = !appSettings.osdEnabled
+  osdDbg('toggleOverlay -> osdEnabled=' + appSettings.osdEnabled)
   saveAppSettings()
-  if (appSettings.osdEnabled) showOverlay(); else hideOverlay()
+  syncOsdVisibility()
+}
+function toggleAbBlock() {
+  appSettings.osdAbBlock = !appSettings.osdAbBlock
+  osdDbg('toggleAbBlock -> osdAbBlock=' + appSettings.osdAbBlock)
+  saveAppSettings()
+  syncOsdVisibility()
 }
 
 // --- Live-Edit-Modus: OSD direkt ueber dem Spiel anfassbar machen -------------
@@ -1412,6 +1894,9 @@ function toggleOverlay() {
 // (rastet in die naechste Ecke), Mausrad = Groesse. "Fertig" schaltet zurueck.
 let osdEditActive = false
 function setOsdEditMode(on) {
+  // Im RTSS-Modus gibt es kein anfassbares Overlay-Fenster – Layout/Position
+  // steuert dort RTSS. Live-Edit gilt nur fuer den Fenster-Modus.
+  if (rtssOsdActive) { osdDbg('Live-Edit im RTSS-Modus nicht verfuegbar'); return }
   const w = createOverlayWindow()
   if (on) {
     if (!appSettings.osdEnabled) { appSettings.osdEnabled = true; saveAppSettings() }
@@ -2270,6 +2755,11 @@ ipcMain.handle('launch-game', async (event, gamePath, opts = {}) => {
     const launchTs = Date.now()
     const gameDir = path.dirname(gamePath)
     const exeName = await resolveProcessName(gamePath)
+    activeLaunchExes.add(exeName.toLowerCase())   // Fremdstart-Watcher: dieses Spiel trackt der Eigenstart-Monitor
+    // Lief das Spiel bereits fremd (Watcher-Session)? Dann dort sauber abschliessen –
+    // ab jetzt zaehlt der Eigenstart-Monitor (keine Doppelzaehlung).
+    const extSession = externalSessions.get(exeName.toLowerCase())
+    if (extSession) { externalSessions.delete(exeName.toLowerCase()); sendExternalRunning(); creditPlaySession(extSession.gamePath, Date.now() - extSession.startTs) }
     playLog(`LAUNCH ${exeName} kind=${isXbox ? 'xbox' : (steamInfo ? 'steam' : (isLnk ? 'lnk' : 'direct'))} appid=${(steamInfo && steamInfo.appId) || '-'}`)
 
     // „Läuft das Spiel?" – Steam-Registry (zuverlässig für Steam-Spiele) ODER ein
@@ -2290,6 +2780,7 @@ ipcMain.handle('launch-game', async (event, gamePath, opts = {}) => {
     }
 
     const endSession = (startTs) => {
+      activeLaunchExes.delete(exeName.toLowerCase())   // Fremdstart-Watcher darf wieder uebernehmen
       if (useHdr) {
         setHDR(false)
         lastHdrState = false
@@ -2360,6 +2851,155 @@ function resolveProcessName(gamePath) {
       resolve(target ? path.basename(target) : path.basename(gamePath, '.lnk') + '.exe')
     })
   })
+}
+
+// === Fremdstart-Watcher ========================================================
+// Erkennt Bibliotheksspiele, die NICHT ueber Lumora gestartet wurden (z.B. per
+// Xbox-Gamebar-Einladung, Steam-Client, Desktop-Verknuepfung), und liefert ihnen
+// dieselben Dienste wie beim Eigenstart: HDR-Automatik + Spielzeit/"zuletzt
+// gespielt". Ein tasklist-Scan alle 15 s (ein leichter Aufruf fuer ALLE Spiele);
+// Session-Ende erst nach 2 leeren Scans (gegen kurze Prozess-Luecken).
+const activeLaunchExes = new Set()    // vom Eigenstart-Monitor belegt -> Watcher laesst die Finger davon
+const externalSessions = new Map()    // exe(lower) -> { gamePath, name, startTs, absent, hdrOn }
+let extWatchTimer = null
+
+function readLibraryGames() {
+  try { return JSON.parse(fs.readFileSync(gamesFile, 'utf8')) || [] } catch { return [] }
+}
+// .lnk-Eintraege: Ziel-Exe einmalig (async) aufloesen und cachen, damit auch
+// Verknuepfungs-Spiele vom Watcher erfasst werden. Bis die Aufloesung fertig ist,
+// liefert der Cache null -> das Spiel wird ab dem naechsten Tick beruecksichtigt.
+const lnkExeCache = new Map()   // lnk-Pfad -> exeName(lower) | '' (in Arbeit/fehlgeschlagen)
+function lnkExeFor(p) {
+  const cached = lnkExeCache.get(p)
+  if (cached !== undefined) return cached || null
+  lnkExeCache.set(p, '')                          // Aufloesung nur einmal anstossen
+  resolveProcessName(p).then(n => lnkExeCache.set(p, (n || '').toLowerCase())).catch(() => {})
+  return null
+}
+// Nativer Prozess-Schnappschuss (Toolhelp-API): alle laufenden Exe-Namen in <1 ms,
+// ohne Subprozess. Erlaubt den 2-s-Watcher-Takt -> HDR geht beim Fremdstart an,
+// BEVOR das Spiel seine Display-Faehigkeiten prueft (sonst cachet z.B. Forza
+// "kein HDR" und bietet es nicht an). tasklist bleibt als Fallback.
+let procSnap = null
+function setupProcScan() {
+  try {
+    const koffi = require('koffi')
+    const k32 = koffi.load('kernel32.dll')
+    procSnap = {
+      create: k32.func('intptr_t __stdcall CreateToolhelp32Snapshot(uint32 flags, uint32 pid)'),
+      first: k32.func('int __stdcall Process32FirstW(intptr_t snap, void* pe)'),
+      next: k32.func('int __stdcall Process32NextW(intptr_t snap, void* pe)'),
+      close: k32.func('int __stdcall CloseHandle(intptr_t h)'),
+    }
+  } catch (e) { procSnap = null; console.log('[watch] Toolhelp nicht ladbar (nutze tasklist):', e && e.message) }
+}
+function listRunningExesNative() {
+  if (!procSnap) return null
+  const snap = procSnap.create(0x2 /*TH32CS_SNAPPROCESS*/, 0)
+  if (!snap || snap === -1) return null
+  const set = new Set()
+  try {
+    // PROCESSENTRY32W (x64): 568 Bytes; szExeFile (UTF-16) ab Offset 44.
+    const pe = Buffer.alloc(568)
+    pe.writeUInt32LE(568, 0)
+    let ok = procSnap.first(snap, pe)
+    while (ok) {
+      let end = 44
+      while (end < 564 && pe.readUInt16LE(end) !== 0) end += 2
+      const name = pe.toString('utf16le', 44, end).toLowerCase()
+      if (name) set.add(name)
+      pe.writeUInt32LE(568, 0)
+      ok = procSnap.next(snap, pe)
+    }
+  } catch { /* Teilergebnis reicht */ }
+  try { procSnap.close(snap) } catch {}
+  return set
+}
+function listRunningExes() {
+  const native = listRunningExesNative()
+  if (native && native.size) return Promise.resolve(native)
+  return new Promise(resolve => {
+    exec('tasklist /FO CSV /NH', { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+      const set = new Set()
+      for (const line of String(stdout || '').split('\n')) {
+        const m = line.match(/^"([^"]+)"/)
+        if (m) set.add(m[1].toLowerCase())
+      }
+      resolve(set)
+    })
+  })
+}
+// Spielzeit gutschreiben: bevorzugt ueber den Renderer (haelt Liste/Detail live);
+// ohne Fenster direkt in games.json. WICHTIG: writeFileSync schreibt UTF-8 OHNE
+// BOM – niemals per PowerShell Set-Content (BOM zerstoert JSON.parse).
+function creditPlaySession(gamePath, durationMs) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('play-session', { gamePath, durationMs })
+      return
+    }
+  } catch {}
+  try {
+    const games = readLibraryGames()
+    const g = games.find(x => x && x.path === gamePath)
+    if (!g) return
+    g.playtime = (g.playtime || 0) + Math.round(durationMs / 1000)   // playtime ist in Sekunden
+    g.lastPlayed = Date.now()
+    fs.writeFileSync(gamesFile, JSON.stringify(games))
+  } catch {}
+}
+// Aktuelle Fremd-Sessions an den Renderer melden (Start-Knopf zeigt "läuft").
+function sendExternalRunning() {
+  try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('external-running', [...externalSessions.values()].map(s => s.gamePath)) } catch {}
+}
+function startExternalWatcher() {
+  if (extWatchTimer) return
+  setupProcScan()
+  // 2-s-Takt (nativer Schnappschuss, <1 ms): Fremdstarts werden so frueh erkannt,
+  // dass HDR VOR dem Grafik-Init des Spiels an ist (Forza & Co. pruefen die
+  // Display-Faehigkeit nur beim Start). Session-Ende nach 2 leeren Scans (~4-6 s).
+  extWatchTimer = setInterval(async () => {
+    try {
+      if (!gamesFile) return
+      const running = await listRunningExes()
+      if (!running.size) return                       // Scan-Aussetzer -> nichts beenden
+      // 1) Neue fremd gestartete Bibliotheksspiele erkennen (.exe direkt,
+      //    .lnk ueber den einmalig aufgeloesten Ziel-Exe-Namen)
+      for (const g of readLibraryGames()) {
+        if (!g || !g.path) continue
+        let exe = null
+        if (/\.exe$/i.test(g.path)) exe = path.basename(g.path).toLowerCase()
+        else if (/\.lnk$/i.test(g.path)) exe = lnkExeFor(g.path)
+        if (!exe || !exe.endsWith('.exe')) continue
+        if (activeLaunchExes.has(exe) || externalSessions.has(exe)) continue
+        if (!running.has(exe)) continue
+        const s = { gamePath: g.path, name: g.name, startTs: Date.now(), absent: 0, hdrOn: false }
+        externalSessions.set(exe, s)
+        sendExternalRunning()
+        playLog(`EXTERN erkannt: ${exe} (${g.name}) hdr=${g.hdr !== false}`)
+        // HDR wie beim Eigenstart – aber nur, wenn nicht schon eine andere
+        // Session (Eigenstart/anderes Spiel) das HDR verwaltet.
+        if (g.hdr !== false && !hdrEnabledByLauncher) {
+          setHDR(true); lastHdrState = true; hdrEnabledByLauncher = true; s.hdrOn = true
+          try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hdr-status', true) } catch {}
+        }
+      }
+      // 2) Laufende Fremd-Sessions pruefen / beenden
+      for (const [exe, s] of [...externalSessions]) {
+        if (running.has(exe)) { s.absent = 0; continue }
+        if (++s.absent < 3) continue                  // ~6 s Prozess-Luecke ueberbruecken (DRM-Handoff)
+        externalSessions.delete(exe)
+        sendExternalRunning()
+        playLog(`EXTERN beendet: ${exe} Dauer ${Math.round((Date.now() - s.startTs) / 1000)}s`)
+        if (s.hdrOn) {
+          setHDR(false); lastHdrState = false; hdrEnabledByLauncher = false
+          try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hdr-status', false) } catch {}
+        }
+        creditPlaySession(s.gamePath, Date.now() - s.startTs)
+      }
+    } catch (e) { playLog('EXTERN Watcher-Fehler: ' + (e && e.message)) }
+  }, 2000)
 }
 
 ipcMain.handle('browse-game', async () => {
@@ -2838,8 +3478,7 @@ ipcMain.handle('set-app-settings', (event, partial) => {
   else destroyTray()
   // OSD live nachziehen, wenn eine OSD-Einstellung dabei war.
   if (partial && Object.keys(partial).some(k => k.startsWith('osd'))) {
-    if (appSettings.osdEnabled) showOverlay()
-    else hideOverlay()
+    syncOsdVisibility()
     applyOsdConfig()
     // NUR bei echtem Quellenwechsel neu waehlen. Sonst wuerde jede Slider-
     // Bewegung stopFps/startFps ausloesen -> wanted flattert 0/1 -> der Broker
@@ -2847,8 +3486,756 @@ ipcMain.handle('set-app-settings', (event, partial) => {
     if (appSettings.osdFpsSource !== prevSource) stopFps()
     syncFps()
   }
+  // Stream-Einstellung geaendert, waehrend ein Stream laeuft: FFmpeg mit neuen
+  // Parametern (Aufloesung/Bitrate/fps/Quelle) neu starten. Der kurze Aussetzer
+  // ist unkritisch; mediamtx + der WHEP-Server laufen durch, die Zuschauer
+  // verbinden nach dem Neustart automatisch weiter.
+  // streamBufferMs ausgenommen: der Player-Jitter-Puffer ist eine reine Zuschauer-
+  // Einstellung (Client setzt ihn live per /cfg), kein FFmpeg-Parameter -> KEIN
+  // Aufnahme-Neustart, sonst wuerde jede Regler-Bewegung den Stream kurz abreissen.
+  if (partial && Object.keys(partial).some(k => k.startsWith('stream') && k !== 'streamBufferMs') && broadcastState.active) {
+    bcRestartFfmpeg()
+    bcPushState()
+  }
   return appSettings
 })
+
+// ===========================================================================
+// Live-Stream: native Pipeline (FFmpeg + mediamtx) — OBS/Discord-Klasse
+// -------------------------------------------------------------------------
+// FFmpeg nimmt den Bildschirm per GPU auf (ddagrab), encodet per Hardware-
+// Encoder (NVENC/AMF/QSV) mit KONSTANTER Bitrate und schiebt den Stream per
+// RTSP an einen lokalen mediamtx-Server. mediamtx macht daraus WebRTC (WHEP)
+// und verteilt es an die Zuschauer. Ein kleiner HTTP-Server liefert die
+// Player-Seite und proxyt die WHEP-Signalisierung, damit der Zuschauer nur
+// EINEN Port braucht. Vorteil ggü. der alten Chromium-Aufnahme: der Hardware-
+// Encoder laeuft auf eigenen GPU-Bloecken und konkurriert NICHT mit dem Spiel
+// um die 3D-Shader -> stabile Bitrate/Framerate auch bei schweren Spielen.
+// ===========================================================================
+const http = require('http')
+const BROADCAST_PORT = 8787       // TCP: player.html + WHEP-Signalisierung (Proxy vor mediamtx)
+const MTX_RTSP_PORT = 8554        // localhost: FFmpeg -> mediamtx (RTSP-Ingest)
+const MTX_WHEP_PORT = 8889        // localhost: mediamtx WHEP-HTTP (hinter dem Proxy)
+const MTX_API_PORT = 9997         // localhost: mediamtx-API (Zuschauerzahl)
+const MTX_ICE_UDP = 8189          // UDP: WebRTC-Medien (muss ans Internet)
+const MTX_PATH = 'live'           // mediamtx-Pfadname
+let broadcastServer = null        // HTTP-Server (player + WHEP-Proxy)
+let mtxProc = null                // mediamtx-Kindprozess
+let ffProc = null                 // FFmpeg-Kindprozess
+let capProc = null                // WGC-Aufnahme-Helfer (nur bei Fenster-Aufnahme)
+let audProc = null                // Audio-Helfer (WASAPI-Loopback, System-Audio)
+let ffRestartTimer = null         // Auto-Neustart bei FFmpeg-Absturz
+let ffRestartDebounce = null      // sammelt schnelle Einstellungsaenderungen
+let ffStopping = false            // true = gewollt beendet (kein Auto-Neustart)
+let bcViewerPoll = null           // Intervall: Zuschauerzahl von der mediamtx-API
+let broadcastState = { active: false, port: 0, link: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false }
+let bcPlayerHtmlCache = null
+let bcEncoderCache = null         // { vendor, encoder, hw } – einmal ermittelt
+
+function bcPlayerHtml() {
+  if (bcPlayerHtmlCache == null) {
+    try { bcPlayerHtmlCache = require('fs').readFileSync(require('path').join(__dirname, 'player.html'), 'utf8') }
+    catch (e) { bcPlayerHtmlCache = '<!doctype html><meta charset=utf-8><body style="font-family:sans-serif">Player nicht gefunden.</body>' }
+  }
+  return bcPlayerHtmlCache
+}
+function bcLanIp() {
+  const ifs = require('os').networkInterfaces()
+  for (const n of Object.keys(ifs)) for (const a of ifs[n]) if (a.family === 'IPv4' && !a.internal) return a.address
+  return '127.0.0.1'
+}
+
+// --- UPnP-IGD: Portfreigabe am Router automatisch (reines Node, keine Lib) ---
+// Beim Streamstart oeffnen wir TCP 8787 (HTTP-Signaling) am Router und schliessen
+// ihn beim Stop wieder. WebRTC-Medien brauchen KEIN Mapping: dank Cone-NAT (per
+// nat-probe verifiziert) reicht STUN – Lumora sendet zuerst raus, der Rueckkanal
+// bleibt offen. GetExternalIPAddress liefert die oeffentliche IP fuer den Link.
+const dgram = require('dgram')
+let upnpCtrl = null   // { controlURL, serviceType, localIp } – einmal aufgeloest
+function upnpDiscover(timeoutMs) {
+  return new Promise((resolve) => {
+    let sock
+    try { sock = dgram.createSocket({ type: 'udp4', reuseAddr: true }) } catch { return resolve([]) }
+    const localIp = bcLanIp()
+    const locations = []
+    sock.on('message', (buf) => {
+      const s = buf.toString('latin1')
+      if (/InternetGatewayDevice|WAN(IP|PPP)Connection/i.test(s)) {
+        const loc = /LOCATION:\s*(\S+)/i.exec(s)
+        if (loc && !locations.includes(loc[1])) locations.push(loc[1])
+      }
+    })
+    sock.on('error', () => {})
+    try {
+      sock.bind(0, localIp, () => {
+        try { sock.setMulticastTTL(4); sock.setMulticastInterface(localIp) } catch {}
+        for (const st of ['urn:schemas-upnp-org:device:InternetGatewayDevice:1', 'urn:schemas-upnp-org:service:WANIPConnection:1', 'urn:schemas-upnp-org:service:WANPPPConnection:1']) {
+          const m = Buffer.from('M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 2\r\nST: ' + st + '\r\n\r\n')
+          try { sock.send(m, 1900, '239.255.255.250') } catch {}
+        }
+      })
+    } catch { return resolve([]) }
+    setTimeout(() => { try { sock.close() } catch {}; resolve(locations) }, timeoutMs || 3000)
+  })
+}
+function upnpHttpGet(u) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(u, { timeout: 4000 }, (res) => { let d = ''; res.on('data', (c) => d += c); res.on('end', () => resolve({ status: res.statusCode, body: d })) })
+    req.on('error', reject); req.on('timeout', () => { req.destroy(); reject(new Error('timeout')) })
+  })
+}
+function upnpSoap(controlURL, serviceType, action, inner) {
+  return new Promise((resolve, reject) => {
+    const u = new (require('url').URL)(controlURL)
+    const xml = '<?xml version="1.0"?>' +
+      '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' +
+      '<s:Body><u:' + action + ' xmlns:u="' + serviceType + '">' + (inner || '') + '</u:' + action + '></s:Body></s:Envelope>'
+    const req = http.request({
+      host: u.hostname, port: u.port, path: u.pathname, method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset="utf-8"', 'SOAPAction': '"' + serviceType + '#' + action + '"', 'Content-Length': Buffer.byteLength(xml) },
+      timeout: 4000,
+    }, (res) => { let d = ''; res.on('data', (c) => d += c); res.on('end', () => resolve({ status: res.statusCode, body: d })) })
+    req.on('error', reject); req.on('timeout', () => { req.destroy(); reject(new Error('timeout')) })
+    req.write(xml); req.end()
+  })
+}
+async function upnpResolveControl() {
+  if (upnpCtrl) return upnpCtrl
+  const locs = await upnpDiscover(3000)
+  for (const loc of locs) {
+    let desc
+    try { desc = await upnpHttpGet(loc) } catch { continue }
+    if (!/InternetGatewayDevice/i.test(desc.body)) continue
+    const svcRe = /<service>([\s\S]*?)<\/service>/g
+    let m
+    while ((m = svcRe.exec(desc.body))) {
+      if (!/WAN(IP|PPP)Connection/i.test(m[1])) continue
+      const type = (/<serviceType>([^<]+)<\/serviceType>/i.exec(m[1]) || [])[1]
+      const ctrl = (/<controlURL>([^<]+)<\/controlURL>/i.exec(m[1]) || [])[1]
+      if (!type || !ctrl) continue
+      const base = new (require('url').URL)(loc)
+      const controlURL = ctrl.startsWith('http') ? ctrl : base.protocol + '//' + base.host + (ctrl.startsWith('/') ? '' : '/') + ctrl
+      upnpCtrl = { controlURL, serviceType: type, localIp: bcLanIp() }
+      return upnpCtrl
+    }
+  }
+  return null
+}
+async function upnpGetExternalIp() {
+  const c = await upnpResolveControl(); if (!c) return null
+  try {
+    const r = await upnpSoap(c.controlURL, c.serviceType, 'GetExternalIPAddress')
+    return (/<NewExternalIPAddress>([^<]*)<\/NewExternalIPAddress>/i.exec(r.body) || [])[1] || null
+  } catch { return null }
+}
+async function upnpMapPort(port, proto, desc) {
+  const c = await upnpResolveControl(); if (!c) return false
+  const inner = '<NewRemoteHost></NewRemoteHost><NewExternalPort>' + port + '</NewExternalPort><NewProtocol>' + proto +
+    '</NewProtocol><NewInternalPort>' + port + '</NewInternalPort><NewInternalClient>' + c.localIp +
+    '</NewInternalClient><NewEnabled>1</NewEnabled><NewPortMappingDescription>' + desc + '</NewPortMappingDescription><NewLeaseDuration>0</NewLeaseDuration>'
+  try { const r = await upnpSoap(c.controlURL, c.serviceType, 'AddPortMapping', inner); return r.status === 200 } catch { return false }
+}
+async function upnpUnmapPort(port, proto) {
+  const c = await upnpResolveControl(); if (!c) return
+  const inner = '<NewRemoteHost></NewRemoteHost><NewExternalPort>' + port + '</NewExternalPort><NewProtocol>' + proto + '</NewProtocol>'
+  try { await upnpSoap(c.controlURL, c.serviceType, 'DeletePortMapping', inner) } catch {}
+}
+
+// --- Verbindungstest: pruefen, ob Streaming beim Anwender funktioniert --------
+// STUN (gleicher Socket an mehrere Server) -> oeffentliche IP + NAT-Typ.
+function stunQuery(sock, host, port) {
+  return new Promise((resolve) => {
+    const tid = require('crypto').randomBytes(12)
+    const req = Buffer.alloc(20)
+    req.writeUInt16BE(0x0001, 0); req.writeUInt16BE(0, 2); req.writeUInt32BE(0x2112a442, 4); tid.copy(req, 8)
+    let done = false
+    const onMsg = (msg) => {
+      let off = 20
+      while (off + 4 <= msg.length) {
+        const type = msg.readUInt16BE(off), len = msg.readUInt16BE(off + 2)
+        const val = msg.slice(off + 4, off + 4 + len)
+        if (type === 0x0020 || type === 0x0001) {
+          const xor = type === 0x0020
+          const p = val.readUInt16BE(2) ^ (xor ? 0x2112 : 0)
+          const b = Buffer.from(val.slice(4, 8))
+          if (xor) { b[0] ^= 0x21; b[1] ^= 0x12; b[2] ^= 0xa4; b[3] ^= 0x42 }
+          return fin({ ip: b[0] + '.' + b[1] + '.' + b[2] + '.' + b[3], port: p })
+        }
+        off += 4 + len + ((4 - (len % 4)) % 4)
+      }
+      fin(null)
+    }
+    const fin = (r) => { if (done) return; done = true; clearTimeout(t); try { sock.removeListener('message', onMsg) } catch {}; resolve(r) }
+    const t = setTimeout(() => fin(null), 3000)
+    sock.on('message', onMsg)
+    try { sock.send(req, port, host) } catch { fin(null) }
+  })
+}
+function detectNat() {
+  return new Promise((resolve) => {
+    let sock
+    try { sock = dgram.createSocket('udp4') } catch { return resolve({ ok: false }) }
+    sock.on('error', () => { try { sock.close() } catch {}; resolve({ ok: false }) })
+    sock.bind(async () => {
+      const servers = [['stun.l.google.com', 19302], ['stun1.l.google.com', 19302], ['stun.cloudflare.com', 3478]]
+      const res = []
+      for (const [h, p] of servers) { const r = await stunQuery(sock, h, p); if (r) res.push(r) }
+      try { sock.close() } catch {}
+      if (!res.length) return resolve({ ok: false })
+      const ip = res[0].ip
+      const o = ip.split('.').map(Number)
+      const cgn = o[0] === 100 && o[1] >= 64 && o[1] <= 127
+      const priv = o[0] === 10 || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168)
+      const ports = [...new Set(res.map(r => r.port))]
+      resolve({ ok: true, ip, cgn, priv, symmetric: ports.length > 1 })
+    })
+  })
+}
+async function runConnectivityTest() {
+  const steps = []
+  const nat = await detectNat()
+  if (!nat.ok) {
+    steps.push({ key: 'ip', state: 'error', label: 'Öffentliche Adresse', detail: 'Keine Antwort vom STUN-Server – ausgehendes UDP scheint blockiert (Firewall/Netzwerk). Streaming ist so nicht möglich.' })
+    return { verdict: 'error', steps }
+  }
+  if (nat.cgn || nat.priv) {
+    steps.push({ key: 'ip', state: 'error', label: 'Öffentliche IPv4', detail: 'Dein Anschluss hat keine eigene öffentliche IPv4 (DS-Lite / Carrier-NAT, ' + nat.ip + '). Direktes Streaming ist so nicht möglich. Bitte beim Provider echtes IPv4 anfragen (oft kostenlos) – oder ein Relay-Server wäre nötig.' })
+  } else {
+    steps.push({ key: 'ip', state: 'ok', label: 'Öffentliche IPv4', detail: nat.ip })
+  }
+  if (nat.symmetric) {
+    steps.push({ key: 'nat', state: 'warn', label: 'NAT-Typ', detail: 'Symmetrisches NAT – manche Zuschauer erreichen dich evtl. nur über eine feste Portfreigabe oder einen Relay.' })
+  } else {
+    steps.push({ key: 'nat', state: 'ok', label: 'NAT-Typ', detail: 'Cone-NAT – direkte Verbindung möglich.' })
+  }
+  // UPnP-Portfreigabe testweise: beide noetigen Ports oeffnen und sofort wieder
+  // schliessen — TCP (Signalisierung) UND UDP (WebRTC-Medien).
+  let tcpOk = false, udpOk = false
+  try {
+    tcpOk = await upnpMapPort(BROADCAST_PORT, 'TCP', 'Lumora Verbindungstest'); if (tcpOk) await upnpUnmapPort(BROADCAST_PORT, 'TCP')
+    udpOk = await upnpMapPort(MTX_ICE_UDP, 'UDP', 'Lumora Verbindungstest'); if (udpOk) await upnpUnmapPort(MTX_ICE_UDP, 'UDP')
+  } catch {}
+  if (tcpOk && udpOk) {
+    steps.push({ key: 'upnp', state: 'ok', label: 'Router-Portfreigabe (UPnP)', detail: 'Lumora kann die nötigen Ports beim Streamstart automatisch öffnen.' })
+  } else {
+    steps.push({ key: 'upnp', state: 'warn', label: 'Router-Portfreigabe (UPnP)', detail: 'Der Router öffnet die Ports nicht selbst. Aktiviere im Router „UPnP“ bzw. „selbstständige Portfreigaben“, oder gib Port ' + BROADCAST_PORT + ' (TCP) und ' + MTX_ICE_UDP + ' (UDP) manuell auf diesen PC frei.' })
+  }
+  const hasError = steps.some(s => s.state === 'error')
+  const hasWarn = steps.some(s => s.state === 'warn')
+  return { verdict: hasError ? 'error' : hasWarn ? 'warn' : 'ok', publicIp: nat.ip, steps }
+}
+ipcMain.handle('test-connectivity', () => runConnectivityTest())
+// Aufnahme-Quellen: ganze Monitore (ddagrab, output_idx) UND einzelne Fenster
+// (WGC-Helfer, per HWND). Die HWND steckt in Electrons Fenster-Source-ID
+// "window:<hwnd>:0" – so brauchen wir keine eigene Fenster-Enumeration.
+ipcMain.handle('list-sources', async () => {
+  try {
+    const out = []
+    const displays = screen.getAllDisplays()
+    const primaryId = String(screen.getPrimaryDisplay().id)
+    displays.forEach((d, i) => {
+      let label = 'Bildschirm ' + (i + 1) + ' – ' + Math.round(d.size.width * d.scaleFactor) + '×' + Math.round(d.size.height * d.scaleFactor)
+      if (String(d.id) === primaryId) label += ' · Haupt'
+      out.push({ value: 'screen:' + i, label })   // i = ddagrab output_idx
+    })
+    const wins = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } })
+    wins.forEach((w) => {
+      const m = /^window:(\d+):/.exec(w.id)
+      const n = String(w.name || '').trim()
+      if (!m || !n || /^lumora$/i.test(n)) return   // eigenes Fenster raus
+      out.push({ value: 'window:' + m[1], label: '🪟 ' + n })
+    })
+    return out
+  } catch { return [] }
+})
+
+// Pfad zu einer gebuendelten Binary (bin/ neben der App bzw. in resources/bin).
+function streamBin(name) {
+  return app.isPackaged ? path.join(process.resourcesPath, 'bin', name) : path.join(__dirname, 'bin', name)
+}
+// Kurzzeile ins Stream-Log (Diagnose).
+function bcLogStream(line) {
+  if (!line) return
+  try { require('fs').appendFileSync(path.join(app.getPath('temp'), 'lumora-stream.log'), Date.now() + ' ' + line + '\n') } catch {}
+}
+// Aufloesungs-Obergrenzen (Hoehe). 'auto'/2160 = native Aufloesung (kein Scale).
+const STREAM_Q_H = { '2160': 2160, '1440': 1440, '1080': 1080, '720': 720 }
+
+// GPU-Hersteller ermitteln und den passenden Hardware-Encoder waehlen. Die
+// Marke der GPU bestimmt den Hardware-Encoder (NVENC/AMF/QSV). KEIN Software-
+// Fallback: der FFmpeg-Build ist LGPL und hat bewusst kein libx264 (das waere
+// GPL). Ohne HW-Encoder bleibt encoder=null -> startBroadcast bricht mit Hinweis
+// ab. Einmal ermittelt und gecacht.
+async function bcDetectEncoder() {
+  if (bcEncoderCache) return bcEncoderCache
+  let vendor = ''
+  try {
+    const out = await new Promise((res) => {
+      require('child_process').execFile('powershell', ['-NoProfile', '-Command',
+        "(Get-CimInstance Win32_VideoController).Name -join '|'"], { windowsHide: true, timeout: 8000 },
+        (e, so) => res(String(so || '')))
+    })
+    const s = out.toLowerCase()
+    if (/nvidia|geforce|rtx|gtx/.test(s)) vendor = 'nvidia'
+    else if (/radeon|\bamd\b/.test(s)) vendor = 'amd'
+    else if (/intel|\barc\b|iris|uhd/.test(s)) vendor = 'intel'
+  } catch {}
+  let enc = null, hw = false
+  try {
+    const encs = await new Promise((res) => {
+      require('child_process').execFile(streamBin('ffmpeg.exe'), ['-hide_banner', '-encoders'],
+        { windowsHide: true, timeout: 8000 }, (e, so) => res(String(so || '')))
+    })
+    const has = (n) => encs.includes(n)
+    if (vendor === 'nvidia' && has('h264_nvenc')) { enc = 'h264_nvenc'; hw = true }
+    else if (vendor === 'amd' && has('h264_amf')) { enc = 'h264_amf'; hw = true }
+    else if (vendor === 'intel' && has('h264_qsv')) { enc = 'h264_qsv'; hw = true }
+    else if (has('h264_nvenc')) { enc = 'h264_nvenc'; hw = true }   // GPU unklar: NVENC zuerst
+    else if (has('h264_amf')) { enc = 'h264_amf'; hw = true }
+    else if (has('h264_qsv')) { enc = 'h264_qsv'; hw = true }
+  } catch {}
+  bcEncoderCache = { vendor, encoder: enc, hw }
+  osdDbg('[stream] Encoder: ' + enc + ' (GPU: ' + (vendor || '?') + ', hw=' + hw + ')')
+  return bcEncoderCache
+}
+// Encoder-spezifische CBR-/Low-Latency-Parameter. Konstante Bitrate (CBR) ist
+// der Schluessel: keine adaptive Drossel, die bei Sende-Jitter einbricht ->
+// gleichmaessiges Bild ohne Klotz-Artefakte bei Bewegung.
+function bcEncoderArgs(enc, kbit) {
+  const rate = kbit + 'k', buf = Math.round(kbit / 2) + 'k'
+  if (enc === 'h264_amf') return ['-c:v', 'h264_amf', '-usage', 'lowlatency', '-rc', 'cbr', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', '120', '-bf', '0']
+  if (enc === 'h264_qsv') return ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-look_ahead', '0', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', '120', '-bf', '0']
+  // Default NVENC (haeufigster HW-Encoder; auch defensiver Fallback). Ohne
+  // HW-Encoder startet der Stream gar nicht erst – kein libx264 im LGPL-Build.
+  return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'll', '-rc', 'cbr', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', '120', '-bf', '0', '-no-scenecut', '1']
+}
+// Streaming-Parameter aus den Einstellungen ableiten.
+function bcStreamCfg(enc) {
+  const q = appSettings.streamQuality || 'auto'
+  let scaleH = STREAM_Q_H[q] || 0
+  if (scaleH === 2160) scaleH = 0            // 4K = native Aufnahme, kein Scale
+  const kbit = Math.max(1000, Math.round(appSettings.streamUploadKbit || 12000))
+  const src = String(appSettings.streamSource || '')
+  let mode = 'monitor', outputIdx = 0, hwnd = 0
+  if (src.startsWith('window:')) { hwnd = parseInt(src.slice(7), 10) || 0; if (hwnd) mode = 'window' }
+  else if (src.startsWith('screen:')) { const n = parseInt(src.slice(7), 10); if (!isNaN(n)) outputIdx = n }
+  return { encoder: enc.encoder, fps: appSettings.streamFps || 60, kbit, scaleH, mode, outputIdx, hwnd }
+}
+function bcQualityLabel(cfg) {
+  const h = cfg.scaleH ? cfg.scaleH + 'p' : 'nativ'
+  return h + ' · ' + cfg.fps + ' fps · ' + Math.round(cfg.kbit / 1000) + ' Mbit · ' + cfg.encoder.replace('h264_', '').toUpperCase()
+}
+// FFmpeg-Kommandozeile. Zwei Quellen:
+//  - Monitor: ddagrab (GPU-Desktop-Duplication).
+//  - Fenster: BGRA-Rohframes vom WGC-Helfer ueber stdin (pipe:0); capW/capH ist
+//    die vom Helfer gemeldete Fenstergroesse.
+// HINWEIS: GPU-Scale/HDR-Tonemapping kommen als Verfeinerung; hier der Basis-Pfad.
+function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
+  const rtsp = ['-f', 'rtsp', '-rtsp_transport', 'tcp', 'rtsp://127.0.0.1:' + MTX_RTSP_PORT + '/' + MTX_PATH]
+  // System-Audio (fd 3, f32le 48k stereo vom Helfer) -> Opus. -map bindet Bild
+  // (Input 0) + Ton (Input 1) explizit zusammen.
+  const aIn = withAudio ? ['-thread_queue_size', '4096', '-f', 'f32le', '-ar', '48000', '-ac', '2', '-i', 'pipe:3'] : []
+  // -max_interleave_delta 0: der Muxer haelt KEINE Videopakete zurueck, um auf
+  // Audio zu warten -> das Bild stockt nicht, wenn der (ueber Node laufende)
+  // Ton kurz jittert. A/V bleiben ueber die RTP-Timestamps trotzdem synchron.
+  const aEnc = withAudio ? ['-map', '0:v:0', '-map', '1:a:0', '-c:a', 'libopus', '-b:a', '128k', '-max_interleave_delta', '0'] : []
+  if (cfg.mode === 'window') {
+    const vf = []
+    if (cfg.scaleH && capH && cfg.scaleH < capH) vf.push('scale=-2:' + cfg.scaleH + ':flags=bicubic')
+    vf.push('format=yuv420p')
+    return ['-hide_banner', '-loglevel', 'warning',
+      '-thread_queue_size', '4096', '-f', 'rawvideo', '-pixel_format', 'bgra', '-video_size', capW + 'x' + capH, '-framerate', String(cfg.fps),
+      '-i', 'pipe:0',
+      ...aIn,
+      '-vf', vf.join(','),
+      ...bcEncoderArgs(cfg.encoder, cfg.kbit),
+      ...aEnc, ...rtsp]
+  }
+  // Monitor-Weg (ddagrab). Bei Ton wird der Audio-Helfer zu Input 0 (pipe:3); das
+  // ddagrab-Bild kommt aus dem Filtergraphen und wird per Label [v] explizit
+  // gemappt (sonst zieht FFmpeg ohne -map das Audio als "Video" heran).
+  const vf = ['ddagrab=output_idx=' + cfg.outputIdx + ':framerate=' + cfg.fps, 'hwdownload', 'format=bgra']
+  if (cfg.scaleH) vf.push('scale=-2:' + cfg.scaleH + ':flags=bicubic')
+  vf.push('format=yuv420p')
+  const mMap = withAudio ? ['-map', '[v]', '-map', '0:a:0', '-c:a', 'libopus', '-b:a', '128k', '-max_interleave_delta', '0'] : []
+  return ['-hide_banner', '-loglevel', 'warning',
+    ...aIn,
+    '-filter_complex', vf.join(',') + (withAudio ? '[v]' : ''),
+    ...bcEncoderArgs(cfg.encoder, cfg.kbit),
+    ...mMap, ...rtsp]
+}
+// mediamtx-Konfiguration schreiben (Node fs -> UTF-8 OHNE BOM). Nur die noetigen
+// Dienste: RTSP-Ingest (localhost), WebRTC/WHEP-Egress + API (Zuschauerzahl).
+// publicIp -> als zusaetzlicher ICE-Host, damit Internet-Zuschauer die externe
+// Adresse als Kandidat bekommen.
+function bcWriteMtxConfig(publicIp) {
+  const lines = [
+    'logLevel: error',
+    'rtspAddress: 127.0.0.1:' + MTX_RTSP_PORT,
+    'rtspTransports: [tcp]',
+    'rtmp: no', 'hls: no', 'srt: no', 'playback: no', 'metrics: no', 'pprof: no',
+    'api: yes', 'apiAddress: 127.0.0.1:' + MTX_API_PORT,
+    'webrtcAddress: 127.0.0.1:' + MTX_WHEP_PORT,
+    'webrtcLocalUDPAddress: :' + MTX_ICE_UDP,
+    "webrtcLocalTCPAddress: ''",
+    'webrtcIPsFromInterfaces: yes',
+    publicIp ? 'webrtcAdditionalHosts: [' + publicIp + ']' : '',
+    'webrtcHandshakeTimeout: 10s',
+    'paths:',
+    '  ' + MTX_PATH + ':',
+    '    source: publisher',
+    '',
+  ].filter((x) => x !== '')
+  const p = path.join(app.getPath('temp'), 'lumora-mediamtx.yml')
+  require('fs').writeFileSync(p, lines.join('\n'), 'utf8')
+  return p
+}
+// HTTP-Server auf dem freigegebenen Port: liefert die Player-Seite und proxyt
+// die WHEP-Signalisierung an mediamtx (localhost). So braucht der Zuschauer nur
+// DIESEN einen TCP-Port fuer die Signalisierung; die Medien laufen per WebRTC
+// direkt ueber mediamtx' ICE-UDP-Port.
+function bcStartServer(port) {
+  return new Promise((resolve, reject) => {
+    const srv = http.createServer((req, res) => {
+      if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?') || req.url === '/index.html')) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+        return res.end(bcPlayerHtml())
+      }
+      // Der Player holt hierher den vom Streamer eingestellten Jitter-Puffer (ms)
+      // und wendet ihn live an – regelmaessig, damit Regler-Aenderungen auch bei
+      // bereits verbundenen Zuschauern ohne Neuladen greifen.
+      if (req.method === 'GET' && req.url === '/cfg') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+        return res.end(JSON.stringify({ buffer: Math.max(0, appSettings.streamBufferMs || 120) }))
+      }
+      // WHEP: POST = Offer->Answer, PATCH = ICE-Trickle, DELETE = Abmelden.
+      if (req.url === '/whep' || req.url.startsWith('/whep')) return bcProxyWhep(req, res)
+      res.writeHead(404); res.end('not found')
+    })
+    srv.on('error', reject)
+    srv.listen(port, () => resolve(srv))
+  })
+}
+// --- Zuschauer-Tracking: IP + Browser je WHEP-Session ----------------------
+// mediamtx kennt die IP (webrtcsessions-API); den Browser (User-Agent) sieht
+// nur unser Proxy. Beides zusammen ergibt die Zuschauer-Liste; Kick + IP-Sperre
+// werfen ungebetene Gaeste raus.
+const bcBlockedIps = new Set()   // gesperrte Zuschauer-IPs (Proxy weist POST /whep ab)
+function bcExtractIp(s) { const m = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/.exec(String(s || '')); return m ? m[1] : '' }
+function bcClientIp(req) {
+  let ip = (req.socket && req.socket.remoteAddress) || ''
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7)   // IPv4-mapped IPv6 -> nackte IPv4
+  return ip
+}
+function bcUaShort(ua) {
+  ua = String(ua || '')
+  if (!ua) return ''
+  const br = /Edg\//.test(ua) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser'
+  const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : ''
+  return br + (os ? ' · ' + os : '')
+}
+function bcApiPost(apiPath) {
+  return new Promise((resolve) => {
+    const rq = http.request({ host: '127.0.0.1', port: MTX_API_PORT, path: apiPath, method: 'POST', timeout: 3000 }, (r) => { let d = ''; r.on('data', (c) => d += c); r.on('end', () => resolve({ status: r.statusCode, body: d })) })
+    rq.on('error', () => resolve({ status: 0 })); rq.on('timeout', () => { rq.destroy(); resolve({ status: 0 }) })
+    rq.end()
+  })
+}
+// WHEP-Anfrage an mediamtx weiterreichen (dessen Endpoint ist /<path>/whep).
+// Die Session-Sub-URL fuer PATCH/DELETE haengt mediamtx im Location-Header an;
+// wir biegen sie auf unseren Proxy-Pfad um, damit der Zuschauer bei uns bleibt.
+function bcProxyWhep(req, res) {
+  const ip = bcClientIp(req)
+  if (req.method === 'POST' && bcBlockedIps.has(ip)) { try { res.writeHead(403); res.end('blocked') } catch {}; return }   // gesperrt
+  const chunks = []
+  req.on('data', (c) => { chunks.push(c); if (Buffer.concat(chunks).length > 300000) req.destroy() })
+  req.on('end', () => {
+    const body = Buffer.concat(chunks)
+    const rest = req.url.replace(/^\/whep/, '')          // '' oder '/<session>'
+    const target = '/' + MTX_PATH + '/whep' + rest
+    const headers = {}
+    if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type']
+    if (req.headers['user-agent']) headers['User-Agent'] = req.headers['user-agent']   // -> mediamtx-Session (Browser)
+    headers['Content-Length'] = body.length
+    const preq = http.request({ host: '127.0.0.1', port: MTX_WHEP_PORT, path: target, method: req.method, headers }, (pres) => {
+      const h = {}
+      let loc = null
+      for (const k of Object.keys(pres.headers)) {
+        if (k.toLowerCase() === 'location') {
+          loc = String(pres.headers[k])
+          h['location'] = loc.replace(/^https?:\/\/[^/]+/, '').replace('/' + MTX_PATH + '/whep', '/whep')
+        } else h[k] = pres.headers[k]
+      }
+      res.writeHead(pres.statusCode, h)
+      pres.pipe(res)
+    })
+    preq.on('error', () => { try { res.writeHead(502); res.end('mediamtx nicht erreichbar') } catch {} })
+    preq.end(body)
+  })
+}
+// Aktive Zuschauer: mediamtx-Sessions (IP, Dauer, Datenmenge) + unser User-Agent.
+ipcMain.handle('list-viewers', async () => {
+  try {
+    const r = await upnpHttpGet('http://127.0.0.1:' + MTX_API_PORT + '/v3/webrtcsessions/list')
+    const j = JSON.parse(r.body)
+    const sessions = (Array.isArray(j.items) ? j.items : []).filter((s) => s.path === MTX_PATH && s.state === 'read')
+    return sessions.map((s) => {
+      // IP + Browser direkt aus mediamtx: IP aus dem ICE-Kandidaten (remoteAddr
+      // ist nur unser Proxy = 127.0.0.1), den User-Agent reichen wir durch. Solange
+      // die WebRTC-Verbindung noch aushandelt, ist der Kandidat leer -> "verbindet…".
+      const ip = bcExtractIp(s.remoteCandidate)
+      return { id: s.id, ip: ip || '(verbindet…)', ua: bcUaShort(s.userAgent), since: Date.parse(s.created) || Date.now(), bytes: s.bytesSent || 0 }
+    })
+  } catch { return [] }
+})
+// Zuschauer trennen; block=true sperrt zusaetzlich die IP (kommt nicht sofort wieder).
+ipcMain.handle('kick-viewer', async (e, id, ip, block) => {
+  try {
+    if (block && ip && ip !== '(verbindet…)') bcBlockedIps.add(ip)
+    await bcApiPost('/v3/webrtcsessions/kick/' + id)
+    return { ok: true }
+  } catch { return { ok: false } }
+})
+function bcPushState() { sendToUi('broadcast-status', broadcastState) }
+// mediamtx starten. Kurz warten und pruefen, dass der Prozess laeuft (mediamtx
+// ist quasi sofort bereit); stirbt er sofort, ist meist ein Port belegt.
+function bcStartMtx(configPath) {
+  return new Promise((resolve, reject) => {
+    let done = false, out = '', p
+    try { p = spawn(streamBin('mediamtx.exe'), [configPath], { windowsHide: true }) }
+    catch (e) { return reject(e) }
+    const onData = (d) => { out = (out + d.toString()).slice(-2000); const t = d.toString().trim(); if (t) bcLogStream('mtx: ' + t) }   // bei logLevel error nur echte Fehler
+    if (p.stdout) p.stdout.on('data', onData)
+    if (p.stderr) p.stderr.on('data', onData)
+    p.on('error', (e) => { if (!done) { done = true; reject(e) } })
+    p.on('exit', (code) => { if (!done) { done = true; reject(new Error('mediamtx beendet (' + code + '): ' + out.slice(-200))) } })
+    setTimeout(() => { if (!done) { done = true; resolve(p) } }, 800)
+  })
+}
+// Laufende Helfer (Bild + Ton) beenden.
+function bcKillCap() {
+  if (capProc) { const c = capProc; capProc = null; try { c.kill() } catch {} }
+  if (audProc) { const a = audProc; audProc = null; try { a.kill() } catch {} }
+}
+// Audio-Helfer starten: System-Audio per WASAPI-Loopback als PCM (f32le 48k
+// stereo) auf stdout, das FFmpeg als zweiten Eingang (fd 3) bekommt.
+function bcStartAudio() {
+  let a
+  try { a = spawn(streamBin('lumora-capture.exe'), ['--audio'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }
+  catch (e) { bcLogStream('aud-start: ' + (e && e.message)); return null }
+  audProc = a
+  a.on('error', (e) => { bcLogStream('aud-error: ' + (e && e.message)) })
+  a.on('exit', (code) => { if (audProc === a) audProc = null; bcLogStream('aud beendet (' + code + ')') })
+  if (a.stderr) a.stderr.on('data', (d) => bcLogStream('aud: ' + d.toString().trim()))
+  if (a.stdout) a.stdout.on('error', () => {})
+  return a
+}
+
+// Aufnahme starten – je nach Quelle Monitor (ddagrab) oder Fenster (WGC-Helfer
+// -> Pipe an FFmpeg). Bei Absturz automatischer Neustart, solange der Stream laeuft.
+let ffFastFails = 0   // aufeinanderfolgende Sofort-Abstuerze
+function bcStartFfmpeg(cfg) {
+  bcKillCap()   // evtl. verwaisten Helfer aufraeumen
+  if (cfg.mode === 'window') return bcStartWindowCapture(cfg)
+  // Monitor-Weg (ddagrab): der Ton kommt – wie beim Fenster-Weg – vom parallelen
+  // System-Audio-Helfer ueber fd 3. ddagrab liefert nur das Bild, daher Audio separat.
+  const aud = bcStartAudio()
+  return bcSpawnEncoder(bcBuildFfmpegArgs(cfg, 0, 0, !!aud), null, null, aud)
+}
+// Fenster-Aufnahme: WGC-Helfer starten, dessen gemeldete Groesse (SIZE auf
+// stderr) abwarten, dann FFmpeg mit rawvideo-Eingang starten und die Frames
+// hineinpipen. Stirbt der Helfer (Fenster zu), bekommt FFmpeg EOF -> Neustart.
+function bcStartWindowCapture(cfg) {
+  let cap
+  try { cap = spawn(streamBin('lumora-capture.exe'), ['--hwnd', String(cfg.hwnd), '--fps', String(cfg.fps), '--max-height', String(cfg.scaleH || 0)], { windowsHide: true }) }
+  catch (e) { osdDbg('[stream] capture-Start fehlgeschlagen: ' + (e && e.message)); return null }
+  capProc = cap
+  cap.on('error', (e) => { bcLogStream('cap-error: ' + (e && e.message)) })
+  cap.on('exit', (code) => { if (capProc === cap) capProc = null; bcLogStream('cap beendet (' + code + ')') })
+  let sized = false, errbuf = ''
+  cap.stderr.on('data', (d) => {
+    const s = d.toString(); errbuf = (errbuf + s).slice(-1000); bcLogStream('cap: ' + s.trim())
+    if (sized) return
+    const m = /SIZE (\d+) (\d+)/.exec(errbuf)
+    if (!m) return
+    sized = true
+    const capW = parseInt(m[1], 10), capH = parseInt(m[2], 10)
+    if (capProc !== cap || !broadcastState.active || ffStopping) return
+    // FFmpeg DIREKT vom stdout-Handle des Helfers lesen lassen (OS-Pipe, nicht
+    // durch Node): bei 4K-Rohframes (~2 GB/s) ist das der entscheidende
+    // Performance-Faktor – Node-Piping bricht hier auf ~8 fps ein, die OS-Pipe
+    // schafft ~58 fps. cap.stdout wird als FFmpegs stdin (fd 0) uebergeben.
+    if (cap.stdout) cap.stdout.on('error', () => {})
+    const aud = bcStartAudio()                                      // System-Audio parallel
+    bcSpawnEncoder(bcBuildFfmpegArgs(cfg, capW, capH, !!aud), cap, cap.stdout, aud)
+  })
+  return cap
+}
+// FFmpeg starten (gemeinsam fuer beide Quellen) inkl. Exit-/Neustart-Logik.
+// capOfThis = zugehoeriger Helfer (Fenster-Modus); wird beim Beenden mitgekillt.
+function bcSpawnEncoder(args, capOfThis, stdinStream, audOfThis) {
+  if (!args) return null
+  osdDbg('[stream] ffmpeg ' + args.join(' '))
+  let p
+  // stdinStream gesetzt (Fenster-Aufnahme) -> dessen fd wird FFmpegs stdin:
+  // die Rohframes fliessen OS-direkt vom Helfer, ohne Node-Overhead.
+  const stdio = stdinStream ? [stdinStream, 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
+  if (audOfThis && audOfThis.stdout) stdio[3] = 'pipe'   // fd 3 = Audio (Node-Pipe, s. u.)
+  try { p = spawn(streamBin('ffmpeg.exe'), args, { windowsHide: true, stdio }) }
+  catch (e) { osdDbg('[stream] ffmpeg-Start fehlgeschlagen: ' + (e && e.message)); return null }
+  ffProc = p
+  // Audio-PCM in FFmpegs fd 3 leiten – als Node-Pipe. Audio ist klein (~384 KB/s),
+  // daher unkritisch; die DIREKTE fd-Weitergabe zwischen zwei Kindprozessen
+  // liefert dagegen kein Audio (verifiziert). Video bleibt OS-direkt (fd 0).
+  if (audOfThis && audOfThis.stdout && p.stdio && p.stdio[3]) {
+    try { p.stdio[3].on('error', () => {}); audOfThis.stdout.pipe(p.stdio[3]) } catch {}
+  }
+  const startedAt = Date.now()
+  try { require('os').setPriority(p.pid, require('os').constants.priority.PRIORITY_HIGH) } catch {}
+  let errbuf = ''
+  if (p.stderr) p.stderr.on('data', (d) => { const s = d.toString(); errbuf = (errbuf + s).slice(-2000); bcLogStream('ff: ' + s.trim()) })
+  // WICHTIG: 'error' MUSS behandelt werden – sonst wird ein Prozessfehler zur
+  // uncaught exception und beendet die ganze App (genau der beobachtete Absturz).
+  p.on('error', (e) => { bcLogStream('ff-error: ' + (e && e.message)) })
+  p.on('exit', (code) => {
+    if (ffProc === p) ffProc = null
+    // Zugehoerige Helfer (Bild + Ton) mit beenden (sonst schreiben sie in tote Pipes).
+    if (capOfThis) { if (capProc === capOfThis) capProc = null; try { capOfThis.kill() } catch {} }
+    if (audOfThis) { if (audProc === audOfThis) audProc = null; try { audOfThis.kill() } catch {} }
+    // _intentional: von bcRestartFfmpeg gewollt beendet -> KEIN eigener Neustart
+    // (sonst konkurriert er mit dem geplanten neuen Prozess -> Doppel-Publisher).
+    if (p._intentional || ffStopping || !broadcastState.active) return
+    // Sofort-Absturz (typisch: Spiel im EXKLUSIVEN Vollbild -> ddagrab verliert
+    // den Zugriff, DXGI_ERROR_ACCESS_LOST). Nach mehreren schnellen Abstuerzen
+    // langsamer neu versuchen und die UI warnen, statt im Sekundentakt zu spammen.
+    if (Date.now() - startedAt < 4000) ffFastFails++; else ffFastFails = 0
+    const delay = ffFastFails >= 3 ? 5000 : 1200
+    if (ffFastFails === 3 && !broadcastState.captureError) { broadcastState.captureError = true; bcPushState() }
+    osdDbg('[stream] ffmpeg beendet (' + code + '), Neustart in ' + delay + 'ms (fails=' + ffFastFails + '): ' + errbuf.slice(-160))
+    ffRestartTimer = setTimeout(() => { if (broadcastState.active && !ffStopping) bcStartFfmpeg(bcStreamCfg(bcEncoderCache || { encoder: 'h264_nvenc' })) }, delay)
+  })
+  // Laeuft der Prozess laenger stabil, Fehlerzaehler + Warnung zuruecksetzen.
+  setTimeout(() => { if (ffProc === p) { ffFastFails = 0; if (broadcastState.captureError) { broadcastState.captureError = false; bcPushState() } } }, 6000)
+  return p
+}
+// FFmpeg gezielt neu starten (nach Einstellungsaenderung). mediamtx + WHEP-
+// Server laufen durch; Zuschauer verbinden nach dem kurzen Aussetzer weiter.
+// Debounce: mehrere schnelle Aenderungen (Bitrate + Aufloesung kurz nacheinander)
+// zu EINEM Neustart zusammenfassen.
+function bcRestartFfmpeg() {
+  if (ffRestartDebounce) clearTimeout(ffRestartDebounce)
+  ffRestartDebounce = setTimeout(bcDoRestartFfmpeg, 350)
+}
+function bcDoRestartFfmpeg() {
+  ffRestartDebounce = null
+  if (!broadcastState.active || ffStopping) return
+  if (ffRestartTimer) { clearTimeout(ffRestartTimer); ffRestartTimer = null }
+  const cfg = bcStreamCfg(bcEncoderCache || { encoder: 'h264_nvenc' })
+  broadcastState.quality = bcQualityLabel(cfg)
+  const old = ffProc
+  ffProc = null
+  let started = false
+  // Erst wenn das ALTE FFmpeg wirklich beendet ist, das neue starten – sonst
+  // senden zwei Prozesse gleichzeitig auf denselben mediamtx-Pfad (der beobachtete
+  // "End of file / Broken pipe"-Konflikt, der den Stream aufhaengt).
+  const startNew = () => { if (started) return; started = true; if (broadcastState.active && !ffStopping) bcStartFfmpeg(cfg) }
+  if (old) {
+    old._intentional = true          // sein exit-Handler darf NICHT selbst neu starten
+    old.once('exit', startNew)
+    try { old.kill() } catch {}
+    setTimeout(startNew, 2500)        // Sicherheitsnetz, falls kein exit-Event kommt
+  } else {
+    startNew()
+  }
+}
+// Zuschauerzahl von der mediamtx-API pollen (Anzahl WHEP-Reader auf dem Pfad).
+function bcStartViewerPoll() {
+  if (bcViewerPoll) return
+  bcViewerPoll = setInterval(() => {
+    if (!broadcastState.active) return
+    upnpHttpGet('http://127.0.0.1:' + MTX_API_PORT + '/v3/paths/get/' + MTX_PATH).then((r) => {
+      let n = 0
+      try { const j = JSON.parse(r.body); n = Array.isArray(j.readers) ? j.readers.length : 0 } catch { return }
+      if (n !== broadcastState.viewers) {
+        const prev = broadcastState.viewers
+        broadcastState.viewers = n
+        bcPushState()
+        if (n > prev) sendToUi('viewer-joined', n)
+      }
+    }).catch(() => {})
+  }, 2000)
+}
+async function startBroadcast() {
+  if (broadcastState.active) return broadcastState
+  ffStopping = false
+  const enc = await bcDetectEncoder()
+  if (!enc.encoder) {
+    // Kein Hardware-Video-Encoder (NVENC/AMF/QSV) verfuegbar. Der LGPL-FFmpeg-Build
+    // hat bewusst keinen Software-Encoder (libx264 = GPL) -> hier kein Streaming.
+    // Klarer Hinweis statt einer FFmpeg-"Unknown encoder"-Fehlerschleife.
+    broadcastState = { active: false, noEncoder: true }
+    bcPushState()
+    osdDbg('[stream] Abbruch: kein Hardware-Encoder (NVENC/AMF/QSV) gefunden.')
+    return broadcastState
+  }
+  const lanIp = bcLanIp()
+  const lanLink = 'http://' + lanIp + ':' + BROADCAST_PORT + '/'
+  broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder }
+  bcPushState()   // LAN-Link sofort anzeigen
+  // Oeffentliche IP + Portfreigaben ZUERST holen (schnell), damit mediamtx die
+  // oeffentliche IP direkt als ICE-Kandidat anbieten kann: TCP fuer die
+  // Signalisierung, UDP fuer die WebRTC-Medien.
+  let pubIp = null, tcpOk = false, udpOk = false
+  try {
+    const r = await Promise.all([
+      upnpMapPort(BROADCAST_PORT, 'TCP', 'Lumora Stream'),
+      upnpMapPort(MTX_ICE_UDP, 'UDP', 'Lumora Stream Medien'),
+      upnpGetExternalIp(),
+    ])
+    tcpOk = r[0]; udpOk = r[1]; pubIp = r[2]
+  } catch {}
+  if (!broadcastState.active) return broadcastState   // zwischenzeitlich gestoppt
+  // mediamtx (mit oeffentlicher IP) + WHEP-Server hochfahren, dann FFmpeg.
+  try {
+    const cfgPath = bcWriteMtxConfig(pubIp)
+    mtxProc = await bcStartMtx(cfgPath)
+    broadcastServer = await bcStartServer(BROADCAST_PORT)
+  } catch (e) {
+    osdDbg('[stream] Start fehlgeschlagen: ' + (e && e.message))
+    stopBroadcast()
+    return broadcastState
+  }
+  const cfg = bcStreamCfg(enc)
+  bcStartFfmpeg(cfg)
+  bcStartViewerPoll()
+  broadcastState.opening = false
+  broadcastState.quality = bcQualityLabel(cfg)
+  if (pubIp) broadcastState.link = 'http://' + pubIp + ':' + BROADCAST_PORT + '/'
+  broadcastState.internet = !!(tcpOk && udpOk && pubIp)
+  broadcastState.needsForward = !!(pubIp && !(tcpOk && udpOk))
+  bcPushState()
+  osdDbg('[stream] aktiv: ' + broadcastState.link + ' enc=' + enc.encoder + ' tcp=' + tcpOk + ' udp=' + udpOk + ' ip=' + pubIp)
+  return broadcastState
+}
+function stopBroadcast() {
+  const wasActive = broadcastState.active
+  ffStopping = true
+  if (ffRestartTimer) { clearTimeout(ffRestartTimer); ffRestartTimer = null }
+  if (ffRestartDebounce) { clearTimeout(ffRestartDebounce); ffRestartDebounce = null }
+  bcKillCap()
+  if (ffProc) { try { ffProc.kill() } catch {}; ffProc = null }
+  if (mtxProc) { try { mtxProc.kill() } catch {}; mtxProc = null }
+  if (broadcastServer) { try { broadcastServer.close() } catch {}; broadcastServer = null }
+  if (bcViewerPoll) { clearInterval(bcViewerPoll); bcViewerPoll = null }
+  bcBlockedIps.clear()
+  if (wasActive) { upnpUnmapPort(BROADCAST_PORT, 'TCP'); upnpUnmapPort(MTX_ICE_UDP, 'UDP') }   // beide Ports schliessen
+  broadcastState = { active: false, port: 0, link: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false }
+  bcPushState()
+  osdDbg('[stream] gestoppt')
+}
+ipcMain.handle('start-broadcast', () => startBroadcast())
+ipcMain.handle('stop-broadcast', () => { stopBroadcast(); return broadcastState })
+ipcMain.handle('broadcast-status', () => broadcastState)
 
 // ---------------------------------------------------------------------------
 // Auto-Update (electron-updater, generischer Feed auf dem eigenen Webserver)
@@ -2905,7 +4292,7 @@ function checkForUpdates(manual) {
 // Liefert { ok } zurueck – false, wenn die Kombination nicht registriert werden
 // konnte (z.B. schon vom System/anderer App belegt).
 ipcMain.handle('set-hotkey', (event, accelerator, which) => {
-  const key = which === 'osd' ? 'osdHotkey' : which === 'osdEdit' ? 'osdEditHotkey' : 'toggleHotkey'
+  const key = which === 'osd' ? 'osdHotkey' : which === 'osdEdit' ? 'osdEditHotkey' : which === 'osdAb' ? 'osdAbHotkey' : 'toggleHotkey'
   appSettings[key] = accelerator || ''
   saveAppSettings()
   const ok = registerToggleHotkey()
@@ -2971,19 +4358,51 @@ if (process.argv.includes('--fps-broker')) {
 } else if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  // Windows Graphics Capture (WGC) fuer getDisplayMedia/Broadcast erzwingen.
+  // Der alte Desktop-Duplication-Pfad bricht bei Vollbild-/Flip-Model-Spielen
+  // auf ~40 fps ein (Desktop fluessig, Spiel ruckelt); WGC greift am DWM-
+  // Compositor ab und liefert bei Spielen volle 60 fps. Steuerung ueber
+  // WebRTC-Field-Trials (allow_wgc_capturer) – braucht Win10 1809+ (erfuellt).
+  try {
+    // ENTSCHEIDEND fuer fluessige Aufnahme bei 4K: Chromium deckelt die Bildschirm-
+    // aufnahme per Default auf 50% CPU-Zeit eines Kerns (kDefaultMaximumCpuConsumption
+    // Percentage=50). Bei teuren 4K-Frames verdoppelt das die Aufnahme-Periode ->
+    // ~30 fps (genau die gemessenen 32). Auf 100 heben = volle Bildrate.
+    app.commandLine.appendSwitch('webrtc-max-cpu-consumption-percentage', '100')
+    // WGC-Capturer + Frame-Lieferung per GPU-TEXTUR (statt langsamer CPU-Kopie) ->
+    // weniger CPU-Zeit pro Frame, hoehere Aufnahme-Bildrate.
+    app.commandLine.appendSwitch('force-fieldtrials', 'WebRTC-AllowWgcScreenCapturer/Enabled/WebRTC-AllowWgcWindowCapturer/Enabled/')
+    app.commandLine.appendSwitch('enable-features', 'AllowWgcScreenCapturer,AllowWgcWindowCapturer,AllowWgcUsingTexture')
+    // Unsichtbares Broadcast-Fenster nicht drosseln.
+    app.commandLine.appendSwitch('disable-renderer-backgrounding')
+    app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+    app.commandLine.appendSwitch('disable-background-timer-throttling')
+    // ZERO-COPY GPU-Aufnahme: haelt die Frames als GPU-Textur (statt teurer CPU-
+    // Kopie) und reicht sie direkt an den Hardware-Encoder -> volle Bildrate auch
+    // bei 4K. Wirkt zusammen mit HAGS (Hardware-GPU-Scheduling) am staerksten.
+    app.commandLine.appendSwitch('enable-zero-copy')
+    app.commandLine.appendSwitch('enable-native-gpu-memory-buffers')
+    app.commandLine.appendSwitch('enable-gpu-memory-buffer-video-frames')
+  } catch {}
   app.on('second-instance', () => showMainWindow())
 
-  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupNvml(); setupAdl(); setupRtss(); setupMahm(); setupCpuClock(); setupVramCounter(); setupGpuName(); if (appSettings.osdEnabled) showOverlay() })
+  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupNvml(); setupAdl(); setupRtss(); setupMahm(); setupCpuClock(); setupVramCounter(); setupGpuName(); startExternalWatcher(); syncOsdVisibility() })
 
-  // HDR abschalten, falls der Launcher es für ein noch laufendes Spiel aktiviert hatte
+  // HDR beim Beenden nur abschalten, wenn KEIN getracktes Spiel mehr laeuft.
+  // Sonst wuerde das Schliessen von Lumora ein laufendes Spiel mitten im Betrieb
+  // von HDR auf SDR kicken. Laeuft noch eine Session, bleibt HDR bewusst an.
   app.on('before-quit', () => {
     if (hdrEnabledByLauncher) {
+      if (externalSessions.size > 0 || activeLaunchExes.size > 0) {
+        playLog('QUIT: Spiel laeuft noch -> HDR bleibt an')
+        return
+      }
       try { execSync(`"${getHdrCmdPath()}" off`) } catch {}
       hdrEnabledByLauncher = false
     }
   })
 
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll); if (timeEndPeriodFn) try { timeEndPeriodFn(1) } catch {}; stopFps(); stopSensorBroker() })
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll); if (timeEndPeriodFn) try { timeEndPeriodFn(1) } catch {}; stopFps(); stopSensorBroker(); try { rtssOsdClear() } catch {}; try { rtssReleaseVisible() } catch {}; try { stopBroadcast() } catch {} })
 
   app.on('window-all-closed', () => {
     if (hdrPollInterval) clearInterval(hdrPollInterval)

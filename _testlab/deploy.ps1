@@ -16,7 +16,7 @@ Write-Host "main.js OK"
 # Staging (Build-Dateien)
 if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
 New-Item -ItemType Directory -Force $tmp | Out-Null
-foreach ($f in 'main.js','index.html','osd.html','styles.css','icon.ico','icon-64.png','package.json') {
+foreach ($f in 'main.js','index.html','osd.html','player.html','styles.css','icon.ico','icon-64.png','package.json') {
   Copy-Item "$src\$f" $tmp
 }
 
@@ -98,6 +98,26 @@ foreach ($bin in 'PresentMon.exe','PresentMon-LICENSE.txt','AMDFamily17.bin','In
   }
 }
 Write-Host "PresentMon mitgeliefert."
+
+# Native Streaming-Pipeline (FFmpeg + mediamtx) nach resources/bin kopieren.
+# Grosse Binaries (~190 MB) – nur kopieren, wenn im Ziel noch nicht aktuell.
+$binSrcDir = Join-Path $src 'bin'
+if (Test-Path $binSrcDir) {
+  foreach ($t in $targets) {
+    $resDir = Split-Path $t
+    if (Test-Path $resDir) {
+      $binDst = Join-Path $resDir 'bin'
+      New-Item -ItemType Directory -Force $binDst | Out-Null
+      foreach ($b in 'ffmpeg.exe','mediamtx.exe','lumora-capture.exe') {
+        $bs = Join-Path $binSrcDir $b; $bd = Join-Path $binDst $b
+        if ((Test-Path $bs) -and (-not (Test-Path $bd) -or (Get-Item $bs).Length -ne (Get-Item $bd).Length)) {
+          Copy-Item $bs $bd -Force
+        }
+      }
+    }
+  }
+  Write-Host "FFmpeg + mediamtx mitgeliefert."
+}
 
 # Optionale Verifikation: main.js/index.html/styles.css aus dem DEPLOYTEN asar
 # ins TEMP extrahieren und ueber ALLE pruefen (Muster kann in jeder Datei stehen).

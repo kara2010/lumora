@@ -1,0 +1,4 @@
+Streaming-Fix:
+
+• Behoben: Wenn ein zuvor als Quelle gewähltes Fenster inzwischen geschlossen war, konnte der Stream trotz „läuft"-Anzeige kein Bild liefern. Lumora fällt jetzt sauber auf den ganzen Bildschirm zurück.
+• Ein nicht mehr verfügbares Fenster führt nicht mehr zu einem Abbruch, sondern zu einem klaren Hinweis.

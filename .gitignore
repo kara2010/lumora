@@ -28,3 +28,14 @@ _testlab/pawnio-modules/
 _testlab/pawnio-out.txt
 _testlab/*.p
 _testlab/PawnIOLib.h
+
+# Gebuendelte Binaries (ffmpeg/mediamtx/Capture-Helfer) – teils >100 MB (GitHub-Limit).
+# Auf einem neuen Rechner separat beziehen: ffmpeg (BtbN LGPL), mediamtx (Release),
+# lumora-capture per `dotnet publish` aus capture/ bauen.
+bin/
+capture/bin/
+capture/obj/
+
+# TLS-Schluessel/Zertifikat fuer das lokale Streaming (Secrets – NIE ins Repo)
+auto.key
+auto.crt

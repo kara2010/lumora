@@ -1,0 +1,5 @@
+Transparenz & Feinschliff:
+
+• FFmpeg läuft jetzt als LGPL-Build (ohne GPL-Bausteine) — encodiert wird wie bisher über die Hardware-Encoder deiner Grafikkarte, an der Streaming-Qualität ändert sich nichts.
+• Alle Streaming-Komponenten sind im „Über"-Dialog und auf der Website vollständig aufgeführt; die Lizenztexte liegen der Installation bei.
+• „Über Lumora"-Dialog überarbeitet: aufgeräumte, dezent scrollende Komponenten-Liste.

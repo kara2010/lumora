@@ -1,0 +1,8 @@
+Streaming – jetzt vollständig, mit Ton:
+
+• Spiel live per Link teilen: in bis zu 4K mit Ton, direkt aus Lumora – Zuschauer öffnen einfach einen Link im Browser, ganz ohne Installation.
+• Wahlweise der ganze Bildschirm oder gezielt nur ein Fenster/Spiel (auch im Vollbild) – für mehr Privatsphäre landet nur das gewählte Fenster im Stream.
+• Ton in beiden Aufnahme-Wegen – stabil auch bei Tonpausen (Menü, Werbung, Standbild).
+• Zuschauer-Liste mit Browser und Standort sowie Entfernen-Funktion für ungebetene Gäste.
+• Wiedergabe-Puffer frei einstellbar: kurz für geringste Verzögerung, länger für ein ruhiges Bild bei schwankender Leitung.
+• Automatisches HDR-Tonemapping fürs gestreamte Bild – natürlich hell statt ausgewaschen.

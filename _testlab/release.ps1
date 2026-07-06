@@ -48,5 +48,24 @@ Get-ChildItem $upd -Filter "*.blockmap" -ErrorAction SilentlyContinue | Remove-I
 Copy-Item "$src\dist\Lumora Setup $ver.exe" $upd -Force
 Copy-Item "$src\dist\Lumora Setup $ver.exe.blockmap" $upd -Force
 Copy-Item $yml $upd -Force
-Write-Host "`nBereit in website\updates\ (zum Hochladen):"
+
+# 4) download.php auf die neue Setup-Datei zeigen lassen (sonst laeuft der
+#    Download-Button ins Leere = 404, weil die alte .exe oben geloescht wurde).
+#    Frueher leicht vergessen -> jetzt automatisch. MUSS mit auf den Server!
+$php = "$src\website\download.php"
+if (Test-Path $php) {
+  # WICHTIG: mit .NET lesen (erkennt UTF-8 korrekt). Get-Content -Raw ohne -Encoding
+  # liest in PS 5.1 als Windows-1252 -> Umlaute im PHP werden beim Zurueckschreiben
+  # zu Mojibake (Za"hlerstand -> ZAxa4hlerstand).
+  $phpText = [System.IO.File]::ReadAllText($php)
+  $phpText = $phpText -replace 'updates/Lumora Setup [0-9.]+\.exe', ("updates/Lumora Setup " + $ver + ".exe")
+  [System.IO.File]::WriteAllText($php, $phpText, (New-Object System.Text.UTF8Encoding($false)))
+  Write-Host "download.php aktualisiert -> Lumora Setup $ver.exe"
+} else {
+  Write-Host "WARN: download.php nicht gefunden - Download-Button NICHT aktualisiert!"
+}
+
+Write-Host "`nBereit zum Hochladen:"
+Write-Host "  1) die 3 Dateien in website\updates\  (Auto-Update)"
+Write-Host "  2) website\download.php               (Download-Button -> neue .exe)"
 Get-ChildItem $upd | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}} | Format-Table -AutoSize

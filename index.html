@@ -22,6 +22,7 @@
     #bootScreen .bt { font-size: 13px; color: #777; }
     @keyframes bootspin { to { transform: rotate(360deg); } }
     #bootScreen.hidden { display: none; }
+    @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
   </style>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -39,6 +40,10 @@
       <span class="titlebar-title">Lumora</span>
     </div>
     <div class="titlebar-controls">
+      <div class="hdr-indicator" id="streamIndicator" style="display:none; cursor:pointer" onclick="showSettings('stream')" title="Zum Stream-Tab">
+        <span class="hdr-dot" style="background:#f05a5a; animation:pulse 1.4s infinite"></span>
+        <span id="streamIndLabel">LIVE</span>
+      </div>
       <div class="hdr-indicator" id="hdrIndicator">
         <span class="hdr-dot" id="hdrDot"></span>
         <span id="hdrLabel">HDR aus</span>
@@ -89,6 +94,7 @@
         <button class="detail-nav-tab" data-view="darstellung" onclick="showSettings('darstellung')">Darstellung</button>
         <button class="detail-nav-tab" data-view="overlay" onclick="showSettings('overlay')">Overlay</button>
         <button class="detail-nav-tab" data-view="steuerung" onclick="showSettings('steuerung')">Steuerung</button>
+        <button class="detail-nav-tab" data-view="stream" onclick="showSettings('stream')">Stream</button>
       </nav>
       <div class="empty-state" id="emptyState">
         <div class="empty-icon">🎮</div>
@@ -333,6 +339,25 @@
             </div>
             <p class="settings-hint" id="osdGpuHint" style="display:none"></p>
             <div class="osd-field">
+              <span class="osd-field-label">Anzeige-Art</span>
+              <select id="setOsdRenderer" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
+                <option value="window">Overlay-Fenster (Standard)</option>
+                <option value="rtss">Im Spiel gerendert via RTSS – streambar</option>
+              </select>
+            </div>
+            <p class="settings-hint">„Im Spiel" zeichnet die Werte direkt in den Spiel-Frame – sichtbar in Aufnahmen und Streams und auch im exklusiven Vollbild. Benötigt laufendes RTSS bzw. MSI Afterburner (sonst automatisch Overlay-Fenster). Vereinfachte Designs (Kompakt/Minimal/Balken); Position folgt der Ecken-Wahl unten. Tipp: Wirkt eine große Fläche hinter den Anzeigen störend, in RTSS die Option „Bildschirmfüllung" (Fill) abschalten.</p>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label">Afterburner-Block (links oben)</span>
+              <label class="switch"><input type="checkbox" id="setOsdAbBlock" onchange="onOsdSettingChange()"><span class="switch-slider"></span></label>
+            </div>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Tastatur">⌨️</span>
+              <span class="hotkey-display" id="osdAbHotkeyDisplay">Alt+B</span>
+              <button class="btn-browse" id="osdAbHotkeyBtn" onclick="toggleHotkeyCapture('osdAb')">Ändern</button>
+              <button class="btn-cancel" onclick="clearHotkey('osdAb')">Aus</button>
+            </div>
+            <p class="settings-hint">Zeigt alle Werte, die du in Afterburner fürs OSD angehakt hast – aber von Lumora gerendert und mit eigenem Hotkey <b>unabhängig</b> vom Lumora-Panel schaltbar. Damit nichts doppelt erscheint, in Afterburner selbst das OSD ausschalten (Eigenschaften → On-Screen Display). Nur bei Anzeige-Art „Im Spiel".</p>
+            <div class="osd-field">
               <span class="osd-field-label">Design</span>
               <select id="setOsdTheme" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
                 <option value="compact">Kompakt</option>
@@ -403,6 +428,105 @@
           </div>
         </div>
 
+        <div class="settings-panel" data-panel="stream" hidden>
+          <div class="form-group">
+            <label>Live-Stream</label>
+            <p class="settings-hint">Teilt deinen Bildschirm in 4K live ins Internet – die Zuschauer öffnen einfach einen Link im Browser, ganz ohne Installation. Voll in Lumora integriert (WebRTC, Hardware-Encoding über deine Grafikkarte), keine Zusatzsoftware, kein fremder Dienst. Bild geht direkt von deinem PC zum Zuschauer.</p>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label">Kann mein Anschluss streamen?</span>
+              <button class="btn-browse" id="connTestBtn" onclick="runConnTest()" style="min-width:120px">Verbindung testen</button>
+            </div>
+            <div id="connTestResult" style="display:none; margin:6px 0 12px"></div>
+            <div class="osd-field" id="streamScreenField">
+              <span class="osd-field-label">Aufnahme-Quelle</span>
+              <select id="setStreamScreen" class="sort-select" style="flex:1" onchange="onSourceChange()"></select>
+              <button class="btn-browse" onclick="loadSources()" title="Liste aktualisieren (z. B. nach Spielstart)">↻</button>
+            </div>
+            <p class="settings-hint">Wähle einen <b>ganzen Bildschirm</b> – oder für mehr Privatsphäre gezielt ein <b>Fenster/Spiel</b> („🪟 …"). Bei der Fenster-Aufnahme landet <b>nur dieses Fenster</b> im Stream (auch im Vollbild) – kein Desktop, keine Benachrichtigungen. Läuft das Spiel noch nicht, erst starten und dann auf ↻ tippen.</p>
+            <div class="osd-field">
+              <span class="osd-field-label">Auflösung</span>
+              <select id="setStreamQuality" class="sort-select" style="flex:1" onchange="onStreamSettingChange()">
+                <option value="auto">Nativ (volle Aufnahme)</option>
+                <option value="1440">1440p</option>
+                <option value="1080">1080p</option>
+                <option value="720">720p</option>
+              </select>
+            </div>
+            <div class="osd-field">
+              <span class="osd-field-label">Bildrate</span>
+              <select id="setStreamFps" class="sort-select" style="flex:1" onchange="onStreamSettingChange()">
+                <option value="120">120 fps (nur bei 120-Hz-Displays)</option>
+                <option value="60">60 fps</option>
+                <option value="30">30 fps</option>
+              </select>
+            </div>
+            <div class="osd-field">
+              <span class="osd-field-label">Bitrate</span>
+              <select id="setStreamBitrate" class="sort-select" style="flex:1" onchange="onStreamSettingChange()">
+                <option value="6000">6 Mbit – sparsam (Mobilfunk)</option>
+                <option value="8000">8 Mbit – Full HD (empfohlen)</option>
+                <option value="12000">12 Mbit – Full HD hoch</option>
+                <option value="16000">16 Mbit – 1440p</option>
+                <option value="25000">25 Mbit – 4K</option>
+              </select>
+            </div>
+            <p class="settings-hint"><b>Native Aufnahme mit Hardware-Encoder</b> (NVIDIA/AMD/Intel) und konstanter Bitrate. Das Encoding läuft auf eigenen GPU-Blöcken und bremst das Spiel praktisch nicht. Für ein gleichmäßiges Bild bei schnellen Spielen <b>1080p oder 1440p</b> mit ausreichender Bitrate wählen; 4K ist am anspruchsvollsten.</p>
+            <div class="osd-field">
+              <span class="osd-field-label">Puffer</span>
+              <input type="range" id="setStreamBuffer" min="120" max="1000" step="20" value="120" oninput="onStreamBufferInput()">
+              <span class="osd-field-val" id="streamBufferVal">120 ms</span>
+            </div>
+            <p class="settings-hint"><b>Wiedergabe-Puffer beim Zuschauer:</b> kurz = geringste Verzögerung (Standard 120 ms), länger = ruhigeres Bild bei schwankender Leitung (z. B. Mobilfunk) – dafür sieht der Zuschauer alles etwas später. Wirkt sofort, auch bei bereits verbundenen Zuschauern.</p>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label" id="streamStateLabel">Stream aus</span>
+              <button class="btn-browse" id="streamToggleBtn" onclick="toggleBroadcast()" style="min-width:120px">Stream starten</button>
+            </div>
+            <div id="streamInfo" style="display:none; margin-top:10px">
+              <div class="osd-field">
+                <span class="osd-field-label">Link für Zuschauer</span>
+                <input type="text" id="streamLink" class="sort-select" style="flex:1; font-family:monospace" readonly onclick="this.select()">
+                <button class="btn-browse" onclick="copyStreamLink()">Kopieren</button>
+              </div>
+              <div class="osd-field" style="flex-wrap:wrap; gap:8px">
+                <span class="osd-field-label">Teilen</span>
+                <button class="btn-browse" onclick="shareStream('whatsapp')">WhatsApp</button>
+                <button class="btn-browse" onclick="shareStream('telegram')">Telegram</button>
+                <button class="btn-browse" onclick="shareStream('discord')">Discord</button>
+                <button class="btn-browse" onclick="shareStream('email')">E-Mail</button>
+              </div>
+              <div id="streamQr" style="text-align:center; margin:14px 0"></div>
+              <p class="settings-hint" id="streamStats">Zuschauer: 0</p>
+              <div id="viewerListBox" style="display:none; margin:6px 0 4px">
+                <div style="font-weight:600; font-size:13px; margin-bottom:6px; opacity:.85">Wer schaut zu</div>
+                <div id="viewerList"></div>
+              </div>
+              <p class="settings-hint" id="streamForwardHelp" style="display:none; border-left:3px solid #f5b942; padding-left:10px">
+                Der Link nutzt deine öffentliche IP, aber deine FritzBox lässt Lumora den Port nicht selbst öffnen. Zwei Wege: <b>(A)</b> In der FritzBox <i>Heimnetz → Netzwerk → [dieser&nbsp;PC] → Bearbeiten</i> das Häkchen <i>„Selbstständige Portfreigaben für dieses Gerät erlauben"</i> setzen — dann öffnet Lumora den Port künftig automatisch. <b>(B)</b> Oder dauerhaft manuell: <i>Internet → Freigaben → Portfreigaben</i>, Port <b>8787 TCP</b> auf diesen PC.
+              </p>
+            </div>
+            <p class="settings-hint" id="streamHint" style="margin-top:8px">Beim Start öffnet Lumora automatisch den nötigen Port am Router (UPnP) und schließt ihn beim Stoppen wieder.</p>
+            <div class="setting-toggle-row" style="margin-top:12px">
+              <span class="setting-toggle-label">Relay-Server für schwierige Anschlüsse</span>
+              <label class="switch"><input type="checkbox" id="setTurnEnabled" onchange="onTurnUiChange()"><span class="switch-slider"></span></label>
+            </div>
+            <div id="turnFields" style="display:none">
+              <div class="osd-field">
+                <span class="osd-field-label">Server-Adresse</span>
+                <input type="text" id="setTurnUrl" class="sort-select" style="flex:1" placeholder="z. B. turn.mein-server.de:3478" onchange="onTurnUiChange()">
+              </div>
+              <div class="osd-field">
+                <span class="osd-field-label">Benutzername</span>
+                <input type="text" id="setTurnUser" class="sort-select" style="flex:1" placeholder="vom Anbieter" onchange="onTurnUiChange()">
+              </div>
+              <div class="osd-field">
+                <span class="osd-field-label">Passwort</span>
+                <input type="password" id="setTurnPass" class="sort-select" style="flex:1" placeholder="vom Anbieter" onchange="onTurnUiChange()">
+              </div>
+            </div>
+            <p class="settings-hint">Die meisten brauchen das <b>nicht</b> – nur einschalten, wenn der Verbindungstest oben „nicht erreichbar" meldet. Die drei Angaben bekommst du fertig von deinem Relay-Anbieter (oder aus deinem eigenen coturn-Server). „turn:" davor musst du nicht eintippen.</p>
+          </div>
+        </div>
+
       </div>
 
   <!-- Startoptionen pro Spiel -->
@@ -429,27 +553,34 @@
     <div class="dialog about-dialog">
       <h2>Über Lumora</h2>
       <p class="about-version" id="aboutVersion">kostenlos</p>
-      <p class="about-text">
-        Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam,
-        Microsoft oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind
-        Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation
-        der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.
-      </p>
-      <p class="about-text"><strong>Lumora steht auf den Schultern großartiger Open-Source-Projekte.</strong> Eingesetzte Komponenten und ihre Urheber:</p>
-      <ul class="about-credits">
-        <li><strong>HDRTray / HDRCmd</strong> — HDR-Steuerung · Frank Richter (res2k) · GPL&nbsp;v3 · <span class="about-link" onclick="openExternal('https://github.com/res2k/HDRTray')">GitHub</span></li>
-        <li><strong>PresentMon</strong> — FPS-/Frametime-Messung · Intel Corporation · MIT · <span class="about-link" onclick="openExternal('https://github.com/GameTechDev/PresentMon')">GitHub</span></li>
-        <li><strong>PawnIO</strong> — signierter Treiber für CPU-Sensorik · namazso · GPL&nbsp;2.0; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps &amp; Features" entfernbar · <span class="about-link" onclick="openExternal('https://pawnio.eu')">pawnio.eu</span></li>
-        <li><strong>PawnIO-Module</strong> (AMDFamily17, IntelMSR) — Sensor-Definitionen · namazso · LGPL&nbsp;2.1 · <span class="about-link" onclick="openExternal('https://github.com/namazso/PawnIO.Modules')">GitHub</span></li>
-        <li><strong>Electron</strong> &amp; <strong>electron-updater</strong> — App-Framework und Auto-Updates · OpenJS Foundation / Electron-Userland · MIT</li>
-        <li><strong>koffi</strong> — Windows-API-Anbindung · Niels Martignène · MIT · <span class="about-link" onclick="openExternal('https://koffi.dev')">koffi.dev</span></li>
-        <li><strong>SteamGridDB</strong> — optionale Community-Artworks (eigener API-Key) · <span class="about-link" onclick="openExternal('https://www.steamgriddb.com')">steamgriddb.com</span></li>
-      </ul>
-      <p class="about-text">
-        Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML),
-        dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten
-        liegen im Installationsordner (<em>resources</em>) bei.
-      </p>
+      <div class="about-body">
+        <p class="about-text">
+          Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam,
+          Microsoft oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind
+          Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation
+          der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.
+        </p>
+        <p class="about-text"><strong>Lumora steht auf den Schultern großartiger Open-Source-Projekte.</strong> Eingesetzte Komponenten und ihre Urheber:</p>
+        <ul class="about-credits">
+          <li><strong>HDRTray / HDRCmd</strong> — HDR-Steuerung · Frank Richter (res2k) · GPL&nbsp;v3 · <span class="about-link" onclick="openExternal('https://github.com/res2k/HDRTray')">GitHub</span></li>
+          <li><strong>PresentMon</strong> — FPS-/Frametime-Messung · Intel Corporation · MIT · <span class="about-link" onclick="openExternal('https://github.com/GameTechDev/PresentMon')">GitHub</span></li>
+          <li><strong>PawnIO</strong> — signierter Treiber für CPU-Sensorik · namazso · GPL&nbsp;2.0; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps &amp; Features" entfernbar · <span class="about-link" onclick="openExternal('https://pawnio.eu')">pawnio.eu</span></li>
+          <li><strong>PawnIO-Module</strong> (AMDFamily17, IntelMSR) — Sensor-Definitionen · namazso · LGPL&nbsp;2.1 · <span class="about-link" onclick="openExternal('https://github.com/namazso/PawnIO.Modules')">GitHub</span></li>
+          <li><strong>Electron</strong> &amp; <strong>electron-updater</strong> — App-Framework und Auto-Updates · OpenJS Foundation / Electron-Userland · MIT</li>
+          <li><strong>koffi</strong> — Windows-API-Anbindung · Niels Martignène · MIT · <span class="about-link" onclick="openExternal('https://koffi.dev')">koffi.dev</span></li>
+          <li><strong>FFmpeg</strong> — Aufnahme &amp; Hardware-Encoding fürs Streaming · FFmpeg-Projekt · LGPL&nbsp;v3 (Build ohne GPL-Bausteine) · <span class="about-link" onclick="openExternal('https://ffmpeg.org')">ffmpeg.org</span></li>
+          <li><strong>mediamtx</strong> — WebRTC-Server, verteilt den Stream an die Zuschauer · bluenviron · MIT · <span class="about-link" onclick="openExternal('https://github.com/bluenviron/mediamtx')">GitHub</span></li>
+          <li><strong>Vortice.Windows</strong> — Direct3D-/Screen-Capture im Aufnahme-Helfer · Amer Koleci · MIT · <span class="about-link" onclick="openExternal('https://github.com/amerkoleci/Vortice.Windows')">GitHub</span></li>
+          <li><strong>NAudio</strong> — System-Ton (WASAPI) fürs Streaming · Mark Heath · MIT · <span class="about-link" onclick="openExternal('https://github.com/naudio/NAudio')">GitHub</span></li>
+          <li><strong>.NET-Runtime</strong> — Laufzeit des Aufnahme-Helfers · Microsoft · MIT · <span class="about-link" onclick="openExternal('https://dotnet.microsoft.com')">dotnet.microsoft.com</span></li>
+          <li><strong>SteamGridDB</strong> — optionale Community-Artworks (eigener API-Key) · <span class="about-link" onclick="openExternal('https://www.steamgriddb.com')">steamgriddb.com</span></li>
+        </ul>
+        <p class="about-text">
+          Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML),
+          dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten
+          liegen im Installationsordner (<em>resources</em>) bei.
+        </p>
+      </div>
       <div class="dialog-actions">
         <button class="btn-primary" onclick="hideAbout()">Schließen</button>
       </div>
@@ -1329,6 +1460,7 @@
       updateHdrSubLabel(hdrOn)
       updateDetailInfo(g)
       updateCoverHero(g)
+      refreshLaunchBtn()   // Fremdstart-Status (external-running) gilt pro Spiel
       applyLibView()
       if (!g.iconUpgradedV1 || !g.coverTriedV3 || (!g.hero && !g.heroTriedV2) || !g.infoTriedV2) enrichArtwork(i)
     }
@@ -1437,17 +1569,30 @@ ipcRenderer.on('osd-setup-status', (e, msg, done) => {
   if (done) t._timer = setTimeout(() => { t.style.display = 'none' }, 5000)
 })
 
-ipcRenderer.on('launch-status', (event, status) => {
+// Start-Knopf: gespeist aus dem Eigenstart-Status (launch-status, global) UND den
+// vom Fremdstart-Watcher gemeldeten laufenden Spielen (external-running, pro Pfad).
+let launchStatus = 'idle'
+let externalRunning = new Set()
+function refreshLaunchBtn() {
   const btn = document.getElementById('launchBtn')
+  if (!btn) return
   const messages = {
     'hdr-wait':   '⏳ HDR wird aktiviert...',
     'launching':  '🚀 Spiel wird gestartet...',
     'running':    '⏹ Spiel läuft...',
     'idle':       '▶ Spiel starten'
   }
-  btn.innerHTML = `<span>${messages[status] || '▶ Spiel starten'}</span>`
-  btn.disabled = status !== 'idle'
-})
+  const g = games[selectedIndex]
+  if (launchStatus === 'idle' && g && externalRunning.has(g.path)) {
+    btn.innerHTML = '<span>⏹ Spiel läuft...</span>'   // fremd gestartet (z.B. Xbox-Einladung)
+    btn.disabled = true
+    return
+  }
+  btn.innerHTML = `<span>${messages[launchStatus] || '▶ Spiel starten'}</span>`
+  btn.disabled = launchStatus !== 'idle'
+}
+ipcRenderer.on('launch-status', (event, status) => { launchStatus = status; refreshLaunchBtn() })
+ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set(paths || []); refreshLaunchBtn() })
 
 
     ipcRenderer.on('hdr-status', (event, enabled) => {
@@ -1578,6 +1723,7 @@ ipcRenderer.on('launch-status', (event, status) => {
       document.getElementById('setTray').checked = !!s.minimizeToTray
       document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
       document.getElementById('setOsdEnabled').checked = !!s.osdEnabled
+      document.getElementById('setOsdRenderer').value = s.osdRenderer || 'window'
       document.getElementById('setOsdTheme').value = s.osdTheme || 'compact'
       renderGpuOptions(s.osdGpu || 'auto')
       renderOsdFields(s.osdFields)
@@ -1594,16 +1740,36 @@ ipcRenderer.on('launch-status', (event, status) => {
       document.getElementById('setOsdOpacity').value = oOp
       document.getElementById('osdOpacityVal').textContent = Math.round(oOp * 100) + '%'
       setOsdCorner(s.osdCorner || 'tl', false)
+      document.getElementById('setOsdAbBlock').checked = !!s.osdAbBlock
       appSettingsCache.toggleHotkey = s.toggleHotkey || ''
       appSettingsCache.osdHotkey = s.osdHotkey != null ? s.osdHotkey : 'Alt+O'
       appSettingsCache.osdEditHotkey = s.osdEditHotkey != null ? s.osdEditHotkey : 'Alt+Shift+O'
+      appSettingsCache.osdAbHotkey = s.osdAbHotkey != null ? s.osdAbHotkey : 'Alt+B'
       appSettingsCache.gamepadHotkey = Array.isArray(s.gamepadHotkey) ? s.gamepadHotkey : []
       appSettingsCache.gamepadOsdHotkey = Array.isArray(s.gamepadOsdHotkey) ? s.gamepadOsdHotkey : []
       refreshHotkeyDisplay('main')
       refreshHotkeyDisplay('osd')
       refreshHotkeyDisplay('osdEdit')
+      refreshHotkeyDisplay('osdAb')
       refreshGpHotkeyDisplay('main')
       refreshGpHotkeyDisplay('osd')
+      document.getElementById('setStreamQuality').value = s.streamQuality || 'auto'
+      document.getElementById('setStreamFps').value = String(s.streamFps || 60)
+      // Bitrate: alter 35-Mbit-Wert (fuers fruehere adaptive System) passt nicht
+      // zu CBR -> auf tauglichen Standard migrieren, wenn er keine Option trifft.
+      let skbit = s.streamUploadKbit || 12000
+      const bsel = document.getElementById('setStreamBitrate')
+      if (![...bsel.options].some(o => o.value === String(skbit))) { skbit = 12000; ipcRenderer.invoke('set-app-settings', { streamUploadKbit: 12000 }) }
+      bsel.value = String(skbit)
+      const sbuf = Math.min(1000, Math.max(120, s.streamBufferMs || 120))
+      document.getElementById('setStreamBuffer').value = String(sbuf)
+      document.getElementById('streamBufferVal').textContent = sbuf + ' ms'
+      document.getElementById('setTurnEnabled').checked = !!s.streamTurnEnabled
+      document.getElementById('turnFields').style.display = s.streamTurnEnabled ? 'block' : 'none'
+      document.getElementById('setTurnUrl').value = s.streamTurnUrl || ''
+      document.getElementById('setTurnUser').value = s.streamTurnUser || ''
+      document.getElementById('setTurnPass').value = s.streamTurnPass || ''
+      if (settingsTab === 'stream') { ipcRenderer.invoke('broadcast-status').then(renderStreamState).catch(() => {}); loadSources() }
     }
     function hideSettings() { stopHotkeyCapture(); if (settingsTab != null) showLibraryView() }
 
@@ -1649,6 +1815,8 @@ ipcRenderer.on('launch-status', (event, status) => {
     function onOsdSettingChange() {
       ipcRenderer.invoke('set-app-settings', {
         osdEnabled: document.getElementById('setOsdEnabled').checked,
+        osdAbBlock: document.getElementById('setOsdAbBlock').checked,
+        osdRenderer: document.getElementById('setOsdRenderer').value,
         osdTheme: document.getElementById('setOsdTheme').value,
         osdFields: osdFieldsState,
         osdFpsSource: document.getElementById('setOsdFpsSource').value,
@@ -1659,6 +1827,203 @@ ipcRenderer.on('launch-status', (event, status) => {
     }
     function onOsdGpuChange() {
       ipcRenderer.invoke('set-app-settings', { osdGpu: document.getElementById('setOsdGpu').value })
+    }
+
+    // --- Live-Stream (WebRTC-Broadcast) ---------------------------------------
+    function renderStreamState(st) {
+      const on = !!(st && st.active)
+      // Live-Indikator im Header (immer sichtbar, solange der Stream läuft)
+      const ind = document.getElementById('streamIndicator')
+      if (ind) {
+        ind.style.display = on ? 'flex' : 'none'
+        const v = st && st.viewers || 0
+        document.getElementById('streamIndLabel').textContent = on ? (v > 0 ? 'LIVE · ' + v + ' 👁' : 'LIVE') : 'LIVE'
+      }
+      document.getElementById('streamStateLabel').textContent = on ? 'Stream läuft' : 'Stream aus'
+      const btn = document.getElementById('streamToggleBtn')
+      btn.textContent = on ? 'Stream stoppen' : 'Stream starten'
+      document.getElementById('streamInfo').style.display = on ? 'block' : 'none'
+      document.getElementById('streamHint').style.display = on ? 'none' : 'block'
+      if (on) {
+        document.getElementById('streamLink').value = st.link || ''
+        let net = ''
+        if (st.opening) net = '  ·  ⏳ Router wird geprüft…'
+        else if (st.internet) net = '  ·  🌐 aus dem Internet erreichbar'
+        else if (st.needsForward) net = '  ·  ⚠️ Ports (8787 TCP / 8189 UDP) am Router noch freigeben'
+        else net = '  ·  nur im lokalen Netz'
+        const cap = st.captureError ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">⚠️ <b>Kein Bild.</b> Läuft dein Spiel im <b>exklusiven Vollbild</b>? Stelle es auf <b>randloses Fenster</b> („Borderless"/„Fenster-Vollbild") um – dann kann Lumora aufnehmen, ohne ins Spiel einzugreifen.</div>' : ''
+        document.getElementById('streamStats').innerHTML =
+          'Zuschauer: ' + (st.viewers || 0) + (st.quality ? '  ·  ' + st.quality : '') + net + cap
+        document.getElementById('streamForwardHelp').style.display = st.needsForward ? 'block' : 'none'
+      }
+      if (on) startViewerPoll(); else stopViewerPoll()
+    }
+    // --- Zuschauer-Liste (IP/Browser) + Kick ---------------------------------
+    let viewerPollTimer = null
+    function startViewerPoll() { if (!viewerPollTimer) { refreshViewers(); viewerPollTimer = setInterval(refreshViewers, 3000) } }
+    function stopViewerPoll() { if (viewerPollTimer) { clearInterval(viewerPollTimer); viewerPollTimer = null }; renderViewers([]) }
+    async function refreshViewers() { try { renderViewers(await ipcRenderer.invoke('list-viewers')) } catch (e) {} }
+    function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
+    function renderViewers(list) {
+      const box = document.getElementById('viewerListBox'), el = document.getElementById('viewerList')
+      if (!list || !list.length) { box.style.display = 'none'; el.innerHTML = ''; return }
+      box.style.display = 'block'
+      el.innerHTML = list.map((v) => {
+        const mins = Math.max(0, Math.floor((Date.now() - v.since) / 60000))
+        const dur = mins < 1 ? 'gerade dazu' : 'seit ' + mins + ' min'
+        const mb = v.bytes ? '  ·  ' + (v.bytes / 1048576).toFixed(0) + ' MB' : ''
+        const ua = v.ua ? '  ·  ' + escHtml(v.ua) : ''
+        return '<div style="display:flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(255,255,255,.05); border-radius:8px; margin-bottom:6px; font-size:13px">'
+          + '<span style="flex:1"><b>' + escHtml(v.ip || '?') + '</b>' + ua + '  ·  ' + dur + mb + '</span>'
+          + '<button class="btn-browse" style="padding:5px 10px" onclick="kickViewer(\'' + v.id + '\', \'' + (v.ip || '') + '\', false)" title="Zuschauer trennen">Entfernen</button>'
+          + '<button class="btn-browse" style="padding:5px 10px" onclick="kickViewer(\'' + v.id + '\', \'' + (v.ip || '') + '\', true)" title="Trennen und diese IP sperren">🚫 Sperren</button>'
+          + '</div>'
+      }).join('')
+    }
+    async function kickViewer(id, ip, block) {
+      try { await ipcRenderer.invoke('kick-viewer', id, ip, block) } catch (e) {}
+      setTimeout(refreshViewers, 300)
+    }
+    async function toggleBroadcast() {
+      const btn = document.getElementById('streamToggleBtn')
+      btn.disabled = true
+      try {
+        const cur = await ipcRenderer.invoke('broadcast-status')
+        const st = cur && cur.active ? await ipcRenderer.invoke('stop-broadcast') : await ipcRenderer.invoke('start-broadcast')
+        if (st && st.noEncoder) streamToast('⚠️ Streaming braucht eine GPU mit Video-Encoder (NVIDIA, AMD oder Intel).')
+        renderStreamState(st)
+      } finally { btn.disabled = false }
+    }
+    function copyStreamLink() {
+      const el = document.getElementById('streamLink')
+      el.select()
+      navigator.clipboard.writeText(el.value).catch(() => { try { document.execCommand('copy') } catch {} })
+    }
+    function streamToast(msg) {
+      const t = document.getElementById('gamepadToast')
+      if (!t) return
+      clearTimeout(t._timer); t.textContent = msg; t.style.display = 'block'
+      t._timer = setTimeout(() => { t.style.display = 'none' }, 4000)
+    }
+    function shareStream(target) {
+      const link = document.getElementById('streamLink').value
+      if (!link) return
+      const msg = 'Schau bei meinem Live-Stream zu: ' + link
+      const shell = require('electron').shell
+      if (target === 'whatsapp') shell.openExternal('https://wa.me/?text=' + encodeURIComponent(msg))
+      else if (target === 'telegram') shell.openExternal('https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Schau bei meinem Live-Stream zu'))
+      else if (target === 'email') shell.openExternal('mailto:?subject=' + encodeURIComponent('Mein Live-Stream') + '&body=' + encodeURIComponent(msg))
+      else if (target === 'discord') {
+        // Discord kennt keinen Teilen-Link -> Link kopieren + Discord öffnen, Nutzer fügt ein
+        navigator.clipboard.writeText(link).catch(() => {})
+        shell.openExternal('discord://').catch(() => {})
+        streamToast('📋 Link kopiert – in Discord mit Strg+V einfügen')
+      }
+    }
+    function onStreamSettingChange() {
+      ipcRenderer.invoke('set-app-settings', {
+        streamQuality: document.getElementById('setStreamQuality').value,
+        streamFps: parseInt(document.getElementById('setStreamFps').value, 10),
+        streamUploadKbit: parseInt(document.getElementById('setStreamBitrate').value, 10),
+      })
+    }
+    // Jitter-Puffer der Zuschauer: getrennt gespeichert, damit die Regler-Bewegung
+    // KEINEN FFmpeg-Neustart ausloest (streamBufferMs ist davon ausgenommen). Der
+    // Player holt den Wert per /cfg und wendet ihn live an.
+    function onStreamBufferInput() {
+      const ms = parseInt(document.getElementById('setStreamBuffer').value, 10)
+      document.getElementById('streamBufferVal').textContent = ms + ' ms'
+      ipcRenderer.invoke('set-app-settings', { streamBufferMs: ms })
+    }
+    async function loadSources() {
+      try {
+        const list = await ipcRenderer.invoke('list-sources')
+        const sel = document.getElementById('setStreamScreen')
+        const cur = sel.value
+        sel.innerHTML = ''
+        list.forEach((s) => {
+          const opt = document.createElement('option')
+          opt.value = s.value
+          opt.textContent = s.label
+          sel.appendChild(opt)
+        })
+        const st = await ipcRenderer.invoke('get-app-settings')
+        const want = st.streamSource || cur
+        if (want && [...sel.options].some(o => o.value === want)) {
+          sel.value = want
+        } else if (sel.options.length) {
+          // Gespeicherte Quelle (z. B. ein inzwischen geschlossenes Fenster) gibt es
+          // nicht mehr -> auf die erste verfügbare Option (ganzer Bildschirm) zurück
+          // UND das speichern. Sonst zeigt das Dropdown „ganzer Bildschirm", der
+          // Stream nimmt aber weiter das tote Fenster -> Helfer-Absturz, kein Bild.
+          sel.value = sel.options[0].value
+          ipcRenderer.invoke('set-app-settings', { streamSource: sel.value })
+        }
+      } catch (e) {}
+    }
+    function onSourceChange() {
+      ipcRenderer.invoke('set-app-settings', { streamSource: document.getElementById('setStreamScreen').value || '' })
+    }
+    function onTurnUiChange() {
+      const en = document.getElementById('setTurnEnabled').checked
+      document.getElementById('turnFields').style.display = en ? 'block' : 'none'
+      ipcRenderer.invoke('set-app-settings', {
+        streamTurnEnabled: en,
+        streamTurnUrl: document.getElementById('setTurnUrl').value.trim(),
+        streamTurnUser: document.getElementById('setTurnUser').value.trim(),
+        streamTurnPass: document.getElementById('setTurnPass').value,
+      })
+    }
+    async function runConnTest() {
+      const btn = document.getElementById('connTestBtn'), box = document.getElementById('connTestResult')
+      btn.disabled = true; btn.textContent = 'Teste…'
+      box.style.display = 'block'
+      box.innerHTML = '<p class="settings-hint">Prüfe öffentliche Adresse, NAT-Typ und Router-Portfreigabe…</p>'
+      try {
+        const r = await ipcRenderer.invoke('test-connectivity')
+        const icon = { ok: '✅', warn: '⚠️', error: '❌' }
+        const head = { ok: 'Alles bereit – dein Stream ist aus dem Internet erreichbar.',
+          warn: 'Grundsätzlich möglich, aber ein Punkt braucht deine Aufmerksamkeit:',
+          error: 'Direktes Streaming ist mit diesem Anschluss nicht möglich.' }
+        const border = { ok: '#4ade80', warn: '#f5b942', error: '#f05a5a' }
+        let html = '<div style="border-left:3px solid ' + border[r.verdict] + '; padding:8px 12px; background:rgba(255,255,255,.03); border-radius:6px">'
+        html += '<p style="margin:0 0 8px; font-weight:600">' + icon[r.verdict] + ' ' + head[r.verdict] + '</p>'
+        for (const s of r.steps) {
+          html += '<p class="settings-hint" style="margin:5px 0"><b>' + icon[s.state] + ' ' + s.label + ':</b> ' + s.detail + '</p>'
+        }
+        html += '</div>'
+        box.innerHTML = html
+      } catch (e) {
+        box.innerHTML = '<p class="settings-hint">Test fehlgeschlagen: ' + (e && e.message || e) + '</p>'
+      } finally { btn.disabled = false; btn.textContent = 'Erneut testen' }
+    }
+    ipcRenderer.on('broadcast-status', (e, st) => renderStreamState(st))
+    // Neuer Zuschauer: freundlicher Zwei-Ton + Hinweis-Toast (auch ausserhalb des Stream-Tabs)
+    ipcRenderer.on('viewer-joined', (e, n) => {
+      playJoinSound()
+      const t = document.getElementById('gamepadToast')
+      if (t) {
+        clearTimeout(t._timer)
+        t.textContent = '👁 Neuer Zuschauer – ' + n + (n === 1 ? ' Person schaut' : ' Personen schauen') + ' zu'
+        t.style.display = 'block'
+        t._timer = setTimeout(() => { t.style.display = 'none' }, 4000)
+      }
+    })
+    function playJoinSound() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)()
+        const now = ctx.currentTime
+        ;[[880, 0], [1174.7, 0.13]].forEach(function (p) {
+          const o = ctx.createOscillator(), g = ctx.createGain()
+          o.connect(g); g.connect(ctx.destination)
+          o.type = 'sine'; o.frequency.value = p[0]
+          g.gain.setValueAtTime(0.0001, now + p[1])
+          g.gain.exponentialRampToValueAtTime(0.22, now + p[1] + 0.02)
+          g.gain.exponentialRampToValueAtTime(0.0001, now + p[1] + 0.28)
+          o.start(now + p[1]); o.stop(now + p[1] + 0.3)
+        })
+        setTimeout(function () { try { ctx.close() } catch (e) {} }, 900)
+      } catch (e) {}
     }
     // OSD-Einrichtung (FPS-Dienst + PawnIO-CPU-Sensorik) nach frueherer Ablehnung
     // erneut anstossen: Erklaer-Dialog + ein UAC, nur fuer das, was wirklich fehlt.
@@ -2064,13 +2429,15 @@ ipcRenderer.on('launch-status', (event, status) => {
     // ======================================================================
     // Hotkey-Konfiguration (globaler Toggle-Shortcut)
     // ======================================================================
-    const appSettingsCache = { toggleHotkey: 'Alt+L', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O', gamepadHotkey: [], gamepadOsdHotkey: [] }
-    // Drei Tastatur-Hotkeys nach gleichem Muster: 'main' (Oberfläche in den
-    // Vordergrund), 'osd' (Overlay ein/aus), 'osdEdit' (OSD-Konfigurationsmodus).
+    const appSettingsCache = { toggleHotkey: 'Alt+L', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O', osdAbHotkey: 'Alt+B', gamepadHotkey: [], gamepadOsdHotkey: [] }
+    // Tastatur-Hotkeys nach gleichem Muster: 'main' (Oberfläche in den
+    // Vordergrund), 'osd' (Overlay ein/aus), 'osdEdit' (OSD-Konfigurationsmodus),
+    // 'osdAb' (Afterburner-Block im Spiel ein/aus).
     const KB_SLOTS = {
       main:    { key: 'toggleHotkey',  which: undefined, disp: 'hotkeyDisplay',       btn: 'hotkeyCaptureBtn' },
       osd:     { key: 'osdHotkey',     which: 'osd',     disp: 'osdKbHotkeyDisplay',   btn: 'osdKbHotkeyBtn' },
       osdEdit: { key: 'osdEditHotkey', which: 'osdEdit', disp: 'osdEditHotkeyDisplay', btn: 'osdEditHotkeyBtn' },
+      osdAb:   { key: 'osdAbHotkey',   which: 'osdAb',   disp: 'osdAbHotkeyDisplay',   btn: 'osdAbHotkeyBtn' },
     }
     let kbCaptureSlot = null           // null | 'main' | 'osd' | 'osdEdit'
     function refreshHotkeyDisplay(slot) {
@@ -2881,6 +3248,9 @@ ipcRenderer.on('launch-status', (event, status) => {
       appSettingsCache.gamepadHotkey = Array.isArray(s.gamepadHotkey) ? s.gamepadHotkey : []
       appSettingsCache.gamepadOsdHotkey = Array.isArray(s.gamepadOsdHotkey) ? s.gamepadOsdHotkey : []
     }).catch(() => {})
+
+    // Header-Live-Indikator initialisieren, falls beim Start schon ein Stream läuft
+    ipcRenderer.invoke('broadcast-status').then(renderStreamState).catch(() => {})
 
     // UI steht → Boot-Screen ausblenden
     document.getElementById('bootScreen').classList.add('hidden')
