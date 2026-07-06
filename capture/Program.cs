@@ -185,8 +185,12 @@ static class Program
             var framePool = Direct3D11CaptureFramePool.Create(winrtDevice, fmt, 2, new SizeInt32(_width, _height));
             var session = framePool.CreateCaptureSession(item);
             try { session.IsCursorCaptureEnabled = true; } catch { }
-            // Gelbe WGC-Aufnahme-Umrandung entfernen (Win11 22000+). Ohne das
-            // zieht Windows einen gelben Rahmen ums aufgenommene Fenster.
+            // Gelben WGC-Aufnahme-Rahmen entfernen. Ab Win11 22000 reicht dafuer
+            // IsBorderRequired=false. Auf Win10 (und teils Win11) verpufft das aber,
+            // wenn die App nicht ZUVOR die Borderless-Berechtigung angefordert hat.
+            // RequestAccessAsync(Borderless) laeuft still (kein Dialog); fehlt die
+            // API auf aelteren Builds -> catch, dann bleibt der Rahmen wie bisher.
+            try { GraphicsCaptureAccess.RequestAccessAsync(GraphicsCaptureAccessKind.Borderless).GetAwaiter().GetResult(); } catch { }
             try { session.IsBorderRequired = false; } catch { }
             item.Closed += (s, e) => { _running = false; };
             session.StartCapture();

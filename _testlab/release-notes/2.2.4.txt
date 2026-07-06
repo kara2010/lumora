@@ -1,0 +1,5 @@
+Streaming auf AMD-Grafikkarten + Feinschliff:
+
+• AMD-Grafikkarten: Das Streaming funktioniert jetzt zuverlässig – das schwarze Bild bei AMD-Encodern ist behoben.
+• Fenster-Streaming: Ändert das aufgenommene Fenster seine Größe (z. B. Video → Vollbild), läuft der Stream ohne Abbruch weiter – mit sauberen Rändern statt abgeschnittenem Bild.
+• Aufräumen: Ein alter Autostart-Eintrag aus der Zeit vor der Umbenennung wird automatisch entfernt (startete sonst zusätzlich eine veraltete Version mit).
