@@ -3738,12 +3738,22 @@ ipcMain.handle('list-sources', async () => {
       if (String(d.id) === primaryId) label += ' · Haupt'
       out.push({ value: 'screen:' + i, label })   // i = ddagrab output_idx
     })
-    const wins = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } })
-    wins.forEach((w) => {
-      const m = /^window:(\d+):/.exec(w.id)
-      const n = String(w.name || '').trim()
-      if (!m || !n || /^lumora$/i.test(n)) return   // eigenes Fenster raus
-      out.push({ value: 'window:' + m[1], label: '🪟 ' + n })
+    // Fenster per eigenem WGC-Helfer enumerieren (EnumWindows). Electrons
+    // desktopCapturer verschluckt viele Fenster (Explorer/Edge u.a.); der Helfer
+    // findet sie alle, und die HWND passt exakt zu dem, was er aufnehmen kann.
+    const raw = await new Promise((res) => {
+      try {
+        require('child_process').execFile(streamBin('lumora-capture.exe'), ['--list'],
+          { windowsHide: true, timeout: 6000, maxBuffer: 1 << 20 }, (e, so) => res(String(so || '')))
+      } catch { res('') }
+    })
+    const seen = new Set()
+    raw.split(/\r?\n/).forEach((line) => {
+      const tab = line.indexOf('\t'); if (tab < 0) return
+      const hwnd = line.slice(0, tab).trim(), n = line.slice(tab + 1).trim()
+      if (!hwnd || !n || /^lumora$/i.test(n) || /^Program Manager$/.test(n) || seen.has(hwnd)) return
+      seen.add(hwnd)
+      out.push({ value: 'window:' + hwnd, label: '🪟 ' + n })
     })
     return out
   } catch { return [] }
