@@ -38,6 +38,9 @@
   button.ctl:hover { background: rgba(40,44,58,.9) }
   button.ctl:active { background: rgba(52,56,72,.95) }
   button.ctl svg { width: 17px; height: 17px; fill: currentColor }
+  /* Infoanzeige komplett aus (getrennt vom Idle-Ausblenden) */
+  body.stats-off #stats { display: none; }
+  #v { will-change: transform; }
   /* Touch-Geraete / kleine Bildschirme: groessere Tap-Ziele + lesbarere Groessen */
   @media (max-width: 640px), (pointer: coarse) {
     button.ctl { padding: 12px 18px; font-size: 15px; min-height: 46px; border-radius: 11px; }
@@ -62,6 +65,7 @@
 <div id="overlay"><div class="badge"><span class="dot" id="dot"></span><span id="msg">Verbinde…</span></div></div>
 <div id="bar">
   <button class="ctl" id="soundBtn" onclick="unmute()" style="display:none">🔊 Ton</button>
+  <button class="ctl" id="statsBtn" onclick="toggleStats()" title="Infoanzeige ein/aus">📊</button>
   <button class="ctl" id="fsBtn" onclick="toggleFullscreen()" title="Vollbild (F / Doppelklick)">
     <svg viewBox="0 0 24 24" id="fsIcon"><path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/></svg>
     <span id="fsLabel">Vollbild</span>
@@ -113,8 +117,77 @@
   document.addEventListener('fullscreenchange', function () {
     document.getElementById('fsLabel').textContent = document.fullscreenElement ? 'Beenden' : 'Vollbild'
   })
-  v.addEventListener('dblclick', toggleFullscreen)
-  document.addEventListener('keydown', function (e) { if (e.key === 'f' || e.key === 'F') toggleFullscreen() })
+  v.addEventListener('dblclick', function () { if (zScale > 1) resetZoom(); else toggleFullscreen() })
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'f' || e.key === 'F') toggleFullscreen()
+    else if (e.key === '0' || e.key === 'Escape') { if (zScale > 1) resetZoom() }
+  })
+
+  // --- Infoanzeige (fps/Aufloesung/Bitrate) ein/aus, in localStorage gemerkt --
+  var statsBtn = document.getElementById('statsBtn')
+  function applyStatsPref() {
+    var off = localStorage.getItem('lumoraStatsOff') === '1'
+    document.body.classList.toggle('stats-off', off)
+    if (statsBtn) statsBtn.style.opacity = off ? '.45' : '1'
+  }
+  function toggleStats() {
+    localStorage.setItem('lumoraStatsOff', localStorage.getItem('lumoraStatsOff') === '1' ? '0' : '1')
+    applyStatsPref()
+  }
+  applyStatsPref()
+
+  // --- Video-Zoom: Mausrad / Pinch zoomen, Ziehen verschiebt (nur bei Zoom) ---
+  // transform-origin 0 0 + translate/scale; der Punkt unter Cursor/Pinch bleibt fix.
+  var zScale = 1, zTx = 0, zTy = 0
+  function applyZoom() {
+    v.style.transformOrigin = '0 0'
+    v.style.transform = 'translate(' + zTx + 'px,' + zTy + 'px) scale(' + zScale + ')'
+    v.style.cursor = zScale > 1 ? 'grab' : ''
+  }
+  function clampZoom() {
+    var w = innerWidth, h = innerHeight
+    zTx = Math.min(0, Math.max(w - w * zScale, zTx))
+    zTy = Math.min(0, Math.max(h - h * zScale, zTy))
+  }
+  function resetZoom() { zScale = 1; zTx = 0; zTy = 0; applyZoom() }
+  function zoomTo(ns, cx, cy) {
+    ns = Math.min(6, Math.max(1, ns))
+    if (ns === zScale) return
+    zTx = cx - (cx - zTx) * (ns / zScale)
+    zTy = cy - (cy - zTy) * (ns / zScale)
+    zScale = ns
+    if (zScale <= 1.001) { zScale = 1; zTx = 0; zTy = 0 }
+    clampZoom(); applyZoom()
+  }
+  v.addEventListener('wheel', function (e) { e.preventDefault(); zoomTo(zScale * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY) }, { passive: false })
+  var drag = null
+  v.addEventListener('mousedown', function (e) { if (zScale > 1) { drag = { x: e.clientX, y: e.clientY }; v.style.cursor = 'grabbing'; e.preventDefault() } })
+  addEventListener('mousemove', function (e) { if (drag) { zTx += e.clientX - drag.x; zTy += e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY; clampZoom(); applyZoom() } })
+  addEventListener('mouseup', function () { if (drag) { drag = null; v.style.cursor = zScale > 1 ? 'grab' : '' } })
+  var ts = null
+  function pinchDist(t) { return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) }
+  v.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 2) { ts = { d0: pinchDist(e.touches), s0: zScale, tx0: zTx, ty0: zTy, mx: (e.touches[0].clientX + e.touches[1].clientX) / 2, my: (e.touches[0].clientY + e.touches[1].clientY) / 2 } }
+    else if (e.touches.length === 1 && zScale > 1) { ts = { pan: true, x: e.touches[0].clientX, y: e.touches[0].clientY } }
+    else { ts = null }
+  }, { passive: false })
+  v.addEventListener('touchmove', function (e) {
+    if (!ts) return
+    if (ts.pan && e.touches.length === 1) {
+      e.preventDefault()
+      zTx += e.touches[0].clientX - ts.x; zTy += e.touches[0].clientY - ts.y
+      ts.x = e.touches[0].clientX; ts.y = e.touches[0].clientY
+      clampZoom(); applyZoom()
+    } else if (e.touches.length === 2 && ts.d0) {
+      e.preventDefault()
+      var ns = Math.min(6, Math.max(1, ts.s0 * pinchDist(e.touches) / ts.d0))
+      var wx = (ts.mx - ts.tx0) / ts.s0, wy = (ts.my - ts.ty0) / ts.s0
+      zScale = ns; zTx = ts.mx - wx * ns; zTy = ts.my - wy * ns
+      if (zScale <= 1.001) { zScale = 1; zTx = 0; zTy = 0 }
+      clampZoom(); applyZoom()
+    }
+  }, { passive: false })
+  v.addEventListener('touchend', function (e) { if (e.touches.length === 0) ts = null })
 
   // --- Steuerleiste bei Inaktivitaet ausblenden -----------------------------
   var idleTimer
