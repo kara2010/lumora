@@ -1830,6 +1830,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
 
     // --- Live-Stream (WebRTC-Broadcast) ---------------------------------------
+    let _streamOpening = false
     function renderStreamState(st) {
       const on = !!(st && st.active)
       // Live-Indikator im Header (immer sichtbar, solange der Stream läuft)
@@ -1845,7 +1846,12 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('streamInfo').style.display = on ? 'block' : 'none'
       document.getElementById('streamHint').style.display = on ? 'none' : 'block'
       if (on) {
-        document.getElementById('streamLink').value = st.link || ''
+        // Waehrend der Router-Pruefung (opening) steht noch der LAN-Link bereit –
+        // den NICHT als Freigabelink anbieten, sonst kopiert man die interne IP.
+        _streamOpening = !!st.opening
+        const linkEl = document.getElementById('streamLink')
+        if (st.opening) { linkEl.value = ''; linkEl.placeholder = '⏳ Öffentlicher Link wird vorbereitet…' }
+        else { linkEl.value = st.link || ''; linkEl.placeholder = '' }
         let net = ''
         if (st.opening) net = '  ·  ⏳ Router wird geprüft…'
         else if (st.internet) net = '  ·  🌐 aus dem Internet erreichbar'
@@ -1896,6 +1902,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function copyStreamLink() {
       const el = document.getElementById('streamLink')
+      if (_streamOpening || !el.value) { streamToast('⏳ Link wird noch vorbereitet – gleich ist er da.'); return }
       el.select()
       navigator.clipboard.writeText(el.value).catch(() => { try { document.execCommand('copy') } catch {} })
     }
@@ -1907,7 +1914,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function shareStream(target) {
       const link = document.getElementById('streamLink').value
-      if (!link) return
+      if (_streamOpening || !link) { streamToast('⏳ Link wird noch vorbereitet – gleich ist er da.'); return }
       const msg = 'Schau bei meinem Live-Stream zu: ' + link
       const shell = require('electron').shell
       if (target === 'whatsapp') shell.openExternal('https://wa.me/?text=' + encodeURIComponent(msg))
