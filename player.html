@@ -30,7 +30,10 @@
   #bar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: flex-end; gap: 10px;
     padding: 14px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background: linear-gradient(transparent, rgba(0,0,0,.55)); transition: opacity .3s; }
+  /* Steuerleiste UND Info-Anzeige blenden bei Inaktivitaet aus – AUSSER die
+     Info-Anzeige ist per 📊 angeheftet (stats-pinned), dann bleibt sie dauerhaft. */
   .idle #bar, .idle #stats { opacity: 0; pointer-events: none; }
+  body.stats-pinned.idle #stats { opacity: 1; pointer-events: auto; }
   .idle { cursor: none; }
   button.ctl { display: flex; align-items: center; gap: 7px; background: rgba(20,22,30,.8); color: #e8e8ea;
     border: 1px solid rgba(255,255,255,.12); border-radius: 9px; padding: 10px 15px; font-size: 14px; cursor: pointer;
@@ -38,8 +41,6 @@
   button.ctl:hover { background: rgba(40,44,58,.9) }
   button.ctl:active { background: rgba(52,56,72,.95) }
   button.ctl svg { width: 17px; height: 17px; fill: currentColor }
-  /* Infoanzeige komplett aus (getrennt vom Idle-Ausblenden) */
-  body.stats-off #stats { display: none; }
   #v { will-change: transform; }
   /* Touch-Geraete / kleine Bildschirme: groessere Tap-Ziele + lesbarere Groessen */
   @media (max-width: 640px), (pointer: coarse) {
@@ -123,15 +124,17 @@
     else if (e.key === '0' || e.key === 'Escape') { if (zScale > 1) resetZoom() }
   })
 
-  // --- Infoanzeige (fps/Aufloesung/Bitrate) ein/aus, in localStorage gemerkt --
+  // --- Info-Anzeige (fps/Aufloesung/Bitrate) ANHEFTEN: normal blendet sie mit
+  //     der Steuerleiste bei Inaktivitaet aus; per 📊 angeheftet bleibt sie
+  //     dauerhaft sichtbar. Zustand in localStorage gemerkt.
   var statsBtn = document.getElementById('statsBtn')
   function applyStatsPref() {
-    var off = localStorage.getItem('lumoraStatsOff') === '1'
-    document.body.classList.toggle('stats-off', off)
-    if (statsBtn) statsBtn.style.opacity = off ? '.45' : '1'
+    var pin = localStorage.getItem('lumoraStatsPin') === '1'
+    document.body.classList.toggle('stats-pinned', pin)
+    if (statsBtn) statsBtn.style.opacity = pin ? '1' : '.55'
   }
   function toggleStats() {
-    localStorage.setItem('lumoraStatsOff', localStorage.getItem('lumoraStatsOff') === '1' ? '0' : '1')
+    localStorage.setItem('lumoraStatsPin', localStorage.getItem('lumoraStatsPin') === '1' ? '0' : '1')
     applyStatsPref()
   }
   applyStatsPref()

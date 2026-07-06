@@ -1,0 +1,7 @@
+Streaming-Feinschliff:
+
+• Fenster-Freigabe: Jetzt tauchen wirklich alle offenen Fenster in der Auswahl auf – auch Explorer und Edge, die vorher manchmal fehlten.
+• Web-Player fürs Handy optimiert: Das Layout passt sich sauber an, das Video lässt sich per Fingergeste bzw. Mausrad zoomen und verschieben.
+• Info-Anzeige (FPS/Auflösung/Bitrate) im Player per Knopf dauerhaft einblendbar.
+• Freigabelink: Beim schnellen Kopieren direkt nach dem Start kommt jetzt zuverlässig der öffentliche Link – nicht mehr versehentlich die interne Adresse.
+• Klarer Hinweis, falls der NVIDIA-Treiber für das Streaming zu alt ist.
