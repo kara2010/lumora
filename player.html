@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lumora Stream</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #0b0d12; color: #e8e8ea; font-family: system-ui, -apple-system, Segoe UI, sans-serif; overflow: hidden; }
+  #v { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 18px; transition: opacity .4s; }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  .badge { display: flex; align-items: center; gap: 11px; background: rgba(10,12,18,.72); padding: 14px 22px; border-radius: 12px; font-size: 15px; backdrop-filter: blur(6px); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #f5b942; animation: pulse 1.2s infinite; }
+  .dot.live { background: #4ade80; animation: none; }
+  .dot.err { background: #f05a5a; animation: none; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
+  /* Live-Statistik oben rechts */
+  #stats { position: fixed; top: 12px; right: 14px; display: flex; gap: 12px; align-items: center;
+    background: rgba(10,12,18,.6); padding: 7px 13px; border-radius: 9px; font-size: 13px;
+    font-variant-numeric: tabular-nums; backdrop-filter: blur(6px); transition: opacity .3s; }
+  #stats .val { color: #fff; font-weight: 600 }
+  #stats .unit { color: #8a8a96; margin-left: 2px }
+  #stats .fps { color: #74e857 }
+  /* Untere Steuerleiste – blendet nach Inaktivitaet aus */
+  #bar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: flex-end; gap: 10px;
+    padding: 14px 16px; background: linear-gradient(transparent, rgba(0,0,0,.55)); transition: opacity .3s; }
+  .idle #bar, .idle #stats { opacity: 0; pointer-events: none; }
+  .idle { cursor: none; }
+  button.ctl { display: flex; align-items: center; gap: 7px; background: rgba(20,22,30,.8); color: #e8e8ea;
+    border: 1px solid rgba(255,255,255,.12); border-radius: 9px; padding: 10px 15px; font-size: 14px; cursor: pointer; }
+  button.ctl:hover { background: rgba(40,44,58,.9) }
+  button.ctl svg { width: 17px; height: 17px; fill: currentColor }
+</style>
+</head>
+<body>
+<video id="v" autoplay playsinline></video>
+<div id="stats">
+  <span><span class="val fps" id="sFps">–</span><span class="unit">fps</span></span>
+  <span><span class="val" id="sRes">–</span></span>
+  <span><span class="val" id="sBitrate">–</span><span class="unit">Mbit/s</span></span>
+</div>
+<div id="overlay"><div class="badge"><span class="dot" id="dot"></span><span id="msg">Verbinde…</span></div></div>
+<div id="bar">
+  <button class="ctl" id="soundBtn" onclick="unmute()" style="display:none">🔊 Ton</button>
+  <button class="ctl" id="fsBtn" onclick="toggleFullscreen()" title="Vollbild (F / Doppelklick)">
+    <svg viewBox="0 0 24 24" id="fsIcon"><path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/></svg>
+    <span id="fsLabel">Vollbild</span>
+  </button>
+</div>
+<script>
+  // Lumora-Stream-Player: WHEP-Client. Der Stream kommt aus der nativen
+  // Pipeline (FFmpeg-Hardware-Encoder -> mediamtx). Der Player holt per WHEP
+  // (ein POST mit dem SDP-Offer, Antwort = SDP-Answer) eine WebRTC-Verbindung
+  // zu mediamtx (ueber den Lumora-Proxy auf demselben Port). Qualitaet/Helligkeit
+  // bestimmt der Sender (FFmpeg) – ein Stream fuer alle Zuschauer.
+  var v = document.getElementById('v'), overlay = document.getElementById('overlay')
+  var dot = document.getElementById('dot'), msg = document.getElementById('msg'), soundBtn = document.getElementById('soundBtn')
+  var sFps = document.getElementById('sFps'), sRes = document.getElementById('sRes'), sBitrate = document.getElementById('sBitrate')
+  // STUN hilft dem Zuschauer, seine eigene Adresse zu finden; die Medien laufen
+  // zu mediamtx' oeffentlichem ICE-Host. TURN ist fuer reines Empfangen unnoetig.
+  var ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }]
+  function status(text, cls) { msg.textContent = text; dot.className = 'dot' + (cls ? ' ' + cls : '') }
+  function unmute() { v.muted = false; v.play().catch(function(){}); soundBtn.style.display = 'none' }
+
+  // --- Jitter-Puffer --------------------------------------------------------
+  // Der STREAMER stellt den Puffer in Lumora ein; der Player holt ihn per /cfg
+  // (in ms) und setzt ihn auf den Video-Empfaenger. WebRTCs Buffer ist adaptiv –
+  // wir geben nur das ZIEL vor: klein = wenig Verzoegerung, gross = fluessiger
+  // bei zappelnder Leitung. Regelmaessig neu geholt, damit eine Regler-Aenderung
+  // auch bereits verbundene Zuschauer live erreicht (ohne Neuladen).
+  var _bufMs = 120
+  function applyBuffer(receiver) {
+    try { receiver.playoutDelayHint = _bufMs / 1000 } catch (err) {}
+    try { receiver.jitterBufferTarget = _bufMs } catch (err) {}
+  }
+  function refreshBuffer() {
+    fetch('/cfg', { cache: 'no-store' }).then(function (r) { return r.json() }).then(function (c) {
+      if (!c || typeof c.buffer !== 'number' || c.buffer === _bufMs) return
+      _bufMs = c.buffer
+      if (window._pc) window._pc.getReceivers().forEach(function (rc) {
+        if (rc.track && rc.track.kind === 'video') applyBuffer(rc)
+      })
+    }).catch(function () {})
+  }
+  refreshBuffer()                 // initialen Wert holen (vor dem ersten Track)
+  setInterval(refreshBuffer, 4000)
+
+  // --- Vollbild -------------------------------------------------------------
+  function toggleFullscreen() {
+    if (document.fullscreenElement) { document.exitFullscreen() }
+    else { (document.documentElement.requestFullscreen ? document.documentElement.requestFullscreen() : v.webkitEnterFullscreen && v.webkitEnterFullscreen()) }
+  }
+  document.addEventListener('fullscreenchange', function () {
+    document.getElementById('fsLabel').textContent = document.fullscreenElement ? 'Beenden' : 'Vollbild'
+  })
+  v.addEventListener('dblclick', toggleFullscreen)
+  document.addEventListener('keydown', function (e) { if (e.key === 'f' || e.key === 'F') toggleFullscreen() })
+
+  // --- Steuerleiste bei Inaktivitaet ausblenden -----------------------------
+  var idleTimer
+  function activity() {
+    document.body.classList.remove('idle')
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(function () { document.body.classList.add('idle') }, 2600)
+  }
+  document.addEventListener('mousemove', activity)
+  document.addEventListener('touchstart', activity)
+  activity()
+
+  // --- Live-Statistik (empfangene FPS/Aufloesung/Bitrate) -------------------
+  var lastBytes = 0, lastTs = 0
+  setInterval(async function () {
+    if (!window._pc) return
+    try {
+      var s = await window._pc.getStats(), inb = null
+      s.forEach(function (r) { if (r.type === 'inbound-rtp' && r.kind === 'video') inb = r })
+      if (!inb) return
+      sFps.textContent = inb.framesPerSecond != null ? Math.round(inb.framesPerSecond) : '–'
+      sRes.textContent = (inb.frameWidth && inb.frameHeight) ? inb.frameWidth + '×' + inb.frameHeight : '–'
+      var now = performance.now()
+      if (lastTs && inb.bytesReceived != null) {
+        var mbit = (inb.bytesReceived - lastBytes) * 8 / ((now - lastTs) / 1000) / 1e6
+        sBitrate.textContent = mbit >= 0 ? mbit.toFixed(1) : '–'
+      }
+      lastBytes = inb.bytesReceived || 0; lastTs = now
+    } catch (e) {}
+  }, 1000)
+
+  function iceComplete(pc) {
+    return new Promise(function (r) {
+      if (pc.iceGatheringState === 'complete') return r()
+      var t = setTimeout(r, 3000)
+      pc.addEventListener('icegatheringstatechange', function () {
+        if (pc.iceGatheringState === 'complete') { clearTimeout(t); r() }
+      })
+    })
+  }
+  var retrying = false
+  function retry() {
+    if (retrying) return
+    retrying = true
+    try { window._pc && window._pc.close() } catch (e) {}
+    setTimeout(function () { retrying = false; connect() }, 800)
+  }
+  async function connect() {
+    status('Verbinde…')
+    overlay.classList.remove('hidden')
+    var pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, bundlePolicy: 'max-bundle' })
+    window._pc = pc
+    var stream = new MediaStream()
+    pc.addTransceiver('video', { direction: 'recvonly' })
+    pc.addTransceiver('audio', { direction: 'recvonly' })
+    pc.ontrack = function (e) {
+      stream.addTrack(e.track); v.srcObject = stream
+      // Vom Streamer eingestellten Jitter-Puffer anwenden (siehe applyBuffer).
+      applyBuffer(e.receiver)
+    }
+    pc.addEventListener('connectionstatechange', function () {
+      if (pc.connectionState === 'connected') {
+        status('Live', 'live')
+        setTimeout(function () { overlay.classList.add('hidden') }, 1200)
+      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        status('Verbindung verloren – neuer Versuch…', 'err')
+        overlay.classList.remove('hidden')
+        setTimeout(retry, 2000)
+      }
+    })
+    try {
+      var offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      await iceComplete(pc)
+      // WHEP: das komplette Offer als application/sdp posten -> Answer im Body.
+      var resp = await fetch('/whep', { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp })
+      if (resp.status !== 201 && !resp.ok) { status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return }
+      // Session-URL fuer sauberes Abmelden (DELETE) merken.
+      var loc = resp.headers.get('location'); if (loc) window._whepSession = loc
+      var answer = await resp.text()
+      await pc.setRemoteDescription({ type: 'answer', sdp: answer })
+    } catch (e) {
+      status('Server nicht erreichbar', 'err')
+      setTimeout(retry, 3000)
+    }
+  }
+  // Autoplay: erst mit Ton versuchen; blockt der Browser, stumm starten + Ton-Button
+  v.addEventListener('loadedmetadata', function () {
+    v.play().catch(function () {
+      v.muted = true
+      v.play().catch(function () {})
+      soundBtn.style.display = 'inline-flex'
+    })
+  })
+  // Sauberes Abmelden beim Schliessen: WHEP-Session per DELETE beenden (keepalive
+  // laesst den Request noch waehrend des Schliessens raus) -> Zuschauerzahl stimmt.
+  function leave() {
+    if (window._whepSession) {
+      try { fetch(window._whepSession, { method: 'DELETE', keepalive: true }) } catch (e) {}
+      window._whepSession = null
+    }
+  }
+  window.addEventListener('pagehide', leave)
+  window.addEventListener('beforeunload', leave)
+
+  connect()
+</script>
+</body>
+</html>

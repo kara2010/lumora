@@ -292,6 +292,24 @@ body::before {
 .about-credits li::marker { color: #555; }
 .about-credits strong { color: #ccc; }
 
+/* Über-Dialog: Titel + Version oben und der Schließen-Knopf unten bleiben fix;
+   nur der mittlere Inhalt scrollt. Sonst scrollt der ganze Dialog inklusive
+   Button (unruhig, „hässliche" Vollflächen-Scrollbar). */
+.dialog.about-dialog { overflow: hidden; }
+.about-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-right: 8px;
+}
+.about-body::-webkit-scrollbar { width: 5px; }
+.about-body::-webkit-scrollbar-track { background: transparent; }
+.about-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+.about-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.24); }
+
 /* Einstellungen: Cover-Darstellung */
 .mode-options {
   display: flex;
