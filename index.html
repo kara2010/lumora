@@ -1857,7 +1857,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         else if (st.internet) net = '  ·  🌐 aus dem Internet erreichbar'
         else if (st.needsForward) net = '  ·  ⚠️ Ports (8787 TCP / 8189 UDP) am Router noch freigeben'
         else net = '  ·  nur im lokalen Netz'
-        const cap = st.captureError ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">⚠️ <b>Kein Bild.</b> Läuft dein Spiel im <b>exklusiven Vollbild</b>? Stelle es auf <b>randloses Fenster</b> („Borderless"/„Fenster-Vollbild") um – dann kann Lumora aufnehmen, ohne ins Spiel einzugreifen.</div>' : ''
+        const cap = st.driverError
+          ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">⚠️ <b>Grafiktreiber veraltet.</b> Das Streaming benötigt einen aktuellen NVIDIA-Treiber (mindestens Version 610). Bitte über GeForce Experience oder nvidia.com aktualisieren – danach läuft es.</div>'
+          : st.captureError ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">⚠️ <b>Kein Bild.</b> Läuft dein Spiel im <b>exklusiven Vollbild</b>? Stelle es auf <b>randloses Fenster</b> („Borderless"/„Fenster-Vollbild") um – dann kann Lumora aufnehmen, ohne ins Spiel einzugreifen.</div>' : ''
         document.getElementById('streamStats').innerHTML =
           'Zuschauer: ' + (st.viewers || 0) + (st.quality ? '  ·  ' + st.quality : '') + net + cap
         document.getElementById('streamForwardHelp').style.display = st.needsForward ? 'block' : 'none'

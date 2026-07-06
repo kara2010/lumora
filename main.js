@@ -4128,12 +4128,17 @@ function bcSpawnEncoder(args, capOfThis, stdinStream, audOfThis) {
     // langsamer neu versuchen und die UI warnen, statt im Sekundentakt zu spammen.
     if (Date.now() - startedAt < 4000) ffFastFails++; else ffFastFails = 0
     const delay = ffFastFails >= 3 ? 5000 : 1200
+    // NVENC-Treiber zu alt (deterministisch – jeder Neuversuch scheitert gleich):
+    // sofort klaren Hinweis. Der aktuelle FFmpeg-Build braucht NVIDIA-Treiber >= 610.
+    if (/required nvenc API version|minimum required Nvidia driver/i.test(errbuf) && !broadcastState.driverError) {
+      broadcastState.driverError = true; bcPushState()
+    }
     if (ffFastFails === 3 && !broadcastState.captureError) { broadcastState.captureError = true; bcPushState() }
     osdDbg('[stream] ffmpeg beendet (' + code + '), Neustart in ' + delay + 'ms (fails=' + ffFastFails + '): ' + errbuf.slice(-160))
     ffRestartTimer = setTimeout(() => { if (broadcastState.active && !ffStopping) bcStartFfmpeg(bcStreamCfg(bcEncoderCache || { encoder: 'h264_nvenc' })) }, delay)
   })
   // Laeuft der Prozess laenger stabil, Fehlerzaehler + Warnung zuruecksetzen.
-  setTimeout(() => { if (ffProc === p) { ffFastFails = 0; if (broadcastState.captureError) { broadcastState.captureError = false; bcPushState() } } }, 6000)
+  setTimeout(() => { if (ffProc === p) { ffFastFails = 0; if (broadcastState.captureError || broadcastState.driverError) { broadcastState.captureError = false; broadcastState.driverError = false; bcPushState() } } }, 6000)
   return p
 }
 // FFmpeg gezielt neu starten (nach Einstellungsaenderung). mediamtx + WHEP-
