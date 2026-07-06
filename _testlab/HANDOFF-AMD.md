@@ -1,6 +1,19 @@
 # Übergabe: AMD-Streaming-Diagnose
 
-## Stand
+## GELÖST (2026-07-06)
+**Grundursache war NICHT HDR/ddagrab, sondern fehlende periodische IDR-Keyframes von h264_amf.**
+Belege (auf AMD-PC gemessen, FFmpeg N-125472):
+- AMF-Encode selbst i.O.: ddagrab→h264_amf→MP4 ergab helles Bild (YAVG ~44), HDR war AUS (`cap: HDR 0`).
+- Fehler erst im Live-Transport: AMF live→RTSP→Readback = 0 dekodierte Frames, nur „concealing … P frame".
+  Dieselbe AMF-Datei per `-c copy`→RTSP = 155 Frames sauber. Also Encoder ok, Datei ok, LIVE kaputt.
+- Kern: `h264_amf -usage lowlatency` ignoriert `-g` und sendet in 480 Frames (8s) nur EINEN Keyframe
+  (pts 0). Jeder WHEP-Zuschauer verbindet sich später → nie ein Referenz-IDR → schwarz (Monitor) bzw.
+  Player kommt nicht hoch (Fenster). NVENC/QSV honorieren `-g` (IDR alle 2s) → dort kein Problem.
+- **Fix** in `main.js` → `bcEncoderArgs` (nur AMF-Zweig): `-forced_idr 1 -force_key_frames expr:gte(t,n_forced*2)`.
+  Gegenprobe live mit Fix: spät verbundener Reader bekommt 133 Frames/4s, keine Fehler, YAVG 52 (hell).
+- **Offen:** nur noch Verifikation in der echten Lumora-UI (Monitor- UND Fenster-Freigabe, WHEP im Browser).
+
+## Stand (ursprüngliche Notiz)
 Lumora **2.2.3**. Streaming (FFmpeg + mediamtx → WHEP) ist auf **NVIDIA (NVENC)** voll verifiziert:
 Monitor-Weg (ddagrab) UND Fenster-Weg (WGC-Helfer), beide mit Ton, „2 tracks (H264, Opus)", stabil.
 FFmpeg ist bewusst LGPL (kein libx264). Encoder-Wahl GPU-agnostisch: NVENC/AMF/QSV.

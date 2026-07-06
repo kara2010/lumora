@@ -3801,9 +3801,17 @@ async function bcDetectEncoder() {
 // Encoder-spezifische CBR-/Low-Latency-Parameter. Konstante Bitrate (CBR) ist
 // der Schluessel: keine adaptive Drossel, die bei Sende-Jitter einbricht ->
 // gleichmaessiges Bild ohne Klotz-Artefakte bei Bewegung.
+// AMF-Sonderfall (WHEP-Kernbug): h264_amf ignoriert im 'lowlatency'-Usage die
+// GOP-Laenge (-g) und sendet nur EINEN IDR-Keyframe beim Stream-Start, danach
+// ausschliesslich P-Frames. Jeder WebRTC-Zuschauer verbindet sich aber SPAETER
+// -> er bekommt nie einen Referenz-Keyframe -> Bild bleibt schwarz (Monitor)
+// bzw. der Player kommt gar nicht erst hoch (Fenster). NVENC/QSV honorieren -g
+// und liefern alle 2s ein IDR, daher dort kein Problem. Fix: -force_key_frames
+// erzwingt encoderseitig alle 2s einen Keyframe, -forced_idr macht ihn zum
+// echten IDR (AMF-Default: normales I-Frame, das den Decoder NICHT resettet).
 function bcEncoderArgs(enc, kbit) {
   const rate = kbit + 'k', buf = Math.round(kbit / 2) + 'k'
-  if (enc === 'h264_amf') return ['-c:v', 'h264_amf', '-usage', 'lowlatency', '-rc', 'cbr', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', '120', '-bf', '0']
+  if (enc === 'h264_amf') return ['-c:v', 'h264_amf', '-usage', 'lowlatency', '-rc', 'cbr', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', '120', '-bf', '0', '-forced_idr', '1', '-force_key_frames', 'expr:gte(t,n_forced*2)']
   if (enc === 'h264_qsv') return ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-look_ahead', '0', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', '120', '-bf', '0']
   // Default NVENC (haeufigster HW-Encoder; auch defensiver Fallback). Ohne
   // HW-Encoder startet der Stream gar nicht erst – kein libx264 im LGPL-Build.
