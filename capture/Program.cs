@@ -31,6 +31,7 @@ static class Program
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int val, int size);
     delegate bool EnumWindowsProc(IntPtr h, IntPtr p);
     // Hochaufloesenden System-Timer (1 ms) fuer praezises Frame-Timing.
     [DllImport("winmm.dll")] static extern uint timeBeginPeriod(uint p);
@@ -100,6 +101,7 @@ static class Program
         {
             try { timeBeginPeriod(1); } catch { }   // praezises Thread.Sleep fuer sauberes CFR
             if (Array.IndexOf(args, "--audio") >= 0) return RunAudio();   // Audio-Modus (WASAPI-Loopback)
+            if (Array.IndexOf(args, "--list") >= 0) return ListWindows(); // Fenster-Liste (zuverlaessiger als Electrons desktopCapturer)
             IntPtr hwnd = IntPtr.Zero;
             int fps = 60, maxHeight = 0;
             for (int i = 0; i < args.Length; i++)
@@ -537,6 +539,34 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             return true;
         }, IntPtr.Zero);
         return found;
+    }
+
+    // Alle sichtbaren, betitelten Top-Level-Fenster als "hwnd\ttitel" auf stdout.
+    // Ersetzt Electrons desktopCapturer, das viele Fenster (Explorer/Edge u.a.)
+    // verschluckt. Cloaked Fenster (anderer virtueller Desktop / suspendierte UWP)
+    // werden ausgelassen. Die HWND passt exakt zu CreateForWindow beim Aufnehmen.
+    static int ListWindows()
+    {
+        // UTF-8 OHNE BOM, damit Fenstertitel mit Umlauten/Sonderzeichen in main.js
+        // korrekt ankommen (Konsolen-Default waere OEM -> Mojibake).
+        try { Console.OutputEncoding = new System.Text.UTF8Encoding(false); } catch { }
+        var stdout = Console.Out;
+        EnumWindows((h, p) =>
+        {
+            if (!IsWindowVisible(h)) return true;
+            int len = GetWindowTextLength(h);
+            if (len == 0) return true;
+            var sb = new StringBuilder(len + 1);
+            GetWindowText(h, sb, sb.Capacity);
+            var title = sb.ToString().Trim();
+            if (title.Length == 0) return true;
+            int cloaked = 0;
+            try { DwmGetWindowAttribute(h, 14, out cloaked, sizeof(int)); } catch { }   // DWMWA_CLOAKED = 14
+            if (cloaked != 0) return true;
+            stdout.WriteLine((long)h + "\t" + title);
+            return true;
+        }, IntPtr.Zero);
+        return 0;
     }
 
     // Audio-Modus: System-Audio per WASAPI-Loopback als PCM auf stdout, das Format
