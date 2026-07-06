@@ -7,30 +7,49 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; background: #0b0d12; color: #e8e8ea; font-family: system-ui, -apple-system, Segoe UI, sans-serif; overflow: hidden; }
+  /* 100dvh: auf Handys die WIRKLICHE sichtbare Hoehe (dynamische Adressleiste). */
+  body { height: 100dvh; }
   #v { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
-  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 18px; transition: opacity .4s; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 18px; transition: opacity .4s; padding: 20px; }
   #overlay.hidden { opacity: 0; pointer-events: none; }
-  .badge { display: flex; align-items: center; gap: 11px; background: rgba(10,12,18,.72); padding: 14px 22px; border-radius: 12px; font-size: 15px; backdrop-filter: blur(6px); }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: #f5b942; animation: pulse 1.2s infinite; }
+  .badge { display: flex; align-items: center; gap: 11px; background: rgba(10,12,18,.72); padding: 14px 22px; border-radius: 12px; font-size: 15px; backdrop-filter: blur(6px); max-width: min(92vw, 460px); text-align: left; line-height: 1.35; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #f5b942; animation: pulse 1.2s infinite; flex-shrink: 0; }
   .dot.live { background: #4ade80; animation: none; }
   .dot.err { background: #f05a5a; animation: none; }
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
-  /* Live-Statistik oben rechts */
-  #stats { position: fixed; top: 12px; right: 14px; display: flex; gap: 12px; align-items: center;
+  /* Live-Statistik oben rechts – respektiert Notch/Safe-Area, bricht bei Platzmangel um */
+  #stats { position: fixed; top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right));
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: flex-end;
+    max-width: calc(100vw - 28px);
     background: rgba(10,12,18,.6); padding: 7px 13px; border-radius: 9px; font-size: 13px;
     font-variant-numeric: tabular-nums; backdrop-filter: blur(6px); transition: opacity .3s; }
   #stats .val { color: #fff; font-weight: 600 }
   #stats .unit { color: #8a8a96; margin-left: 2px }
   #stats .fps { color: #74e857 }
-  /* Untere Steuerleiste – blendet nach Inaktivitaet aus */
+  /* Untere Steuerleiste – blendet nach Inaktivitaet aus, respektiert Safe-Area */
   #bar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: flex-end; gap: 10px;
-    padding: 14px 16px; background: linear-gradient(transparent, rgba(0,0,0,.55)); transition: opacity .3s; }
+    padding: 14px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background: linear-gradient(transparent, rgba(0,0,0,.55)); transition: opacity .3s; }
   .idle #bar, .idle #stats { opacity: 0; pointer-events: none; }
   .idle { cursor: none; }
   button.ctl { display: flex; align-items: center; gap: 7px; background: rgba(20,22,30,.8); color: #e8e8ea;
-    border: 1px solid rgba(255,255,255,.12); border-radius: 9px; padding: 10px 15px; font-size: 14px; cursor: pointer; }
+    border: 1px solid rgba(255,255,255,.12); border-radius: 9px; padding: 10px 15px; font-size: 14px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation; user-select: none; }
   button.ctl:hover { background: rgba(40,44,58,.9) }
+  button.ctl:active { background: rgba(52,56,72,.95) }
   button.ctl svg { width: 17px; height: 17px; fill: currentColor }
+  /* Touch-Geraete / kleine Bildschirme: groessere Tap-Ziele + lesbarere Groessen */
+  @media (max-width: 640px), (pointer: coarse) {
+    button.ctl { padding: 12px 18px; font-size: 15px; min-height: 46px; border-radius: 11px; }
+    button.ctl svg { width: 19px; height: 19px; }
+    #stats { font-size: 12px; gap: 9px; padding: 6px 11px; }
+    .badge { font-size: 14px; padding: 13px 18px; }
+    #bar { gap: 8px; padding-top: 22px; }
+  }
+  /* Handy quer (sehr flach): Statuszeile kompakter halten */
+  @media (max-height: 430px) {
+    #stats { font-size: 11px; padding: 5px 9px; gap: 7px; }
+  }
 </style>
 </head>
 <body>
