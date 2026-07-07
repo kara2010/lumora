@@ -1,0 +1,7 @@
+Ton-Aussetzer behoben + Streaming-Feinschliff:
+
+• Ton-Aussetzer im Stream behoben: Je nach System mischte die Tonaufnahme regelmäßig winzige Stille-Blöcke in den laufenden Ton – im 6-Stunden-Dauertest aufgespürt und beseitigt.
+• Live-Vorschau in neuer Qualität: echtes Video in voller Schärfe statt Standbild-Folge, startet praktisch sofort mit dem Stream – und pausiert automatisch, während gespielt wird (keine Last im Spiel).
+• Schnellerer Streamstart: Die Router-Prüfung läuft jetzt im Hintergrund, Bild und Ton stehen sofort bereit.
+• Zuschauer sehen schneller ein Bild – beim Einschalten wie auch nach kurzen Verbindungsabbrüchen.
+• Web-Player: Der Hinweis, den Ton per Tipp zu aktivieren, erscheint jetzt zuverlässig als deutliche Schaltfläche mitten im Bild.

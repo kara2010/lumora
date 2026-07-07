@@ -402,6 +402,25 @@ body::before {
 .sgdb-guide-body ol { margin: 6px 0 12px 18px; }
 .sgdb-guide-body li { margin-bottom: 5px; }
 
+/* Stream-Tab: klar getrennte Sektionen. Bei laufendem Stream rutscht die
+   Stream-Sektion (mit der Vorschau) nach oben – Highlight statt Runterscrollen.
+   :not([hidden]) MUSS sein – sonst schlaegt display:flex das hidden-Attribut
+   (hoehere Spezifitaet) und der Panel bliebe in allen anderen Tabs sichtbar. */
+.settings-panel[data-panel="stream"]:not([hidden]) { display: flex; flex-direction: column; }
+.stream-sec { margin-top: 20px; padding-top: 18px; border-top: 1px solid #242424; }
+.settings-panel[data-panel="stream"]:not(.live) .stream-sec:first-of-type,
+.settings-panel[data-panel="stream"].live .stream-sec-stream { margin-top: 0; padding-top: 0; border-top: none; }
+.settings-panel[data-panel="stream"].live .stream-sec-stream { order: -1; }
+.stream-sec > label { font-size: 12px; color: #777; text-transform: uppercase; letter-spacing: .6px; font-weight: 600; }
+/* Der globale Akzent-Schleier (body::before, z-index 9999) liegt ueber der ganzen
+   UI und wuerde sich auch ueber das Vorschau-VIDEO legen -> Bild wirkt aufgehellt
+   und farbstichig. Die Vorschau-Vorfahren bilden keinen Stacking-Context, daher
+   hebt ein z-index > 9999 das Bild zuverlaessig ueber den Schleier (Wrap hat schon
+   position:relative). So bleibt der Schleier auf der Chrome, nicht auf dem Video. */
+#streamPreviewWrap { z-index: 10000; }
+.stream-advanced { margin-top: 6px; }
+.stream-advanced .setting-toggle-row { padding: 6px 0; }
+
 .setting-toggle-row {
   display: flex;
   align-items: center;
@@ -575,6 +594,38 @@ body::before {
 }
 
 .sort-select:focus { border-color: var(--accent); }
+
+/* Aufnahme-Quelle: eigenes Dropdown mit App-Icons (natives <select> kann keine Bilder). */
+.src-dd { position: relative; }
+.src-dd-trigger {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; margin: 0; padding: 7px 10px;
+  background: #111; border: 1px solid #2a2a2a; border-radius: 7px;
+  color: #ddd; font-size: 13px; cursor: pointer; text-align: left;
+}
+.src-dd-trigger:hover { border-color: #3a3a3a; }
+.src-dd.open .src-dd-trigger, .src-dd-trigger:focus { border-color: var(--accent); }
+.src-dd-ico { width: 18px; height: 18px; flex: 0 0 auto; object-fit: contain; border-radius: 3px; }
+.src-dd-emoji { width: 18px; flex: 0 0 auto; text-align: center; }
+.src-dd-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-dd-caret { flex: 0 0 auto; opacity: .6; font-size: 11px; transition: transform .12s; }
+.src-dd.open .src-dd-caret { transform: rotate(180deg); }
+.src-dd-list {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
+  max-height: 264px; overflow-y: auto;
+  background: #1e1e1e; border: 1px solid #333; border-radius: 8px;
+  padding: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+.src-dd-opt {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; margin: 0; padding: 7px 9px;
+  background: transparent; border: 0; border-radius: 6px;
+  color: #ccc; font-size: 13px; cursor: pointer; text-align: left;
+}
+.src-dd-opt:hover, .src-dd-opt.nav-focus, .src-dd-opt.sel { background: #2a2a2a; color: #fff; }
+.src-dd-opt img { width: 20px; height: 20px; flex: 0 0 auto; object-fit: contain; border-radius: 3px; }
+.src-dd-opt .em { width: 20px; flex: 0 0 auto; text-align: center; font-size: 15px; }
+.src-dd-opt .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .list-empty {
   padding: 24px 12px;

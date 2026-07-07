@@ -1,0 +1,10 @@
+Großes Streaming-Update:
+
+• Live-Vorschau: Direkt im Stream-Tab siehst du jetzt, was gerade übertragen wird – ressourcenschonend im Hintergrund.
+• Streamen per Hotkey: Eine frei wählbare Taste startet und stoppt die Freigabe des laufenden Spiels – mit akustischer Rückmeldung.
+• Aufgeräumter Stream-Bereich, klar gegliedert in Aufnahme, Stream und Verbindung. Neue Standardqualität: 1080p, 60 fps, 8 Mbit/s.
+• App-Symbole in der Fensterauswahl – die richtige Quelle ist auf einen Blick erkennbar.
+• Web-Player: Lautstärkeregler und eine klare Aufforderung, den Ton zu aktivieren.
+• Handy: Der Stream läuft weiter, auch wenn man kurz die App wechselt oder eine Nachricht hereinkommt.
+• Bessere Verbindungshilfen beim Test: konkrete Router-Hinweise (u. a. FritzBox), IPv6-Direktweg als Alternative und Unterstützung für TURN-Server.
+• Auto-Update läuft künftig ohne Setup-Dialog durch, und der Download ist deutlich kleiner geworden.

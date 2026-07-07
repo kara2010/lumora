@@ -32,6 +32,10 @@ static class Program
     [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int val, int size);
+    [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr wp, IntPtr lp, uint flags, uint timeout, out IntPtr res);
+    [DllImport("user32.dll")] static extern IntPtr GetClassLongPtr(IntPtr h, int idx);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
     delegate bool EnumWindowsProc(IntPtr h, IntPtr p);
     // Hochaufloesenden System-Timer (1 ms) fuer praezises Frame-Timing.
     [DllImport("winmm.dll")] static extern uint timeBeginPeriod(uint p);
@@ -123,6 +127,18 @@ static class Program
                 CreateDirect3D11DeviceFromDXGIDevice(dxgi.NativePointer, out IntPtr inspectable);
                 winrtDevice = MarshalInterface<IDirect3DDevice>.FromAbi(inspectable);
                 Marshal.Release(inspectable);
+            }
+
+            // Minimierte Fenster rendert Windows nicht -> WGC bekommt nur winzige/leere
+            // Frames (typisch ~100x56). Vor dem Capture wiederherstellen: erst ohne
+            // Fokusklau (SHOWNOACTIVATE), notfalls RESTORE. Danach kurz warten, damit
+            // DWM das Fenster tatsaechlich neu zeichnet, bevor der erste Frame kommt.
+            if (IsIconic(hwnd))
+            {
+                ShowWindow(hwnd, 4);                       // SW_SHOWNOACTIVATE
+                System.Threading.Thread.Sleep(80);
+                if (IsIconic(hwnd)) ShowWindow(hwnd, 9);   // SW_RESTORE (holt es notfalls in den Vordergrund)
+                System.Threading.Thread.Sleep(150);
             }
 
             // GraphicsCaptureItem fuer das Fenster. Ist der HWND ungueltig (Fenster
@@ -563,10 +579,35 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             int cloaked = 0;
             try { DwmGetWindowAttribute(h, 14, out cloaked, sizeof(int)); } catch { }   // DWMWA_CLOAKED = 14
             if (cloaked != 0) return true;
-            stdout.WriteLine((long)h + "\t" + title);
+            stdout.WriteLine((long)h + "\t" + title + "\t" + IconBase64(h));
             return true;
         }, IntPtr.Zero);
         return 0;
+    }
+
+    // App-Icon eines Fensters als PNG (Base64) fuer die Quellen-Liste; "" wenn keins.
+    // Reihenfolge: WM_GETICON (grosses, dann Small2), dann Fenster-Klasse (HICON/HICONSM).
+    static string IconBase64(IntPtr hwnd)
+    {
+        try
+        {
+            IntPtr res;
+            SendMessageTimeout(hwnd, 0x7F, (IntPtr)1, IntPtr.Zero, 0, 200, out res);        // WM_GETICON, ICON_BIG
+            IntPtr hIcon = res;
+            if (hIcon == IntPtr.Zero) { SendMessageTimeout(hwnd, 0x7F, (IntPtr)2, IntPtr.Zero, 0, 200, out res); hIcon = res; }  // ICON_SMALL2
+            if (hIcon == IntPtr.Zero) hIcon = GetClassLongPtr(hwnd, -14);                    // GCLP_HICON
+            if (hIcon == IntPtr.Zero) hIcon = GetClassLongPtr(hwnd, -34);                    // GCLP_HICONSM
+            if (hIcon == IntPtr.Zero) return "";
+            using (var ico = System.Drawing.Icon.FromHandle(hIcon))
+            using (var bmp0 = ico.ToBitmap())
+            using (var bmp = new System.Drawing.Bitmap(bmp0, new System.Drawing.Size(24, 24)))   // Anzeigegroesse -> kleine Base64
+            using (var ms = new System.IO.MemoryStream())
+            {
+                bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                return Convert.ToBase64String(ms.ToArray());
+            }
+        }
+        catch { return ""; }
     }
 
     // Audio-Modus: System-Audio per WASAPI-Loopback als PCM auf stdout, das Format
@@ -598,37 +639,53 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             capture.RecordingStopped += (s, e) => { try { queue.CompleteAdding(); } catch { } };
             // WICHTIG: WasapiLoopbackCapture feuert bei STILLE keine DataAvailable-
             // Events. Ohne Daten blockiert FFmpeg beim Lesen von fd 3 und muxt kein
-            // Video mehr -> die Video-Pipe laeuft voll, der Video-Helfer haengt im
-            // stdout.Write, der ganze Stream friert ein (mediamtx-Timeout -> "Kein
-            // Stream"). Darum GARANTIERT der Writer einen lueckenlosen Strom: fehlt
-            // echtes Audio, schiebt er Stille (Nullen) nach, bis der Byte-Zaehler die
-            // Echtzeit-Uhr eingeholt hat. Echtes Audio zaehlt gleichwertig mit -> kein
-            // A/V-Drift. Die Toleranz (~150 ms) faengt die normale WASAPI-Puffer-Latenz
-            // ab, damit bei LAUFENDEM Ton keine Stille eingemischt wird.
+            // Video mehr -> die Video-Pipe laeuft voll, der ganze Stream friert ein.
+            // Darum schiebt der Writer bei echten Tonpausen Stille (Nullen) nach.
+            // ACHTUNG (Lehre aus 2.2.x-Tonaussetzern): NICHT gegen eine absolute
+            // Echtzeit-Uhr fuellen! Die WASAPI-Pipeline-Latenz (system-/geraeteabhaengig,
+            // gemessen ~170 ms) liegt sonst dauerhaft ueber der Toleranz und es wird
+            // ZYKLISCH Stille in den LAUFENDEN Ton gemischt (= die gemeldeten Aussetzer).
+            // Stattdessen rein relativ: Kommt >150 ms nichts aus der Queue, beginnt eine
+            // Pause; die Stille wird exakt fuer die DAUER der Pause im Echtzeit-Takt
+            // erzeugt und endet mit dem naechsten echten Chunk. Kein Uhr-Vergleich mit
+            // dem Capture-Strom -> keine Latenz-/Drift-Fallen.
             int bps = fmt.AverageBytesPerSecond;                  // 48000*2*4 = 384000
             byte[] silence = new byte[Math.Max(2, bps / 50)];     // 20-ms-Haeppchen
-            long tol = bps / 6;                                   // ~150 ms Toleranz
-            var swAud = System.Diagnostics.Stopwatch.StartNew();
-            long written = 0;
+            var swPause = new System.Diagnostics.Stopwatch();
             var writer = new Thread(() =>
             {
                 try
                 {
+                    int dryMs = 0; bool inPause = false; long pauseWritten = 0;
                     while (!broken)
                     {
                         if (queue.TryTake(out var buf, 15))
                         {
-                            stdout.Write(buf, 0, buf.Length);
-                            written += buf.Length;
-                        }
-                        else if (queue.IsAddingCompleted) break;   // Recording gestoppt & leer
-                        long expected = (long)(swAud.Elapsed.TotalSeconds * bps);
-                        if (expected - written > tol)              // echte Stille-Luecke
-                            while (expected - written >= silence.Length)
+                            if (inPause)
                             {
-                                stdout.Write(silence, 0, silence.Length);
-                                written += silence.Length;
+                                Console.Error.WriteLine($"SIL {swPause.ElapsedMilliseconds + 150}");   // Diagnose: Pausendauer in ms
+                                inPause = false;
                             }
+                            dryMs = 0;
+                            stdout.Write(buf, 0, buf.Length);
+                            continue;
+                        }
+                        if (queue.IsAddingCompleted) break;        // Recording gestoppt & leer
+                        dryMs += 15;
+                        if (!inPause && dryMs >= 150)              // echte Tonpause erkannt
+                        {
+                            inPause = true;
+                            swPause.Restart();
+                            pauseWritten = 0;
+                        }
+                        if (inPause)
+                        {
+                            // Stille exakt im Echtzeit-Takt der Pausen-Uhr; der konstante
+                            // 150-ms-Erkennungsanteil wird mit aufgefuellt, damit ueber
+                            // viele Pausen kein Rueckstand akkumuliert.
+                            long target = (long)bps * 150 / 1000 + (long)(swPause.Elapsed.TotalSeconds * bps);
+                            while (pauseWritten + silence.Length <= target) { stdout.Write(silence, 0, silence.Length); pauseWritten += silence.Length; }
+                        }
                     }
                 }
                 catch { broken = true; try { queue.CompleteAdding(); } catch { } }

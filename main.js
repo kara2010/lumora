@@ -71,12 +71,13 @@ const appSettings = { autostart: false, startMinimized: false, minimizeToTray: f
   // Afterburner-Block: Lumora rendert die in Afterburner fuers OSD angehakten
   // Sensoren SELBST links oben in den Spiel-Frame (RTSS-Modus) - getrennt vom
   // Lumora-Panel schaltbar. ABs eigenes OSD bleibt dafuer in AB deaktiviert.
-  osdAbBlock: false, osdAbHotkey: 'Alt+B',
+  osdAbHotkey: 'Alt+B',
   // Live-Stream (native Pipeline): konstante Encode-Bitrate in kbit/s. Bei CBR
   // begrenzt sie zugleich, was der Zuschauer empfangen muss -> mobilfunktauglich
   // waehlen. Default 12 Mbit (gutes Full-HD). Dazu Ziel-Framerate + Aufloesung.
-  streamUploadKbit: 12000, streamFps: 60, streamQuality: 'auto', streamBufferMs: 120,
-  streamTurnEnabled: false, streamTurnUrl: '', streamTurnUser: '', streamTurnPass: '',
+  streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 120, streamHotkey: '',
+  streamTurnEnabled: false, streamTurnUrl: '', streamTurnUser: '', streamTurnPass: '', streamTurnForce: false,
+  streamForceIPv6: false,
   streamSource: '',   // '' = Hauptbildschirm bzw. 'screen:<idx>' (ddagrab-Monitor)
   // Grafikkarte fuer die OSD-Sensoren: 'auto' (schnellste automatisch) oder feste ID 'nvml:<idx>' / 'adl:<idx>'
   osdGpu: 'auto',
@@ -239,7 +240,8 @@ function rebuildHotkeys() {
   add(appSettings.toggleHotkey, toggleMainWindow)
   add(appSettings.osdHotkey, toggleOverlay)          // leer -> parseAccel null -> aus
   add(appSettings.osdEditHotkey, toggleOsdEdit)
-  add(appSettings.osdAbHotkey, toggleAbBlock)
+  add(appSettings.osdAbHotkey, toggleAbOsd)
+  add(appSettings.streamHotkey, toggleBroadcastHotkey)   // Stream/Freigabe schnell toggeln (auch im Spiel)
 }
 // (Neu-)Registriert die Hotkeys. Ist der native Poll (GetAsyncKeyState) aktiv,
 // uebernimmt der die Tastatur-Hotkeys – auch im Spiel. Nur wenn der nicht
@@ -250,7 +252,8 @@ function registerToggleHotkey() {
   if (getAsyncKey) return true   // Poll erledigt die Tastatur-Hotkeys
   if (appSettings.osdHotkey) try { globalShortcut.register(appSettings.osdHotkey, toggleOverlay) } catch {}
   if (appSettings.osdEditHotkey) try { globalShortcut.register(appSettings.osdEditHotkey, toggleOsdEdit) } catch {}
-  if (appSettings.osdAbHotkey) try { globalShortcut.register(appSettings.osdAbHotkey, toggleAbBlock) } catch {}
+  if (appSettings.osdAbHotkey) try { globalShortcut.register(appSettings.osdAbHotkey, toggleAbOsd) } catch {}
+  if (appSettings.streamHotkey) try { globalShortcut.register(appSettings.streamHotkey, toggleBroadcastHotkey) } catch {}
   const acc = appSettings.toggleHotkey
   if (!acc) return true
   try { return globalShortcut.register(acc, toggleMainWindow) }
@@ -640,8 +643,7 @@ function rtssOsdMap(cb) {
   return ok
 }
 const RTSS_EX2_OFF = 256 + 256 + 4096 + 262144   // szOSDEx2 @266752 (Format v2.20+)
-function rtssOsdWrite(mainLines, abLines) {
-  abLines = abLines || []
+function rtssOsdWrite(mainLines) {
   const res = rtssResolution()
   return rtssOsdMap((base, hdr) => {
     const n = Math.min(hdr.dwOSDArrSize >>> 0, 32)
@@ -666,14 +668,14 @@ function rtssOsdWrite(mainLines, abLines) {
     const zero = Buffer.from([0])
     if (es >= RTSS_EX2_OFF + 32768) {
       // Modernes RTSS: Layout-Feld mit freier Positionierung (siehe unten).
-      rtssEnc(base, so + RTSS_EX2_OFF, Buffer.from(rtssComposeEx2(mainLines, abLines, res).slice(0, 32000) + '\0', 'latin1'))
+      rtssEnc(base, so + RTSS_EX2_OFF, Buffer.from(rtssComposeEx2(mainLines, res).slice(0, 32000) + '\0', 'latin1'))
       rtssEnc(base, so + 512, zero)
       rtssEnc(base, so, zero)
     } else if (es >= 512 + 4096) {
-      rtssEnc(base, so + 512, Buffer.from([...abLines, ...mainLines].join('\n').slice(0, 4000) + '\0', 'latin1'))
+      rtssEnc(base, so + 512, Buffer.from(mainLines.join('\n').slice(0, 4000) + '\0', 'latin1'))
       rtssEnc(base, so, zero)
     } else {
-      rtssEnc(base, so, Buffer.from([...abLines, ...mainLines].join('\n').slice(0, 255) + '\0', 'latin1'))
+      rtssEnc(base, so, Buffer.from(mainLines.join('\n').slice(0, 255) + '\0', 'latin1'))
     }
     const frame = rtss.koffi.decode(base, 32, 'uint32')
     rtss.koffi.encode(base, 32, 'uint32', (frame + 1) >>> 0)        // RTSS neu zeichnen lassen
@@ -768,30 +770,24 @@ function rtssResolution() {
     return { x: Math.round(d.size.width * d.scaleFactor), y: Math.round(d.size.height * d.scaleFactor) }
   } catch { return null }
 }
-// Setzt die Bloecke frei positioniert um: Lumora-Panel an der Wunsch-Ecke,
-// Afterburner-Block (falls aktiv) fix links oben. Ohne Aufloesung (altes RTSS)
-// faellt alles in den klassischen Stapel-Fluss zurueck.
-function rtssComposeEx2(mainLines, abLines, res) {
+// Setzt das Lumora-Panel frei positioniert an die Wunsch-Ecke. Ohne Aufloesung
+// (altes RTSS) faellt es in den klassischen Stapel-Fluss zurueck.
+function rtssComposeEx2(mainLines, res) {
   const corner = appSettings.osdCorner || 'tl'
-  // Klassischer Stapel-Fluss (nativer Font, dockt automatisch unter fremde
-  // Anbieter wie ein aktives natives AB-OSD): wenn freie Positionierung nicht
-  // moeglich (altes RTSS) oder nicht noetig (Ecke "oben links" ohne AB-Block).
-  if (!res || (corner === 'tl' && !abLines.length)) return [...abLines, ...mainLines].join('\n')
+  // Klassischer Stapel-Fluss (nativer Font, dockt automatisch UNTER fremde
+  // Anbieter wie ein aktives natives Afterburner-OSD -> keine Ueberlappung):
+  // wenn freie Positionierung nicht moeglich (altes RTSS) oder Ecke "oben links".
+  if (!res || corner === 'tl') return mainLines.join('\n')
   const fh = Math.max(14, Math.round(res.y / 68))   // Fonthoehe skaliert mit der Spielaufloesung
   const charW = fh * 0.55                           // Consolas-Vorschub (gemessen: 8.8 px bei -16)
   const lineH = Math.round(fh * 1.3)
   const margin = fh
   const vis = (s) => String(s).replace(/<[^>]*>/g, '').length
   let out = `<FNT=Consolas,${-fh},700,1>`
-  if (abLines.length) {
-    abLines.forEach((l, i) => { out += `<P=${margin},${margin + i * lineH}>` + l })
-  }
   if (mainLines.length) {
     const wMax = Math.max(...mainLines.map(vis)) * charW
     const x = (corner === 'tr' || corner === 'br') ? Math.max(0, Math.round(res.x - margin - wMax)) : margin
-    let y0 = (corner === 'bl' || corner === 'br') ? Math.max(0, res.y - margin - mainLines.length * lineH) : margin
-    // Beide links oben? Lumora-Panel unter den Afterburner-Block setzen.
-    if (corner === 'tl' && abLines.length) y0 += (abLines.length + 1) * lineH
+    const y0 = (corner === 'bl' || corner === 'br') ? Math.max(0, res.y - margin - mainLines.length * lineH) : margin
     mainLines.forEach((l, i) => { out += `<P=${x},${y0 + i * lineH}>` + l })
   }
   return out
@@ -972,58 +968,8 @@ function readMahm() {
   mahmVal = readMahmRaw(); mahmValAt = now
   return mahmVal
 }
-// Alle Sensoren, die der Nutzer in Afterburner fuers OSD angehakt hat
-// (MAHM_SHARED_MEMORY_ENTRY_FLAG_SHOW_IN_OSD, Offsets per SDK-Header
-// verifiziert: Strings @0/260/520/780/1040, data @1300, dwFlags @1312).
-// Damit rendert Lumora den klassischen Afterburner-Block SELBST – ABs
-// eigener OSD-Renderer bleibt aus und beide Anzeigen sind getrennt schaltbar.
-// Reihenfolge = ABs Monitoring-Reihenfolge; FLT_MAX = Wert nicht verfuegbar.
-function readMahmOsdList() {
-  if (!mahm) return null
-  const h = mahm.open(0x0004, 0, 'MAHMSharedMemory')
-  if (!h) return null
-  let base = 0
-  try {
-    base = mahm.map(h, 0x0004, 0, 0, 0)
-    if (!base) return null
-    const hdr = mahm.koffi.decode(base, mahm.HDR)
-    if (hdr.sig !== MAHM_SIG || !hdr.numEntries) return null
-    const out = []
-    const cstr = (b, off, len) => { const e = b.indexOf(0, off); return b.toString('latin1', off, e < 0 || e > off + len ? off + len : e) }
-    for (let i = 0; i < Math.min(hdr.numEntries, 96); i++) {
-      const eOff = hdr.headerSize + i * hdr.entrySize
-      const raw = Buffer.from(mahm.koffi.decode(base, eOff, mahm.koffi.array('uint8', 1316)))
-      if (!(raw.readUInt32LE(1312) & 1)) continue          // SHOW_IN_OSD
-      const name = cstr(raw, 520, 260) || cstr(raw, 0, 260)
-      const units = cstr(raw, 780, 260) || cstr(raw, 260, 260)
-      const fmt = cstr(raw, 1040, 260)
-      const val = raw.readFloatLE(1300)
-      const dec = (() => { const m = /%\.(\d)f/.exec(fmt); return m ? Math.min(+m[1], 3) : 0 })()
-      out.push({
-        name, units,
-        value: (Number.isFinite(val) && val < 3.4e38) ? val.toFixed(dec) : '—',
-      })
-    }
-    return out
-  } catch { return null }
-  finally {
-    if (base) { try { mahm.unmap(base) } catch {} }
-    try { mahm.close(h) } catch {}
-  }
-}
-// Hypertext-Zeilen des Afterburner-Blocks (klassischer Look: Name links,
-// Wert rechtsbuendig, Einheit gedimmt; Kennzeile trennt vom Lumora-Panel).
-function buildAbOsdLines() {
-  const list = readMahmOsdList()
-  if (!list || !list.length) return []
-  const L = ['<S=50><C=FFFF8A1E>AFTERBURNER<C><S>']
-  const nw = Math.min(22, Math.max(...list.map(s => s.name.length)))
-  for (const s of list.slice(0, 24)) {
-    L.push('<C=FFCFCFCF>' + s.name.slice(0, nw).padEnd(nw) + '<C><C=FFFFFFFF>' + String(s.value).padStart(9) + '<C>' +
-      (s.units ? '<C=FF8A8A96> ' + s.units + '<C>' : ''))
-  }
-  return L
-}
+// (Der fruehere "Afterburner-Block" – Lumora rendert ABs OSD-Werte selbst nach –
+// ist raus: Alt+B schaltet jetzt das NATIVE Afterburner-OSD, siehe toggleAbOsd.)
 
 // --- CPU-Takt treiberfrei via PDH-Performance-Counter -------------------------
 // Fallback ohne Afterburner: "% Processor Performance" (kann >100 = Boost) x
@@ -1710,18 +1656,14 @@ function startOsdData() {
         if (h && (h.getFlags() & 1) === 0) {
           osdDbg('[rtss-osd] Master-Bit extern ausgeschaltet -> Lumora-OSD folgt')
           appSettings.osdEnabled = false
-          appSettings.osdAbBlock = false
           saveAppSettings()
           hideOverlay()
           return
         }
       } catch {}
-      // Beide Anzeigen getrennt: Lumora-Panel nur wenn osdEnabled, der
-      // Afterburner-Block nur wenn osdAbBlock – jede haengt an ihrem Schalter.
       const mainLines = appSettings.osdEnabled
         ? buildRtssOsd(appSettings.osdTheme, readGpu(), readCpu(), readRtssFps(), appSettings.osdFields) : []
-      const abLines = appSettings.osdAbBlock ? buildAbOsdLines() : []
-      rtssOsdWrite(mainLines, abLines)
+      rtssOsdWrite(mainLines)
       return
     }
     if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return
@@ -1867,14 +1809,10 @@ function hideOverlay() {
   syncFps()
 }
 
-// Zentrale Sichtbarkeit: Das Spiel-OSD laeuft, solange MINDESTENS EINE der
-// beiden Anzeigen aktiv ist – Lumora-Panel (osdEnabled, Alt+O) oder
-// Afterburner-Block (osdAbBlock, Alt+B; nur im RTSS-Modus). Jede Anzeige hat
-// ihren eigenen Schalter; hier wird nur der Gesamt-Kanal an-/abgeschaltet.
+// Zentrale Sichtbarkeit des Lumora-Panels (osdEnabled, Alt+O). Das native
+// Afterburner-OSD schaltet Alt+B (toggleAbOsd) direkt ueber RTSS – unabhaengig.
 function syncOsdVisibility() {
-  const any = appSettings.osdEnabled ||
-    (appSettings.osdAbBlock && appSettings.osdRenderer === 'rtss' && rtssAvailable())
-  if (any) showOverlay(); else hideOverlay()
+  if (appSettings.osdEnabled) showOverlay(); else hideOverlay()
 }
 function toggleOverlay() {
   appSettings.osdEnabled = !appSettings.osdEnabled
@@ -1882,11 +1820,23 @@ function toggleOverlay() {
   saveAppSettings()
   syncOsdVisibility()
 }
-function toggleAbBlock() {
-  appSettings.osdAbBlock = !appSettings.osdAbBlock
-  osdDbg('toggleAbBlock -> osdAbBlock=' + appSettings.osdAbBlock)
-  saveAppSettings()
-  syncOsdVisibility()
+// Alt+B: das NATIVE Afterburner-OSD ein-/ausblenden. Schaltet das globale
+// RTSS-Sichtbarkeits-Bit – exakt das Bit, das auch Afterburners eigener
+// OSD-Hotkey nutzt (04.07. vermessen). Im Fenster-Modus ist Lumoras OSD davon
+// unabhaengig (eigenes Fenster) -> AB laesst sich getrennt schalten. Im
+// RTSS-Renderer haengt auch unser Block an diesem Bit (RTSS hat nur EINEN
+// Sichtbarkeits-Kanal) -> dort bewusst kein Toggle, sonst killt Alt+B das
+// Lumora-OSD gleich mit (die Folgen-Logik in startOsdData schaltet es dann ab).
+function toggleAbOsd() {
+  if (rtssOsdActive) { osdDbg('toggleAbOsd: RTSS-Renderer aktiv – Lumora+Afterburner teilen sich den Kanal, kein getrenntes Schalten'); return }
+  try {
+    const h = setupRtssHooks()
+    if (!h) { osdDbg('toggleAbOsd: RTSSHooks nicht verfuegbar (RTSS/Afterburner installiert?)'); return }
+    const before = h.getFlags()
+    const on = (before & 1) === 1
+    h.setFlags((~1) >>> 0, on ? 0 : 1)
+    osdDbg('toggleAbOsd: Afterburner-OSD -> ' + (on ? 'AUS' : 'AN') + ' (Flags 0x' + before.toString(16) + ' -> 0x' + h.getFlags().toString(16) + ')')
+  } catch (e) { osdDbg('toggleAbOsd: ' + (e && e.message)) }
 }
 
 // --- Live-Edit-Modus: OSD direkt ueber dem Spiel anfassbar machen -------------
@@ -3521,6 +3471,7 @@ const MTX_ICE_UDP = 8189          // UDP: WebRTC-Medien (muss ans Internet)
 const MTX_PATH = 'live'           // mediamtx-Pfadname
 let broadcastServer = null        // HTTP-Server (player + WHEP-Proxy)
 let mtxProc = null                // mediamtx-Kindprozess
+let bcPinholeIds = []             // IPv6-Firewall-Pinholes (UniqueIDs) zum Aufraeumen
 let ffProc = null                 // FFmpeg-Kindprozess
 let capProc = null                // WGC-Aufnahme-Helfer (nur bei Fenster-Aufnahme)
 let audProc = null                // Audio-Helfer (WASAPI-Loopback, System-Audio)
@@ -3552,6 +3503,26 @@ function bcLanIp() {
 // bleibt offen. GetExternalIPAddress liefert die oeffentliche IP fuer den Link.
 const dgram = require('dgram')
 let upnpCtrl = null   // { controlURL, serviceType, localIp } – einmal aufgeloest
+let upnpRouter = null // { friendlyName, manufacturer, modelName } aus der Geraete-Beschreibung
+// Normalisierte TURN-Angaben (oder null) – gemeinsam fuer mediamtx UND Browser-Player.
+// Der Nutzer tippt "host:port"; wir ergaenzen das noetige "turn:"-Schema.
+function bcTurnServer() {
+  if (!appSettings.streamTurnEnabled) return null
+  let url = (appSettings.streamTurnUrl || '').trim()
+  if (!url) return null
+  if (!/^turns?:/i.test(url)) url = 'turn:' + url
+  return { url, username: appSettings.streamTurnUser || '', password: appSettings.streamTurnPass || '' }
+}
+// Herstellerspezifische Kurzanleitung, wenn die UPnP-Freigabe scheitert.
+function routerUpnpHint() {
+  const name = (upnpRouter && (upnpRouter.modelName || upnpRouter.friendlyName)) || ''
+  const nm = (name + ' ' + ((upnpRouter && upnpRouter.manufacturer) || '')).toLowerCase()
+  const ports = 'Port ' + BROADCAST_PORT + ' (TCP) und ' + MTX_ICE_UDP + ' (UDP)'
+  if (/avm|fritz/.test(nm)) return { router: name || 'FRITZ!Box', steps: 'In der FRITZ!Box: „Internet → Freigaben → Portfreigaben“. Beim Eintrag für diesen PC „Selbstständige Portfreigaben für dieses Gerät erlauben“ anhaken – und ganz unten „Selbstständige Portfreigaben für alle Geräte erlauben“ aktivieren.' }
+  if (/speedport|telekom/.test(nm)) return { router: name || 'Speedport', steps: 'Im Speedport: „Internet → Portfreigaben“ (bzw. „Netzwerk → NAT“) öffnen und „UPnP“ bzw. „Portfreigaben automatisch zulassen“ einschalten.' }
+  if (/vodafone|arris|technicolor|hitron/.test(nm)) return { router: name || 'Vodafone Station', steps: 'In der Vodafone Station den Experten-/Erweitert-Modus öffnen und „UPnP“ aktivieren (je nach Modell unter „Firewall“ oder „NAT“).' }
+  return { router: name || 'deinem Router', steps: 'Aktiviere im Router „UPnP“ bzw. „automatische/selbstständige Portfreigaben“ – oder gib ' + ports + ' manuell auf diesen PC frei.' }
+}
 function upnpDiscover(timeoutMs) {
   return new Promise((resolve) => {
     let sock
@@ -3606,6 +3577,10 @@ async function upnpResolveControl() {
     let desc
     try { desc = await upnpHttpGet(loc) } catch { continue }
     if (!/InternetGatewayDevice/i.test(desc.body)) continue
+    if (!upnpRouter) {
+      const f = (t) => (new RegExp('<' + t + '>([^<]+)</' + t + '>', 'i').exec(desc.body) || [])[1] || ''
+      upnpRouter = { friendlyName: f('friendlyName'), manufacturer: f('manufacturer'), modelName: f('modelName') }
+    }
     const svcRe = /<service>([\s\S]*?)<\/service>/g
     let m
     while ((m = svcRe.exec(desc.body))) {
@@ -3639,6 +3614,70 @@ async function upnpUnmapPort(port, proto) {
   const c = await upnpResolveControl(); if (!c) return
   const inner = '<NewRemoteHost></NewRemoteHost><NewExternalPort>' + port + '</NewExternalPort><NewProtocol>' + proto + '</NewProtocol>'
   try { await upnpSoap(c.controlURL, c.serviceType, 'DeletePortMapping', inner) } catch {}
+}
+
+// --- IPv6-Direktweg -----------------------------------------------------------
+// Bei DS-Lite/CGNAT gibt es kein oeffentliches IPv4, aber (fast immer) globales
+// IPv6. Dann laeuft der Stream direkt ueber IPv6 – ohne Relay. Noetig: (1) die
+// richtige Quell-IPv6 (nur die kennt der Router), (2) ein Firewall-Pinhole.
+
+// Globale Quell-IPv6 fuer ausgehenden Verkehr. WICHTIG: Windows nutzt dafuer die
+// temporaere Privacy-Adresse – und NUR die kennt der Router als Geraeteadresse,
+// nur fuer die akzeptiert er einen Pinhole. Die "stabile" IPv6 wird abgelehnt.
+function bcPublicIPv6() {
+  return new Promise((resolve) => {
+    let s
+    try { s = dgram.createSocket('udp6') } catch { return resolve(null) }
+    s.on('error', () => { try { s.close() } catch {}; resolve(null) })
+    try {
+      s.connect(53, '2001:4860:4860::8888', () => {   // Google IPv6-DNS: nur Routenwahl, kein Paket
+        let a = null
+        try { a = s.address().address } catch {}
+        try { s.close() } catch {}
+        resolve(a && /^(2|3)/.test(a) ? a : null)   // nur global unicast (2000::/3)
+      })
+    } catch { try { s.close() } catch {}; resolve(null) }
+  })
+}
+let upnpV6Ctrl = null   // WANIPv6FirewallControl (IGDv2) – einmal aufgeloest
+async function upnpResolveV6Firewall() {
+  if (upnpV6Ctrl) return upnpV6Ctrl
+  const locs = await upnpDiscover(3000)
+  for (const loc of locs) {
+    let desc
+    try { desc = await upnpHttpGet(loc) } catch { continue }
+    const svcRe = /<service>([\s\S]*?)<\/service>/g
+    let m
+    while ((m = svcRe.exec(desc.body))) {
+      if (!/WANIPv6FirewallControl/i.test(m[1])) continue
+      const type = (/<serviceType>([^<]+)<\/serviceType>/i.exec(m[1]) || [])[1]
+      const ctrl = (/<controlURL>([^<]+)<\/controlURL>/i.exec(m[1]) || [])[1]
+      if (!type || !ctrl) continue
+      const base = new (require('url').URL)(loc)
+      const controlURL = ctrl.startsWith('http') ? ctrl : base.protocol + '//' + base.host + (ctrl.startsWith('/') ? '' : '/') + ctrl
+      upnpV6Ctrl = { controlURL, serviceType: type }
+      return upnpV6Ctrl
+    }
+  }
+  return null
+}
+// Firewall-Pinhole oeffnen (RemoteHost/Port leer = beliebiger Absender). Router
+// verlangen eine endliche Lease (LeaseTime 0 lehnt die FritzBox mit 402 ab) ->
+// 24h; laenger streamt praktisch niemand am Stueck. Gibt UniqueID oder null.
+async function upnpAddPinhole(v6, port, proto) {
+  const c = await upnpResolveV6Firewall(); if (!c || !v6) return null
+  const pr = proto === 'TCP' ? 6 : 17
+  const inner = '<RemoteHost></RemoteHost><RemotePort>0</RemotePort><InternalClient>' + v6 +
+    '</InternalClient><InternalPort>' + port + '</InternalPort><Protocol>' + pr + '</Protocol><LeaseTime>86400</LeaseTime>'
+  try {
+    const r = await upnpSoap(c.controlURL, c.serviceType, 'AddPinhole', inner)
+    if (r.status === 200) return (/<UniqueID>([^<]*)<\/UniqueID>/i.exec(r.body) || [])[1] || null
+  } catch {}
+  return null
+}
+async function upnpDeletePinhole(id) {
+  const c = await upnpResolveV6Firewall(); if (!c || !id) return
+  try { await upnpSoap(c.controlURL, c.serviceType, 'DeletePinhole', '<UniqueID>' + id + '</UniqueID>') } catch {}
 }
 
 // --- Verbindungstest: pruefen, ob Streaming beim Anwender funktioniert --------
@@ -3698,8 +3737,15 @@ async function runConnectivityTest() {
     steps.push({ key: 'ip', state: 'error', label: 'Öffentliche Adresse', detail: 'Keine Antwort vom STUN-Server – ausgehendes UDP scheint blockiert (Firewall/Netzwerk). Streaming ist so nicht möglich.' })
     return { verdict: 'error', steps }
   }
+  // IPv6-Direktweg vorab pruefen: globale Quell-IPv6 + laesst sich die Firewall
+  // per Pinhole oeffnen? (testweise oeffnen und sofort wieder schliessen)
+  const v6 = await bcPublicIPv6()
+  let v6Ok = false
+  if (v6) { try { const id = await upnpAddPinhole(v6, MTX_ICE_UDP, 'UDP'); if (id) { v6Ok = true; await upnpDeletePinhole(id) } } catch {} }
   if (nat.cgn || nat.priv) {
-    steps.push({ key: 'ip', state: 'error', label: 'Öffentliche IPv4', detail: 'Dein Anschluss hat keine eigene öffentliche IPv4 (DS-Lite / Carrier-NAT, ' + nat.ip + '). Direktes Streaming ist so nicht möglich. Bitte beim Provider echtes IPv4 anfragen (oft kostenlos) – oder ein Relay-Server wäre nötig.' })
+    // Kein oeffentliches IPv4 – mit funktionierendem IPv6 aber KEIN K.o. mehr.
+    if (v6Ok) steps.push({ key: 'ip', state: 'warn', label: 'Öffentliche IPv4', detail: 'Kein eigenes öffentliches IPv4 (DS-Lite / Carrier-NAT, ' + nat.ip + '). Das ist aber ok – über IPv6 (siehe unten) bist du trotzdem direkt erreichbar.' })
+    else steps.push({ key: 'ip', state: 'error', label: 'Öffentliche IPv4', detail: 'Dein Anschluss hat keine eigene öffentliche IPv4 (DS-Lite / Carrier-NAT, ' + nat.ip + ') und auch kein nutzbares IPv6. Direktes Streaming ist so nicht möglich – ein Relay-Server wäre nötig, oder beim Provider echtes IPv4 anfragen (oft kostenlos).' })
   } else {
     steps.push({ key: 'ip', state: 'ok', label: 'Öffentliche IPv4', detail: nat.ip })
   }
@@ -3716,9 +3762,21 @@ async function runConnectivityTest() {
     udpOk = await upnpMapPort(MTX_ICE_UDP, 'UDP', 'Lumora Verbindungstest'); if (udpOk) await upnpUnmapPort(MTX_ICE_UDP, 'UDP')
   } catch {}
   if (tcpOk && udpOk) {
-    steps.push({ key: 'upnp', state: 'ok', label: 'Router-Portfreigabe (UPnP)', detail: 'Lumora kann die nötigen Ports beim Streamstart automatisch öffnen.' })
+    steps.push({ key: 'upnp', state: 'ok', label: 'Router-Portfreigabe (UPnP)', detail: 'Lumora kann die nötigen IPv4-Ports beim Streamstart automatisch öffnen.' })
   } else {
-    steps.push({ key: 'upnp', state: 'warn', label: 'Router-Portfreigabe (UPnP)', detail: 'Der Router öffnet die Ports nicht selbst. Aktiviere im Router „UPnP“ bzw. „selbstständige Portfreigaben“, oder gib Port ' + BROADCAST_PORT + ' (TCP) und ' + MTX_ICE_UDP + ' (UDP) manuell auf diesen PC frei.' })
+    const hint = routerUpnpHint()
+    const found = upnpRouter ? ('Erkannter Router: ' + hint.router + '. ') : ''
+    const alt = v6Ok ? ' (Zur Not läuft es aber über den IPv6-Direktweg – siehe unten.)' : (appSettings.streamTurnEnabled ? '' : ' Alternativ hilft ein Relay-Server (siehe unten).')
+    steps.push({ key: 'upnp', state: 'warn', label: 'Router-Portfreigabe (UPnP)', detail: 'Der Router öffnet die IPv4-Ports nicht selbst. ' + found + hint.steps + alt })
+  }
+  // IPv6-Direktweg: der kostenlose Ausweg bei DS-Lite/CGNAT.
+  if (v6 && v6Ok) {
+    steps.push({ key: 'ipv6', state: 'ok', label: 'IPv6-Direktweg', detail: 'Globales IPv6 vorhanden und die Firewall lässt sich automatisch öffnen. Zuschauer mit IPv6 (Mobilfunk, moderne Anschlüsse) erreichen dich direkt – auch ohne IPv4-Portfreigabe.' })
+  } else if (v6 && !v6Ok) {
+    const hint = routerUpnpHint()
+    steps.push({ key: 'ipv6', state: 'warn', label: 'IPv6-Direktweg', detail: 'Globales IPv6 ist da, aber die Firewall lässt sich nicht automatisch öffnen. ' + (upnpRouter ? 'Router: ' + hint.router + '. ' : '') + 'Erlaube im Router die selbstständigen (IPv6-)Freigaben für diesen PC.' })
+  } else {
+    steps.push({ key: 'ipv6', state: 'warn', label: 'IPv6-Direktweg', detail: 'Kein globales IPv6 an diesem Anschluss – dieser Weg steht nicht zur Verfügung.' })
   }
   const hasError = steps.some(s => s.state === 'error')
   const hasWarn = steps.some(s => s.state === 'warn')
@@ -3736,7 +3794,7 @@ ipcMain.handle('list-sources', async () => {
     displays.forEach((d, i) => {
       let label = 'Bildschirm ' + (i + 1) + ' – ' + Math.round(d.size.width * d.scaleFactor) + '×' + Math.round(d.size.height * d.scaleFactor)
       if (String(d.id) === primaryId) label += ' · Haupt'
-      out.push({ value: 'screen:' + i, label })   // i = ddagrab output_idx
+      out.push({ value: 'screen:' + i, label, icon: '', kind: 'screen' })   // i = ddagrab output_idx
     })
     // Fenster per eigenem WGC-Helfer enumerieren (EnumWindows). Electrons
     // desktopCapturer verschluckt viele Fenster (Explorer/Edge u.a.); der Helfer
@@ -3744,16 +3802,17 @@ ipcMain.handle('list-sources', async () => {
     const raw = await new Promise((res) => {
       try {
         require('child_process').execFile(streamBin('lumora-capture.exe'), ['--list'],
-          { windowsHide: true, timeout: 6000, maxBuffer: 1 << 20 }, (e, so) => res(String(so || '')))
+          { windowsHide: true, timeout: 6000, maxBuffer: 8 << 20 }, (e, so) => res(String(so || '')))
       } catch { res('') }
     })
     const seen = new Set()
     raw.split(/\r?\n/).forEach((line) => {
-      const tab = line.indexOf('\t'); if (tab < 0) return
-      const hwnd = line.slice(0, tab).trim(), n = line.slice(tab + 1).trim()
+      const parts = line.split('\t')
+      if (parts.length < 2) return
+      const hwnd = (parts[0] || '').trim(), n = (parts[1] || '').trim(), icon = (parts[2] || '').trim()
       if (!hwnd || !n || /^lumora$/i.test(n) || /^Program Manager$/.test(n) || seen.has(hwnd)) return
       seen.add(hwnd)
-      out.push({ value: 'window:' + hwnd, label: '🪟 ' + n })
+      out.push({ value: 'window:' + hwnd, label: n, icon: icon ? 'data:image/png;base64,' + icon : '', kind: 'window' })
     })
     return out
   } catch { return [] }
@@ -3819,20 +3878,24 @@ async function bcDetectEncoder() {
 // und liefern alle 2s ein IDR, daher dort kein Problem. Fix: -force_key_frames
 // erzwingt encoderseitig alle 2s einen Keyframe, -forced_idr macht ihn zum
 // echten IDR (AMF-Default: normales I-Frame, das den Decoder NICHT resettet).
-function bcEncoderArgs(enc, kbit) {
+function bcEncoderArgs(enc, kbit, fps) {
   const rate = kbit + 'k', buf = Math.round(kbit / 2) + 'k'
-  if (enc === 'h264_amf') return ['-c:v', 'h264_amf', '-usage', 'lowlatency', '-rc', 'cbr', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', '120', '-bf', '0', '-forced_idr', '1', '-force_key_frames', 'expr:gte(t,n_forced*2)']
-  if (enc === 'h264_qsv') return ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-look_ahead', '0', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', '120', '-bf', '0']
+  // GOP = 1 Sekunde (frueher 2 s): Jeder neue Zuschauer (und die Vorschau) kann
+  // erst ab einem Keyframe Bild zeigen – 1s-GOP halbiert diese Wartezeit auf im
+  // Schnitt 0,5 s. Kostet bei CBR etwas Effizienz, fuer fluessiges Join-Gefuehl.
+  const gop = String(Math.max(1, Math.round(fps || 60)))
+  if (enc === 'h264_amf') return ['-c:v', 'h264_amf', '-usage', 'lowlatency', '-rc', 'cbr', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', gop, '-bf', '0', '-forced_idr', '1', '-force_key_frames', 'expr:gte(t,n_forced*1)']
+  if (enc === 'h264_qsv') return ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-look_ahead', '0', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', gop, '-bf', '0']
   // Default NVENC (haeufigster HW-Encoder; auch defensiver Fallback). Ohne
   // HW-Encoder startet der Stream gar nicht erst – kein libx264 im LGPL-Build.
-  return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'll', '-rc', 'cbr', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', '120', '-bf', '0', '-no-scenecut', '1']
+  return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'll', '-rc', 'cbr', '-b:v', rate, '-maxrate', rate, '-bufsize', buf, '-g', gop, '-bf', '0', '-no-scenecut', '1']
 }
 // Streaming-Parameter aus den Einstellungen ableiten.
 function bcStreamCfg(enc) {
-  const q = appSettings.streamQuality || 'auto'
+  const q = appSettings.streamQuality || '1080'
   let scaleH = STREAM_Q_H[q] || 0
   if (scaleH === 2160) scaleH = 0            // 4K = native Aufnahme, kein Scale
-  const kbit = Math.max(1000, Math.round(appSettings.streamUploadKbit || 12000))
+  const kbit = Math.max(1000, Math.round(appSettings.streamUploadKbit || 8000))
   const src = String(appSettings.streamSource || '')
   let mode = 'monitor', outputIdx = 0, hwnd = 0
   if (src.startsWith('window:')) { hwnd = parseInt(src.slice(7), 10) || 0; if (hwnd) mode = 'window' }
@@ -3866,7 +3929,7 @@ function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
       '-i', 'pipe:0',
       ...aIn,
       '-vf', vf.join(','),
-      ...bcEncoderArgs(cfg.encoder, cfg.kbit),
+      ...bcEncoderArgs(cfg.encoder, cfg.kbit, cfg.fps),
       ...aEnc, ...rtsp]
   }
   // Monitor-Weg (ddagrab). Bei Ton wird der Audio-Helfer zu Input 0 (pipe:3); das
@@ -3879,14 +3942,15 @@ function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
   return ['-hide_banner', '-loglevel', 'warning',
     ...aIn,
     '-filter_complex', vf.join(',') + (withAudio ? '[v]' : ''),
-    ...bcEncoderArgs(cfg.encoder, cfg.kbit),
+    ...bcEncoderArgs(cfg.encoder, cfg.kbit, cfg.fps),
     ...mMap, ...rtsp]
 }
 // mediamtx-Konfiguration schreiben (Node fs -> UTF-8 OHNE BOM). Nur die noetigen
 // Dienste: RTSP-Ingest (localhost), WebRTC/WHEP-Egress + API (Zuschauerzahl).
-// publicIp -> als zusaetzlicher ICE-Host, damit Internet-Zuschauer die externe
-// Adresse als Kandidat bekommen.
-function bcWriteMtxConfig(publicIp) {
+// hosts -> oeffentliche IPv4 UND/ODER globale IPv6 als zusaetzliche ICE-Hosts,
+// damit Internet-Zuschauer die externe(n) Adresse(n) als Kandidaten bekommen.
+function bcWriteMtxConfig(hosts) {
+  const hostList = (Array.isArray(hosts) ? hosts : [hosts]).filter(Boolean)
   const lines = [
     'logLevel: error',
     'rtspAddress: 127.0.0.1:' + MTX_RTSP_PORT,
@@ -3897,13 +3961,20 @@ function bcWriteMtxConfig(publicIp) {
     'webrtcLocalUDPAddress: :' + MTX_ICE_UDP,
     "webrtcLocalTCPAddress: ''",
     'webrtcIPsFromInterfaces: yes',
-    publicIp ? 'webrtcAdditionalHosts: [' + publicIp + ']' : '',
+    // IPv6 MUSS gequotet werden (Doppelpunkte sonst = YAML-Mapping).
+    hostList.length ? 'webrtcAdditionalHosts: [' + hostList.map((h) => "'" + h + "'").join(', ') + ']' : '',
     'webrtcHandshakeTimeout: 10s',
-    'paths:',
-    '  ' + MTX_PATH + ':',
-    '    source: publisher',
-    '',
   ].filter((x) => x !== '')
+  // TURN als ICE-Server fuer mediamtx: liefert einen relay-Kandidaten, wenn der
+  // Streamer nicht direkt erreichbar ist (CGNAT/IPv6-only). So laeuft das Medium
+  // ueber den Relay statt zu scheitern.
+  const turn = bcTurnServer()
+  if (turn) {
+    lines.push('webrtcICEServers2:', '  - url: ' + turn.url)
+    if (turn.username) lines.push('    username: ' + turn.username)
+    if (turn.password) lines.push('    password: ' + turn.password)
+  }
+  lines.push('paths:', '  ' + MTX_PATH + ':', '    source: publisher', '')
   const p = path.join(app.getPath('temp'), 'lumora-mediamtx.yml')
   require('fs').writeFileSync(p, lines.join('\n'), 'utf8')
   return p
@@ -3923,10 +3994,24 @@ function bcStartServer(port) {
       // und wendet ihn live an – regelmaessig, damit Regler-Aenderungen auch bei
       // bereits verbundenen Zuschauern ohne Neuladen greifen.
       if (req.method === 'GET' && req.url === '/cfg') {
+        const ice = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }]
+        const turn = bcTurnServer()
+        if (turn) {
+          // WebRTC verlangt bei turn:-URLs IMMER username+credential (sonst wirft
+          // Chrome InvalidAccessError und die PeerConnection scheitert komplett) –
+          // auch bei auth-losen Servern. Darum Platzhalter, die ein no-auth-Server
+          // schlicht ignoriert.
+          ice.push({ urls: turn.url, username: turn.username || 'lumora', credential: turn.password || 'lumora' })
+        }
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-        return res.end(JSON.stringify({ buffer: Math.max(0, appSettings.streamBufferMs || 120) }))
+        return res.end(JSON.stringify({
+          buffer: Math.max(0, appSettings.streamBufferMs || 120),
+          iceServers: ice,
+          forceRelay: !!(turn && appSettings.streamTurnForce),   // zum Testen: nur ueber TURN
+        }))
       }
       // WHEP: POST = Offer->Answer, PATCH = ICE-Trickle, DELETE = Abmelden.
+      // (Die Stream-Tab-Vorschau nutzt denselben /whep-Weg per localhost, ueber IPC.)
       if (req.url === '/whep' || req.url.startsWith('/whep')) return bcProxyWhep(req, res)
       res.writeHead(404); res.end('not found')
     })
@@ -3939,7 +4024,16 @@ function bcStartServer(port) {
 // nur unser Proxy. Beides zusammen ergibt die Zuschauer-Liste; Kick + IP-Sperre
 // werfen ungebetene Gaeste raus.
 const bcBlockedIps = new Set()   // gesperrte Zuschauer-IPs (Proxy weist POST /whep ab)
-function bcExtractIp(s) { const m = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/.exec(String(s || '')); return m ? m[1] : '' }
+// mediamtx-ICE-Kandidat: "<typ>/<proto>/<ip>/<port>". Die IP ist der vorletzte
+// Teil – so klappt es fuer IPv4 UND IPv6 (frueher nur IPv4-Regex -> IPv6-Zuschauer
+// wurden dauerhaft als "verbindet…" angezeigt, obwohl laengst verbunden).
+function bcExtractIp(s) {
+  s = String(s || '')
+  const parts = s.split('/')
+  if (parts.length >= 4 && parts[parts.length - 2]) return parts[parts.length - 2]
+  const m = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/.exec(s)   // Fallback: nackte IPv4
+  return m ? m[1] : ''
+}
 function bcClientIp(req) {
   let ip = (req.socket && req.socket.remoteAddress) || ''
   if (ip.startsWith('::ffff:')) ip = ip.slice(7)   // IPv4-mapped IPv6 -> nackte IPv4
@@ -3952,6 +4046,18 @@ function bcUaShort(ua) {
   const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad|iPod/.test(ua) ? 'iOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : ''
   return br + (os ? ' · ' + os : '')
 }
+// Die eigene lokale Stream-Vorschau (Renderer verbindet sich zu 127.0.0.1) darf
+// NICHT als Zuschauer zaehlen – ihr ICE-Kandidat ist Loopback.
+function bcIsLocalViewer(cand) { const c = String(cand || ''); return c.includes('127.0.0.1') || c.includes('::1') }
+// Die eigene Live-Vorschau verbindet sich zwar lokal, aber ihre WebRTC-Medien
+// laufen NICHT ueber Loopback (mediamtx bietet die konfigurierten Hosts/globalen
+// IPs als ICE-Kandidaten an -> die Vorschau nimmt oft eine private IPv6-ULA);
+// bcIsLocalViewer greift da nicht. Loesung: die Vorschau schickt einen eindeutigen
+// User-Agent, den mediamtx je Session ausweist -> exakt identifizierbar (verifiziert:
+// die WHEP-Location-ID ist NICHT die Session-ID der API, taugt also nicht dafuer).
+// Explizit statt per IP-Heuristik, damit ein echter LAN-Zuschauer korrekt zaehlt.
+const PREVIEW_UA = 'LumoraPreview'
+function bcIsPreviewSession(s) { return s.userAgent === PREVIEW_UA || bcIsLocalViewer(s.remoteCandidate) }
 function bcApiPost(apiPath) {
   return new Promise((resolve) => {
     const rq = http.request({ host: '127.0.0.1', port: MTX_API_PORT, path: apiPath, method: 'POST', timeout: 3000 }, (r) => { let d = ''; r.on('data', (c) => d += c); r.on('end', () => resolve({ status: r.statusCode, body: d })) })
@@ -3996,7 +4102,7 @@ ipcMain.handle('list-viewers', async () => {
   try {
     const r = await upnpHttpGet('http://127.0.0.1:' + MTX_API_PORT + '/v3/webrtcsessions/list')
     const j = JSON.parse(r.body)
-    const sessions = (Array.isArray(j.items) ? j.items : []).filter((s) => s.path === MTX_PATH && s.state === 'read')
+    const sessions = (Array.isArray(j.items) ? j.items : []).filter((s) => s.path === MTX_PATH && s.state === 'read' && !bcIsPreviewSession(s))
     return sessions.map((s) => {
       // IP + Browser direkt aus mediamtx: IP aus dem ICE-Kandidaten (remoteAddr
       // ist nur unser Proxy = 127.0.0.1), den User-Agent reichen wir durch. Solange
@@ -4027,6 +4133,15 @@ function bcStartMtx(configPath) {
     if (p.stderr) p.stderr.on('data', onData)
     p.on('error', (e) => { if (!done) { done = true; reject(e) } })
     p.on('exit', (code) => { if (!done) { done = true; reject(new Error('mediamtx beendet (' + code + '): ' + out.slice(-200))) } })
+    // Aktiver Ready-Check statt blindem Warten: sobald der RTSP-Port annimmt, ist
+    // mediamtx bereit (typisch ~150 ms). Das feste Timeout bleibt nur als Fallback –
+    // jede gesparte Zehntelsekunde verkuerzt die Zeit bis zum ersten Vorschaubild.
+    const probe = () => {
+      if (done) return
+      const s = require('net').connect({ host: '127.0.0.1', port: MTX_RTSP_PORT }, () => { s.destroy(); if (!done) { done = true; resolve(p) } })
+      s.on('error', () => { s.destroy(); if (!done) setTimeout(probe, 60) })
+    }
+    setTimeout(probe, 60)
     setTimeout(() => { if (!done) { done = true; resolve(p) } }, 800)
   })
 }
@@ -4176,9 +4291,11 @@ function bcStartViewerPoll() {
   if (bcViewerPoll) return
   bcViewerPoll = setInterval(() => {
     if (!broadcastState.active) return
-    upnpHttpGet('http://127.0.0.1:' + MTX_API_PORT + '/v3/paths/get/' + MTX_PATH).then((r) => {
+    // webrtcsessions/list statt paths/get: liefert die ICE-Kandidaten, damit die
+    // eigene lokale Vorschau (127.0.0.1) nicht als Zuschauer mitgezaehlt wird.
+    upnpHttpGet('http://127.0.0.1:' + MTX_API_PORT + '/v3/webrtcsessions/list').then((r) => {
       let n = 0
-      try { const j = JSON.parse(r.body); n = Array.isArray(j.readers) ? j.readers.length : 0 } catch { return }
+      try { const j = JSON.parse(r.body); n = (Array.isArray(j.items) ? j.items : []).filter((s) => s.path === MTX_PATH && s.state === 'read' && !bcIsPreviewSession(s)).length } catch { return }
       if (n !== broadcastState.viewers) {
         const prev = broadcastState.viewers
         broadcastState.viewers = n
@@ -4205,22 +4322,17 @@ async function startBroadcast() {
   const lanLink = 'http://' + lanIp + ':' + BROADCAST_PORT + '/'
   broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder }
   bcPushState()   // LAN-Link sofort anzeigen
-  // Oeffentliche IP + Portfreigaben ZUERST holen (schnell), damit mediamtx die
-  // oeffentliche IP direkt als ICE-Kandidat anbieten kann: TCP fuer die
-  // Signalisierung, UDP fuer die WebRTC-Medien.
-  let pubIp = null, tcpOk = false, udpOk = false
+  bcPinholeIds = []
+  // Test-Schalter: IPv4-Weg bewusst auslassen, damit sich der IPv6-Direktweg
+  // isoliert pruefen laesst (Link + Medien laufen dann garantiert ueber IPv6).
+  const forceV6 = !!appSettings.streamForceIPv6
+  // PHASE 1 – LOKAL, SOFORT: mediamtx + WHEP-Server + FFmpeg hochziehen, damit das
+  // erste Vorschaubild ohne Router-Wartezeit kommt. Als ICE-Hosts nimmt mediamtx
+  // die GECACHTEN oeffentlichen IPs der letzten Session (aendern sich selten);
+  // Phase 2 korrigiert sie bei Abweichung (mediamtx laedt seine Config selbst neu).
+  const cachedHosts = Array.isArray(appSettings.streamLastHosts) ? appSettings.streamLastHosts.filter(Boolean) : []
   try {
-    const r = await Promise.all([
-      upnpMapPort(BROADCAST_PORT, 'TCP', 'Lumora Stream'),
-      upnpMapPort(MTX_ICE_UDP, 'UDP', 'Lumora Stream Medien'),
-      upnpGetExternalIp(),
-    ])
-    tcpOk = r[0]; udpOk = r[1]; pubIp = r[2]
-  } catch {}
-  if (!broadcastState.active) return broadcastState   // zwischenzeitlich gestoppt
-  // mediamtx (mit oeffentlicher IP) + WHEP-Server hochfahren, dann FFmpeg.
-  try {
-    const cfgPath = bcWriteMtxConfig(pubIp)
+    const cfgPath = bcWriteMtxConfig(cachedHosts)
     mtxProc = await bcStartMtx(cfgPath)
     broadcastServer = await bcStartServer(BROADCAST_PORT)
   } catch (e) {
@@ -4231,13 +4343,61 @@ async function startBroadcast() {
   const cfg = bcStreamCfg(enc)
   bcStartFfmpeg(cfg)
   bcStartViewerPoll()
-  broadcastState.opening = false
   broadcastState.quality = bcQualityLabel(cfg)
-  if (pubIp) broadcastState.link = 'http://' + pubIp + ':' + BROADCAST_PORT + '/'
-  broadcastState.internet = !!(tcpOk && udpOk && pubIp)
-  broadcastState.needsForward = !!(pubIp && !(tcpOk && udpOk))
-  bcPushState()
-  osdDbg('[stream] aktiv: ' + broadcastState.link + ' enc=' + enc.encoder + ' tcp=' + tcpOk + ' udp=' + udpOk + ' ip=' + pubIp)
+  bcPushState()   // Medien laufen – Vorschau kann verbinden (opening bleibt true bis der Router geprueft ist)
+  // PHASE 2 – ROUTER, PARALLEL: Portfreigaben + oeffentliche IPs (dauert je nach
+  // Router Sekunden). Erst danach steht der oeffentliche Link fest -> opening=false.
+  ;(async () => {
+    let pubIp = null, tcpOk = false, udpOk = false
+    let pubIp6 = null, v6Ok = false
+    try {
+      const r = await Promise.all([
+        forceV6 ? Promise.resolve(false) : upnpMapPort(BROADCAST_PORT, 'TCP', 'Lumora Stream'),
+        forceV6 ? Promise.resolve(false) : upnpMapPort(MTX_ICE_UDP, 'UDP', 'Lumora Stream Medien'),
+        upnpGetExternalIp(),
+        bcPublicIPv6(),
+      ])
+      tcpOk = r[0]; udpOk = r[1]; pubIp = r[2]; pubIp6 = r[3]
+      // IPv6-Firewall oeffnen (Pinhole je Port) – der Direktweg bei DS-Lite/CGNAT.
+      if (pubIp6) {
+        const [t6, u6] = await Promise.all([
+          upnpAddPinhole(pubIp6, BROADCAST_PORT, 'TCP'),
+          upnpAddPinhole(pubIp6, MTX_ICE_UDP, 'UDP'),
+        ])
+        if (t6) bcPinholeIds.push(t6)
+        if (u6) bcPinholeIds.push(u6)
+        v6Ok = !!(t6 && u6)
+      }
+    } catch {}
+    if (!broadcastState.active) {
+      // Waehrend der Router-Phase gestoppt: frisch gesetzte Pinholes wieder schliessen.
+      const ids = bcPinholeIds; bcPinholeIds = []
+      for (const id of ids) { try { upnpDeletePinhole(id) } catch {} }
+      return
+    }
+    // Weichen die frischen oeffentlichen IPs vom Cache ab, Config aktualisieren –
+    // mediamtx uebernimmt sie per Hot-Reload (nur der WebRTC-Teil startet kurz neu;
+    // die Vorschau verbindet sich dank Auto-Reconnect von selbst wieder).
+    const hosts = (forceV6 ? [pubIp6] : [pubIp, pubIp6]).filter(Boolean)
+    if (JSON.stringify(hosts) !== JSON.stringify(cachedHosts)) {
+      try { bcWriteMtxConfig(hosts) } catch {}
+      appSettings.streamLastHosts = hosts
+      saveAppSettings()
+    }
+    broadcastState.opening = false
+    // Link-Prioritaet: klappt die IPv4-Freigabe -> IPv4-Link (breiteste Reichweite,
+    // jeder Zuschauer erreicht ihn). Sonst, wenn der IPv6-Pinhole sitzt -> IPv6-Link
+    // ([v6]:port) fuer DS-Lite/CGNAT (Zuschauer braucht IPv6). Sonst IPv4 anzeigen.
+    const v4Reachable = tcpOk && udpOk && pubIp
+    if (v4Reachable) broadcastState.link = 'http://' + pubIp + ':' + BROADCAST_PORT + '/'
+    else if (v6Ok && pubIp6) broadcastState.link = 'http://[' + pubIp6 + ']:' + BROADCAST_PORT + '/'
+    else if (pubIp) broadcastState.link = 'http://' + pubIp + ':' + BROADCAST_PORT + '/'
+    broadcastState.internet = !!(v4Reachable || (v6Ok && pubIp6))
+    broadcastState.ipv6Only = !!(!v4Reachable && v6Ok && pubIp6)   // Link laeuft ueber IPv6 (Zuschauer braucht IPv6)
+    broadcastState.needsForward = !!(pubIp && !v4Reachable && !(v6Ok && pubIp6))
+    bcPushState()
+    osdDbg('[stream] aktiv: ' + broadcastState.link + ' enc=' + enc.encoder + ' tcp=' + tcpOk + ' udp=' + udpOk + ' ip=' + pubIp + ' v6=' + v6Ok + ' ip6=' + pubIp6)
+  })()
   return broadcastState
 }
 function stopBroadcast() {
@@ -4251,11 +4411,66 @@ function stopBroadcast() {
   if (broadcastServer) { try { broadcastServer.close() } catch {}; broadcastServer = null }
   if (bcViewerPoll) { clearInterval(bcViewerPoll); bcViewerPoll = null }
   bcBlockedIps.clear()
-  if (wasActive) { upnpUnmapPort(BROADCAST_PORT, 'TCP'); upnpUnmapPort(MTX_ICE_UDP, 'UDP') }   // beide Ports schliessen
+  if (wasActive) {
+    upnpUnmapPort(BROADCAST_PORT, 'TCP'); upnpUnmapPort(MTX_ICE_UDP, 'UDP')     // IPv4-Freigaben schliessen
+    bcPinholeIds.forEach((id) => upnpDeletePinhole(id)); bcPinholeIds = []       // IPv6-Firewall-Pinholes schliessen
+  }
   broadcastState = { active: false, port: 0, link: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false }
   bcPushState()
   osdDbg('[stream] gestoppt')
 }
+// Globaler Hotkey: Freigabe schnell an/aus – auch mitten im Spiel (der Poll mit
+// GetAsyncKeyState greift dort, wo globalShortcut abgefangen wird). Beim Start
+// wird das AKTUELLE Vordergrundfenster (i.d.R. das laufende Spiel) freigegeben –
+// wie man es erwartet, wenn man den Hotkey im Spiel drueckt. Ist Lumora/Overlay
+// selbst vorn, das zuletzt aktive Spiel; findet sich keins, bleibt die in den
+// Einstellungen gewaehlte Quelle.
+function toggleBroadcastHotkey() {
+  const wasActive = broadcastState.active
+  if (wasActive) {
+    stopBroadcast()
+  } else {
+    let hwnd = 0
+    try { hwnd = fgWin ? Number(fgWin.get()) : 0 } catch {}
+    const own = nativeHwnd(mainWindow), ovl = nativeHwnd(overlayWindow)
+    if (!hwnd || hwnd === own || hwnd === ovl) hwnd = prevGameHwnd || 0
+    if (hwnd) {
+      appSettings.streamSource = 'window:' + hwnd
+      saveAppSettings()
+      sendToUi('stream-source-changed', {})   // Renderer aktualisiert die Quellen-Anzeige
+    }
+    startBroadcast()
+  }
+  // Akustische Rueckmeldung – man drueckt den Hotkey im Spiel und sieht die UI nicht.
+  sendToUi('stream-toggle-sound', { on: !wasActive })
+}
+// Live-Vorschau im Stream-Tab: der Renderer haengt sich per WHEP an den EIGENEN
+// Broadcast-Server (localhost) und dekodiert den Stream per Hardware im Browser –
+// exakt dasselbe Bild wie der Zuschauer, in voller Qualitaet, aber OHNE zweiten
+// Encoder und OHNE Upload (alles lokal im RAM). Der SDP-Austausch laeuft ueber IPC,
+// damit der Renderer keinen Cross-Origin-fetch auf den Server braucht. Solche
+// localhost-Sessions zaehlen ueber bcIsLocalViewer NICHT als Zuschauer.
+ipcMain.handle('preview-whep', (e, offerSdp) => new Promise((resolve) => {
+  try {
+    const port = (broadcastState && broadcastState.port) || BROADCAST_PORT
+    // User-Agent 'LumoraPreview' markiert die Session -> aus der Zuschauerzaehlung gefiltert.
+    const r = require('http').request({ host: '127.0.0.1', port, path: '/whep', method: 'POST', headers: { 'Content-Type': 'application/sdp', 'User-Agent': PREVIEW_UA } }, (resp) => {
+      let body = ''
+      resp.on('data', (d) => { body += d })
+      resp.on('end', () => resolve({ ok: resp.statusCode >= 200 && resp.statusCode < 300, answer: body, session: resp.headers.location || null }))
+    })
+    r.on('error', () => resolve({ ok: false }))
+    r.end(offerSdp)
+  } catch { resolve({ ok: false }) }
+}))
+ipcMain.handle('preview-whep-stop', (e, session) => {
+  if (!session) return
+  try {
+    const port = (broadcastState && broadcastState.port) || BROADCAST_PORT
+    const r = require('http').request({ host: '127.0.0.1', port, path: session, method: 'DELETE' })
+    r.on('error', () => {}); r.end()
+  } catch {}
+})
 ipcMain.handle('start-broadcast', () => startBroadcast())
 ipcMain.handle('stop-broadcast', () => { stopBroadcast(); return broadcastState })
 ipcMain.handle('broadcast-status', () => broadcastState)
@@ -4315,7 +4530,7 @@ function checkForUpdates(manual) {
 // Liefert { ok } zurueck – false, wenn die Kombination nicht registriert werden
 // konnte (z.B. schon vom System/anderer App belegt).
 ipcMain.handle('set-hotkey', (event, accelerator, which) => {
-  const key = which === 'osd' ? 'osdHotkey' : which === 'osdEdit' ? 'osdEditHotkey' : which === 'osdAb' ? 'osdAbHotkey' : 'toggleHotkey'
+  const key = which === 'osd' ? 'osdHotkey' : which === 'osdEdit' ? 'osdEditHotkey' : which === 'osdAb' ? 'osdAbHotkey' : which === 'stream' ? 'streamHotkey' : 'toggleHotkey'
   appSettings[key] = accelerator || ''
   saveAppSettings()
   const ok = registerToggleHotkey()
@@ -4366,7 +4581,10 @@ ipcMain.handle('fps-grant-access', () => {
 
 ipcMain.handle('check-for-updates', () => { checkForUpdates(true) })
 ipcMain.handle('download-update', () => { if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {}) })
-ipcMain.handle('install-update', () => { if (autoUpdater) { app.isQuitting = true; autoUpdater.quitAndInstall() } })
+// isSilent=true -> Installer mit /S (kein Wizard, In-Place-Update am gespeicherten
+// Pfad); isForceRunAfter=true -> Lumora danach automatisch neu starten. Ohne das
+// erste true liefe beim Auto-Update der komplette Ersteinrichtungs-Assistent auf.
+ipcMain.handle('install-update', () => { if (autoUpdater) { app.isQuitting = true; autoUpdater.quitAndInstall(true, true) } })
 
 // Nur eine Instanz zulassen: ein zweiter Start holt das vorhandene (ggf. im Tray
 // versteckte) Fenster nach vorne, statt eine neue Instanz zu öffnen.
@@ -4410,6 +4628,10 @@ if (process.argv.includes('--fps-broker')) {
   app.on('second-instance', () => showMainWindow())
 
   app.whenReady().then(() => { setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupNvml(); setupAdl(); setupRtss(); setupMahm(); setupCpuClock(); setupVramCounter(); setupGpuName(); startExternalWatcher(); syncOsdVisibility() })
+
+  // Encoder-Erkennung vorwaermen (PowerShell-GPU-Abfrage + ffmpeg -encoders kosten
+  // beim allerersten Streamstart sonst 1-2 s auf dem kritischen Weg zum ersten Bild).
+  app.whenReady().then(() => setTimeout(() => { bcDetectEncoder().catch(() => {}) }, 2500))
 
   // HDR beim Beenden nur abschalten, wenn KEIN getracktes Spiel mehr laeuft.
   // Sonst wuerde das Schliessen von Lumora ein laufendes Spiel mitten im Betrieb
