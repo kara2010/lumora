@@ -27,7 +27,7 @@
   #stats .unit { color: #8a8a96; margin-left: 2px }
   #stats .fps { color: #74e857 }
   /* Untere Steuerleiste – blendet nach Inaktivitaet aus, respektiert Safe-Area */
-  #bar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: flex-end; gap: 10px;
+  #bar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;
     padding: 14px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background: linear-gradient(transparent, rgba(0,0,0,.55)); transition: opacity .3s; }
   /* Steuerleiste UND Info-Anzeige blenden bei Inaktivitaet aus – AUSSER die
@@ -41,6 +41,32 @@
   button.ctl:hover { background: rgba(40,44,58,.9) }
   button.ctl:active { background: rgba(52,56,72,.95) }
   button.ctl svg { width: 17px; height: 17px; fill: currentColor }
+  /* Lautstaerke in der Leiste: Lautsprecher-Icon (Mute-Toggle) + Schieberegler.
+     Solange stumm, ist der Slider ausgeblendet (nutzlos) – die Aufforderung zum
+     Ton uebernimmt der grosse #soundHint mitten im Bild (unuebersehbar). */
+  #volCtl { align-items: center; gap: 10px; padding: 8px 14px; }
+  #volCtl button { background: none; border: none; color: inherit; cursor: pointer; font-size: 16px; padding: 0; line-height: 1; display: flex; align-items: center; -webkit-tap-highlight-color: transparent; }
+  #volCtl.muted #volSlider { display: none; }               /* stumm: kein Slider */
+  #volSlider { width: 92px; height: 4px; accent-color: #fff; cursor: pointer; }
+  @media (max-width: 640px), (pointer: coarse) { #volSlider { width: 116px; height: 6px; } #volCtl button { font-size: 19px; } }
+  /* Grosse Ton-Aufforderung: erscheint, sobald der Stream laeuft aber (Autoplay)
+     stumm ist. Mittig ueber dem Video, pulsierend, ein Tipp aktiviert den Ton. */
+  #soundHint { position: fixed; left: 50%; bottom: 23%; transform: translateX(-50%);
+    display: none; align-items: center; gap: 12px; cursor: pointer; z-index: 6; white-space: nowrap;
+    background: rgba(18,20,28,.9); color: #fff; border: 1px solid rgba(255,255,255,.26);
+    border-radius: 999px; padding: 15px 26px; font-size: 17px; font-weight: 600;
+    backdrop-filter: blur(8px); box-shadow: 0 10px 34px rgba(0,0,0,.55);
+    animation: soundPulse 1.9s ease-in-out infinite; -webkit-tap-highlight-color: transparent; }
+  #soundHint.show { display: flex; }
+  #soundHint .ico { font-size: 22px; }
+  @keyframes soundPulse {
+    0%,100% { transform: translateX(-50%) scale(1);    box-shadow: 0 10px 34px rgba(0,0,0,.55); border-color: rgba(255,255,255,.26); }
+    50%     { transform: translateX(-50%) scale(1.045); box-shadow: 0 10px 40px rgba(74,222,128,.4); border-color: rgba(74,222,128,.6); }
+  }
+  @media (max-width: 640px), (pointer: coarse) { #soundHint { font-size: 18px; padding: 16px 28px; } }
+  /* Schmale Bildschirme (Handy hochkant): Vollbild-Text weg -> nur Icon, damit die
+     Leiste in EINE Reihe passt und nichts abgeschnitten wird oder umbricht. */
+  @media (max-width: 560px) { #fsLabel { display: none; } }
   #v { will-change: transform; }
   /* Touch-Geraete / kleine Bildschirme: groessere Tap-Ziele + lesbarere Groessen */
   @media (max-width: 640px), (pointer: coarse) {
@@ -64,8 +90,12 @@
   <span><span class="val" id="sBitrate">–</span><span class="unit">Mbit/s</span></span>
 </div>
 <div id="overlay"><div class="badge"><span class="dot" id="dot"></span><span id="msg">Verbinde…</span></div></div>
+<div id="soundHint" onclick="enableSound()"><span class="ico">🔊</span><span>Tippen für Ton</span></div>
 <div id="bar">
-  <button class="ctl" id="soundBtn" onclick="unmute()" style="display:none">🔊 Ton</button>
+  <div class="ctl" id="volCtl">
+    <button id="soundBtn" onclick="toggleMute()" title="Ton an/aus"><span id="volIcon">🔊</span></button>
+    <input type="range" id="volSlider" min="0" max="100" value="100" oninput="onVolInput()" title="Lautstärke">
+  </div>
   <button class="ctl" id="statsBtn" onclick="toggleStats()" title="Infoanzeige ein/aus">📊</button>
   <button class="ctl" id="fsBtn" onclick="toggleFullscreen()" title="Vollbild (F / Doppelklick)">
     <svg viewBox="0 0 24 24" id="fsIcon"><path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/></svg>
@@ -79,13 +109,39 @@
   // zu mediamtx (ueber den Lumora-Proxy auf demselben Port). Qualitaet/Helligkeit
   // bestimmt der Sender (FFmpeg) – ein Stream fuer alle Zuschauer.
   var v = document.getElementById('v'), overlay = document.getElementById('overlay')
-  var dot = document.getElementById('dot'), msg = document.getElementById('msg'), soundBtn = document.getElementById('soundBtn')
+  var dot = document.getElementById('dot'), msg = document.getElementById('msg')
   var sFps = document.getElementById('sFps'), sRes = document.getElementById('sRes'), sBitrate = document.getElementById('sBitrate')
   // STUN hilft dem Zuschauer, seine eigene Adresse zu finden; die Medien laufen
   // zu mediamtx' oeffentlichem ICE-Host. TURN ist fuer reines Empfangen unnoetig.
   var ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }]
   function status(text, cls) { msg.textContent = text; dot.className = 'dot' + (cls ? ' ' + cls : '') }
-  function unmute() { v.muted = false; v.play().catch(function(){}); soundBtn.style.display = 'none' }
+  var volSlider = document.getElementById('volSlider'), volCtl = document.getElementById('volCtl'), volIcon = document.getElementById('volIcon'), soundHint = document.getElementById('soundHint')
+  var _connected = false
+  function applyVol() {
+    var vol = volSlider.value / 100
+    v.volume = vol
+    // Stumm (Autoplay-Sperre) -> Slider in der Leiste ausgeblendet, dafuer die
+    // grosse Aufforderung #soundHint. Aktiv -> Icon spiegelt die Lautstaerke.
+    volCtl.classList.toggle('muted', v.muted)
+    volIcon.textContent = v.muted ? '🔊' : (vol === 0 ? '🔇' : (vol < 0.5 ? '🔉' : '🔊'))
+    soundHint.classList.toggle('show', _connected && v.muted)
+  }
+  function enableSound() {   // Tipp auf die grosse Aufforderung mitten im Bild
+    v.muted = false
+    if (Number(volSlider.value) === 0) volSlider.value = 100
+    v.play().catch(function () {})
+    applyVol()
+  }
+  function onVolInput() {
+    if (volSlider.value > 0 && v.muted) v.muted = false   // erste Interaktion hebt die Autoplay-Stummschaltung auf
+    v.play().catch(function () {})
+    applyVol()
+  }
+  function toggleMute() {
+    v.muted = !v.muted
+    if (!v.muted) { if (Number(volSlider.value) === 0) volSlider.value = 100; v.play().catch(function () {}) }
+    applyVol()
+  }
 
   // --- Jitter-Puffer --------------------------------------------------------
   // Der STREAMER stellt den Puffer in Lumora ein; der Player holt ihn per /cfg
@@ -236,13 +292,33 @@
     if (retrying) return
     retrying = true
     try { window._pc && window._pc.close() } catch (e) {}
+    leave()   // alte WHEP-Session am Server abmelden, bevor eine neue entsteht (kein Zombie-Zuschauer)
     setTimeout(function () { retrying = false; connect() }, 800)
   }
   async function connect() {
     status('Verbinde…')
     overlay.classList.remove('hidden')
-    var pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, bundlePolicy: 'max-bundle' })
+    // ICE-Server frisch vom Streamer holen: enthaelt STUN und – falls eingetragen –
+    // den TURN-Relay. forceRelay=true (Testschalter) zwingt die Verbindung NUR
+    // ueber TURN, damit sich das Relay ueberhaupt pruefen laesst.
+    var ice = ICE_SERVERS, relay = false
+    try {
+      var cfg = await fetch('/cfg', { cache: 'no-store' }).then(function (r) { return r.json() })
+      if (cfg && Array.isArray(cfg.iceServers) && cfg.iceServers.length) ice = cfg.iceServers
+      relay = !!(cfg && cfg.forceRelay)
+    } catch (e) {}
+    var pc = new RTCPeerConnection({ iceServers: ice, iceTransportPolicy: relay ? 'relay' : 'all', bundlePolicy: 'max-bundle' })
     window._pc = pc
+    // Diagnose (F12-Konsole): kommt ein "relay"-Kandidat vom TURN-Server? Welcher
+    // ICE-Fehler tritt auf? (701/401 = Zugangsdaten, Timeout = nicht erreichbar)
+    var sawRelay = false
+    pc.addEventListener('icecandidate', function (e) {
+      if (e.candidate) { if (e.candidate.type === 'relay') sawRelay = true; console.log('[ICE] Kandidat:', e.candidate.type, '|', e.candidate.candidate) }
+      else console.log('[ICE] Sammlung fertig – relay erhalten:', sawRelay)
+    })
+    pc.addEventListener('icecandidateerror', function (e) { console.warn('[ICE] Fehler', e.errorCode, e.errorText, '| url:', e.url) })
+    pc.addEventListener('iceconnectionstatechange', function () { console.log('[ICE] Status:', pc.iceConnectionState) })
+    if (relay) { setTimeout(function () { if (!sawRelay) status('Relay antwortet nicht – Server/Zugangsdaten prüfen (F12-Konsole)', 'err') }, 6000) }
     var stream = new MediaStream()
     pc.addTransceiver('video', { direction: 'recvonly' })
     pc.addTransceiver('audio', { direction: 'recvonly' })
@@ -254,11 +330,16 @@
     pc.addEventListener('connectionstatechange', function () {
       if (pc.connectionState === 'connected') {
         status('Live', 'live')
+        _connected = true; applyVol()   // ggf. die grosse Ton-Aufforderung zeigen
         setTimeout(function () { overlay.classList.add('hidden') }, 1200)
       } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         status('Verbindung verloren – neuer Versuch…', 'err')
+        _connected = false; applyVol()
         overlay.classList.remove('hidden')
-        setTimeout(retry, 2000)
+        // Nur im Vordergrund sofort neu verbinden. Im Hintergrund (App gewechselt)
+        // waere das zwecklos + akkufressend – den Reconnect macht resume() bei der
+        // Rueckkehr. So laeuft der Stream auch nach 2-5 Min Pause zuverlaessig weiter.
+        if (document.visibilityState === 'visible') setTimeout(retry, 2000)
       }
     })
     try {
@@ -277,14 +358,21 @@
       setTimeout(retry, 3000)
     }
   }
-  // Autoplay: erst mit Ton versuchen; blockt der Browser, stumm starten + Ton-Button
+  // Autoplay: erst mit Ton versuchen; blockt der Browser, stumm starten + grosse
+  // Ton-Aufforderung. WICHTIG: das Stummschalten passiert ASYNCHRON im catch –
+  // applyVol() muss dort NACH v.muted=true erneut laufen, sonst erscheint der
+  // "Tippen fuer Ton"-Hinweis nie (genau der frueher fehlende Fall).
   v.addEventListener('loadedmetadata', function () {
     v.play().catch(function () {
       v.muted = true
       v.play().catch(function () {})
-      soundBtn.style.display = 'inline-flex'
+      applyVol()
     })
+    applyVol()   // Icon (🔊/🔇) an den tatsaechlichen Zustand angleichen
   })
+  // Sicherheitsnetz: JEDE Mute-/Lautstaerke-Aenderung (egal woher) aktualisiert
+  // Hinweis + Icon – Zustand und Anzeige koennen nicht mehr auseinanderlaufen.
+  v.addEventListener('volumechange', applyVol)
   // Sauberes Abmelden beim Schliessen: WHEP-Session per DELETE beenden (keepalive
   // laesst den Request noch waehrend des Schliessens raus) -> Zuschauerzahl stimmt.
   function leave() {
@@ -293,8 +381,46 @@
       window._whepSession = null
     }
   }
-  window.addEventListener('pagehide', leave)
+  // WICHTIG (mobil): Ein App-Wechsel oder eine eingehende Benachrichtigung
+  // (WhatsApp o.ae.) legt die Seite nur kurz in den Hintergrund – pagehide feuert
+  // dann, OHNE dass der Zuschauer den Player wirklich verlaesst. Wir duerfen die
+  // WHEP-Session hier NICHT abbauen, sonst ist der Stream nach dem Zurueckschalten
+  // tot. Nur beim ECHTEN Verwerfen der Seite (persisted=false) abmelden; beim
+  // Weg-Tabben (bfcache, persisted=true) bleibt die Verbindung bestehen.
+  window.addEventListener('pagehide', function (e) { if (!e.persisted) leave() })
   window.addEventListener('beforeunload', leave)
+  // Rueckkehr aus dem Hintergrund: mobile Browser pausieren das Video -> wieder
+  // anwerfen; und falls die Verbindung (auch nach 2-5 Min) abgerissen ist, neu
+  // verbinden. WICHTIG: Nach langem Hintergrund kappt der Browser die Verbindung
+  // teils STILL – connectionState bleibt 'connected', aber es kommt kein Bild mehr.
+  // Darum messen wir die tatsaechlich dekodierten Frames statt dem Status zu trauen.
+  var _healthTimer = null
+  function framesDecoded() {
+    return new Promise(function (res) {
+      if (!window._pc) return res(null)
+      window._pc.getStats().then(function (s) {
+        var n = null; s.forEach(function (r) { if (r.type === 'inbound-rtp' && r.kind === 'video') n = r.framesDecoded })
+        res(n)
+      }).catch(function () { res(null) })
+    })
+  }
+  function resume() {
+    v.play().catch(function () {})
+    var st = window._pc && window._pc.connectionState
+    if (!window._pc || st === 'failed' || st === 'disconnected' || st === 'closed') { retry(); return }
+    // Status meldet "gesund" – trotzdem gegenpruefen, ob wirklich wieder Bild kommt.
+    framesDecoded().then(function (before) {
+      clearTimeout(_healthTimer)
+      _healthTimer = setTimeout(function () {
+        if (document.visibilityState !== 'visible') return
+        framesDecoded().then(function (after) {
+          if (before == null || after == null || after <= before) retry()   // kein neuer Frame in ~2s -> neu verbinden
+        })
+      }, 2000)
+    })
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') resume() })
+  window.addEventListener('pageshow', function (e) { if (e.persisted) resume() })   // Rueckkehr aus dem bfcache
 
   connect()
 </script>

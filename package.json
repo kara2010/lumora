@@ -1,6 +1,6 @@
 {
   "name": "lumora",
-  "version": "2.2.5",
+  "version": "2.2.8",
   "description": "Lumora – Game Launcher mit automatischem HDR",
   "main": "main.js",
   "scripts": {
@@ -16,6 +16,7 @@
       "!website${/*}",
       "!dist${/*}",
       "!bin${/*}",
+      "!capture${/*}",
       "!.claude${/*}",
       "!**/*.zip",
       "!screenshot1.png",
@@ -27,6 +28,7 @@
       "!installer.nsh"
     ],
     "compression": "maximum",
+    "electronLanguages": ["en-US", "de"],
     "asarUnpack": [
       "**/*.node",
       "**/node_modules/koffi/**",
@@ -45,6 +47,7 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
+      "selectPerMachineByDefault": false,
       "allowToChangeInstallationDirectory": true,
       "include": "installer.nsh"
     },
