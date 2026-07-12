@@ -16,6 +16,8 @@ Write-Host "main.js OK"
 # Staging (Build-Dateien)
 if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
 New-Item -ItemType Directory -Force $tmp | Out-Null
+# grid.html gibt es nicht mehr: der Grid-Player lebt seit dem Vermittlungs-Umbau
+# im PHP-Skript (website/gruppe.php) und wird vom Webspace ausgeliefert.
 foreach ($f in 'main.js','index.html','osd.html','player.html','styles.css','icon.ico','icon-64.png','package.json') {
   Copy-Item "$src\$f" $tmp
 }
@@ -110,7 +112,12 @@ if (Test-Path $binSrcDir) {
       New-Item -ItemType Directory -Force $binDst | Out-Null
       foreach ($b in 'ffmpeg.exe','mediamtx.exe','lumora-capture.exe') {
         $bs = Join-Path $binSrcDir $b; $bd = Join-Path $binDst $b
-        if ((Test-Path $bs) -and (-not (Test-Path $bd) -or (Get-Item $bs).Length -ne (Get-Item $bd).Length)) {
+        # NICHT nur auf Groesse pruefen: zwei verschiedene Builds von lumora-capture.exe
+        # (self-contained single-file) landen leicht zufaellig auf exakt derselben
+        # Byte-Zahl - dann wurde frueher gar nicht kopiert, obwohl sich der Inhalt
+        # geaendert hatte (echter Vorfall 2026-07-08: ein Fix "wirkte" zwei Runden lang
+        # nicht, weil genau das passiert ist). Zusaetzlich Zeitstempel vergleichen.
+        if ((Test-Path $bs) -and (-not (Test-Path $bd) -or (Get-Item $bs).Length -ne (Get-Item $bd).Length -or (Get-Item $bs).LastWriteTimeUtc -gt (Get-Item $bd).LastWriteTimeUtc)) {
           Copy-Item $bs $bd -Force
         }
       }

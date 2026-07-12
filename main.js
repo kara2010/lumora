@@ -68,16 +68,20 @@ const appSettings = { autostart: false, startMinimized: false, minimizeToTray: f
   // dann fehlen FPS/CPU-Sensorwerte und wir fragen nicht staendig neu
   // ("Jetzt einrichten" im Overlay-Tab holt es nach).
   osdEnabled: false, osdScale: 1, osdCorner: 'tl', osdOpacity: 0.55, osdSetupDeclined: false, osdFpsSource: 'auto', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O',
-  // Afterburner-Block: Lumora rendert die in Afterburner fuers OSD angehakten
-  // Sensoren SELBST links oben in den Spiel-Frame (RTSS-Modus) - getrennt vom
-  // Lumora-Panel schaltbar. ABs eigenes OSD bleibt dafuer in AB deaktiviert.
+  // Alt+B: natives Afterburner-OSD ein-/ausblenden (RTSS-Sichtbarkeits-Bit),
+  // unabhaengig vom Lumora-Panel. Siehe toggleAbOsd().
   osdAbHotkey: 'Alt+B',
   // Live-Stream (native Pipeline): konstante Encode-Bitrate in kbit/s. Bei CBR
   // begrenzt sie zugleich, was der Zuschauer empfangen muss -> mobilfunktauglich
   // waehlen. Default 12 Mbit (gutes Full-HD). Dazu Ziel-Framerate + Aufloesung.
-  streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 120, streamHotkey: '',
+  // streamBufferMs: Empfangspuffer der Zuschauer. 120 ms war fuer Internet-Streams
+  // zu knapp - jede kleine Sende-/Netz-Schwankung schlug direkt als Ruckler durch.
+  // 300 ms ist weiterhin "live" (unter einer halben Sekunde), schluckt aber Jitter.
+  streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 300, streamHotkey: '',
   streamTurnEnabled: false, streamTurnUrl: '', streamTurnUser: '', streamTurnPass: '', streamTurnForce: false,
   streamForceIPv6: false,
+  groupRelayUrl: '',   // '' = eingebauter Standard (GROUP_RELAY_DEFAULT); austauschbar fuer Selbst-Hoster
+  groupLastCode: '',   // zuletzt genutzter Raumcode (Beitreten-Feld vorbefuellen)
   streamSource: '',   // '' = Hauptbildschirm bzw. 'screen:<idx>' (ddagrab-Monitor)
   // Grafikkarte fuer die OSD-Sensoren: 'auto' (schnellste automatisch) oder feste ID 'nvml:<idx>' / 'adl:<idx>'
   osdGpu: 'auto',
@@ -98,6 +102,12 @@ function loadAppSettings() {
     const parsed = JSON.parse(stripBom(fs.readFileSync(appSettingsFile, 'utf8')))
     if (parsed && typeof parsed === 'object') Object.assign(appSettings, parsed)
   } catch {}
+  // Einmalige Migration (2.2.10): 120 ms war der alte Standard-Empfangspuffer -
+  // nachweislich zu knapp (belegte Sender-Spitzen von 175-515 ms schlugen beim
+  // Zuschauer als "Verschlucken" durch). Wer noch exakt auf dem alten Default
+  // steht, wird auf den neuen (300 ms) gehoben; bewusst abweichend eingestellte
+  // Werte bleiben unangetastet, der Regler bleibt frei bedienbar.
+  if (appSettings.streamBufferMs === 120) appSettings.streamBufferMs = 300
 }
 
 function saveAppSettings() {
@@ -2116,6 +2126,24 @@ function createWindow() {
 
   if (state.maximized) mainWindow.maximize()
 
+  // Rechtsklick in Eingabefeldern: Electron bringt von Haus aus KEIN Kontextmenue
+  // mit - ohne diesen Handler geht "Einfuegen" per rechter Maustaste nirgendwo
+  // (aufgefallen beim Gruppen-Beitreten-Feld, gilt aber fuer alle Textfelder).
+  // WICHTIG: readonly-Felder (Gruppen-Code, Link-Anzeigen) melden isEditable=false,
+  // sollen aber trotzdem ein Kopieren-Menue bekommen - daher zusaetzlich auf
+  // inputFieldType (Rechtsklick IN einem Feld) bzw. markierten Text pruefen.
+  mainWindow.webContents.on('context-menu', (e, params) => {
+    const inField = params.isEditable || (params.inputFieldType && params.inputFieldType !== 'none')
+    if (!inField && !params.selectionText) return
+    Menu.buildFromTemplate([
+      { label: 'Ausschneiden', role: 'cut', enabled: !!params.editFlags.canCut },
+      { label: 'Kopieren', role: 'copy', enabled: !!(params.editFlags.canCopy || params.selectionText) },
+      { label: 'Einfügen', role: 'paste', enabled: !!params.editFlags.canPaste },
+      { type: 'separator' },
+      { label: 'Alles auswählen', role: 'selectAll', enabled: !!params.editFlags.canSelectAll },
+    ]).popup({ window: mainWindow })
+  })
+
   // Nur beim minimierten Start (Autostart): nach dem ersten Rendern minimieren bzw. im Tray lassen.
   mainWindow.once('ready-to-show', () => {
     if (!wantMin) return
@@ -3468,10 +3496,13 @@ const MTX_RTSP_PORT = 8554        // localhost: FFmpeg -> mediamtx (RTSP-Ingest)
 const MTX_WHEP_PORT = 8889        // localhost: mediamtx WHEP-HTTP (hinter dem Proxy)
 const MTX_API_PORT = 9997         // localhost: mediamtx-API (Zuschauerzahl)
 const MTX_ICE_UDP = 8189          // UDP: WebRTC-Medien (muss ans Internet)
+const MTX_RTP_UDP = 8556          // localhost-UDP: RTP-Ingest FFmpeg -> mediamtx (s. bcWriteMtxConfig)
+const MTX_RTCP_UDP = 8557         // localhost-UDP: zugehoeriges RTCP
 const MTX_PATH = 'live'           // mediamtx-Pfadname
 let broadcastServer = null        // HTTP-Server (player + WHEP-Proxy)
 let mtxProc = null                // mediamtx-Kindprozess
 let bcPinholeIds = []             // IPv6-Firewall-Pinholes (UniqueIDs) zum Aufraeumen
+let bcV4Mapped = false            // haben WIR das IPv4-Port-Mapping gesetzt? (nie fremde Mappings loeschen)
 let ffProc = null                 // FFmpeg-Kindprozess
 let capProc = null                // WGC-Aufnahme-Helfer (nur bei Fenster-Aufnahme)
 let audProc = null                // Audio-Helfer (WASAPI-Loopback, System-Audio)
@@ -3479,7 +3510,7 @@ let ffRestartTimer = null         // Auto-Neustart bei FFmpeg-Absturz
 let ffRestartDebounce = null      // sammelt schnelle Einstellungsaenderungen
 let ffStopping = false            // true = gewollt beendet (kein Auto-Neustart)
 let bcViewerPoll = null           // Intervall: Zuschauerzahl von der mediamtx-API
-let broadcastState = { active: false, port: 0, link: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false }
+let broadcastState = { active: false, port: 0, link: '', linkV4: '', linkV6: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false }
 let bcPlayerHtmlCache = null
 let bcEncoderCache = null         // { vendor, encoder, hw } – einmal ermittelt
 
@@ -3529,11 +3560,20 @@ function upnpDiscover(timeoutMs) {
     try { sock = dgram.createSocket({ type: 'udp4', reuseAddr: true }) } catch { return resolve([]) }
     const localIp = bcLanIp()
     const locations = []
+    // Early-Exit: der Router antwortet typisch in <300 ms. Nach dem ersten
+    // IGD-Fund nur noch eine kurze Nachfrist fuer weitere Antworten abwarten,
+    // statt immer die volle Wartezeit auszusitzen (der Stream-Start hing sonst
+    // pro Discovery-Runde fast 3 s, obwohl die Antwort laengst da war).
+    let done = false, grace = null
+    const finish = () => { if (done) return; done = true; if (grace) clearTimeout(grace); try { sock.close() } catch {}; resolve(locations) }
     sock.on('message', (buf) => {
       const s = buf.toString('latin1')
       if (/InternetGatewayDevice|WAN(IP|PPP)Connection/i.test(s)) {
         const loc = /LOCATION:\s*(\S+)/i.exec(s)
-        if (loc && !locations.includes(loc[1])) locations.push(loc[1])
+        if (loc && !locations.includes(loc[1])) {
+          locations.push(loc[1])
+          if (!grace) grace = setTimeout(finish, 250)
+        }
       }
     })
     sock.on('error', () => {})
@@ -3546,7 +3586,7 @@ function upnpDiscover(timeoutMs) {
         }
       })
     } catch { return resolve([]) }
-    setTimeout(() => { try { sock.close() } catch {}; resolve(locations) }, timeoutMs || 3000)
+    setTimeout(finish, timeoutMs || 3000)
   })
 }
 function upnpHttpGet(u) {
@@ -3584,15 +3624,20 @@ async function upnpResolveControl() {
     const svcRe = /<service>([\s\S]*?)<\/service>/g
     let m
     while ((m = svcRe.exec(desc.body))) {
-      if (!/WAN(IP|PPP)Connection/i.test(m[1])) continue
       const type = (/<serviceType>([^<]+)<\/serviceType>/i.exec(m[1]) || [])[1]
       const ctrl = (/<controlURL>([^<]+)<\/controlURL>/i.exec(m[1]) || [])[1]
       if (!type || !ctrl) continue
       const base = new (require('url').URL)(loc)
       const controlURL = ctrl.startsWith('http') ? ctrl : base.protocol + '//' + base.host + (ctrl.startsWith('/') ? '' : '/') + ctrl
-      upnpCtrl = { controlURL, serviceType: type, localIp: bcLanIp() }
-      return upnpCtrl
+      // IGDv2 (z.B. FritzBox): dieselbe Geraetebeschreibung enthaelt auch die
+      // IPv6-Firewall-Control - gleich mitcachen, das erspart dem Stream-Start
+      // die zweite komplette Discovery-Runde. Fehlt sie hier, discovert
+      // upnpResolveV6Firewall spaeter wie bisher selbst.
+      if (/WANIPv6FirewallControl/i.test(m[1])) { if (!upnpV6Ctrl) upnpV6Ctrl = { controlURL, serviceType: type }; continue }
+      if (!/WAN(IP|PPP)Connection/i.test(m[1])) continue
+      if (!upnpCtrl) upnpCtrl = { controlURL, serviceType: type, localIp: bcLanIp() }
     }
+    if (upnpCtrl) return upnpCtrl
   }
   return null
 }
@@ -3895,7 +3940,9 @@ function bcStreamCfg(enc) {
   const q = appSettings.streamQuality || '1080'
   let scaleH = STREAM_Q_H[q] || 0
   if (scaleH === 2160) scaleH = 0            // 4K = native Aufnahme, kein Scale
-  const kbit = Math.max(1000, Math.round(appSettings.streamUploadKbit || 8000))
+  // Adaptive Bitrate: bei leidenden Zuschauern stufenweise unter der Einstellung
+  // (bcAdaptKbit ist neutral, solange Stufe 0 oder der Schalter aus ist).
+  const kbit = bcAdaptKbit(Math.max(1000, Math.round(appSettings.streamUploadKbit || 8000)))
   const src = String(appSettings.streamSource || '')
   let mode = 'monitor', outputIdx = 0, hwnd = 0
   if (src.startsWith('window:')) { hwnd = parseInt(src.slice(7), 10) || 0; if (hwnd) mode = 'window' }
@@ -3912,7 +3959,9 @@ function bcQualityLabel(cfg) {
 //    die vom Helfer gemeldete Fenstergroesse.
 // HINWEIS: GPU-Scale/HDR-Tonemapping kommen als Verfeinerung; hier der Basis-Pfad.
 function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
-  const rtsp = ['-f', 'rtsp', '-rtsp_transport', 'tcp', 'rtsp://127.0.0.1:' + MTX_RTSP_PORT + '/' + MTX_PATH]
+  // UDP-Transport + 8-MB-Sendepuffer: der TCP-Ingest von mediamtx blockierte
+  // den Publisher periodisch (Beweiskette in bcWriteMtxConfig).
+  const rtsp = ['-f', 'rtsp', '-rtsp_transport', 'udp', '-buffer_size', '8388608', 'rtsp://127.0.0.1:' + MTX_RTSP_PORT + '/' + MTX_PATH]
   // System-Audio (fd 3, f32le 48k stereo vom Helfer) -> Opus. -map bindet Bild
   // (Input 0) + Ton (Input 1) explizit zusammen.
   const aIn = withAudio ? ['-thread_queue_size', '4096', '-f', 'f32le', '-ar', '48000', '-ac', '2', '-i', 'pipe:3'] : []
@@ -3924,9 +3973,13 @@ function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
     const vf = []
     if (cfg.scaleH && capH && cfg.scaleH < capH) vf.push('scale=-2:' + cfg.scaleH + ':flags=bicubic')
     vf.push('format=yuv420p')
-    return ['-hide_banner', '-loglevel', 'warning',
+    // -progress: Encoder-Eigenauskunft (frame/fps/speed) alle 5s auf stderr -
+    // Diagnose der maxwrite-Stalls: bricht der AUSSTOSS ein (GPU-These) oder
+    // nur die Pipe-Annahme? Wird in bcSpawnEncoder kompakt geloggt.
+    return ['-hide_banner', '-loglevel', 'warning', '-progress', 'pipe:2', '-stats_period', '5',
       '-thread_queue_size', '4096', '-f', 'rawvideo', '-pixel_format', 'bgra', '-video_size', capW + 'x' + capH, '-framerate', String(cfg.fps),
-      '-i', 'pipe:0',
+      // Named Pipe des Helfers (grosser Puffer) statt stdin - s. bcStartWindowCapture.
+      '-i', cfg.vidPipe ? '\\\\.\\pipe\\' + cfg.vidPipe : 'pipe:0',
       ...aIn,
       '-vf', vf.join(','),
       ...bcEncoderArgs(cfg.encoder, cfg.kbit, cfg.fps),
@@ -3935,11 +3988,23 @@ function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
   // Monitor-Weg (ddagrab). Bei Ton wird der Audio-Helfer zu Input 0 (pipe:3); das
   // ddagrab-Bild kommt aus dem Filtergraphen und wird per Label [v] explizit
   // gemappt (sonst zieht FFmpeg ohne -map das Audio als "Video" heran).
-  const vf = ['ddagrab=output_idx=' + cfg.outputIdx + ':framerate=' + cfg.fps, 'hwdownload', 'format=bgra']
-  if (cfg.scaleH) vf.push('scale=-2:' + cfg.scaleH + ':flags=bicubic')
-  vf.push('format=yuv420p')
+  // GPU-Direktkette (NVENC, keine Skalierung noetig): ddagrabs D3D11-Texturen
+  // gehen unveraendert in den Encoder, der BGRA->NV12 auf der GPU wandelt.
+  // hwdownload+format+scale (CPU-Umweg, bei 4K ~2 GB/s memcpy) entfallen
+  // komplett. Nur fuer diesen Fall: GPU-Skalierung kann das mitgelieferte
+  // FFmpeg nicht (scale_d3d11 bricht beim Konfigurieren ab, D3D11->CUDA-
+  // Ableitung nicht einkompiliert - beides real getestet), und AMF/QSV sind
+  // mit D3D11-Frames ungetestet -> ueberall sonst bleibt die CPU-Kette.
+  const zeroCopy = cfg.encoder === 'h264_nvenc' && !cfg.scaleH
+  const vf = ['ddagrab=output_idx=' + cfg.outputIdx + ':framerate=' + cfg.fps]
+  if (!zeroCopy) {
+    vf.push('hwdownload', 'format=bgra')
+    if (cfg.scaleH) vf.push('scale=-2:' + cfg.scaleH + ':flags=bicubic')
+    vf.push('format=yuv420p')
+  }
+  bcLogStream('video: ddagrab ' + (zeroCopy ? 'GPU-direkt (zero-copy)' : 'CPU-Kette' + (cfg.scaleH ? ', scale ' + cfg.scaleH + 'p' : '')))
   const mMap = withAudio ? ['-map', '[v]', '-map', '0:a:0', '-c:a', 'libopus', '-b:a', '128k', '-max_interleave_delta', '0'] : []
-  return ['-hide_banner', '-loglevel', 'warning',
+  return ['-hide_banner', '-loglevel', 'warning', '-progress', 'pipe:2', '-stats_period', '5',
     ...aIn,
     '-filter_complex', vf.join(',') + (withAudio ? '[v]' : ''),
     ...bcEncoderArgs(cfg.encoder, cfg.kbit, cfg.fps),
@@ -3954,13 +4019,27 @@ function bcWriteMtxConfig(hosts) {
   const lines = [
     'logLevel: error',
     'rtspAddress: 127.0.0.1:' + MTX_RTSP_PORT,
-    'rtspTransports: [tcp]',
+    // RTP-Ingest ueber UDP statt TCP: mediamtx' TCP-Ingest-Pfad blockiert den
+    // Publisher periodisch fuer 100-400 ms (isoliert belegt: identische 4K-
+    // Testkette 4 min ohne Zuschauer -> TCP: 167 Pipe-Stalls/speed 0.9x,
+    // UDP: 0 Stalls/speed 1.0x; tcp_nodelay half NICHT). Auf localhost ist
+    // UDP verlustfrei, solange die Puffer Keyframe-Bursts schlucken - dafuer
+    // udpReadBufferSize hier + buffer_size auf der FFmpeg-Seite (ohne diese
+    // Puffer real gemessen: "RTP packets lost" + FU-A-Fehler, mit: 0).
+    'rtspTransports: [udp, tcp]',
+    'rtpAddress: 127.0.0.1:' + MTX_RTP_UDP,
+    'rtcpAddress: 127.0.0.1:' + MTX_RTCP_UDP,
+    'udpReadBufferSize: 26214400',
     'rtmp: no', 'hls: no', 'srt: no', 'playback: no', 'metrics: no', 'pprof: no',
     'api: yes', 'apiAddress: 127.0.0.1:' + MTX_API_PORT,
     'webrtcAddress: 127.0.0.1:' + MTX_WHEP_PORT,
     'webrtcLocalUDPAddress: :' + MTX_ICE_UDP,
     "webrtcLocalTCPAddress: ''",
     'webrtcIPsFromInterfaces: yes',
+    // Sende-Warteschlange je Zuschauer: der Default (512 Pakete) kann bei
+    // Keyframe-Bursts + mehreren Zuschauern ueberlaufen -> mediamtx verwirft
+    // dann Pakete ("verschluckte" Stellen beim Zuschauer). Grosszuegig dimensionieren.
+    'writeQueueSize: 2048',
     // IPv6 MUSS gequotet werden (Doppelpunkte sonst = YAML-Mapping).
     hostList.length ? 'webrtcAdditionalHosts: [' + hostList.map((h) => "'" + h + "'").join(', ') + ']' : '',
     'webrtcHandshakeTimeout: 10s',
@@ -3979,6 +4058,70 @@ function bcWriteMtxConfig(hosts) {
   require('fs').writeFileSync(p, lines.join('\n'), 'utf8')
   return p
 }
+// --- Adaptive Bitrate (QoS-gesteuert) -------------------------------------------
+// Die Player melden alle 5 s ihre Empfangsqualitaet an /qos (Paketverlust,
+// Jitter, verworfene/eingefrorene Frames; Grid-Kacheln via gruppe.php-Relay).
+// Leidet ein Zuschauer anhaltend, senkt Lumora die Encoder-Bitrate stufenweise
+// (FFmpeg-Neustart; mediamtx + Server laufen durch, die Player-Watchdogs
+// verbinden automatisch neu); bleibt der Empfang laenger sauber, geht es
+// stufenweise zurueck zur eingestellten Bitrate. Hintergrund: feste CBR ueber
+// schwankenden Mobilfunk = Funkstau -> Einfrieren + Schnelllauf + Ton-Risse
+// beim Zuschauer (real diagnostiziert: 1440p/16 Mbit auf Handy; Sender
+// nachweislich makellos). Ein Encode fuer alle -> es zaehlt der schlechteste
+// aktive Zuschauer; die eigene Vorschau (localhost) regelt NICHT mit.
+const BC_ADAPT_F = [1, 0.7, 0.5, 0.35]   // Stufen-Faktoren auf die eingestellte Bitrate
+let bcAdaptLevel = 0                     // aktuelle Stufe (0 = volle Bitrate)
+let bcAdaptLastChange = 0                // letzter Stufenwechsel (Hysterese)
+let bcAdaptBadSince = 0, bcAdaptGoodSince = 0
+let bcQosMap = new Map()                 // viewerId/IP -> juengster QoS-Report
+let bcQosLogLast = new Map()             // Drossel fuer OK-Logzeilen
+let bcAdaptTimer = null
+function bcQosReport(ip, q) {
+  if (!q || typeof q !== 'object') return
+  if (/^(::1|127\.|::ffff:127\.)/.test(String(ip))) return   // eigene Vorschau
+  const recv = Math.max(0, q.recv | 0), lost = Math.max(0, q.lost | 0)
+  const drop = Math.max(0, q.drop | 0), frz = Math.max(0, q.frz | 0)
+  const lossRate = (lost + recv) > 0 ? lost / (lost + recv) : 0
+  // "leidet": spuerbarer Paketverlust ODER eingefrorene Wiedergabe ODER viele
+  // verworfene Frames im 5-s-Fenster.
+  const bad = lossRate > 0.02 || frz > 0 || drop > 15
+  const key = String(q.id || ip).slice(0, 40)
+  bcQosMap.set(key, { t: Date.now(), bad })
+  const last = bcQosLogLast.get(key) || 0
+  if (bad || Date.now() - last > 60000) {
+    bcLogStream('qos: ' + key + ' lost=' + lost + '/' + (lost + recv) + ' jit=' + (q.jit | 0) + 'ms fps=' + (q.fps == null ? '?' : Math.round(q.fps)) + ' drop=' + drop + ' frz=' + frz + (bad ? ' !' : ''))
+    bcQosLogLast.set(key, Date.now())
+  }
+}
+function bcAdaptKbit(baseKbit) {
+  if (bcAdaptLevel <= 0 || appSettings.streamAdaptive === false) return baseKbit
+  return Math.max(3000, Math.round(baseKbit * BC_ADAPT_F[bcAdaptLevel] / 100) * 100)
+}
+function bcAdaptTick() {
+  if (!broadcastState.active || appSettings.streamAdaptive === false) return
+  const now = Date.now()
+  let bad = false
+  for (const [k, r] of bcQosMap) {
+    if (now - r.t > 15000) { bcQosMap.delete(k); continue }
+    if (r.bad) bad = true
+  }
+  if (bad) { if (!bcAdaptBadSince) bcAdaptBadSince = now; bcAdaptGoodSince = 0 }
+  else { bcAdaptBadSince = 0; if (!bcAdaptGoodSince) bcAdaptGoodSince = now }
+  // Runter: >=8 s anhaltend schlecht (>=2 Reports in Folge). Rauf: 90 s sauber.
+  // Zwischen Wechseln >=20 s Ruhe - jeder Wechsel ist ein kurzer Neustart,
+  // Flattern waere schlimmer als eine zu niedrige Stufe.
+  let next = bcAdaptLevel
+  if (bad && bcAdaptBadSince && now - bcAdaptBadSince >= 8000 && bcAdaptLevel < BC_ADAPT_F.length - 1) next = bcAdaptLevel + 1
+  else if (!bad && bcAdaptGoodSince && now - bcAdaptGoodSince >= 90000 && bcAdaptLevel > 0) next = bcAdaptLevel - 1
+  if (next === bcAdaptLevel || now - bcAdaptLastChange < 20000) return
+  const base = Math.max(1000, Math.round(appSettings.streamUploadKbit || 8000))
+  bcAdaptLevel = next
+  bcAdaptLastChange = now
+  bcAdaptBadSince = 0; bcAdaptGoodSince = 0
+  bcLogStream('adapt: Stufe ' + next + ' -> ' + bcAdaptKbit(base) + ' kbit (' + (next > 0 ? 'Zuschauer-Empfang schlecht' : 'Empfang wieder stabil') + ')')
+  bcRestartFfmpeg()
+}
+
 // HTTP-Server auf dem freigegebenen Port: liefert die Player-Seite und proxyt
 // die WHEP-Signalisierung an mediamtx (localhost). So braucht der Zuschauer nur
 // DIESEN einen TCP-Port fuer die Signalisierung; die Medien laufen per WebRTC
@@ -3986,6 +4129,14 @@ function bcWriteMtxConfig(hosts) {
 function bcStartServer(port) {
   return new Promise((resolve, reject) => {
     const srv = http.createServer((req, res) => {
+      // CORS: player.html/preview riefen bisher immer NUR den eigenen Server auf
+      // (same-origin, kein CORS noetig). Die Grid-Seite verbindet dagegen zu den
+      // Servern ANDERER Gruppenmitglieder (echtes Cross-Origin) - daher generell
+      // erlauben. Der Endpunkt ist ohnehin oeffentlich/unauthentifiziert per Design.
+      res.setHeader('Access-Control-Allow-Origin', '*')
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+      if (req.method === 'OPTIONS') { res.writeHead(204); return res.end() }
       if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?') || req.url === '/index.html')) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
         return res.end(bcPlayerHtml())
@@ -4010,14 +4161,240 @@ function bcStartServer(port) {
           forceRelay: !!(turn && appSettings.streamTurnForce),   // zum Testen: nur ueber TURN
         }))
       }
+      // Identitaets-Endpunkt: verraet, WELCHE Lumora-Instanz unter dieser Adresse
+      // antwortet. Noetig fuer den Fall "zwei PCs hinter demselben Router": bevor
+      // ein zweiter PC das IPv4-Port-Mapping beansprucht, fragt er hier nach, ob
+      // die oeffentliche IPv4:Port schon einem ANDEREN Lumora gehoert (sonst wuerde
+      // er dessen Mapping je nach Router stehlen und den laufenden Stream abreissen).
+      if (req.method === 'GET' && req.url === '/instanz') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+        // group: laufender Raumcode - der zweite eigene PC im selben Netz nutzt das
+        // fuer den automatischen Gruppen-Beitritt beim Stream-Start.
+        return res.end(JSON.stringify({ lumora: true, id: groupMemberId(), group: bcGroup ? bcGroup.code : null }))
+      }
       // WHEP: POST = Offer->Answer, PATCH = ICE-Trickle, DELETE = Abmelden.
       // (Die Stream-Tab-Vorschau nutzt denselben /whep-Weg per localhost, ueber IPC.)
       if (req.url === '/whep' || req.url.startsWith('/whep')) return bcProxyWhep(req, res)
+      // QoS-Bericht eines Players (adaptive Bitrate, s. bcQosReport).
+      if (req.method === 'POST' && req.url === '/qos') {
+        let body = ''
+        req.on('data', (c) => { body += c; if (body.length > 4096) req.destroy() })
+        req.on('end', () => {
+          try { bcQosReport(req.socket.remoteAddress || '', JSON.parse(body)) } catch {}
+          res.writeHead(204); res.end()
+        })
+        return
+      }
       res.writeHead(404); res.end('not found')
     })
     srv.on('error', reject)
     srv.listen(port, () => resolve(srv))
   })
+}
+// --- Gruppen-Stream: Freunde sehen sich gegenseitig im Grid ------------------
+// Vermittlung ueber ein kleines PHP-Skript (gruppe.php) auf einem Webspace: Es
+// verwaltet Raumcodes + die aktuellen Adressen der Mitglieder, liefert den
+// Grid-Player per HTTPS aus (dadurch iPhone/Safari-tauglich und der Zuschauer-
+// Link bleibt die GANZE Sitzung stabil, egal wer kommt/geht) und reicht die
+// WHEP-Handshakes durch. Der VIDEO-Traffic laeuft weiterhin direkt P2P
+// Browser<->Streamer - kein Byte Video ueber den Webspace. Die URL ist
+// austauschbar (Einstellung groupRelayUrl, Standard unten); das Skript liegt
+// der Installation bei (resources/gruppe.php) - jeder kann es auf den eigenen
+// Webspace legen und bleibt damit unabhaengig.
+const GROUP_HEARTBEAT_MS = 8000     // Intervall fuer den Anwesenheits-Heartbeat
+const GROUP_RELAY_DEFAULT = 'https://kara-webdesign.de/hdr-launcher/gruppe.php'
+let bcGroup = null                  // null = nicht in einer Gruppe, sonst { code, members: [], relayFails }
+let bcGroupTimer = null
+
+function groupRelayUrl() {
+  const u = String(appSettings.groupRelayUrl || '').trim()
+  return u || GROUP_RELAY_DEFAULT
+}
+// Anfrage an die Vermittlung (https ODER http, je nach eingetragener URL).
+// Mit bodyObj = POST, sonst GET. Kurzer Timeout, niemals werfen.
+function groupRelay(action, params, bodyObj) {
+  return new Promise((resolve) => {
+    let u
+    try {
+      u = new (require('url').URL)(groupRelayUrl())
+      u.searchParams.set('a', action)
+      for (const k in (params || {})) u.searchParams.set(k, params[k])
+    } catch { return resolve(null) }
+    const mod = u.protocol === 'https:' ? https : http
+    const body = bodyObj ? Buffer.from(JSON.stringify(bodyObj)) : null
+    const req = mod.request(u, {
+      method: body ? 'POST' : 'GET', timeout: 8000,
+      headers: body ? { 'Content-Type': 'application/json', 'Content-Length': body.length } : {},
+    }, (res) => {
+      let d = ''
+      res.on('data', (c) => { d += c; if (d.length > 500000) req.destroy() })
+      res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve(null) } })
+    })
+    req.on('error', () => resolve(null))
+    req.on('timeout', () => { req.destroy(); resolve(null) })
+    req.end(body)
+  })
+}
+
+function groupMemberId() {
+  if (!appSettings.groupMemberId) {
+    appSettings.groupMemberId = require('crypto').randomBytes(6).toString('hex')
+    saveAppSettings()
+  }
+  return appSettings.groupMemberId
+}
+function groupDisplayName() {
+  try { return require('os').userInfo().username.slice(0, 24) || 'Spieler' } catch { return 'Spieler' }
+}
+// Roh-JSON an eine Basisadresse ("http://ip:port/" bzw. "http://[v6]:port/")
+// senden. Kurzer Timeout - eine tote Adresse soll den Heartbeat nicht blockieren.
+function groupHttpJson(base, urlPath, method, bodyObj, timeoutMs) {
+  return new Promise((resolve) => {
+    let u
+    try { u = new (require('url').URL)(urlPath, base) } catch { return resolve(null) }
+    const body = bodyObj ? Buffer.from(JSON.stringify(bodyObj)) : null
+    const req = http.request({
+      host: u.hostname, port: u.port || 80, path: u.pathname, method, timeout: timeoutMs || 4000,
+      headers: body ? { 'Content-Type': 'application/json', 'Content-Length': body.length } : {},
+    }, (res) => {
+      let d = ''
+      res.on('data', (c) => { d += c; if (d.length > 200000) req.destroy() })
+      res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve(null) } })
+    })
+    req.on('error', () => resolve(null))
+    req.on('timeout', () => { req.destroy(); resolve(null) })
+    req.end(body)
+  })
+}
+function groupSelfEntry() {
+  return {
+    id: groupMemberId(), name: groupDisplayName(),
+    linkV4: broadcastState.linkV4 || null, linkV6: broadcastState.linkV6 || null,
+    // Mitgliedschaft != Streamen: Wer seinen Stream stoppt, bleibt in der Gruppe
+    // (Server laeuft weiter) und erscheint im Grid als "pausiert" statt zu verschwinden.
+    streaming: !!broadcastState.active,
+  }
+}
+function groupPushState() { sendToUi('group-status', groupPublicState()) }
+function groupPublicState() {
+  // lastCode auch im Nicht-Gruppen-Zustand mitliefern: damit kann die Oberflaeche
+  // das Beitreten-Feld vorbefuellen - Wiederbeitritt ist dann ein Klick.
+  if (!bcGroup) return { active: false, lastCode: appSettings.groupLastCode || '' }
+  return {
+    active: true,
+    code: bcGroup.code,
+    link: groupRelayUrl() + '?code=' + bcGroup.code,
+    members: (bcGroup.members || []).map((m) => ({ id: m.id, name: m.name, isSelf: m.id === groupMemberId(), streaming: m.streaming !== false })),
+    relayUnreachable: (bcGroup.relayFails || 0) > 0,
+  }
+}
+// Ein Heartbeat-Takt: eigenen Eintrag bei der Vermittlung auffrischen, die
+// aktuelle Mitgliederliste zuruecknehmen. Abgelaufene Mitglieder raeumt die
+// Vermittlung selbst (TTL) - keine Host-Rolle, kein Gossip, keine Nachfolge
+// mehr noetig: der Raum lebt auf dem Webspace, nicht bei einer Person.
+async function groupTick() {
+  if (!bcGroup) return
+  const r = await groupRelay('update', { code: bcGroup.code }, groupSelfEntry())
+  if (r && r.ok) {
+    bcGroup.relayFails = 0
+    bcGroup.members = Array.isArray(r.members) ? r.members : []
+    groupPushState()
+    return
+  }
+  if (r && r.error === 'no-room') {
+    // Raum existiert nicht mehr (alle waren zu lange offline -> TTL). Lokal sauber
+    // beenden; der Code bleibt als lastCode vorbefuellt, ein Klick auf "Gruppe
+    // starten" erzeugt einen frischen.
+    osdDbg('[gruppe] groupTick: Raum ' + bcGroup.code + ' existiert nicht mehr -> Gruppe beendet')
+    groupStopHeartbeat()
+    bcGroup = null
+    groupPushState()
+    return
+  }
+  bcGroup.relayFails = (bcGroup.relayFails || 0) + 1
+  if (bcGroup.relayFails === 1 || bcGroup.relayFails % 5 === 0) osdDbg('[gruppe] Vermittlung nicht erreichbar (' + bcGroup.relayFails + 'x): ' + groupRelayUrl())
+  groupPushState()
+}
+function groupStartHeartbeat() {
+  osdDbg('[gruppe] groupStartHeartbeat: Eintritt, bcGroupTimer=' + !!bcGroupTimer)
+  if (!bcGroupTimer) bcGroupTimer = setInterval(() => { osdDbg('[gruppe] Heartbeat-Timer ausgeloest'); groupTick().catch((e) => osdDbg('[gruppe] groupTick warf: ' + (e && e.message))) }, GROUP_HEARTBEAT_MS)
+  osdDbg('[gruppe] groupStartHeartbeat: fertig')
+}
+function groupStopHeartbeat() { if (bcGroupTimer) { clearInterval(bcGroupTimer); bcGroupTimer = null } }
+// Aus Anwendersicht ist die Gruppe EIN Klick: "Gruppe starten" bzw. "Beitreten"
+// zieht den eigenen Stream automatisch mit hoch, statt den Nutzer mit einem
+// "erst Stream starten"-Toast in einen zweiten, unverstaendlichen Pflichtschritt
+// zu schicken. Gewartet wird bis Phase 2 (Router/oeffentliche IPs) fertig ist,
+// denn erst dann stehen linkV4/linkV6 - ohne die waere man im Roster adresslos
+// und fuer die anderen unsichtbar.
+async function groupEnsureBroadcast() {
+  if (!broadcastState.active) {
+    osdDbg('[gruppe] Auto-Start des Streams (fuer Gruppe)')
+    await startBroadcast()
+    if (!broadcastState.active) return broadcastState.noEncoder ? 'no-encoder' : 'stream-start-failed'
+  }
+  for (let i = 0; i < 40 && broadcastState.opening; i++) await new Promise((r) => setTimeout(r, 500))
+  if (broadcastState.opening) osdDbg('[gruppe] Router-Pruefung dauert ungewoehnlich lange - fahre mit LAN-Kenntnisstand fort')
+  return null
+}
+// Raumcode aus beliebiger Eingabe ziehen: roher 6er-Code ("TG7KP2") oder
+// kompletter Einladungslink (...gruppe.php?code=TG7KP2), Gross/Klein egal.
+function groupParseCode(raw) {
+  const s = String(raw || '').trim().toUpperCase()
+  const m = /[?&]CODE=([A-Z2-9]{6})\b/.exec(s) || /^([A-Z2-9]{6})$/.exec(s)
+  return m ? m[1] : null
+}
+async function groupStart() {
+  osdDbg('[gruppe] groupStart: Eintritt')
+  if (bcGroup) return groupPublicState()
+  const bcErr = await groupEnsureBroadcast()
+  if (bcErr) { osdDbg('[gruppe] groupStart: Stream-Start fehlgeschlagen -> Abbruch'); return { active: false, error: bcErr } }
+  const c = await groupRelay('create', {}, {})
+  if (!c || !c.ok || !c.code) { osdDbg('[gruppe] groupStart: Vermittlung nicht erreichbar (' + groupRelayUrl() + ')'); return { active: false, error: 'relay-unreachable' } }
+  bcGroup = { code: c.code, members: [], relayFails: 0 }
+  const r = await groupRelay('update', { code: c.code }, groupSelfEntry())
+  if (r && r.ok) bcGroup.members = Array.isArray(r.members) ? r.members : []
+  appSettings.groupLastCode = c.code
+  saveAppSettings()
+  groupStartHeartbeat()
+  groupPushState()
+  osdDbg('[gruppe] groupStart: Raum ' + c.code + ' erstellt')
+  return groupPublicState()
+}
+async function groupJoin(raw) {
+  osdDbg('[gruppe] groupJoin: Eintritt, Eingabe=' + raw)
+  if (bcGroup) return { active: false, error: 'already-in-group' }
+  const code = groupParseCode(raw)
+  if (!code) return { active: false, error: 'bad-code' }
+  const bcErr = await groupEnsureBroadcast()
+  if (bcErr) { osdDbg('[gruppe] groupJoin: Stream-Start fehlgeschlagen -> Abbruch'); return { active: false, error: bcErr } }
+  const r = await groupRelay('update', { code }, groupSelfEntry())
+  osdDbg('[gruppe] groupJoin: Antwort=' + JSON.stringify(r))
+  if (!r) return { active: false, error: 'relay-unreachable' }
+  if (!r.ok) return { active: false, error: r.error === 'no-room' ? 'no-room' : 'join-failed' }
+  bcGroup = { code, members: Array.isArray(r.members) ? r.members : [], relayFails: 0 }
+  appSettings.groupLastCode = code
+  saveAppSettings()
+  groupStartHeartbeat()
+  groupPushState()
+  osdDbg('[gruppe] groupJoin: Raum ' + code + ' beigetreten, Mitglieder=' + bcGroup.members.length)
+  return groupPublicState()
+}
+async function groupLeave() {
+  osdDbg('[gruppe] groupLeave: Eintritt, inGruppe=' + !!bcGroup)
+  if (!bcGroup) return { active: false }
+  const code = bcGroup.code
+  groupStopHeartbeat()
+  bcGroup = null
+  // Abmeldung ABWARTEN, damit ein sofortiger Wiederbeitritt den Austritt nicht
+  // ueberholen kann; scheitert sie, raeumt die TTL der Vermittlung den Eintrag.
+  await groupRelay('leave', { code }, { id: groupMemberId() })
+  groupPushState()
+  // Lief der Server nur noch fuer die Gruppe (eigener Stream ist aus), jetzt
+  // abbauen - ohne Gruppe und ohne Stream gibt es nichts mehr auszuliefern.
+  if (!broadcastState.active && broadcastServer) bcTeardownServer()
+  osdDbg('[gruppe] groupLeave: fertig')
+  return { active: false }
 }
 // --- Zuschauer-Tracking: IP + Browser je WHEP-Session ----------------------
 // mediamtx kennt die IP (webrtcsessions-API); den Browser (User-Agent) sieht
@@ -4150,13 +4527,33 @@ function bcKillCap() {
   if (capProc) { const c = capProc; capProc = null; try { c.kill() } catch {} }
   if (audProc) { const a = audProc; audProc = null; try { a.kill() } catch {} }
 }
-// Audio-Helfer starten: System-Audio per WASAPI-Loopback als PCM (f32le 48k
-// stereo) auf stdout, das FFmpeg als zweiten Eingang (fd 3) bekommt.
-function bcStartAudio() {
+// Streaming-Prozesse beim Scheduler bevorzugen. Log-Beleg (VSTAT im Helfer):
+// maxwrite bis ~300 ms bei maxcopy 1-5 ms -> FFmpeg nimmt die Frame-Pipe
+// periodisch nicht ab, waehrend Spiel/Browser Last machen. FFmpeg lief zwar
+// schon auf HIGH, aber ohne Erfolgskontrolle (stiller catch) und die Helfer
+// gar nicht erhoeht. Jetzt: ganze Kette angehoben und das Ergebnis geloggt -
+// so weiss die naechste Stall-Analyse sicher, ob die Prioritaet greift.
+function bcBoostPriority(proc, name, high) {
+  if (!proc || !proc.pid) return
+  try {
+    os.setPriority(proc.pid, high ? os.constants.priority.PRIORITY_HIGH : os.constants.priority.PRIORITY_ABOVE_NORMAL)
+    bcLogStream('prio ' + name + ' (' + proc.pid + '): ' + (high ? 'HIGH' : 'ABOVE_NORMAL'))
+  } catch (e) { bcLogStream('prio ' + name + ': FEHLER ' + (e && e.message)) }
+}
+// Audio-Helfer starten: PCM (f32le 48k stereo) auf stdout, das FFmpeg als
+// zweiten Eingang (fd 3) bekommt. Mit hwnd (Fenster-Modus): NUR der Ton des
+// zugehoerigen Prozesses (WASAPI Process-Loopback) - sonst wuerde man z.B.
+// Firefox-Ton im Stream hoeren, obwohl nur ein Spielfenster geteilt wurde.
+// Ohne hwnd (Monitor-Modus): System-weites Loopback wie bisher, dort korrekt,
+// weil ja der ganze Bildschirm geteilt wird.
+function bcStartAudio(hwnd) {
+  const args = ['--audio']
+  if (hwnd) args.push('--hwnd', String(hwnd))
   let a
-  try { a = spawn(streamBin('lumora-capture.exe'), ['--audio'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }
+  try { a = spawn(streamBin('lumora-capture.exe'), args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }
   catch (e) { bcLogStream('aud-start: ' + (e && e.message)); return null }
   audProc = a
+  bcBoostPriority(a, 'audio')
   a.on('error', (e) => { bcLogStream('aud-error: ' + (e && e.message)) })
   a.on('exit', (code) => { if (audProc === a) audProc = null; bcLogStream('aud beendet (' + code + ')') })
   if (a.stderr) a.stderr.on('data', (d) => bcLogStream('aud: ' + d.toString().trim()))
@@ -4167,11 +4564,20 @@ function bcStartAudio() {
 // Aufnahme starten – je nach Quelle Monitor (ddagrab) oder Fenster (WGC-Helfer
 // -> Pipe an FFmpeg). Bei Absturz automatischer Neustart, solange der Stream laeuft.
 let ffFastFails = 0   // aufeinanderfolgende Sofort-Abstuerze
+let ffGpuTimer = null // GPU-Telemetrie-Poll (Diagnose), laeuft nur waehrend FFmpeg lebt
+let ffLagTimer = null // Event-Loop-Messung (Diagnose): haengt NODE, stockt die fd3-Audio-Pipe
 function bcStartFfmpeg(cfg) {
   bcKillCap()   // evtl. verwaisten Helfer aufraeumen
+  // Anzeige nachfuehren: die adaptive Bitrate aendert cfg.kbit bei Neustarts -
+  // Qualitaetslabel + Hinweis-Badge in der UI sollen den echten Wert zeigen.
+  broadcastState.quality = bcQualityLabel(cfg)
+  broadcastState.adaptKbit = (bcAdaptLevel > 0 && appSettings.streamAdaptive !== false) ? cfg.kbit : 0
+  bcPushState()
   if (cfg.mode === 'window') return bcStartWindowCapture(cfg)
-  // Monitor-Weg (ddagrab): der Ton kommt – wie beim Fenster-Weg – vom parallelen
-  // System-Audio-Helfer ueber fd 3. ddagrab liefert nur das Bild, daher Audio separat.
+  // Monitor-Weg (ddagrab): der Ton kommt vom parallelen Audio-Helfer ueber fd 3 -
+  // hier bewusst OHNE hwnd, also System-weites Loopback (der ganze Bildschirm wird
+  // geteilt, da gehoert auch der ganze System-Ton dazu). ddagrab liefert nur das
+  // Bild, daher Audio separat.
   const aud = bcStartAudio()
   return bcSpawnEncoder(bcBuildFfmpegArgs(cfg, 0, 0, !!aud), null, null, aud)
 }
@@ -4179,10 +4585,15 @@ function bcStartFfmpeg(cfg) {
 // stderr) abwarten, dann FFmpeg mit rawvideo-Eingang starten und die Frames
 // hineinpipen. Stirbt der Helfer (Fenster zu), bekommt FFmpeg EOF -> Neustart.
 function bcStartWindowCapture(cfg) {
+  // Video-Transport: Named Pipe mit grossem Puffer (Name pro Lauf eindeutig).
+  // Die Standard-stdout-Pipe (64-KB-Puffer) war bei 4K-Rohframes der belegte
+  // Engpass (13 statt 157 fps im Direktvergleich) - siehe Program.cs.
+  cfg.vidPipe = 'lumora-vid-' + process.pid + '-' + Date.now()
   let cap
-  try { cap = spawn(streamBin('lumora-capture.exe'), ['--hwnd', String(cfg.hwnd), '--fps', String(cfg.fps), '--max-height', String(cfg.scaleH || 0)], { windowsHide: true }) }
+  try { cap = spawn(streamBin('lumora-capture.exe'), ['--hwnd', String(cfg.hwnd), '--fps', String(cfg.fps), '--max-height', String(cfg.scaleH || 0), '--pipe', cfg.vidPipe], { windowsHide: true }) }
   catch (e) { osdDbg('[stream] capture-Start fehlgeschlagen: ' + (e && e.message)); return null }
   capProc = cap
+  bcBoostPriority(cap, 'capture')
   cap.on('error', (e) => { bcLogStream('cap-error: ' + (e && e.message)) })
   cap.on('exit', (code) => { if (capProc === cap) capProc = null; bcLogStream('cap beendet (' + code + ')') })
   let sized = false, errbuf = ''
@@ -4194,13 +4605,13 @@ function bcStartWindowCapture(cfg) {
     sized = true
     const capW = parseInt(m[1], 10), capH = parseInt(m[2], 10)
     if (capProc !== cap || !broadcastState.active || ffStopping) return
-    // FFmpeg DIREKT vom stdout-Handle des Helfers lesen lassen (OS-Pipe, nicht
-    // durch Node): bei 4K-Rohframes (~2 GB/s) ist das der entscheidende
-    // Performance-Faktor – Node-Piping bricht hier auf ~8 fps ein, die OS-Pipe
-    // schafft ~58 fps. cap.stdout wird als FFmpegs stdin (fd 0) uebergeben.
+    // Das Video laeuft ueber die Named Pipe des Helfers (siehe oben) - FFmpeg
+    // oeffnet sie selbst per Dateiname. Historie der Transportwege: Node-Piping
+    // ~8 fps, stdout-OS-Pipe (64-KB-Puffer) ~58 fps, Named Pipe mit 64-MB-
+    // Puffer haelt 60 fps auch bei 4K-Rohframes.
     if (cap.stdout) cap.stdout.on('error', () => {})
-    const aud = bcStartAudio()                                      // System-Audio parallel
-    bcSpawnEncoder(bcBuildFfmpegArgs(cfg, capW, capH, !!aud), cap, cap.stdout, aud)
+    const aud = bcStartAudio(cfg.hwnd)                              // Ton NUR des aufgenommenen Fensters/Prozesses
+    bcSpawnEncoder(bcBuildFfmpegArgs(cfg, capW, capH, !!aud), cap, null, aud)
   })
   return cap
 }
@@ -4224,14 +4635,77 @@ function bcSpawnEncoder(args, capOfThis, stdinStream, audOfThis) {
     try { p.stdio[3].on('error', () => {}); audOfThis.stdout.pipe(p.stdio[3]) } catch {}
   }
   const startedAt = Date.now()
-  try { require('os').setPriority(p.pid, require('os').constants.priority.PRIORITY_HIGH) } catch {}
-  let errbuf = ''
-  if (p.stderr) p.stderr.on('data', (d) => { const s = d.toString(); errbuf = (errbuf + s).slice(-2000); bcLogStream('ff: ' + s.trim()) })
+  bcBoostPriority(p, 'ffmpeg', true)
+  // GPU-Telemetrie (Diagnose der maxwrite-Stalls): Takt + Encoder-Last alle 10s
+  // neben die VSTAT-Zeilen legen. These: bei ruhigem Bild/ohne Zuschauer senkt
+  // die GPU ihre Takte (Idle-Clocks, gemessen: SM 780 statt ~2600 MHz) -> der
+  // NVENC-Encode dauert x-fach laenger -> FFmpeg nimmt die Pipe 200-300ms nicht
+  // ab. Faellt der Video-Takt exakt am Kipp-Punkt, ist die Ursache bewiesen.
+  // NVIDIA-only und fehlertolerant: ohne nvidia-smi beendet sich der Timer.
+  if (!ffGpuTimer) {
+    ffGpuTimer = setInterval(() => {
+      // Selbstheilung: beim Stop-Pfad wird ffProc genullt BEVOR der Prozess
+      // stirbt - der exit-Handler stoppt den Timer dann nicht (ffProc !== p).
+      if (!ffProc) { clearInterval(ffGpuTimer); ffGpuTimer = null; return }
+      exec('nvidia-smi --query-gpu=clocks.sm,clocks.video,utilization.gpu,utilization.encoder,power.draw --format=csv,noheader,nounits', { windowsHide: true, timeout: 5000 }, (err, out) => {
+        if (err) { if (ffGpuTimer) { clearInterval(ffGpuTimer); ffGpuTimer = null } bcLogStream('gpu: Abfrage nicht moeglich (' + String(err.message || '').slice(0, 80) + ')'); return }
+        const v = String(out).trim().split(/,\s*/)
+        if (v.length >= 5) bcLogStream('gpu: sm=' + v[0] + 'MHz video=' + v[1] + 'MHz util=' + v[2] + '% enc=' + v[3] + '% pwr=' + v[4] + 'W')
+      })
+    }, 10000)
+  }
+  // Event-Loop-Verzoegerung im Node-Hauptprozess messen (Diagnose): das Audio
+  // laeuft als Node-Pipe durch diesen Prozess (fd 3) - haengt der Event-Loop
+  // (IPC/HTTP/Settings), koennte das die WSTALL-Ereignisse im Helfer erklaeren.
+  // Nur Ausreisser (>100 ms Drift eines 1s-Timers) landen im Log.
+  if (!ffLagTimer) {
+    let lagT = Date.now()
+    ffLagTimer = setInterval(() => {
+      if (!ffProc) { clearInterval(ffLagTimer); ffLagTimer = null; return }
+      const d = Date.now() - lagT - 1000
+      lagT = Date.now()
+      if (d > 100) bcLogStream('node-lag: ' + d + 'ms')
+    }, 1000)
+  }
+  // Adaptions-Tick (adaptive Bitrate): ueberlebt FFmpeg-Neustarts (active bleibt
+  // true), raeumt sich nach Stream-Ende selbst weg.
+  if (!bcAdaptTimer) {
+    bcAdaptTimer = setInterval(() => {
+      if (!ffProc && !broadcastState.active) { clearInterval(bcAdaptTimer); bcAdaptTimer = null; return }
+      try { bcAdaptTick() } catch {}
+    }, 5000)
+  }
+  // stderr zeilenweise verarbeiten: die key=value-Bloecke von -progress werden
+  // eingesammelt und alle 5s als EINE ff-stat-Zeile geloggt (sonst Log-Flut);
+  // alles andere (Warnungen/Fehler) laeuft wie bisher als 'ff:' ins Log und in
+  // errbuf (NVENC-Treiber-Erkennung beim Exit).
+  let errbuf = '', ffLineBuf = ''
+  const ffProg = {}
+  if (p.stderr) p.stderr.on('data', (d) => {
+    ffLineBuf += d.toString()
+    let nl
+    while ((nl = ffLineBuf.indexOf('\n')) >= 0) {
+      const line = ffLineBuf.slice(0, nl).trim(); ffLineBuf = ffLineBuf.slice(nl + 1)
+      if (!line) continue
+      const m = /^(frame|fps|stream_\d+_\d+_q|bitrate|total_size|out_time\w*|dup_frames|drop_frames|speed|progress)=(.*)$/.exec(line)
+      if (m) {
+        if (m[1] === 'progress') bcLogStream('ff-stat: frame=' + ffProg.frame + ' fps=' + ffProg.fps + ' speed=' + ffProg.speed + ' dup=' + ffProg.dup_frames + ' drop=' + ffProg.drop_frames)
+        else ffProg[m[1]] = m[2]
+        continue
+      }
+      errbuf = (errbuf + line + '\n').slice(-2000)
+      bcLogStream('ff: ' + line)
+    }
+  })
   // WICHTIG: 'error' MUSS behandelt werden – sonst wird ein Prozessfehler zur
   // uncaught exception und beendet die ganze App (genau der beobachtete Absturz).
   p.on('error', (e) => { bcLogStream('ff-error: ' + (e && e.message)) })
   p.on('exit', (code) => {
-    if (ffProc === p) ffProc = null
+    if (ffProc === p) {
+      ffProc = null
+      if (ffGpuTimer) { clearInterval(ffGpuTimer); ffGpuTimer = null }
+      if (ffLagTimer) { clearInterval(ffLagTimer); ffLagTimer = null }
+    }
     // Zugehoerige Helfer (Bild + Ton) mit beenden (sonst schreiben sie in tote Pipes).
     if (capOfThis) { if (capProc === capOfThis) capProc = null; try { capOfThis.kill() } catch {} }
     if (audOfThis) { if (audProc === audOfThis) audProc = null; try { audOfThis.kill() } catch {} }
@@ -4299,6 +4773,10 @@ function bcStartViewerPoll() {
       if (n !== broadcastState.viewers) {
         const prev = broadcastState.viewers
         broadcastState.viewers = n
+        // Immer-an-Log (lumora-stream.log): Bei einem harten PC-Absturz zeigt die
+        // LETZTE Zeile, ob der Crash unmittelbar auf einen Zuschauer-Wechsel folgte
+        // (Verdachtsfall AMD-System: Absturz, als der 2. Zuschauer den Player oeffnete).
+        bcLogStream('viewer: ' + prev + ' -> ' + n)
         bcPushState()
         if (n > prev) sendToUi('viewer-joined', n)
       }
@@ -4320,7 +4798,15 @@ async function startBroadcast() {
   }
   const lanIp = bcLanIp()
   const lanLink = 'http://' + lanIp + ':' + BROADCAST_PORT + '/'
-  broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder }
+  // Lief der Server durch (Gruppe aktiv, Stream war nur pausiert), sind die
+  // oeffentlichen Adressen weiterhin gueltig - uebernehmen statt zu leeren, sonst
+  // waere man im Gruppen-Roster kurzzeitig adresslos, bis Phase 2 durch ist.
+  const prevV4 = broadcastServer ? (broadcastState.linkV4 || '') : ''
+  const prevV6 = broadcastServer ? (broadcastState.linkV6 || '') : ''
+  // Adaptive Bitrate: jeder Stream beginnt mit der vollen eingestellten Bitrate.
+  bcAdaptLevel = 0; bcAdaptLastChange = 0; bcAdaptBadSince = 0; bcAdaptGoodSince = 0
+  bcQosMap.clear()
+  broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, linkV4: prevV4, linkV6: prevV6, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder }
   bcPushState()   // LAN-Link sofort anzeigen
   bcPinholeIds = []
   // Test-Schalter: IPv4-Weg bewusst auslassen, damit sich der IPv6-Direktweg
@@ -4334,7 +4820,9 @@ async function startBroadcast() {
   try {
     const cfgPath = bcWriteMtxConfig(cachedHosts)
     mtxProc = await bcStartMtx(cfgPath)
-    broadcastServer = await bcStartServer(BROADCAST_PORT)
+    // Server kann vom Gruppen-Modus noch laufen (Stream war nur pausiert) ->
+    // NICHT neu binden, das gaebe EADDRINUSE und risse den Start ab.
+    if (!broadcastServer) broadcastServer = await bcStartServer(BROADCAST_PORT)
   } catch (e) {
     osdDbg('[stream] Start fehlgeschlagen: ' + (e && e.message))
     stopBroadcast()
@@ -4345,21 +4833,28 @@ async function startBroadcast() {
   bcStartViewerPoll()
   broadcastState.quality = bcQualityLabel(cfg)
   bcPushState()   // Medien laufen – Vorschau kann verbinden (opening bleibt true bis der Router geprueft ist)
+  if (bcGroup) { groupPushState(); groupTick().catch(() => {}) }   // "streamt wieder" sofort an die Gruppe verteilen
   // PHASE 2 – ROUTER, PARALLEL: Portfreigaben + oeffentliche IPs (dauert je nach
   // Router Sekunden). Erst danach steht der oeffentliche Link fest -> opening=false.
   ;(async () => {
+    const routerT0 = Date.now()   // Dauer der Router-Phase belegen (Startwartezeit-Optimierung)
     let pubIp = null, tcpOk = false, udpOk = false
     let pubIp6 = null, v6Ok = false
+    let v4OccupiedBy = null      // andere Lumora-Instanz haelt bereits IPv4:Port (zweiter PC im selben Netz)
+    let v4OccupiedGroup = null   // deren laufender Raumcode, falls vorhanden (fuer den Auto-Join)
     try {
-      const r = await Promise.all([
-        forceV6 ? Promise.resolve(false) : upnpMapPort(BROADCAST_PORT, 'TCP', 'Lumora Stream'),
-        forceV6 ? Promise.resolve(false) : upnpMapPort(MTX_ICE_UDP, 'UDP', 'Lumora Stream Medien'),
-        upnpGetExternalIp(),
-        bcPublicIPv6(),
-      ])
-      tcpOk = r[0]; udpOk = r[1]; pubIp = r[2]; pubIp6 = r[3]
-      // IPv6-Firewall oeffnen (Pinhole je Port) – der Direktweg bei DS-Lite/CGNAT.
-      if (pubIp6) {
+      // ERST die oeffentlichen IPs ermitteln, DANN mappen: vor dem Beanspruchen des
+      // IPv4-Ports pruefen, ob dort schon eine ANDERE Lumora-Instanz antwortet
+      // (zweiter PC hinter demselben Router). Ohne diese Pruefung wuerde je nach
+      // Router das bestehende Mapping ueberschrieben - und der bereits laufende
+      // Stream des anderen PCs risse mitten im Spiel ab.
+      const ips = await Promise.all([upnpGetExternalIp(), bcPublicIPv6()])
+      pubIp = ips[0]; pubIp6 = ips[1]
+      // IPv6-Pinholes PARALLEL zum IPv4-Zweig oeffnen (beide sind voneinander
+      // unabhaengig; frueher lief das sequentiell und addierte sich auf die
+      // Startwartezeit). Ergebnis wird unten vor der Link-Wahl abgewartet.
+      const v6Job = (async () => {
+        if (!pubIp6) return
         const [t6, u6] = await Promise.all([
           upnpAddPinhole(pubIp6, BROADCAST_PORT, 'TCP'),
           upnpAddPinhole(pubIp6, MTX_ICE_UDP, 'UDP'),
@@ -4367,7 +4862,30 @@ async function startBroadcast() {
         if (t6) bcPinholeIds.push(t6)
         if (u6) bcPinholeIds.push(u6)
         v6Ok = !!(t6 && u6)
+      })()
+      if (!forceV6 && pubIp) {
+        // Kurzer Timeout (statt der 4s-Voreinstellung): eine ANDERE Instanz im
+        // selben Netz antwortet ueber Router-Hairpin in <500 ms. Gibt es keine
+        // (Normalfall), versandet das Paket mangels Portfreigabe kommentarlos -
+        // und dieser Timeout war der groesste Einzelposten der Startwartezeit.
+        const inst = await groupHttpJson('http://' + pubIp + ':' + BROADCAST_PORT + '/', '/instanz', 'GET', null, 1500)
+        if (inst && inst.lumora && inst.id && inst.id !== groupMemberId()) {
+          v4OccupiedBy = inst.id
+          v4OccupiedGroup = inst.group || null   // Raumcode der anderen Instanz (fuer Auto-Join)
+        }
       }
+      if (v4OccupiedBy) {
+        osdDbg('[stream] IPv4:' + BROADCAST_PORT + ' gehoert bereits einer anderen Lumora-Instanz (' + v4OccupiedBy + ') im selben Netz -> IPv4-Weg wird NICHT beansprucht, weiche auf IPv6 aus')
+      } else {
+        const r = await Promise.all([
+          forceV6 ? Promise.resolve(false) : upnpMapPort(BROADCAST_PORT, 'TCP', 'Lumora Stream'),
+          forceV6 ? Promise.resolve(false) : upnpMapPort(MTX_ICE_UDP, 'UDP', 'Lumora Stream Medien'),
+        ])
+        tcpOk = r[0]; udpOk = r[1]
+        if (!forceV6) bcV4Mapped = true   // nur dann darf der Teardown spaeter auch unmappen
+      }
+      // IPv6-Pinholes (oben parallel gestartet) fertig abwarten.
+      await v6Job
     } catch {}
     if (!broadcastState.active) {
       // Waehrend der Router-Phase gestoppt: frisch gesetzte Pinholes wieder schliessen.
@@ -4384,6 +4902,7 @@ async function startBroadcast() {
       appSettings.streamLastHosts = hosts
       saveAppSettings()
     }
+    bcLogStream('router-phase: ' + (Date.now() - routerT0) + ' ms (v4=' + (tcpOk && udpOk ? 'ok' : 'nein') + ' v6=' + (v6Ok ? 'ok' : 'nein') + ')')
     broadcastState.opening = false
     // Link-Prioritaet: klappt die IPv4-Freigabe -> IPv4-Link (breiteste Reichweite,
     // jeder Zuschauer erreicht ihn). Sonst, wenn der IPv6-Pinhole sitzt -> IPv6-Link
@@ -4392,31 +4911,76 @@ async function startBroadcast() {
     if (v4Reachable) broadcastState.link = 'http://' + pubIp + ':' + BROADCAST_PORT + '/'
     else if (v6Ok && pubIp6) broadcastState.link = 'http://[' + pubIp6 + ']:' + BROADCAST_PORT + '/'
     else if (pubIp) broadcastState.link = 'http://' + pubIp + ':' + BROADCAST_PORT + '/'
+    // Beide Adressfamilien getrennt merken (fuer den Gruppen-Modus): jedes Mitglied
+    // kennt so von jedem anderen sowohl IPv4- als auch IPv6-Weg, falls vorhanden -
+    // Zuschauer/Beitretende koennen dann selbst waehlen, was bei ihnen klappt.
+    broadcastState.linkV4 = v4Reachable ? ('http://' + pubIp + ':' + BROADCAST_PORT + '/') : ''
+    broadcastState.linkV6 = (v6Ok && pubIp6) ? ('http://[' + pubIp6 + ']:' + BROADCAST_PORT + '/') : ''
     broadcastState.internet = !!(v4Reachable || (v6Ok && pubIp6))
     broadcastState.ipv6Only = !!(!v4Reachable && v6Ok && pubIp6)   // Link laeuft ueber IPv6 (Zuschauer braucht IPv6)
     broadcastState.needsForward = !!(pubIp && !v4Reachable && !(v6Ok && pubIp6))
     bcPushState()
-    osdDbg('[stream] aktiv: ' + broadcastState.link + ' enc=' + enc.encoder + ' tcp=' + tcpOk + ' udp=' + udpOk + ' ip=' + pubIp + ' v6=' + v6Ok + ' ip6=' + pubIp6)
+    osdDbg('[stream] aktiv: ' + broadcastState.link + ' enc=' + enc.encoder + ' tcp=' + tcpOk + ' udp=' + udpOk + ' ip=' + pubIp + ' v6=' + v6Ok + ' ip6=' + pubIp6 + (v4OccupiedBy ? ' (IPv4 belegt von ' + v4OccupiedBy + ')' : ''))
+    // Zweiter PC im selben Netz: laeuft auf der anderen Lumora-Instanz bereits eine
+    // Gruppe, automatisch per Raumcode beitreten - der Nutzer startet auf Rechner 2
+    // nur den Stream und ist dabei, ohne Code-Kopieren zwischen den eigenen Geraeten.
+    if (v4OccupiedGroup && !bcGroup) {
+      try {
+        osdDbg('[gruppe] Auto-Join: Instanz von ' + v4OccupiedBy + ' hat Raum ' + v4OccupiedGroup)
+        const st = await groupJoin(v4OccupiedGroup)
+        if (st && st.active) sendToUi('group-autojoin', {})
+        else osdDbg('[gruppe] Auto-Join fehlgeschlagen: ' + JSON.stringify(st))
+      } catch (e) { osdDbg('[gruppe] Auto-Join warf: ' + (e && e.message)) }
+    }
   })()
   return broadcastState
 }
-function stopBroadcast() {
+// Server + Freigaben komplett abbauen - der Teil des Stopps, der bei aktiver
+// Gruppe NICHT laufen darf (siehe stopBroadcast): der HTTP-Server ist die
+// Gruppen-Infrastruktur (Roster, Gossip, Grid) und muss die Mitgliedschaft
+// ueberleben, sonst haengt die ganze Gruppe am Streaming-Zustand einer Person.
+function bcTeardownServer() {
+  if (broadcastServer) { try { broadcastServer.close() } catch {}; broadcastServer = null }
+  if (bcViewerPoll) { clearInterval(bcViewerPoll); bcViewerPoll = null }
+  bcBlockedIps.clear()
+  // IPv4-Freigaben NUR schliessen, wenn wir sie selbst gesetzt haben: gehoert das
+  // Mapping einer anderen Lumora-Instanz (zweiter PC im selben Netz), wuerde ein
+  // blindes Unmap deren laufenden Stream von aussen kappen.
+  if (bcV4Mapped) { upnpUnmapPort(BROADCAST_PORT, 'TCP'); upnpUnmapPort(MTX_ICE_UDP, 'UDP'); bcV4Mapped = false }
+  bcPinholeIds.forEach((id) => upnpDeletePinhole(id)); bcPinholeIds = []       // IPv6-Firewall-Pinholes schliessen
+  broadcastState = { active: false, port: 0, link: '', linkV4: '', linkV6: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false }
+  bcPushState()
+}
+// fullTeardown=true nur beim App-Ende: dann wird auch eine aktive Gruppe verlassen
+// und der Server abgebaut. Der normale "Stream stoppen"-Weg (Knopf/Hotkey) beendet
+// dagegen NUR die Videopipeline: Wer in einer Gruppe ist, BLEIBT Mitglied (und
+// Host bleibt Host!) - er gilt fuer die anderen lediglich als "pausiert". Frueher
+// bedeutete "Stream stoppen" automatisch "Gruppe verlassen"; beim Host riss das
+// den Einstiegspunkt der ganzen Gruppe mit um (geteilter Link sofort tot).
+async function stopBroadcast(fullTeardown) {
   const wasActive = broadcastState.active
   ffStopping = true
+  const keepGroup = !!bcGroup && !fullTeardown
+  // Beim echten Abbau die Gruppe sauber verlassen - ABWARTEN, damit ein sofortiger
+  // Wiederbeitritt die Austrittsmeldung nicht ueberholen kann (Race, siehe groupLeave).
+  if (bcGroup && fullTeardown) await groupLeave()
   if (ffRestartTimer) { clearTimeout(ffRestartTimer); ffRestartTimer = null }
   if (ffRestartDebounce) { clearTimeout(ffRestartDebounce); ffRestartDebounce = null }
   bcKillCap()
   if (ffProc) { try { ffProc.kill() } catch {}; ffProc = null }
   if (mtxProc) { try { mtxProc.kill() } catch {}; mtxProc = null }
-  if (broadcastServer) { try { broadcastServer.close() } catch {}; broadcastServer = null }
-  if (bcViewerPoll) { clearInterval(bcViewerPoll); bcViewerPoll = null }
-  bcBlockedIps.clear()
-  if (wasActive) {
-    upnpUnmapPort(BROADCAST_PORT, 'TCP'); upnpUnmapPort(MTX_ICE_UDP, 'UDP')     // IPv4-Freigaben schliessen
-    bcPinholeIds.forEach((id) => upnpDeletePinhole(id)); bcPinholeIds = []       // IPv6-Firewall-Pinholes schliessen
+  if (keepGroup) {
+    // Nur die Pipeline ist aus; Server, Portfreigaben und oeffentliche Adressen
+    // bleiben gueltig (der Server laeuft ja weiter). Zuschauerzaehler stoppen.
+    if (bcViewerPoll) { clearInterval(bcViewerPoll); bcViewerPoll = null }
+    broadcastState = { active: false, port: BROADCAST_PORT, link: '', linkV4: broadcastState.linkV4 || '', linkV6: broadcastState.linkV6 || '', lanLink: '', viewers: 0, quality: '', internet: broadcastState.internet, opening: false }
+    bcPushState()
+    groupPushState()                        // UI: Gruppe lebt weiter, eigener Stream pausiert
+    groupTick().catch(() => {})             // streaming=false sofort an alle verteilen
+    osdDbg('[stream] gestoppt (Gruppe bleibt aktiv, Server laeuft weiter)')
+    return
   }
-  broadcastState = { active: false, port: 0, link: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false }
-  bcPushState()
+  bcTeardownServer()
   osdDbg('[stream] gestoppt')
 }
 // Globaler Hotkey: Freigabe schnell an/aus – auch mitten im Spiel (der Poll mit
@@ -4472,8 +5036,30 @@ ipcMain.handle('preview-whep-stop', (e, session) => {
   } catch {}
 })
 ipcMain.handle('start-broadcast', () => startBroadcast())
-ipcMain.handle('stop-broadcast', () => { stopBroadcast(); return broadcastState })
+ipcMain.handle('stop-broadcast', async () => { await stopBroadcast(); return broadcastState })
 ipcMain.handle('broadcast-status', () => broadcastState)
+ipcMain.handle('group-start', () => { osdDbg('[gruppe] IPC group-start empfangen'); const r = groupStart(); osdDbg('[gruppe] IPC group-start liefert zurueck'); return r })
+ipcMain.handle('group-join', (e, link) => groupJoin(link))
+ipcMain.handle('group-leave', () => groupLeave())
+// Beim expliziten Status-Abruf (Tab-Oeffnen) zusaetzlich pruefen, ob der zuletzt
+// genutzte Raum NOCH EXISTIERT: nur dann wird das Beitreten-Feld vorbefuellt.
+// Ein toter Code von gestern im Feld stiftet nur Verwirrung; ein lebender Raum
+// (z. B. App-Absturz, waehrend die Freunde weiterzocken) macht den Wiederbeitritt
+// zum Ein-Klick. 30-s-Cache, damit Tab-Wechsel nicht dauernd die Vermittlung anfragen.
+let _lastCodeCheck = { code: '', alive: false, ts: 0 }
+ipcMain.handle('group-status', async () => {
+  const st = groupPublicState()
+  if (!st.active && st.lastCode) {
+    if (_lastCodeCheck.code !== st.lastCode || Date.now() - _lastCodeCheck.ts > 30000) {
+      const r = await groupRelay('list', { code: st.lastCode })
+      _lastCodeCheck = { code: st.lastCode, alive: !!(r && r.ok), ts: Date.now() }
+    }
+    st.lastCodeAlive = _lastCodeCheck.alive
+  }
+  return st
+})
+// TEMPORAER (Absturz-Diagnose Gruppen-Feature): Renderer-Debug ins selbe Log wie osdDbg.
+ipcMain.on('r-log', (e, m) => osdDbg(String(m)))
 
 // ---------------------------------------------------------------------------
 // Auto-Update (electron-updater, generischer Feed auf dem eigenen Webserver)
@@ -4647,7 +5233,7 @@ if (process.argv.includes('--fps-broker')) {
     }
   })
 
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll); if (timeEndPeriodFn) try { timeEndPeriodFn(1) } catch {}; stopFps(); stopSensorBroker(); try { rtssOsdClear() } catch {}; try { rtssReleaseVisible() } catch {}; try { stopBroadcast() } catch {} })
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (xinputPoll) clearInterval(xinputPoll); if (timeEndPeriodFn) try { timeEndPeriodFn(1) } catch {}; stopFps(); stopSensorBroker(); try { rtssOsdClear() } catch {}; try { rtssReleaseVisible() } catch {}; try { stopBroadcast(true).catch(() => {}) } catch {} })
 
   app.on('window-all-closed', () => {
     if (hdrPollInterval) clearInterval(hdrPollInterval)

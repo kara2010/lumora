@@ -36,6 +36,14 @@ static class Program
     [DllImport("user32.dll")] static extern IntPtr GetClassLongPtr(IntPtr h, int idx);
     [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+    // Physische Pixel von den Fenster-APIs bekommen (sonst liefert Windows einer
+    // DPI-unbewussten Konsolen-App skalierte LOGISCHE Werte, waehrend WGC
+    // PHYSISCHE Texturen liefert -> der Client-Ausschnitt saesse daneben).
+    [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
+    static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new IntPtr(-4);
     delegate bool EnumWindowsProc(IntPtr h, IntPtr p);
     // Hochaufloesenden System-Timer (1 ms) fuer praezises Frame-Timing.
     [DllImport("winmm.dll")] static extern uint timeBeginPeriod(uint p);
@@ -78,8 +86,18 @@ static class Program
     static ID3D11SamplerState _sampler;
     static ID3D11RenderTargetView _rtv;
     static ID3D11Texture2D _srcCopy;   // FP16-Kopie der WGC-Textur (mit ShaderResource-Flag)
-    static int _width, _height;       // Content-Groesse (WGC)
+    static int _width, _height;       // CLIENT-Groesse (sichtbarer Fensterinhalt)
     static int _outW, _outH;          // Ausgabe-Groesse (nach GPU-Downscale)
+    // WGC liefert die FENSTER-Textur inkl. unsichtbarer Rahmenzonen (ein maximiertes
+    // Fenster ragt mit dem Rahmen ueber den Monitor hinaus; z.B. 3876x2196 Textur um
+    // 3840x2160 Inhalt) - und die Texturgroesse kann je Compositing-Zustand sogar
+    // zwischen mit/ohne Rahmen WECHSELN. Wir schneiden deshalb IMMER den echten
+    // Client-Bereich aus der Textur (Crop), bevor die Pipeline arbeitet: keine
+    // Rahmenpixel im Stream, konstante Ausgabegroesse, kein Umbau bei Textur-Pingpong.
+    static int _texW, _texH;          // aktuelle WGC-Texturgroesse
+    static int _cropX, _cropY;        // Client-Offset innerhalb der Textur
+    static bool _cropOn;              // Crop noetig? (Offset != 0 oder Textur > Client)
+    static ID3D11Texture2D _cropTex;  // Zwischen-Textur in Client-Groesse
     static int _numMips;              // >0 = Mipmap-Downscale (glatte Halbierung)
     static volatile bool _running = true;
 
@@ -104,18 +122,46 @@ static class Program
         try
         {
             try { timeBeginPeriod(1); } catch { }   // praezises Thread.Sleep fuer sauberes CFR
-            if (Array.IndexOf(args, "--audio") >= 0) return RunAudio();   // Audio-Modus (WASAPI-Loopback)
+            try { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); } catch { }   // Fenster-APIs in physischen Pixeln
+            if (Array.IndexOf(args, "--audio") >= 0)
+            {
+                // Im Fenster-Modus wird der HWND mitgegeben, damit RunAudio nur den Ton
+                // DIESES Fensters/Prozesses aufnimmt (siehe RunAudio-Kommentar unten).
+                IntPtr audHwnd = IntPtr.Zero;
+                for (int ai = 0; ai < args.Length; ai++) if (args[ai] == "--hwnd" && ai + 1 < args.Length) audHwnd = (IntPtr)long.Parse(args[++ai]);
+                return RunAudio(audHwnd);
+            }
             if (Array.IndexOf(args, "--list") >= 0) return ListWindows(); // Fenster-Liste (zuverlaessiger als Electrons desktopCapturer)
             IntPtr hwnd = IntPtr.Zero;
             int fps = 60, maxHeight = 0;
+            string pipeName = null;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--hwnd" && i + 1 < args.Length) hwnd = (IntPtr)long.Parse(args[++i]);
                 else if (args[i] == "--title" && i + 1 < args.Length) hwnd = FindByTitle(args[++i]);
                 else if (args[i] == "--fps" && i + 1 < args.Length) fps = int.Parse(args[++i]);
                 else if (args[i] == "--max-height" && i + 1 < args.Length) maxHeight = int.Parse(args[++i]);
+                else if (args[i] == "--pipe" && i + 1 < args.Length) pipeName = args[++i];
             }
             if (hwnd == IntPtr.Zero) { Console.Error.WriteLine("ERR kein Fenster gefunden"); return 2; }
+            // Video-Ausgang als Named Pipe mit GROSSEM Puffer statt Prozess-stdout.
+            // Die kleine Standard-Pipe (64-KB-Puffer) ist bei 4K-Rohframes (33 MB,
+            // ~2 GB/s) der belegte Engpass der ganzen Kette: prozessintern schafft
+            // die Encoder-Kette 157 fps, durch die kleine Pipe 13 fps - der echte
+            // Stream lief dadurch bei konstant ~55 statt 60 fps (speed=0.91x).
+            // WICHTIG: Die Pipe muss VOR der SIZE-Meldung existieren - Lumora
+            // startet FFmpeg direkt nach "SIZE", und dessen CreateFile schluege
+            // auf einer noch nicht existenten Pipe fehl.
+            System.IO.Pipes.NamedPipeServerStream vidPipe = null;
+            if (pipeName != null)
+            {
+                try
+                {
+                    vidPipe = new System.IO.Pipes.NamedPipeServerStream(pipeName, System.IO.Pipes.PipeDirection.Out, 1,
+                        System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.None, 0, 64 * 1024 * 1024);
+                }
+                catch (Exception ex) { Console.Error.WriteLine("ERR Named Pipe: " + ex.Message); return 5; }
+            }
             if (!GraphicsCaptureSession.IsSupported()) { Console.Error.WriteLine("ERR WGC nicht unterstuetzt"); return 3; }
 
             // D3D11-Device + WinRT-Device
@@ -149,7 +195,17 @@ static class Program
             try { item = CreateItemForWindow(hwnd); }
             catch { Console.Error.WriteLine("ERR Fenster nicht mehr verfuegbar"); return 4; }
             if (item == null) { Console.Error.WriteLine("ERR Fenster nicht mehr verfuegbar"); return 4; }
-            _width = item.Size.Width; _height = item.Size.Height;
+            // Textur- und CLIENT-Groesse trennen: die Pipeline arbeitet auf dem
+            // sichtbaren Inhalt (Client), nicht auf der Fenster-Textur mit Rahmen.
+            _texW = item.Size.Width; _texH = item.Size.Height;
+            if (_texW <= 0 || _texH <= 0) { Console.Error.WriteLine("ERR Fenstergroesse 0"); return 5; }
+            if (!GetClientBox(hwnd, _texW, _texH, out _cropX, out _cropY, out int cliW, out int cliH)) { _cropX = 0; _cropY = 0; cliW = _texW; cliH = _texH; }
+            _width = Math.Min(cliW, _texW - _cropX);
+            _height = Math.Min(cliH, _texH - _cropY);
+            if (_width <= 0 || _height <= 0) { _cropX = 0; _cropY = 0; _width = _texW; _height = _texH; }
+            // H.264 verlangt GERADE Masse - ungerade Fenstergroessen (frei gezogene
+            // Fenster) auf gerade abrunden (1 px Beschnitt statt Encoder-Fehler).
+            _width &= ~1; _height &= ~1;
             if (_width <= 0 || _height <= 0) { Console.Error.WriteLine("ERR Fenstergroesse 0"); return 5; }
 
             // HDR-Quelle -> per FP16 erfassen und im eigenen Shader tonemappen.
@@ -173,7 +229,9 @@ static class Program
                 else _useVp = true;                                              // krumm -> Video-Processor
             }
 
+            EnsureCropTex(hdr);
             Console.Error.WriteLine($"SIZE {_outW} {_outH}");
+            if (_cropOn) Console.Error.WriteLine($"CLIP {_cropX},{_cropY} {_curW}x{_curH} in {_texW}x{_texH}");
             Console.Error.Flush();
 
             // Staging-Textur (CPU-lesbar) in AUSGABE-Groesse.
@@ -200,7 +258,7 @@ static class Program
             else if (_useVp) SetupVideoProcessor(_width, _height, _outW, _outH, hdr);
 
             var fmt = hdr ? DirectXPixelFormat.R16G16B16A16Float : DirectXPixelFormat.B8G8R8A8UIntNormalized;
-            var framePool = Direct3D11CaptureFramePool.Create(winrtDevice, fmt, 2, new SizeInt32(_width, _height));
+            var framePool = Direct3D11CaptureFramePool.Create(winrtDevice, fmt, 2, new SizeInt32(_texW, _texH));
             var session = framePool.CreateCaptureSession(item);
             try { session.IsCursorCaptureEnabled = true; } catch { }
             // Gelben WGC-Aufnahme-Rahmen entfernen. Ab Win11 22000 reicht dafuer
@@ -218,48 +276,139 @@ static class Program
             // Konsolen-App ohne Message-Loop/Dispatcher feuert das Event nicht,
             // Polling funktioniert dagegen zuverlaessig. Kein neues Frame ->
             // letztes erneut senden (CFR).
-            var stdout = Console.OpenStandardOutput();
+            // Verbindung abwarten BEVOR die Takt-Stopwatch startet: die Wartezeit
+            // bis FFmpeg die Pipe oeffnet darf nicht als Takt-Rueckstand zaehlen
+            // (Zaehl-Zeitbasis!). FFmpeg verbindet direkt nach seinem Start.
+            System.IO.Stream stdout;
+            if (vidPipe != null) { vidPipe.WaitForConnection(); stdout = vidPipe; }
+            else stdout = Console.OpenStandardOutput();
             double interval = 1000.0 / fps;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             double next = 0;
+            double pace = 0;   // Aufhol-Drossel: fruehester naechster Schreibzeitpunkt bei Rueckstand
             byte[] frameBuf = null;
+            int rszW = 0, rszH = 0; double rszSince = 0;   // Resize-Kandidat fuer die Stabilitaets-Hysterese
+            // Telemetrie: alle 10 s eine VSTAT-Zeile (frische vs. duplizierte Frames +
+            // aktueller Takt-Rueckstand). Macht "fuehlt sich weniger fluessig an"
+            // messbar: viele dup = Quelle liefert nicht; wachsender lag = Encoder
+            // kommt nicht nach (Latenz baut sich auf).
+            long statFresh = 0, statDup = 0; double statLast = 0;
+            double statMaxCopy = 0, statMaxWrite = 0;   // Stall-Quelle: GPU-Kopie vs. Pipe-Write
             while (_running)
             {
                 // Praezise bis zum naechsten Tick warten: grob per Sleep(1) (dank
                 // timeBeginPeriod ~1 ms genau), Feinschliff per SpinWait -> sauberes
                 // CFR auch bei 120 fps (8 ms Takt) statt grobem 15-ms-Sleep-Jitter.
                 double now;
-                while ((now = sw.Elapsed.TotalMilliseconds) < next - 0.3)
+                double waitUntil = Math.Max(next, pace);
+                while ((now = sw.Elapsed.TotalMilliseconds) < waitUntil - 0.3)
                 {
-                    if (next - now > 1.5) Thread.Sleep(1); else Thread.SpinWait(200);
+                    if (waitUntil - now > 1.5) Thread.Sleep(1); else Thread.SpinWait(200);
                 }
                 next += interval;
-                if (now > next + interval * 4) next = now;   // grosser Rueckstand -> Takt neu setzen
+                // AUFHOL-DROSSEL: Bei Rueckstand (Encoder-Spitze) NICHT back-to-back
+                // nachschiessen - der Frame-BURST blaeht den adaptiven Abspielpuffer
+                // des Zuschauers auf, und der baut sich kaum wieder ab (faktisch
+                // belegt: VSTAT lag=515ms -> Burst -> bleibendes Delay). Stattdessen
+                // hoechstens ~6% schneller als Echtzeit schreiben: ein 500-ms-
+                // Rueckstand baut sich damit unsichtbar ueber ~9 s ab. Im
+                // Normalbetrieb (kein Rueckstand) ist pace=0 und dieser Pfad inaktiv;
+                // die Frame-ZAEHLUNG (A/V-Sync) bleibt in jedem Fall unveraendert.
+                pace = (now - next > interval) ? now + interval * 0.94 : 0;
+                // A/V-SYNC: FFmpeg taktet das Rohvideo durch ZAEHLEN (Frame N = N/fps) -
+                // die geschriebene Frame-Zahl MUSS der Realzeit entsprechen, sonst
+                // driftet das Bild gegen den Ton. Der fruehere Takt-Reset bei Rueckstand
+                // verschluckte Ticks (-> wachsender Versatz); der erste Fix dagegen
+                // schrieb Aufhol-BURSTS desselben alten Bildes (-> sichtbares Stocken +
+                // fd3-Ton-Stau, faktisch belegt via VCATCHUP-Log). Die saubere Loesung
+                // ist KEIN Sonderpfad: Haengt der Takt hinterher, entfaellt oben die
+                // Wartezeit und jeder Durchlauf schreibt SOFORT seinen Tick - mit
+                // frisch gepolltem Bild statt Duplikat-Salve. Der Loop holt dadurch
+                // von selbst gleichmaessig auf, ohne je einen Tick zu verlieren.
+                // Einziges Notventil: >5 s Rueckstand (Encoder faktisch tot) -> Takt
+                // neu setzen und den Verlust sichtbar machen.
+                if (now - next > 5000)
+                {
+                    Console.Error.WriteLine($"VDROP {(now - next):F0}ms");
+                    Console.Error.Flush();
+                    next = now;
+                }
 
                 // Alle aufgestauten Frames abholen, nur das neueste verarbeiten.
                 Direct3D11CaptureFrame latest = null, f;
                 while ((f = framePool.TryGetNextFrame()) != null) { latest?.Dispose(); latest = f; }
                 if (latest != null)
                 {
-                    // Fenster-Groessenaenderung (z.B. Video -> Vollbild)? FramePool neu
-                    // anlegen (sonst croppt WGC auf die alte Groesse) und auf den
-                    // Letterbox-Scaler umschalten. Kleine Wackler (<=1 px) ignorieren.
+                    // Textur-Groessenwechsel? ZWEI Faelle sauber trennen:
+                    //  (a) Nur die WGC-TEXTUR wechselt (Rahmen dazu/weg - faktisch belegtes
+                    //      Pingpong z.B. 3876x2196 <-> 3840x2160 bei Browser-Fenstern):
+                    //      Der INHALT ist unveraendert -> lautlos Crop-Offset nachfuehren,
+                    //      KEIN Pipeline-Umbau, kein Stocken, keine SIZE-Aenderung.
+                    //  (b) Der CLIENT-Inhalt aendert sich wirklich (Video -> Vollbild):
+                    //      Letterbox-Scaler umbauen wie gehabt.
+                    // Dazu STABILITAETS-HYSTERESE (~500 ms), damit hektische Wechsel
+                    // gar nicht erst Arbeit ausloesen.
                     var cs = latest.ContentSize;
-                    if (cs.Width > 1 && cs.Height > 1 && (Math.Abs(cs.Width - _curW) > 1 || Math.Abs(cs.Height - _curH) > 1))
+                    bool differs = cs.Width > 1 && cs.Height > 1 && (Math.Abs(cs.Width - _texW) > 1 || Math.Abs(cs.Height - _texH) > 1);
+                    if (differs)
                     {
-                        _curW = cs.Width; _curH = cs.Height;
-                        try { framePool.Recreate(winrtDevice, fmt, 2, new SizeInt32(_curW, _curH)); } catch { }
-                        try { ConfigureLetterbox(hdr); }
-                        catch (Exception ex) { if (!_vpLogged) { _vpLogged = true; Console.Error.WriteLine("RSZERR " + ex.Message); } }
-                        if (frameBuf != null) Array.Clear(frameBuf, 0, frameBuf.Length);   // Raender schwarz
+                        if (cs.Width != rszW || cs.Height != rszH) { rszW = cs.Width; rszH = cs.Height; rszSince = now; }
+                        if (now - rszSince >= 500)
+                        {
+                            rszW = rszH = 0;
+                            _texW = cs.Width; _texH = cs.Height;
+                            try { framePool.Recreate(winrtDevice, fmt, 2, new SizeInt32(_texW, _texH)); } catch { }
+                            if (!GetClientBox(hwnd, _texW, _texH, out int ox, out int oy, out int cw, out int ch)) { ox = 0; oy = 0; cw = _texW; ch = _texH; }
+                            _cropX = ox; _cropY = oy;
+                            cw = Math.Min(cw, _texW - _cropX); ch = Math.Min(ch, _texH - _cropY);
+                            if (cw <= 0 || ch <= 0) { _cropX = 0; _cropY = 0; cw = _texW; ch = _texH; }
+                            cw &= ~1; ch &= ~1;   // H.264 verlangt gerade Masse
+                            if (Math.Abs(cw - _curW) > 1 || Math.Abs(ch - _curH) > 1)
+                            {
+                                // (b) echter Inhalts-Resize
+                                _curW = cw; _curH = ch;
+                                EnsureCropTex(hdr);
+                                try { ConfigureLetterbox(hdr); }
+                                catch (Exception ex) { if (!_vpLogged) { _vpLogged = true; Console.Error.WriteLine("RSZERR " + ex.Message); } }
+                                if (frameBuf != null) Array.Clear(frameBuf, 0, frameBuf.Length);   // Raender schwarz
+                            }
+                            else
+                            {
+                                // (a) nur Textur/Rahmen gewechselt - Inhalt identisch
+                                EnsureCropTex(hdr);
+                                Console.Error.WriteLine($"CLIP {_cropX},{_cropY} {_curW}x{_curH} in {_texW}x{_texH}");
+                            }
+                        }
+                        // Noch nicht stabil bzw. gerade umgebaut: dieses Frame ueberspringen
+                        // (letztes Bild laeuft weiter) - kein Stocken.
                         latest.Dispose();
-                        continue;   // naechstes Frame kommt in der neuen Groesse
                     }
-                    if (frameBuf == null) frameBuf = new byte[_outW * 4 * _outH];
-                    try { CopyFrameInto(latest, frameBuf); } catch { }
-                    latest.Dispose();
+                    else
+                    {
+                        rszW = rszH = 0;
+                        if (frameBuf == null) frameBuf = new byte[_outW * 4 * _outH];
+                        double c0 = sw.Elapsed.TotalMilliseconds;
+                        try { CopyFrameInto(latest, frameBuf); } catch { }
+                        statMaxCopy = Math.Max(statMaxCopy, sw.Elapsed.TotalMilliseconds - c0);
+                        latest.Dispose();
+                    }
                 }
-                if (frameBuf != null) { try { stdout.Write(frameBuf, 0, frameBuf.Length); stdout.Flush(); } catch { break; } }
+                if (frameBuf != null)
+                {
+                    double w0 = sw.Elapsed.TotalMilliseconds;
+                    try { stdout.Write(frameBuf, 0, frameBuf.Length); stdout.Flush(); } catch { break; }
+                    double wDur = sw.Elapsed.TotalMilliseconds - w0;
+                    statMaxWrite = Math.Max(statMaxWrite, wDur);
+                    // Einzelereignis mit Zeitstempel (VSTAT zeigt nur das 10s-Maximum):
+                    // erlaubt die Korrelation der Stalls mit ff-stat/gpu/node-lag-Zeilen.
+                    if (wDur >= 100) Console.Error.WriteLine($"WSTALL {wDur:F0}ms");
+                }
+                if (latest != null) statFresh++; else statDup++;
+                if (now - statLast >= 10000)
+                {
+                    if (statLast > 0) Console.Error.WriteLine($"VSTAT fresh={statFresh} dup={statDup} lag={Math.Max(0, now - next):F0}ms maxcopy={statMaxCopy:F0}ms maxwrite={statMaxWrite:F0}ms");
+                    statFresh = 0; statDup = 0; statMaxCopy = 0; statMaxWrite = 0; statLast = now;
+                }
             }
             try { session.Dispose(); framePool.Dispose(); } catch { }
             return 0;
@@ -277,7 +426,10 @@ static class Program
         var access = frame.Surface.As<IDirect3DDxgiInterfaceAccess>();
         Guid iid = ID3D11Texture2D_IID;
         IntPtr texPtr = access.GetInterface(ref iid);
-        using var srcTex = new ID3D11Texture2D(texPtr);
+        using var wgcTex = new ID3D11Texture2D(texPtr);
+        // Zuerst den CLIENT-Ausschnitt aus der Fenster-Textur schneiden (keine
+        // Rahmenpixel im Stream); die gesamte Pipeline arbeitet auf dem Ausschnitt.
+        var srcTex = PrepareSource(wgcTex);
         if (_resized) { CopyFrameLetterbox(srcTex, dst); return; }
         if (_numMips > 0)
         {
@@ -529,6 +681,61 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         _context.OMSetRenderTargets((ID3D11RenderTargetView)null);   // RTV loesen fuer die Kopie danach
     }
 
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT val, int size);
+    // SICHTBAREN Ausschnitt relativ zur WGC-Textur bestimmen. Die TEXTURGROESSE ist
+    // dabei die Wahrheit, die Fenster-Geometrie nur die Interpretation:
+    //  - Entspricht die Textur der Fenstergroesse INKL. unsichtbarer Rahmen
+    //    (GetWindowRect), wird auf die DWM Extended-Frame-Bounds (= das, was der
+    //    Nutzer wirklich sieht) beschnitten.
+    //  - Entspricht die Textur bereits den Extended-Frame-Bounds (neuere Windows-
+    //    Builds liefern im Borderless-Modus rahmenfreie Texturen), wird NICHT
+    //    beschnitten. Faktisch belegt: blindes Abziehen des Rahmenversatzes hat
+    //    hier 18 px sichtbaren Inhalt gekappt (CLIP 18,18 in 3840x2160 -> 1926x1080).
+    //  - Unerwartete Kombination -> ganze Textur (sicherer Default).
+    // WICHTIG: NICHT GetClientRect - Browser mit eigener Titelleiste definieren ihre
+    // Client-Flaeche selbst und ragen maximiert in die Off-Screen-Rahmenzone.
+    static bool GetClientBox(IntPtr hwnd, int texW, int texH, out int ox, out int oy, out int cw, out int ch)
+    {
+        ox = 0; oy = 0; cw = texW; ch = texH;
+        if (!GetWindowRect(hwnd, out RECT wr)) return false;
+        if (DwmGetWindowAttribute(hwnd, 9 /* DWMWA_EXTENDED_FRAME_BOUNDS */, out RECT vis, Marshal.SizeOf<RECT>()) != 0) return false;
+        int wrW = wr.Right - wr.Left, wrH = wr.Bottom - wr.Top;
+        int visW = vis.Right - vis.Left, visH = vis.Bottom - vis.Top;
+        bool texIsWindow = Math.Abs(texW - wrW) <= 2 && Math.Abs(texH - wrH) <= 2;
+        bool texIsVisible = Math.Abs(texW - visW) <= 2 && Math.Abs(texH - visH) <= 2;
+        if (texIsWindow && !texIsVisible && visW > 0 && visH > 0)
+        {
+            ox = Math.Max(0, vis.Left - wr.Left);
+            oy = Math.Max(0, vis.Top - wr.Top);
+            cw = visW; ch = visH;
+        }
+        return cw > 0 && ch > 0;
+    }
+    // Zwischen-Textur fuer den Client-Crop (in _curW x _curH) anlegen bzw. verwerfen.
+    static void EnsureCropTex(bool hdr)
+    {
+        _cropTex?.Dispose(); _cropTex = null;
+        _cropOn = _cropX != 0 || _cropY != 0 || _curW != _texW || _curH != _texH;
+        if (!_cropOn) return;
+        _cropTex = _device.CreateTexture2D(new Texture2DDescription
+        {
+            Width = (uint)_curW, Height = (uint)_curH, MipLevels = 1, ArraySize = 1,
+            Format = hdr ? Vortice.DXGI.Format.R16G16B16A16_Float : Vortice.DXGI.Format.B8G8R8A8_UNorm,
+            SampleDescription = new SampleDescription(1, 0),
+            Usage = ResourceUsage.Default, BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget,
+        });
+    }
+    // Liefert die Quelle fuer die Verarbeitungs-Pipeline: bei Crop den Client-
+    // Ausschnitt der WGC-Textur (GPU-Kopie), sonst die Textur direkt.
+    static ID3D11Texture2D PrepareSource(ID3D11Texture2D srcTex)
+    {
+        if (!_cropOn || _cropTex == null) return srcTex;
+        int w = Math.Min(_curW, _texW - _cropX), h = Math.Min(_curH, _texH - _cropY);
+        if (w <= 0 || h <= 0) return srcTex;
+        _context.CopySubresourceRegion(_cropTex, 0, 0, 0, 0, srcTex, 0, new Vortice.Mathematics.Box(_cropX, _cropY, 0, _cropX + w, _cropY + h, 1));
+        return _cropTex;
+    }
+
     static GraphicsCaptureItem CreateItemForWindow(IntPtr hwnd)
     {
         var factory = WinRT.ActivationFactory.Get("Windows.Graphics.Capture.GraphicsCaptureItem");
@@ -610,15 +817,122 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
         catch { return ""; }
     }
 
-    // Audio-Modus: System-Audio per WASAPI-Loopback als PCM auf stdout, das Format
-    // auf stderr ("AUDIO <rate> <channels> <bits> <f|i>"). Lumora haengt das als
-    // zweiten Eingang an FFmpeg (-> Opus fuer mediamtx).
-    static int RunAudio()
+    // --- Prozess-gebundene Audioaufnahme (WASAPI "Process Loopback", ab Win10 2004) --
+    // Im FENSTER-Modus soll nur der Ton DIESES Fensters/Prozesses (inkl. Kindprozesse)
+    // im Stream landen. Ohne das faengt WasapiLoopbackCapture (System-Loopback) IMMER
+    // den kompletten Sound-Mix des PCs ein - z.B. Firefox-Ton, obwohl nur ein
+    // Spielfenster geteilt wurde (genau der gemeldete Fehler). NAudio kennt die
+    // noetigen Datentypen zwar (AudioClientActivationParams etc., NAudio.Wasapi
+    // 2.2.1), verdrahtet sie aber nicht oeffentlich - daher hier die Aktivierung von
+    // Hand per P/Invoke; danach uebernimmt NAudios eigener AudioClient/
+    // AudioCaptureClient-Wrapper den Rest (dieselben Klassen wie beim System-Loopback).
+    [DllImport("Mmdevapi.dll", ExactSpelling = true, PreserveSig = false)]
+    static extern void ActivateAudioInterfaceAsync(
+        [MarshalAs(UnmanagedType.LPWStr)] string deviceInterfacePath,
+        Guid riid,
+        IntPtr activationParams,
+        NAudio.Wasapi.CoreAudioApi.Interfaces.IActivateAudioInterfaceCompletionHandler completionHandler,
+        out NAudio.Wasapi.CoreAudioApi.Interfaces.IActivateAudioInterfaceAsyncOperation activationOperation);
+
+    class AudioActivationHandler : NAudio.Wasapi.CoreAudioApi.Interfaces.IActivateAudioInterfaceCompletionHandler
+    {
+        public readonly ManualResetEvent Done = new ManualResetEvent(false);
+        public NAudio.Wasapi.CoreAudioApi.Interfaces.IActivateAudioInterfaceAsyncOperation Operation;
+        public void ActivateCompleted(NAudio.Wasapi.CoreAudioApi.Interfaces.IActivateAudioInterfaceAsyncOperation activateOperation)
+        { Operation = activateOperation; Done.Set(); }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS { public uint TargetProcessId; public int ProcessLoopbackMode; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct AUDIOCLIENT_ACTIVATION_PARAMS { public int ActivationType; public AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS ProcessLoopbackParams; }
+    // Minimal nachgebautes PROPVARIANT (nur der VT_BLOB-Zweig), da ActivateAudioInterfaceAsync
+    // die Aktivierungsparameter als PROPVARIANT-verpackten Byte-Blob erwartet.
+    [StructLayout(LayoutKind.Sequential)]
+    struct PROPVARIANT_BLOB { public ushort vt, wReserved1, wReserved2, wReserved3; public uint blobSize; public IntPtr blobData; }
+
+    static readonly Guid IID_IAudioClient = new Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
+
+    // Aktiviert WASAPI-Loopback fuer GENAU einen Prozess (samt Kindprozesse). Wirft bei
+    // jedem Problem (aeltere Windows-Version, Aktivierung schlaegt fehl, Prozess weg
+    // usw.) - der Aufrufer faengt das ab und faellt auf System-weites Loopback zurueck,
+    // damit im schlimmsten Fall wieder der bisherige Zustand gilt (Ton laeuft, nur
+    // ungefiltert) statt gar kein Ton mehr.
+    static NAudio.CoreAudioApi.AudioClient ActivateProcessLoopback(uint pid)
+    {
+        var acParams = new AUDIOCLIENT_ACTIVATION_PARAMS
+        {
+            ActivationType = 1,   // AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK
+            ProcessLoopbackParams = new AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS { TargetProcessId = pid, ProcessLoopbackMode = 0 },   // 0 = inkl. Kindprozesse
+        };
+        int paramsSize = Marshal.SizeOf<AUDIOCLIENT_ACTIVATION_PARAMS>();
+        IntPtr paramsPtr = Marshal.AllocHGlobal(paramsSize);
+        IntPtr propPtr = Marshal.AllocHGlobal(Marshal.SizeOf<PROPVARIANT_BLOB>());
+        try
+        {
+            Marshal.StructureToPtr(acParams, paramsPtr, false);
+            var prop = new PROPVARIANT_BLOB { vt = 0x41 /* VT_BLOB */, blobSize = (uint)paramsSize, blobData = paramsPtr };
+            Marshal.StructureToPtr(prop, propPtr, false);
+
+            var handler = new AudioActivationHandler();
+            ActivateAudioInterfaceAsync(@"VAD\Process_Loopback", IID_IAudioClient, propPtr, handler, out _);
+            if (!handler.Done.WaitOne(4000)) throw new TimeoutException("Aktivierung (Process-Loopback) antwortet nicht");
+            handler.Operation.GetActivateResult(out int hr, out object iface);
+            if (hr != 0) throw new COMException("ActivateAudioInterfaceAsync fehlgeschlagen", hr);
+            return new NAudio.CoreAudioApi.AudioClient((NAudio.CoreAudioApi.Interfaces.IAudioClient)iface);
+        }
+        finally { Marshal.FreeHGlobal(paramsPtr); Marshal.FreeHGlobal(propPtr); }
+    }
+
+    // Audio-Modus: PCM auf stdout, das Format auf stderr ("AUDIO <rate> <channels>
+    // <bits> <f|i>"). Lumora haengt das als zweiten Eingang an FFmpeg (-> Opus fuer
+    // mediamtx). Im Fenster-Modus (hwnd gesetzt) wird NUR der Ton des zugehoerigen
+    // Prozesses aufgenommen (siehe ActivateProcessLoopback); im Monitor-Modus (hwnd
+    // IntPtr.Zero) bleibt es beim bisherigen System-weiten Loopback - dort ist das
+    // korrekt, weil ja der GANZE Bildschirm geteilt wird.
+    static int RunAudio(IntPtr hwnd)
     {
         try
         {
-            var capture = new NAudio.Wave.WasapiLoopbackCapture();
-            var fmt = capture.WaveFormat;
+            NAudio.CoreAudioApi.AudioClient procClient = null;
+            NAudio.CoreAudioApi.AudioCaptureClient procCap = null;
+            NAudio.Wave.WasapiLoopbackCapture sysCapture = null;
+            NAudio.Wave.WaveFormat procFmt = null;
+            if (hwnd != IntPtr.Zero)
+            {
+                // Jeder Schritt einzeln geloggt (statt nur der Gesamt-Fehlermeldung) - die
+                // erste Runde zeigte nur "The method or operation is not implemented" ohne
+                // erkennbar, WELCHER Aufruf das war. Fakten statt raten.
+                string step = "start";
+                try
+                {
+                    step = "GetWindowThreadProcessId";
+                    GetWindowThreadProcessId(hwnd, out uint pid);
+                    if (pid == 0) throw new Exception("keine Prozess-ID ermittelt");
+                    step = "ActivateProcessLoopback";
+                    procClient = ActivateProcessLoopback(pid);
+                    // GetMixFormat() ist beim virtuellen Process-Loopback-Geraet NICHT
+                    // zuverlaessig implementiert (liefert auf manchen Systemen E_NOTIMPL,
+                    // in .NET als NotImplementedException sichtbar). Es gibt kein echtes
+                    // Geraet zum Erfragen, daher fest das ueberall unterstuetzte
+                    // Standardformat (f32/48kHz/stereo).
+                    procFmt = NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
+                    step = "Initialize";
+                    procClient.Initialize(NAudio.CoreAudioApi.AudioClientShareMode.Shared, NAudio.CoreAudioApi.AudioClientStreamFlags.Loopback, 200000 /* 20 ms, in 100-ns-Einheiten */, 0, procFmt, Guid.Empty);
+                    step = "AudioCaptureClient";
+                    procCap = procClient.AudioCaptureClient;
+                    Console.Error.WriteLine("AUDIOSRC prozessgebunden (pid " + pid + ")");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("AUDPROCFALLBACK [" + step + "] " + ex.GetType().Name + ": " + ex.Message);
+                    try { procClient?.Dispose(); } catch { }
+                    procClient = null; procCap = null; procFmt = null;
+                }
+            }
+            if (procClient == null) { sysCapture = new NAudio.Wave.WasapiLoopbackCapture(); Console.Error.WriteLine("AUDIOSRC system"); }
+
+            var fmt = procClient != null ? procFmt : sysCapture.WaveFormat;
             Console.Error.WriteLine($"AUDIO {fmt.SampleRate} {fmt.Channels} {fmt.BitsPerSample} {(fmt.Encoding == NAudio.Wave.WaveFormatEncoding.IeeeFloat ? "f" : "i")}");
             Console.Error.Flush();
             var stdout = Console.OpenStandardOutput();
@@ -629,71 +943,153 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             // blockieren); erst bei laengerem Stau wird verworfen.
             var queue = new System.Collections.Concurrent.BlockingCollection<byte[]>(512);
             bool broken = false;
-            capture.DataAvailable += (s, e) =>
+            if (sysCapture != null)
             {
-                if (broken || e.BytesRecorded <= 0) return;
-                var buf = new byte[e.BytesRecorded];
-                Array.Copy(e.Buffer, buf, e.BytesRecorded);
-                queue.TryAdd(buf);
-            };
-            capture.RecordingStopped += (s, e) => { try { queue.CompleteAdding(); } catch { } };
-            // WICHTIG: WasapiLoopbackCapture feuert bei STILLE keine DataAvailable-
-            // Events. Ohne Daten blockiert FFmpeg beim Lesen von fd 3 und muxt kein
-            // Video mehr -> die Video-Pipe laeuft voll, der ganze Stream friert ein.
-            // Darum schiebt der Writer bei echten Tonpausen Stille (Nullen) nach.
-            // ACHTUNG (Lehre aus 2.2.x-Tonaussetzern): NICHT gegen eine absolute
-            // Echtzeit-Uhr fuellen! Die WASAPI-Pipeline-Latenz (system-/geraeteabhaengig,
-            // gemessen ~170 ms) liegt sonst dauerhaft ueber der Toleranz und es wird
-            // ZYKLISCH Stille in den LAUFENDEN Ton gemischt (= die gemeldeten Aussetzer).
-            // Stattdessen rein relativ: Kommt >150 ms nichts aus der Queue, beginnt eine
-            // Pause; die Stille wird exakt fuer die DAUER der Pause im Echtzeit-Takt
-            // erzeugt und endet mit dem naechsten echten Chunk. Kein Uhr-Vergleich mit
-            // dem Capture-Strom -> keine Latenz-/Drift-Fallen.
+                sysCapture.DataAvailable += (s, e) =>
+                {
+                    if (broken || e.BytesRecorded <= 0) return;
+                    var buf = new byte[e.BytesRecorded];
+                    Array.Copy(e.Buffer, buf, e.BytesRecorded);
+                    queue.TryAdd(buf);
+                };
+                sysCapture.RecordingStopped += (s, e) => { try { queue.CompleteAdding(); } catch { } };
+            }
+            // A/V-SYNC-KERN: FFmpeg taktet den Rohton durch reines ZAEHLEN der Samples.
+            // Bild und Ton bleiben also nur synchron, wenn wir pro realer Sekunde EXAKT
+            // bps Bytes liefern. Frueher (Pausen-Schaetz-Logik) blieb jeder Fehler -
+            // Schaetzfehler beim Pausenfuellen, unter Last verworfene WASAPI-Chunks,
+            // Soundkarten-Uhr-Drift - FUER IMMER als wachsender Versatz stehen (bei zwei
+            // parallelen Streams schnell hoerbar). Jetzt: ECHTZEIT-BYTE-BUDGET.
+            //   budget(t) = (Stoppuhr seit dem ERSTEN echten Chunk) * bps
+            // Liegt das Geschriebene mehr als 80 ms unter dem Budget, wird die Luecke
+            // (bis auf 40 ms Reserve) mit Stille aufgefuellt - egal, WODURCH sie entstand.
+            // Jeder Fehler ist damit nach spaetestens ~100 ms wieder ausgeglichen statt
+            // sich zu addieren. Die 2.2.8-Falle (zyklische Stille im LAUFENDEN Ton, weil
+            // gegen eine absolute Uhr ab Prozessstart gefuellt wurde) ist konstruktiv
+            // vermieden: Nullpunkt ist der erste Chunk (die konstante WASAPI-Pipeline-
+            // Latenz steckt damit im Nullpunkt und kuerzt sich heraus), und die 80-ms-
+            // Hysterese liegt weit ueber dem normalen Chunk-Abstand (~10 ms).
+            // Laeuft die Soundkarten-Uhr dauerhaft VOR (Budget-Ueberschuss > 500 ms),
+            // werden ganze Chunks ausgelassen, bis der Ueberschuss abgebaut ist -
+            // passiert nur bei starkem Uhren-Drift und in seltenen Einzelschritten.
             int bps = fmt.AverageBytesPerSecond;                  // 48000*2*4 = 384000
-            byte[] silence = new byte[Math.Max(2, bps / 50)];     // 20-ms-Haeppchen
-            var swPause = new System.Diagnostics.Stopwatch();
+            int align = Math.Max(1, fmt.BlockAlign);              // NIE mitten im Sample-Frame schneiden (Kanal-Versatz!)
+            byte[] silence = new byte[Math.Max(align, bps / 50 / align * align)];   // 20-ms-Haeppchen, align-gerundet
             var writer = new Thread(() =>
             {
                 try
                 {
-                    int dryMs = 0; bool inPause = false; long pauseWritten = 0;
+                    var clock = new System.Diagnostics.Stopwatch();
+                    long written = 0;
+                    bool started = false;
+                    long filledTotal = 0;
+                    // inFill: Pause ist BESTAETIGT (150-ms-Hysterese einmal ueberschritten).
+                    // Ab dann wird bei jedem 15-ms-Tick kontinuierlich in kleinen Haeppchen
+                    // bis zur 60-ms-Reserve nachgefuellt, statt jeweils erneut auf 150 ms
+                    // Defizit zu warten. WICHTIG (Latenz beim Zuschauer, faktisch belegt bei
+                    // YouTube-Pausen): 90-ms-Stille-BURSTS liessen den adaptiven Abspielpuffer
+                    // des Empfaenger-Browsers anwachsen - und der baut sich kaum wieder ab.
+                    // Ein kontinuierlicher Fluss haelt das Paket-Timing glatt. Die MENGEN-
+                    // Rechnung (Budget) und die 150-ms-Schutz-Hysterese fuer den laufenden
+                    // Ton bleiben unveraendert - nur die Ausgabe-Kadenz der Stille aendert sich.
+                    bool inFill = false;
+                    long fillStartTotal = 0;
                     while (!broken)
                     {
                         if (queue.TryTake(out var buf, 15))
                         {
-                            if (inPause)
+                            if (!started) { started = true; clock.Restart(); }
+                            if (inFill)
                             {
-                                Console.Error.WriteLine($"SIL {swPause.ElapsedMilliseconds + 150}");   // Diagnose: Pausendauer in ms
-                                inPause = false;
+                                inFill = false;
+                                Console.Error.WriteLine($"SIL {(filledTotal - fillStartTotal) * 1000 / bps}ms (gesamt {filledTotal * 1000 / bps}ms)");
                             }
-                            dryMs = 0;
+                            // VORLAUF-Selbstkorrektur: Wurde faelschlich gefuellt (Lieferstau
+                            // sah wie eine Luecke aus) oder laeuft die Karten-Uhr vor, liegt
+                            // written ueber dem Budget. Dann den Anfang des GESTAUTEN Chunks
+                            // beschneiden (align-gerecht, bis auf 20 ms Rest) - der Vorlauf
+                            // baut sich damit sofort wieder ab, statt dauerhaft zu bleiben.
+                            long ahead = written - (long)(clock.Elapsed.TotalSeconds * bps);
+                            if (ahead > bps / 10)   // > 100 ms
+                            {
+                                int cut = (int)Math.Min((long)(buf.Length - align), (ahead - bps / 50) / align * align);
+                                if (cut > 0)
+                                {
+                                    stdout.Write(buf, cut, buf.Length - cut);
+                                    written += buf.Length - cut;
+                                    Console.Error.WriteLine($"CUT {cut * 1000 / bps}ms (Vorlauf-Abbau)");
+                                    continue;
+                                }
+                            }
                             stdout.Write(buf, 0, buf.Length);
+                            written += buf.Length;
                             continue;
                         }
                         if (queue.IsAddingCompleted) break;        // Recording gestoppt & leer
-                        dryMs += 15;
-                        if (!inPause && dryMs >= 150)              // echte Tonpause erkannt
+                        if (!started) continue;                    // vor dem ersten Ton nichts erzwingen
+                        // 150 ms Hysterese (praxiserprobter Wert) fuer den EINSTIEG in eine
+                        // Pause: Lieferstaus unterhalb davon sind normale Latenzspitzen unter
+                        // Last - dort NICHT fuellen, sonst entstuende genau dann ein hoerbarer
+                        // Mini-Aussetzer, wenn die gestauten Samples doch noch eintreffen.
+                        long target = (long)(clock.Elapsed.TotalSeconds * bps) / align * align;
+                        long deficit = target - written;
+                        if (!inFill && deficit >= bps * 150 / 1000) { inFill = true; fillStartTotal = filledTotal; }
+                        if (inFill && deficit > bps * 60 / 1000)
                         {
-                            inPause = true;
-                            swPause.Restart();
-                            pauseWritten = 0;
-                        }
-                        if (inPause)
-                        {
-                            // Stille exakt im Echtzeit-Takt der Pausen-Uhr; der konstante
-                            // 150-ms-Erkennungsanteil wird mit aufgefuellt, damit ueber
-                            // viele Pausen kein Rueckstand akkumuliert.
-                            long target = (long)bps * 150 / 1000 + (long)(swPause.Elapsed.TotalSeconds * bps);
-                            while (pauseWritten + silence.Length <= target) { stdout.Write(silence, 0, silence.Length); pauseWritten += silence.Length; }
+                            long fill = (deficit - bps * 60 / 1000) / align * align;
+                            long filled = 0;
+                            while (filled + silence.Length <= fill) { stdout.Write(silence, 0, silence.Length); filled += silence.Length; }
+                            written += filled;
+                            filledTotal += filled;
                         }
                     }
                 }
                 catch { broken = true; try { queue.CompleteAdding(); } catch { } }
             }) { IsBackground = true };
-            capture.StartRecording();
+            Thread capThread = null;
+            if (sysCapture != null) sysCapture.StartRecording();
+            else
+            {
+                // Prozessgebundener Weg: NAudio hat hier keinen DataAvailable-Event-Mechanismus
+                // (der existiert nur fuer die MMDevice-basierten WasapiCapture-Klassen) - darum
+                // ein eigener Poll-Thread, der 1:1 in dieselbe Queue liefert wie oben beim
+                // System-Loopback, damit die Stille-Fuell-Logik im Writer unveraendert bleibt.
+                procClient.Start();
+                int bytesPerFrame = fmt.BlockAlign;
+                capThread = new Thread(() =>
+                {
+                    try
+                    {
+                        while (!broken)
+                        {
+                            int packetSize = procCap.GetNextPacketSize();
+                            if (packetSize == 0) { Thread.Sleep(5); continue; }
+                            while (packetSize != 0)
+                            {
+                                IntPtr p = procCap.GetBuffer(out int numFrames, out var flags);
+                                int nbytes = numFrames * bytesPerFrame;
+                                if (nbytes > 0)
+                                {
+                                    var data = new byte[nbytes];
+                                    if ((flags & NAudio.CoreAudioApi.AudioClientBufferFlags.Silent) == 0) Marshal.Copy(p, data, 0, nbytes);
+                                    queue.TryAdd(data);
+                                }
+                                procCap.ReleaseBuffer(numFrames);
+                                packetSize = procCap.GetNextPacketSize();
+                            }
+                        }
+                    }
+                    catch { }
+                    finally { try { queue.CompleteAdding(); } catch { } }
+                }) { IsBackground = true };
+                capThread.Start();
+            }
             writer.Start();
             writer.Join();   // laeuft, bis stdout bricht (FFmpeg weg) oder Recording stoppt
-            try { capture.StopRecording(); capture.Dispose(); } catch { }
+            broken = true;   // capThread (falls aktiv) ueber die Poll-Schleife hinaus beenden
+            try { capThread?.Join(1000); } catch { }   // erst sauber auslaufen lassen, dann erst freigeben
+            try { sysCapture?.StopRecording(); sysCapture?.Dispose(); } catch { }
+            try { procClient?.Stop(); procClient?.Dispose(); } catch { }
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine("ERR audio " + ex.Message); return 1; }

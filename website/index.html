@@ -39,7 +39,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Lumora",
-    "version": "2.2.8",
+    "version": "2.2.11",
     "operatingSystem": "Windows 10, Windows 11",
     "applicationCategory": "GameApplication",
     "applicationSubCategory": "Utility",
@@ -1162,8 +1162,34 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">2.2.8</span>
+          <span class="release-ver">2.2.11</span>
           <span class="release-tag">aktuell</span>
+        </div>
+        <ul>
+          <li><strong>Der Stream passt sich dem Empfang an</strong>: Hat ein Zuschauer schwachen Empfang (z.&nbsp;B. unterwegs im Mobilfunk), senkt Lumora die Bitrate automatisch in Stufen, bis das Bild stabil läuft – und hebt sie wieder an, sobald die Verbindung es hergibt. Abschaltbar in den Stream-Einstellungen.</li>
+          <li><strong>Ruckler und Ton-Aussetzer beseitigt</strong>: Zwei tief sitzende Engpässe in der Übertragungskette sorgten für periodische Aussetzer – beide aufgespürt und behoben. 4K mit 60&nbsp;fps läuft jetzt durchgehend glatt.</li>
+          <li><strong>Bild und Ton dauerhaft synchron</strong>: Auch bei Ton-Pausen, Fenstergrößen-Wechseln oder stundenlangen Streams baut sich keine Verzögerung mehr auf.</li>
+          <li><strong>Stream-Start in rund 2 Sekunden</strong> statt 10 – Router-Abfragen laufen parallel, der öffentliche Link steht fast sofort.</li>
+          <li><strong>Bildschirm-Streams GPU-direkt</strong>: Die Aufnahme geht ohne Umweg über den Hauptprozessor in den Encoder – weniger Last, mehr Reserven fürs Spiel.</li>
+          <li><strong>Web-Player</strong>: dezente Wiedergabedauer-Anzeige · Bedienelemente per Tipp ein- und ausblendbar · Standard-Empfangspuffer auf 300&nbsp;ms erhöht (ruhigeres Bild bei schwankender Leitung).</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">2.2.10</span>
+        </div>
+        <ul>
+          <li><strong>Neu: Gruppen-Stream mit Raumcodes</strong> – „Gruppe starten" erzeugt einen kurzen Code (z.&nbsp;B. TG7KP2), Freunde tippen ihn in Lumora ein, der eigene Stream startet automatisch mit. Zuschauer öffnen den Gruppen-Link im Browser und sehen alle Streams im Grid – per HTTPS, damit auch auf dem iPhone.</li>
+          <li><strong>Die Gruppe hängt an niemandem</strong>: Wer seinen Stream stoppt, bleibt Mitglied (als „pausiert" sichtbar); wer Lumora schließt, verlässt nur sich selbst – für alle anderen läuft alles ununterbrochen weiter, Code und Link bleiben gültig.</li>
+          <li><strong>Unabhängig bleiben</strong>: Die Vermittlung ist ein kleines PHP-Skript, das der Installation beiliegt – auf eigenen Webspace legen und die Adresse in Lumora eintragen. Der Video-Traffic läuft nie über einen Server, alles bleibt direkt.</li>
+          <li><strong>Grid</strong>: Vollbild für die ganze Ansicht, Doppelklick auf eine Kachel zeigt nur diese Person bildschirmfüllend, Info-Anzeige (fps/Auflösung/Bitrate) je Kachel zuschaltbar.</li>
+          <li><strong>Fenster-Freigabe</strong>: Der Ton kommt jetzt gezielt nur noch vom geteilten Fenster/Spiel selbst, nicht mehr vom ganzen PC (z.&nbsp;B. kein Browser-Ton mehr im Stream).</li>
+          <li>Live-Vorschau im Stream-Tab zeigt jetzt unverfälschte Farben · Rechtsklick-Einfügen in allen Eingabefeldern.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">2.2.8</span>
         </div>
         <ul>
           <li><strong>Ton-Aussetzer im Stream behoben</strong>: Je nach System mischte die Tonaufnahme regelmäßig winzige Stille-Blöcke in den laufenden Ton – im 6-Stunden-Dauertest aufgespürt und beseitigt.</li>
@@ -1302,7 +1328,7 @@
     <div class="install-steps">
       <div class="install-step">
         <div class="num">1</div>
-        <p>Setup-Datei <strong>Lumora Setup 2.2.8.exe</strong> herunterladen.</p>
+        <p>Setup-Datei <strong>Lumora Setup 2.2.11.exe</strong> herunterladen.</p>
       </div>
       <div class="install-step">
         <div class="num">2</div>
@@ -1507,7 +1533,7 @@
 
 <footer>
   <p>
-    Lumora 2.2.8 · Kostenlos &amp; Open-Source-basiert ·
+    Lumora 2.2.11 · Kostenlos &amp; Open-Source-basiert ·
     HDR via <a href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">HDRTray</a> (Frank Richter, GPL v3) ·
     FPS via <a href="https://github.com/GameTechDev/PresentMon" target="_blank" rel="noopener">PresentMon</a> (Intel, MIT) ·
     CPU-Sensorik via <a href="https://pawnio.eu" target="_blank" rel="noopener">PawnIO</a> (namazso, GPL v2)

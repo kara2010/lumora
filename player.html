@@ -12,7 +12,7 @@
   #v { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
   #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 18px; transition: opacity .4s; padding: 20px; }
   #overlay.hidden { opacity: 0; pointer-events: none; }
-  .badge { display: flex; align-items: center; gap: 11px; background: rgba(10,12,18,.72); padding: 14px 22px; border-radius: 12px; font-size: 15px; backdrop-filter: blur(6px); max-width: min(92vw, 460px); text-align: left; line-height: 1.35; }
+  .badge { display: flex; align-items: center; gap: 11px; background: rgba(10,12,18,.72); padding: 14px 22px; border-radius: 12px; font-size: 15px; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); max-width: min(92vw, 460px); text-align: left; line-height: 1.35; }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: #f5b942; animation: pulse 1.2s infinite; flex-shrink: 0; }
   .dot.live { background: #4ade80; animation: none; }
   .dot.err { background: #f05a5a; animation: none; }
@@ -22,10 +22,20 @@
     display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: flex-end;
     max-width: calc(100vw - 28px);
     background: rgba(10,12,18,.6); padding: 7px 13px; border-radius: 9px; font-size: 13px;
-    font-variant-numeric: tabular-nums; backdrop-filter: blur(6px); transition: opacity .3s; }
+    font-variant-numeric: tabular-nums; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); transition: opacity .3s; }
   #stats .val { color: #fff; font-weight: 600 }
   #stats .unit { color: #8a8a96; margin-left: 2px }
   #stats .fps { color: #74e857 }
+  /* Wiedergabedauer unten links: Glas-Chip mit pulsierendem Live-Punkt. Blendet
+     wie die Steuerleiste bei Inaktivitaet aus - dezent, nie dauerhaft im Bild. */
+  #dur { position: fixed; left: max(16px, env(safe-area-inset-left)); bottom: max(14px, env(safe-area-inset-bottom));
+    display: none; align-items: center; gap: 9px; padding: 9px 15px; border-radius: 999px;
+    background: rgba(10,12,18,.62); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.14); box-shadow: 0 4px 18px rgba(0,0,0,.35);
+    font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .6px;
+    color: #f0f0f2; transition: opacity .3s; z-index: 5; pointer-events: none; }
+  #dur .rec { width: 8px; height: 8px; border-radius: 50%; background: #f05a5a; animation: pulse 1.6s infinite; }
+  .idle #dur { opacity: 0; }
   /* Untere Steuerleiste – blendet nach Inaktivitaet aus, respektiert Safe-Area */
   #bar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;
     padding: 14px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
@@ -55,7 +65,7 @@
     display: none; align-items: center; gap: 12px; cursor: pointer; z-index: 6; white-space: nowrap;
     background: rgba(18,20,28,.9); color: #fff; border: 1px solid rgba(255,255,255,.26);
     border-radius: 999px; padding: 15px 26px; font-size: 17px; font-weight: 600;
-    backdrop-filter: blur(8px); box-shadow: 0 10px 34px rgba(0,0,0,.55);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 10px 34px rgba(0,0,0,.55);
     animation: soundPulse 1.9s ease-in-out infinite; -webkit-tap-highlight-color: transparent; }
   #soundHint.show { display: flex; }
   #soundHint .ico { font-size: 22px; }
@@ -91,6 +101,7 @@
 </div>
 <div id="overlay"><div class="badge"><span class="dot" id="dot"></span><span id="msg">Verbinde…</span></div></div>
 <div id="soundHint" onclick="enableSound()"><span class="ico">🔊</span><span>Tippen für Ton</span></div>
+<div id="dur"><span class="rec"></span><span id="durVal">0:00</span></div>
 <div id="bar">
   <div class="ctl" id="volCtl">
     <button id="soundBtn" onclick="toggleMute()" title="Ton an/aus"><span id="volIcon">🔊</span></button>
@@ -255,9 +266,58 @@
     clearTimeout(idleTimer)
     idleTimer = setTimeout(function () { document.body.classList.add('idle') }, 2600)
   }
-  document.addEventListener('mousemove', activity)
-  document.addEventListener('touchstart', activity)
+  // Nur ECHTE Mausbewegung blendet die UI ein. WICHTIG: Mobile Browser feuern nach
+  // jedem Tipp SIMULIERTE Maus-Events - ein nackter mousemove-Listener machte das
+  // Tipp-Ausblenden (unten) sofort wieder rueckgaengig, die UI blieb dann doch bis
+  // zum Timeout sichtbar. Pointer-Events kennen den Eingabetyp und filtern das sauber.
+  if (window.PointerEvent) {
+    document.addEventListener('pointermove', function (e) { if (e.pointerType === 'mouse') activity() })
+  } else {
+    var _lastTouchEnd = 0
+    document.addEventListener('touchend', function () { _lastTouchEnd = Date.now() }, true)
+    document.addEventListener('mousemove', function () { if (Date.now() - _lastTouchEnd > 700) activity() })
+  }
+  // Touch: Tipp aufs Video TOGGELT die Bedienelemente - war die UI schon sichtbar,
+  // blendet ein erneuter Tipp sie sofort wieder aus (statt den Timer zu verlaengern).
+  // Nur ein ruhiger Einzel-Tipp zaehlt: Pinch/Zieh-Gesten und Tipps auf Knoepfe
+  // bleiben unberuehrt. Dazu den Sichtbarkeits-Zustand VOR dem Einblenden merken.
+  var _tapWasVisible = false, _tapOk = false, _tapX = 0, _tapY = 0, _tapT = 0
+  document.addEventListener('touchstart', function () {
+    _tapWasVisible = !document.body.classList.contains('idle')
+    activity()
+  })
+  v.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 1) { _tapOk = true; _tapX = e.touches[0].clientX; _tapY = e.touches[0].clientY; _tapT = Date.now() }
+    else _tapOk = false
+  })
+  v.addEventListener('touchmove', function (e) {
+    if (_tapOk && e.touches.length === 1 && Math.hypot(e.touches[0].clientX - _tapX, e.touches[0].clientY - _tapY) > 12) _tapOk = false
+    if (e.touches.length > 1) _tapOk = false
+  })
+  v.addEventListener('touchend', function () {
+    if (_tapOk && Date.now() - _tapT < 350 && _tapWasVisible) {
+      clearTimeout(idleTimer)
+      document.body.classList.add('idle')
+    }
+    _tapOk = false
+  })
   activity()
+
+  // --- Wiedergabedauer (Glas-Chip unten links) -------------------------------
+  // Zaehlt ab dem ERSTEN erfolgreichen Verbinden und laeuft ueber Reconnects
+  // hinweg weiter ("wie lange schaue ich schon"). Blendet mit der Leiste aus.
+  var _playStart = 0
+  function fmtDur(ms) {
+    var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), r = s % 60
+    return (h > 0 ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(r).padStart(2, '0')
+  }
+  setInterval(function () {
+    if (!_connected && !_playStart) return
+    if (!_playStart) _playStart = Date.now()
+    var el = document.getElementById('dur')
+    el.style.display = 'flex'
+    document.getElementById('durVal').textContent = fmtDur(Date.now() - _playStart)
+  }, 1000)
 
   // --- Live-Statistik (empfangene FPS/Aufloesung/Bitrate) -------------------
   var lastBytes = 0, lastTs = 0
@@ -278,6 +338,32 @@
     } catch (e) {}
   }, 1000)
 
+  // --- QoS-Meldung an den Streamer (adaptive Bitrate) -----------------------
+  // Alle 5 s ein kleiner Delta-Bericht (Paketverlust, Jitter, verworfene und
+  // eingefrorene Frames). Der Streamer senkt bei anhaltend schlechtem Empfang
+  // automatisch die Bitrate und hebt sie wieder an, wenn es stabil laeuft.
+  var _qosId = Math.random().toString(36).slice(2, 8)
+  var _qosPrev = null
+  setInterval(async function () {
+    if (!window._pc || window._pc.connectionState !== 'connected') { _qosPrev = null; return }
+    try {
+      var s = await window._pc.getStats(), inb = null
+      s.forEach(function (r) { if (r.type === 'inbound-rtp' && r.kind === 'video') inb = r })
+      if (!inb) return
+      var cur = { recv: inb.packetsReceived || 0, lost: inb.packetsLost || 0, drop: inb.framesDropped || 0, frz: inb.freezeCount || 0 }
+      if (_qosPrev) {
+        fetch('/qos', { method: 'POST', body: JSON.stringify({
+          id: _qosId,
+          recv: cur.recv - _qosPrev.recv, lost: cur.lost - _qosPrev.lost,
+          drop: cur.drop - _qosPrev.drop, frz: cur.frz - _qosPrev.frz,
+          jit: inb.jitter != null ? Math.round(inb.jitter * 1000) : 0,
+          fps: inb.framesPerSecond != null ? inb.framesPerSecond : null,
+        }) }).catch(function () {})
+      }
+      _qosPrev = cur
+    } catch (e) {}
+  }, 5000)
+
   function iceComplete(pc) {
     return new Promise(function (r) {
       if (pc.iceGatheringState === 'complete') return r()
@@ -297,6 +383,7 @@
   }
   async function connect() {
     status('Verbinde…')
+    window._wdStarted = Date.now()   // Aufbau-Beginn fuer den Watchdog (haengt der Aufbau?)
     overlay.classList.remove('hidden')
     // ICE-Server frisch vom Streamer holen: enthaelt STUN und – falls eingetragen –
     // den TURN-Relay. forceRelay=true (Testschalter) zwingt die Verbindung NUR
@@ -328,6 +415,10 @@
       applyBuffer(e.receiver)
     }
     pc.addEventListener('connectionstatechange', function () {
+      // Nur Events der AKTUELLEN Verbindung beachten: eine sterbende alte
+      // Verbindung darf eine frisch aufgebaute nicht kapern (ihr spaetes
+      // failed-Event loeste sonst einen Retry gegen die gesunde neue aus).
+      if (window._pc !== pc) return
       if (pc.connectionState === 'connected') {
         status('Live', 'live')
         _connected = true; applyVol()   // ggf. die grosse Ton-Aufforderung zeigen
@@ -421,6 +512,34 @@
   }
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') resume() })
   window.addEventListener('pageshow', function (e) { if (e.persisted) resume() })   // Rueckkehr aus dem bfcache
+
+  // --- Watchdog: heilt ALLE Lebenslagen, unabhaengig von den Ereignis-Ketten ---
+  // Alle 4 s pruefen: Verbindung fehlt/failed/closed -> neu verbinden; Aufbau
+  // haengt >15 s -> neu; Status sagt "connected", aber >12 s kein neues Bild
+  // (stiller Tod, z. B. Sender-Absturz) -> neu. Damit erholt sich der Player
+  // selbst dann, wenn ein Einzelpfad (Event verpasst, Retry-Kette gerissen,
+  // Hintergrund-Timing) versagt hat.
+  var _wdFrames = -1, _wdStall = 0
+  window._wdStarted = Date.now()
+  setInterval(function () {
+    if (document.visibilityState !== 'visible' || retrying) return
+    var pc = window._pc
+    if (!pc) { retry(); return }
+    var st = pc.connectionState
+    if (st === 'failed' || st === 'closed') { retry(); return }
+    if (st === 'new' || st === 'connecting') {
+      if (Date.now() - (window._wdStarted || 0) > 15000) retry()
+      return
+    }
+    if (v.paused) v.play().catch(function () {})
+    framesDecoded().then(function (n) {
+      if (n == null || window._pc !== pc) return
+      if (n === _wdFrames) {
+        _wdStall++
+        if (_wdStall >= 3) { _wdStall = 0; retry() }
+      } else { _wdStall = 0; _wdFrames = n }
+    })
+  }, 4000)
 
   connect()
 </script>

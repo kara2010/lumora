@@ -1,0 +1,9 @@
+Neu: Der Stream passt sich dem Empfang an – und läuft rundum flüssiger
+
+• Automatische Bitrate: Hat ein Zuschauer schwachen Empfang (z. B. unterwegs im Mobilfunk), senkt Lumora die Bitrate selbst in Stufen, bis das Bild stabil läuft – und hebt sie wieder an, sobald die Verbindung es hergibt. Der Stream-Status zeigt an, wenn gerade reduziert wird; abschaltbar in den Stream-Einstellungen.
+• Ruckler und Ton-Aussetzer beseitigt: Zwei tief sitzende Engpässe in der Übertragungskette sorgten für periodische Aussetzer – beide aufgespürt und behoben. 4K mit 60 fps läuft jetzt durchgehend glatt.
+• Bild und Ton bleiben dauerhaft synchron: Auch bei Ton-Pausen (z. B. YouTube), Fenstergrößen-Wechseln oder stundenlangen Streams baut sich keine Verzögerung mehr auf.
+• Stream-Start in rund 2 Sekunden statt 10: Router-Abfragen laufen parallel und mit kurzen Wartezeiten – der öffentliche Link steht fast sofort.
+• Bildschirm-Streams gehen jetzt GPU-direkt in den Encoder (ohne Umweg über den Hauptprozessor) – weniger Last, mehr Reserven fürs Spiel.
+• Web-Player: dezente Anzeige der Wiedergabedauer; ein Tipp aufs Bild blendet die Bedienelemente ein und wieder aus.
+• Standard-Empfangspuffer auf 300 ms erhöht – ruhigeres Bild bei schwankender Leitung (weiterhin frei einstellbar).

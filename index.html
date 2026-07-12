@@ -479,7 +479,11 @@
               <input type="range" id="setStreamBuffer" min="120" max="1000" step="20" value="120" oninput="onStreamBufferInput()">
               <span class="osd-field-val" id="streamBufferVal">120 ms</span>
             </div>
-            <p class="settings-hint">Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum. Für schnelle Spiele <b>1080p/1440p</b> mit genug Bitrate; 4K ist am anspruchsvollsten. <b>Puffer</b>: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung.</p>
+            <div class="setting-toggle-row" style="margin-top:6px">
+              <span class="setting-toggle-label">Bitrate automatisch anpassen</span>
+              <input type="checkbox" id="setStreamAdaptive" onchange="onStreamSettingChange()">
+            </div>
+            <p class="settings-hint">Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum. Für schnelle Spiele <b>1080p/1440p</b> mit genug Bitrate; 4K ist am anspruchsvollsten. <b>Puffer</b>: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. <b>Automatisch anpassen</b>: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.</p>
           </div>
 
           <!-- Sektion 2: Stream (bei laufendem Stream via CSS nach oben – Vorschau als Highlight) -->
@@ -518,19 +522,84 @@
               </p>
             </div>
             <p class="settings-hint" id="streamHint" style="margin-top:8px">Beim Start öffnet Lumora automatisch den nötigen Port am Router (UPnP) und schließt ihn beim Stoppen wieder.</p>
-            <div style="margin-top:14px; padding-top:12px; border-top:1px solid #232323">
-              <div class="hotkey-row">
-                <span class="hotkey-kind" title="Schnellstart per Tastatur">⌨️</span>
-                <span class="setting-toggle-label" style="flex:1">Schnellstart-Hotkey</span>
-                <span class="hotkey-display" id="streamHotkeyDisplay">Aus</span>
-                <button class="btn-browse" id="streamHotkeyBtn" onclick="toggleHotkeyCapture('stream')">Ändern</button>
-                <button class="btn-cancel" onclick="clearHotkey('stream')">Aus</button>
-              </div>
-              <p class="settings-hint" style="margin:4px 0 0">Startet/stoppt die Freigabe von überall – <b>auch mitten im Spiel</b>. Beim Start wird das <b>aktuelle Fenster</b> (dein laufendes Spiel) freigegeben.</p>
-            </div>
           </div>
 
-          <!-- Sektion 3: Verbindung & Diagnose -->
+          <!-- Sektion 3: Gruppe (mehrere Streams gemeinsam im Grid ansehen) -->
+          <div class="form-group stream-sec">
+            <label>Gruppe</label>
+            <p class="settings-hint">Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Dein Stream startet automatisch mit, ein Klick genügt.</p>
+
+            <div id="groupIdleBox">
+              <!-- Waehrend der Einrichtung wird der GEKLICKTE KNOPF selbst zum
+                   Ladezustand (Spinner im Knopf, fester Text) - kein Element wird
+                   ersetzt oder verschoben, nichts springt unterm Mauszeiger weg. -->
+              <div class="setting-toggle-row">
+                <span class="setting-toggle-label">Neue Gruppe</span>
+                <button class="btn-browse" id="groupStartBtn" onclick="groupStartClick()">Gruppe starten</button>
+              </div>
+              <div class="osd-field">
+                <span class="osd-field-label">Beitreten</span>
+                <input type="text" id="groupJoinInput" class="sort-select" style="flex:1" placeholder="Gruppen-Code oder Link einfügen" onkeydown="if(event.key==='Enter')groupJoinClick()">
+                <button class="btn-browse" id="groupJoinBtn" onclick="groupJoinClick()">Beitreten</button>
+              </div>
+              <!-- Einrichtungs-Schritte: fuellen sich ADDITIV unter dem Klickpunkt
+                   (fertige Zeilen bleiben stehen, neue kommen dazu) - zeigt sichtbar,
+                   was Lumora gerade alles prueft und einrichtet. -->
+              <div id="groupSetupSteps" style="display:none; margin-top:10px; padding:10px 12px; background:rgba(255,255,255,.04); border-radius:10px"></div>
+            </div>
+
+            <div id="groupActiveBox" style="display:none">
+              <p class="settings-hint" id="groupRoleHint" style="margin-top:0"></p>
+              <p class="settings-hint" id="groupRelayHint" style="display:none; border-left:3px solid #f5b942; padding-left:10px; margin-top:8px">
+                ⚠️ Vermittlungs-Server gerade nicht erreichbar – laufende Streams funktionieren weiter, aber neue Mitglieder können momentan nicht beitreten.
+              </p>
+              <div class="osd-field" id="groupCodeRow" style="border-radius:8px">
+                <span class="osd-field-label">Code</span>
+                <input type="text" id="groupCode" class="sort-select" style="flex:0 0 130px; font-family:monospace; font-size:16px; font-weight:700; letter-spacing:2px; text-align:center" readonly onclick="this.select()">
+                <input type="text" id="groupLink" class="sort-select" style="flex:1; font-family:monospace" readonly onclick="this.select()">
+                <button class="btn-browse" onclick="copyGroupLink()">Link kopieren</button>
+              </div>
+              <p class="settings-hint" style="margin-top:4px">Freunde mit Lumora brauchen nur den <b>Code</b> · der <b>Link</b> ist für Zuschauer im Browser (auch iPhone).</p>
+              <div id="groupMemberBox" style="margin:10px 0 4px">
+                <div style="font-weight:600; font-size:13px; margin-bottom:6px; opacity:.85">Mitglieder</div>
+                <div id="groupMemberList"></div>
+              </div>
+              <div class="setting-toggle-row" style="margin-top:10px">
+                <span class="setting-toggle-label">Grid im Browser öffnen</span>
+                <button class="btn-browse" onclick="openGroupGrid()">Grid öffnen</button>
+              </div>
+              <div class="setting-toggle-row">
+                <span class="setting-toggle-label">Gruppe verlassen</span>
+                <button class="btn-cancel" onclick="groupLeaveClick()">Verlassen</button>
+              </div>
+            </div>
+
+            <details class="sgdb-guide stream-advanced">
+              <summary>Eigener Vermittlungs-Server</summary>
+              <div class="sgdb-guide-body">
+                <p class="settings-hint" style="margin-top:0">Die Gruppen-Vermittlung läuft über ein kleines PHP-Skript. Es wird mit Lumora mitgeliefert (<span style="font-family:monospace">resources\gruppe.php</span> im Installationsordner) – lege es auf einen beliebigen PHP-Webspace und trage hier die Adresse ein. Leer = Standard-Server. Der Video-Traffic läuft nie über diesen Server.</p>
+                <div class="osd-field">
+                  <span class="osd-field-label">Skript-URL</span>
+                  <input type="text" id="setGroupRelay" class="sort-select" style="flex:1; font-family:monospace" placeholder="https://kara-webdesign.de/hdr-launcher/gruppe.php" onchange="onGroupRelayChange()">
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <!-- Sektion 4: Schnellstart-Hotkey (auf Nutzerwunsch UNTER der Gruppe) -->
+          <div class="form-group stream-sec">
+            <label>Schnellstart</label>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Schnellstart per Tastatur">⌨️</span>
+              <span class="setting-toggle-label" style="flex:1">Schnellstart-Hotkey</span>
+              <span class="hotkey-display" id="streamHotkeyDisplay">Aus</span>
+              <button class="btn-browse" id="streamHotkeyBtn" onclick="toggleHotkeyCapture('stream')">Ändern</button>
+              <button class="btn-cancel" onclick="clearHotkey('stream')">Aus</button>
+            </div>
+            <p class="settings-hint" style="margin:4px 0 0">Startet/stoppt die Freigabe von überall – <b>auch mitten im Spiel</b>. Beim Start wird das <b>aktuelle Fenster</b> (dein laufendes Spiel) freigegeben.</p>
+          </div>
+
+          <!-- Sektion 5: Verbindung & Diagnose -->
           <div class="form-group stream-sec">
             <label>Verbindung</label>
             <div class="setting-toggle-row">
@@ -1813,6 +1882,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const sbuf = Math.min(1000, Math.max(120, s.streamBufferMs || 120))
       document.getElementById('setStreamBuffer').value = String(sbuf)
       document.getElementById('streamBufferVal').textContent = sbuf + ' ms'
+      document.getElementById('setStreamAdaptive').checked = s.streamAdaptive !== false
       document.getElementById('setTurnEnabled').checked = !!s.streamTurnEnabled
       document.getElementById('turnFields').style.display = s.streamTurnEnabled ? 'block' : 'none'
       document.getElementById('setTurnUrl').value = s.streamTurnUrl || ''
@@ -1820,7 +1890,8 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setTurnPass').value = s.streamTurnPass || ''
       document.getElementById('setTurnForce').checked = !!s.streamTurnForce
       document.getElementById('setForceIPv6').checked = !!s.streamForceIPv6
-      if (settingsTab === 'stream') { ipcRenderer.invoke('broadcast-status').then(renderStreamState).catch(() => {}); loadSources() }
+      document.getElementById('setGroupRelay').value = s.groupRelayUrl || ''
+      if (settingsTab === 'stream') { ipcRenderer.invoke('broadcast-status').then(renderStreamState).catch(() => {}); ipcRenderer.invoke('group-status').then(renderGroupState).catch(() => {}); loadSources() }
     }
     function hideSettings() { stopHotkeyCapture(); if (settingsTab != null) showLibraryView() }
 
@@ -1881,8 +1952,18 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
 
     // --- Live-Stream (WebRTC-Broadcast) ---------------------------------------
     let _streamOpening = false
+    let _lastStreamState = null   // letzter Status (fuer die Detailzeile der Gruppen-Einrichtung: IPv4/IPv6/lokal)
     function renderStreamState(st) {
       const on = !!(st && st.active)
+      _lastStreamState = st || null
+      // Laeuft gerade die GRUPPEN-Einrichtung, darf dieses Rendering die Ansicht
+      // nicht verschieben: Beim Livegehen klappt weiter oben die grosse Vorschau-
+      // Box auf (streamInfo, ~350px!) und die Stream-Sektion wird umsortiert -
+      // beides schiebt sonst den Klickpunkt des Nutzers weg. Darum die Anker-
+      // Position VOR allen Aenderungen messen und am ENDE exakt ausgleichen.
+      const _cAnchor = _groupBusy ? document.getElementById('groupIdleBox') : null
+      const _cScroller = _cAnchor ? document.getElementById('settingsView') : null
+      const _cBefore = (_cAnchor && _cScroller) ? _cAnchor.getBoundingClientRect().top : null
       // Live-Indikator im Header (immer sichtbar, solange der Stream läuft)
       const ind = document.getElementById('streamIndicator')
       if (ind) {
@@ -1911,12 +1992,17 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         const cap = st.driverError
           ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">⚠️ <b>Grafiktreiber veraltet.</b> Das Streaming benötigt einen aktuellen NVIDIA-Treiber (mindestens Version 610). Bitte über GeForce Experience oder nvidia.com aktualisieren – danach läuft es.</div>'
           : st.captureError ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">⚠️ <b>Kein Bild.</b> Läuft dein Spiel im <b>exklusiven Vollbild</b>? Stelle es auf <b>randloses Fenster</b> („Borderless"/„Fenster-Vollbild") um – dann kann Lumora aufnehmen, ohne ins Spiel einzugreifen.</div>' : ''
+        // Adaptive Bitrate aktiv abgesenkt? Dezent, aber sichtbar erklaeren.
+        const adapt = st.adaptKbit
+          ? '<div style="color:#7fb3e6; margin-top:6px">📶 Bitrate automatisch auf <b>' + (Math.round(st.adaptKbit / 100) / 10) + ' Mbit</b> gesenkt – ein Zuschauer hat schwachen Empfang. Geht von selbst wieder hoch, sobald es stabil läuft.</div>'
+          : ''
         document.getElementById('streamStats').innerHTML =
-          'Zuschauer: ' + (st.viewers || 0) + (st.quality ? '  ·  ' + st.quality : '') + net + cap
+          'Zuschauer: ' + (st.viewers || 0) + (st.quality ? '  ·  ' + st.quality : '') + net + adapt + cap
         document.getElementById('streamForwardHelp').style.display = st.needsForward ? 'block' : 'none'
       }
       if (on) startViewerPoll(); else stopViewerPoll()
       // Bei laufendem Stream die Stream-Sektion (mit der Vorschau) nach oben holen.
+      // (Die Scroll-Kompensation dafuer passiert GESAMTHAFT am Funktionsende.)
       const streamPanel = document.querySelector('.settings-panel[data-panel="stream"]')
       if (streamPanel) streamPanel.classList.toggle('live', on)
       // Live-Vorschau: nur bei laufendem Stream, offenem Tab UND sichtbarem Fenster.
@@ -1925,6 +2011,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       _streamPort = st.port || _streamPort
       _streamActive = on
       refreshStreamPreview()
+      // Gesamt-Ausgleich (siehe Funktionsanfang): Anker exakt dorthin zurueck-
+      // scrollen, wo er vor SAEMTLICHEN Layout-Aenderungen dieses Renderings war.
+      if (_cBefore != null && _cScroller) _cScroller.scrollTop += _cAnchor.getBoundingClientRect().top - _cBefore
     }
     // --- Zuschauer-Liste (IP/Browser) + Kick ---------------------------------
     let viewerPollTimer = null
@@ -1951,6 +2040,197 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     async function kickViewer(id, ip, block) {
       try { await ipcRenderer.invoke('kick-viewer', id, ip, block) } catch (e) {}
       setTimeout(refreshViewers, 300)
+    }
+    // --- Gruppen-Stream: mehrere Streams gemeinsam im Grid ansehen -----------
+    // Kein eigener Vermittlungs-Server: der Host ist einfach die Lumora-Instanz,
+    // die aktuell die Mitgliederliste fuehrt (siehe main.js groupTick). Faellt
+    // sie aus, uebernimmt automatisch ein anderes Mitglied - die Oberflaeche
+    // hier zeigt davon nur das Endergebnis (wer gerade Host ist).
+    function renderGroupState(st) {
+      const idle = document.getElementById('groupIdleBox'), active = document.getElementById('groupActiveBox')
+      if (!idle || !active) return
+      if (!st || !st.active) {
+        idle.style.display = 'block'; active.style.display = 'none'
+        // Beitreten-Feld NUR vorbefuellen, wenn der letzte Raum laut Vermittlung noch
+        // existiert (lastCodeAlive, prueft main.js) - so ist der Wiederbeitritt nach
+        // einem App-Absturz ein Klick, aber es liegt nie ein toter Code von gestern
+        // im Feld. Laufende Nutzereingaben werden nie angefasst; ein zuvor von UNS
+        // eingetragener, inzwischen toter Code wird wieder entfernt.
+        const joinInput = document.getElementById('groupJoinInput')
+        if (joinInput && st && st.lastCode && document.activeElement !== joinInput) {
+          if (st.lastCodeAlive && !joinInput.value) joinInput.value = st.lastCode
+          else if (st.lastCodeAlive === false && joinInput.value === st.lastCode) joinInput.value = ''
+        }
+        return
+      }
+      idle.style.display = 'none'; active.style.display = 'block'
+      const relayHint = document.getElementById('groupRelayHint')
+      if (relayHint) relayHint.style.display = st.relayUnreachable ? 'block' : 'none'
+      // Stream gestoppt, aber weiter in der Gruppe: Mitgliedschaft haengt nicht
+      // am eigenen Streamen - das dem Nutzer auch sagen.
+      const pauseNote = _streamActive ? '' : '<br><span style="opacity:.8">⏸ Dein Stream ist gerade aus – die anderen sehen dich als pausiert. Starte ihn, um wieder gesehen zu werden.</span>'
+      document.getElementById('groupRoleHint').innerHTML =
+        'Gib den <b>Code</b> an Freunde mit Lumora weiter oder teile den <b>Link</b> mit Zuschauern. Die Gruppe bleibt bestehen, egal wer kommt oder geht.' + pauseNote
+      document.getElementById('groupCode').value = st.code || ''
+      document.getElementById('groupLink').value = st.link || ''
+      const el = document.getElementById('groupMemberList')
+      el.innerHTML = (st.members || []).map((m) => {
+        const you = m.isSelf ? ' <span style="opacity:.6">(du)</span>' : ''
+        const pause = m.streaming === false ? ' <span style="opacity:.6">· ⏸ pausiert</span>' : ''
+        return '<div style="display:flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(255,255,255,.05); border-radius:8px; margin-bottom:6px; font-size:13px">'
+          + '<span style="flex:1">' + escHtml(m.name || 'Spieler') + you + pause + '</span></div>'
+      }).join('') || '<p class="settings-hint" style="margin:0">Noch allein hier – teile Code oder Link.</p>'
+    }
+    // Waehrend "Gruppe starten"/"Beitreten" laeuft ggf. der automatische Stream-Start
+    // inkl. Router-Pruefung (einige Sekunden). Die Knoepfe weichen dabei AN ORT UND
+    // STELLE einer Fortschritts-Anzeige mit Spinner, deren Text die echten Phasen
+    // durchlaeuft - der Blick bleibt, wo geklickt wurde; nichts springt oder scrollt.
+    // Einrichtung laeuft: der GEKLICKTE Knopf zeigt Spinner + festen Text (stabiler
+    // Klickpunkt), und darunter fuellt sich eine Schritt-Liste ADDITIV - fertige
+    // Zeilen bleiben mit gruenem Haken stehen, neue kommen dazu. So sieht man,
+    // was Lumora alles prueft und einrichtet, ohne dass irgendetwas wegspringt.
+    let _groupBusy = false, _groupBusySince = 0, _groupStepTimer = null, _groupJoinMode = false
+    const groupSleep = (ms) => new Promise((r) => setTimeout(r, ms))
+    function groupStepsRender(state) {   // state: 'run' | 'done' | 'fail'
+      const box = document.getElementById('groupSetupSteps')
+      if (!box) return
+      const spin = '<span class="group-spinner" style="width:11px; height:11px; border-width:2px"></span>'
+      const ok = '<span style="color:#4ade80; font-weight:700">✓</span>'
+      const err = '<span style="color:#f05a5a; font-weight:700">✕</span>'
+      const rows = []
+      // Schritt 1: eigener Stream
+      rows.push(_streamActive ? [ok, 'Stream läuft'] : [spin, 'Dein Stream wird gestartet…'])
+      // Schritt 2: Erreichbarkeit (erscheint, sobald der Stream steht)
+      if (_streamActive) {
+        if (_streamOpening) rows.push([spin, 'Öffentliche Adresse wird eingerichtet…'])
+        else {
+          const s = _lastStreamState || {}
+          const det = s.ipv6Only ? 'über IPv6 erreichbar' : (s.internet ? 'aus dem Internet erreichbar' : 'nur im lokalen Netz erreichbar')
+          rows.push([ok, 'Verbindung eingerichtet – ' + det])
+        }
+      }
+      // Schritt 3: Gruppenraum (erscheint, sobald die Verbindung steht)
+      if (_streamActive && !_streamOpening) {
+        if (state === 'done') rows.push([ok, _groupJoinMode ? 'Gruppe beigetreten' : 'Gruppenraum erstellt'])
+        else if (state === 'fail') rows.push([err, _groupJoinMode ? 'Beitritt fehlgeschlagen' : 'Gruppenraum konnte nicht erstellt werden'])
+        else rows.push([spin, _groupJoinMode ? 'Gruppe wird beigetreten…' : 'Gruppenraum wird erstellt…'])
+      }
+      box.innerHTML = rows.map((r) =>
+        '<div style="display:flex; align-items:center; gap:9px; padding:3px 0; font-size:12.5px; color:#ccc">' + r[0] + '<span>' + r[1] + '</span></div>'
+      ).join('')
+    }
+    function groupSetBusy(busy, which) {
+      _groupBusy = busy
+      const bStart = document.getElementById('groupStartBtn')
+      const bJoin = document.getElementById('groupJoinBtn')
+      const inp = document.getElementById('groupJoinInput')
+      const steps = document.getElementById('groupSetupSteps')
+      if (bStart) { bStart.disabled = busy; if (!busy) bStart.textContent = 'Gruppe starten' }
+      if (bJoin) { bJoin.disabled = busy; if (!busy) bJoin.textContent = 'Beitreten' }
+      if (inp) inp.disabled = busy
+      clearInterval(_groupStepTimer); _groupStepTimer = null
+      if (busy) {
+        _groupBusySince = Date.now()
+        _groupJoinMode = which === 'join'
+        const btn = which === 'join' ? bJoin : bStart
+        if (btn) btn.innerHTML = '<span class="group-spinner" style="width:12px; height:12px; border-width:2px"></span> Wird eingerichtet…'
+        if (steps) steps.style.display = 'block'
+        groupStepsRender('run')
+        _groupStepTimer = setInterval(() => groupStepsRender('run'), 300)   // Schritte folgen dem ECHTEN Fortschritt
+      } else {
+        if (steps) steps.style.display = 'none'
+      }
+    }
+    // Laeuft der Stream schon (z. B. zweiter Gruppenstart), waere alles in
+    // Millisekunden vorbei - Mindestdauer, damit die Haken sichtbar sind.
+    async function groupBusyMinTime() {
+      const rest = 700 - (Date.now() - _groupBusySince)
+      if (rest > 0) await groupSleep(rest)
+    }
+    // Abschluss: alle Haken zeigen, kurz stehen lassen, DANN zum Ergebnis wechseln
+    // und sanft zur Code+Link-Zeile scrollen. WICHTIG (Ursache des frueheren
+    // "Sprungs nach oben"): scrollIntoView startete, WAEHREND drei Layout-Wechsel
+    // liefen (Schrittliste weg, aktive Box rein, ggf. Live-Umsortierung) - dabei
+    // schrumpfte der Scrollbereich kurz, der Browser klemmte die Position ab bzw.
+    // brach den Smooth-Scroll ab. Darum: erst ALLE Layout-Aenderungen anwenden,
+    // zwei Frames auf stabiles Layout warten, dann die Zielposition SELBST
+    // berechnen und den Einstellungs-Scroller gezielt fahren.
+    async function groupFinishSequence(st) {
+      clearInterval(_groupStepTimer); _groupStepTimer = null
+      groupStepsRender('done')
+      await groupSleep(900)
+      groupSetBusy(false)
+      renderGroupState(st)
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      const row = document.getElementById('groupCodeRow')
+      const scroller = document.getElementById('settingsView')
+      if (row && scroller) {
+        const rRect = row.getBoundingClientRect(), sRect = scroller.getBoundingClientRect()
+        const target = scroller.scrollTop + (rRect.top - sRect.top) - scroller.clientHeight / 2 + rRect.height / 2
+        scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+        row.classList.remove('group-highlight'); void row.offsetWidth; row.classList.add('group-highlight')
+      }
+      // Code erst NACH dem Scroll markieren - ein sofortiger Fokus konkurriert
+      // mit dem laufenden Smooth-Scroll und kann ihn abbrechen.
+      setTimeout(() => {
+        const codeEl = document.getElementById('groupCode')
+        if (codeEl && codeEl.value) { codeEl.focus({ preventScroll: true }); codeEl.select() }
+      }, 650)
+    }
+    async function groupFailSequence(st) {
+      clearInterval(_groupStepTimer); _groupStepTimer = null
+      groupStepsRender('fail')
+      await groupSleep(900)
+      groupSetBusy(false)
+      groupErrorToast(st)
+    }
+    function groupErrorToast(st) {
+      const e = st && st.error
+      if (e === 'no-encoder') streamToast('⚠️ Streaming braucht eine GPU mit Video-Encoder (NVIDIA, AMD oder Intel).')
+      else if (e === 'stream-start-failed') streamToast('❌ Dein Stream konnte nicht gestartet werden – prüfe den Stream-Bereich oben.')
+      else if (e === 'bad-code') streamToast('❌ Das sieht nicht wie ein Gruppen-Code oder -Link aus (Code: 6 Zeichen, z. B. TG7KP2).')
+      else if (e === 'no-room') streamToast('❌ Diese Gruppe gibt es nicht (mehr) – Code prüfen oder eine neue starten.')
+      else if (e === 'relay-unreachable') streamToast('❌ Vermittlungs-Server nicht erreichbar – Internet prüfen (oder die Skript-URL unter „Eigener Vermittlungs-Server").')
+      else streamToast('❌ Das hat nicht geklappt – bitte nochmal versuchen.')
+    }
+    async function groupStartClick() {
+      if (_groupBusy) return
+      groupSetBusy(true, 'start')
+      const st = await ipcRenderer.invoke('group-start').catch(() => null)
+      await groupBusyMinTime()
+      if (!st || !st.active) { await groupFailSequence(st); return }
+      await groupFinishSequence(st)
+    }
+    async function groupJoinClick() {
+      if (_groupBusy) return
+      const input = document.getElementById('groupJoinInput')
+      const link = input.value.trim()
+      if (!link) { streamToast('ℹ️ Füge zuerst den Gruppen-Code oder -Link eines Freundes ein.'); input.focus(); return }
+      groupSetBusy(true, 'join')
+      const st = await ipcRenderer.invoke('group-join', link).catch(() => null)
+      await groupBusyMinTime()
+      if (!st || !st.active) { await groupFailSequence(st); return }
+      // Die Eingabe bewusst NICHT leeren: nach einem Stream-Stopp ist der
+      // Wiederbeitritt damit ein einziger Klick (Code merkt sich main.js zusaetzlich).
+      await groupFinishSequence(st)
+    }
+    async function groupLeaveClick() {
+      const st = await ipcRenderer.invoke('group-leave')
+      renderGroupState(st)
+    }
+    function copyGroupLink() {
+      const el = document.getElementById('groupLink')
+      if (!el.value) return
+      el.select()
+      navigator.clipboard.writeText(el.value).catch(() => { try { document.execCommand('copy') } catch {} })
+    }
+    function openGroupGrid() {
+      const link = document.getElementById('groupLink').value
+      if (!link) return
+      require('electron').shell.openExternal(link)   // der Einladungslink IST der Grid-Player
+    }
+    function onGroupRelayChange() {
+      ipcRenderer.invoke('set-app-settings', { groupRelayUrl: document.getElementById('setGroupRelay').value.trim() })
     }
     async function toggleBroadcast() {
       const btn = document.getElementById('streamToggleBtn')
@@ -1994,6 +2274,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         streamQuality: document.getElementById('setStreamQuality').value,
         streamFps: parseInt(document.getElementById('setStreamFps').value, 10),
         streamUploadKbit: parseInt(document.getElementById('setStreamBitrate').value, 10),
+        streamAdaptive: document.getElementById('setStreamAdaptive').checked,
       })
     }
     // Jitter-Puffer der Zuschauer: getrennt gespeichert, damit die Regler-Bewegung
@@ -2140,8 +2421,14 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       } finally { btn.disabled = false; btn.textContent = 'Erneut testen' }
     }
     ipcRenderer.on('broadcast-status', (e, st) => renderStreamState(st))
+    // Waehrend der Gruppen-Einrichtung KEINE Push-Renders: main.js meldet den
+    // aktiven Zustand schon mittendrin - das riss den Knopf-Ladezustand vorzeitig
+    // weg. Der Klick-Handler rendert nach der Mindestdauer selbst.
+    ipcRenderer.on('group-status', (e, st) => { if (!_groupBusy) renderGroupState(st) })
     // Hotkey hat die Quelle auf das laufende Spiel gesetzt -> Dropdown nachziehen
     ipcRenderer.on('stream-source-changed', () => { if (settingsTab === 'stream') loadSources() })
+    // Zweiter eigener PC im selben Netz hatte schon eine Gruppe laufen -> automatisch beigetreten
+    ipcRenderer.on('group-autojoin', () => streamToast('👥 Gruppe auf einem anderen PC in deinem Netzwerk gefunden – automatisch beigetreten.'))
     // Neuer Zuschauer: freundlicher Zwei-Ton + Hinweis-Toast (auch ausserhalb des Stream-Tabs)
     ipcRenderer.on('viewer-joined', (e, n) => {
       playJoinSound()

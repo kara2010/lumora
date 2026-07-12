@@ -1,0 +1,10 @@
+Neu: Gruppen-Stream mit Raumcodes
+
+• Seht euch beim Zocken gegenseitig zu: „Gruppe starten" erzeugt einen kurzen Raumcode (z. B. TG7KP2) – Freunde tippen ihn einfach in Lumora ein, der eigene Stream startet automatisch mit. Ein Klick genügt.
+• Zuschauer ohne Lumora öffnen den Gruppen-Link im Browser und sehen alle Streams im Grid – jetzt über eine sichere HTTPS-Adresse, damit funktioniert es auch auf dem iPhone (Safari).
+• Die Gruppe hängt an niemandem: Wer seinen Stream stoppt, bleibt Mitglied und erscheint als pausiert; wer Lumora schließt, fliegt einfach raus – für alle anderen läuft alles ununterbrochen weiter. Code und Link bleiben die ganze Sitzung gültig.
+• Im Grid: alle Kacheln starten stumm, ein Antippen aktiviert gezielt den Ton dieser Person; Vollbild für alles, Doppelklick zeigt eine Person bildschirmfüllend; Info-Anzeige (fps/Auflösung/Bitrate) je Kachel per 📊 zuschaltbar.
+• Unabhängig bleiben: Die Vermittlung ist ein kleines PHP-Skript (liegt der Installation bei, resources\gruppe.php) – auf eigenen Webspace legen und die Adresse in Lumora eintragen, fertig. Der Video-Traffic läuft nie über diesen Server, alles bleibt direkt zwischen euch.
+• Zwei PCs am selben Anschluss: Der zweite PC erkennt den ersten automatisch, nimmt ihm den IPv4-Port nicht weg (weicht auf IPv6 aus) und tritt dessen Gruppe von selbst bei.
+• Fenster-Freigabe: Der Ton kommt jetzt gezielt nur noch vom geteilten Fenster/Spiel selbst, nicht mehr vom ganzen PC (z. B. kein Firefox-Ton mehr im Stream).
+• Live-Vorschau im Stream-Tab zeigt jetzt unverfälschte Farben; Rechtsklick-Einfügen funktioniert in allen Eingabefeldern.
