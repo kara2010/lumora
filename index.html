@@ -491,7 +491,11 @@
               <span class="setting-toggle-label">Bitrate automatisch anpassen</span>
               <input type="checkbox" id="setStreamAdaptive" onchange="onStreamSettingChange()">
             </div>
-            <p class="settings-hint">Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum. Für schnelle Spiele <b>1080p/1440p</b> mit genug Bitrate; 4K ist am anspruchsvollsten. <b>Puffer</b>: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. <b>Automatisch anpassen</b>: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.</p>
+            <p class="settings-hint">Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum.</p>
+            <details class="sgdb-guide stream-advanced">
+              <summary>Puffer &amp; automatische Anpassung erklärt</summary>
+              <p class="settings-hint" style="margin-top:8px">Für schnelle Spiele 1080p/1440p mit genug Bitrate; 4K ist am anspruchsvollsten. Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.</p>
+            </details>
           </div>
 
           <!-- Sektion 2: Stream (bei laufendem Stream via CSS nach oben – Vorschau als Highlight) -->
@@ -799,6 +803,357 @@
   <!-- Info-Tooltip für das per Gamepad/Tastatur fokussierte Element -->
   <div class="nav-tooltip" id="navTooltip" style="display:none"></div>
 
+<script>
+// --- i18n (Etappe 1: statisches UI) -------------------------------------------
+// Deutsch bleibt die Quellsprache im Markup. Bei Sprache Englisch uebersetzt
+// applyI18n() die statischen Textknoten + placeholder/title-Attribute ueber
+// eine Text-zu-Text-Karte - ohne in Logik oder dynamische Renders einzugreifen
+// (die folgen in Etappe 2 ueber t()-Wrapper). Effektive Sprache: Einstellung
+// 'language' (auto = Systemsprache), gecacht in localStorage fuer die
+// flackerfreie Anwendung direkt beim Start.
+const I18N_EN = {
+  'Wird geladen…': 'Loading…',
+  'HDR aus': 'HDR off',
+  'Meine Spiele': 'My games',
+  'Manuelle Reihenfolge': 'Manual order',
+  'Name (A–Z)': 'Name (A–Z)',
+  'Name (Z–A)': 'Name (Z–A)',
+  'Zuletzt gespielt': 'Last played',
+  'Spielzeit': 'Playtime',
+  'Zuletzt hinzugefügt': 'Recently added',
+  '📊 Rückblick': '📊 Recap',
+  'ⓘ Über': 'ⓘ About',
+  'Bibliothek': 'Library',
+  'Allgemein': 'General',
+  'Darstellung': 'Appearance',
+  'Steuerung': 'Controls',
+  'Kein Spiel ausgewählt': 'No game selected',
+  'Erstes Spiel hinzufügen': 'Add your first game',
+  'Bild hier ablegen': 'Drop image here',
+  'nie': 'never',
+  'HDR-Automatik': 'Auto HDR',
+  'HDR wird beim Start aktiviert und beim Beenden abgeschaltet.': 'HDR turns on at launch and back off when the game exits.',
+  '▶ Spiel starten': '▶ Launch game',
+  '✏ Umbenennen': '✏ Rename',
+  '🖼 Icon ändern...': '🖼 Change icon...',
+  '🎨 Cover suchen...': '🎨 Find cover...',
+  '📂 Speicherort öffnen': '📂 Open location',
+  '⚙ Startoptionen...': '⚙ Launch options...',
+  '✕ Entfernen': '✕ Remove',
+  'Spiele suchen': 'Find games',
+  '📁 Ordner hinzufügen...': '📁 Add folder...',
+  '🔍 Automatisch scannen': '🔍 Scan automatically',
+  'Wird gescannt...': 'Scanning...',
+  '0 Spiele gefunden': '0 games found',
+  'Alle': 'All',
+  'Keine': 'None',
+  'Keine neuen Spiele gefunden.': 'No new games found.',
+  'Schließen': 'Close',
+  'Ausgewählte hinzufügen': 'Add selected',
+  'Spiel hinzufügen': 'Add game',
+  'Pfad zur .exe': 'Path to the .exe',
+  'Durchsuchen': 'Browse',
+  'Abbrechen': 'Cancel',
+  'Hinzufügen': 'Add',
+  'Sprache / Language': 'Language',
+  'Automatisch / Auto (System)': 'Auto (system)',
+  'Mit Windows starten': 'Start with Windows',
+  'Beim Autostart minimiert starten': 'Start minimized on autostart',
+  'Beim Schließen in den Infobereich (Tray)': 'Close to tray',
+  'Lumora sucht beim Start automatisch nach Updates. Du kannst auch jederzeit selbst prüfen.': 'Lumora checks for updates automatically at startup. You can also check manually anytime.',
+  'Jetzt nach Updates suchen': 'Check for updates now',
+  'Cover-Darstellung': 'Cover style',
+  'Hero-Banner': 'Hero banner',
+  'Breites Querformat': 'Wide landscape',
+  'Poster': 'Poster',
+  'Hochformat-Cover': 'Portrait cover',
+  'Ist die bevorzugte Variante für ein Spiel nicht verfügbar, wird automatisch die andere als Fallback verwendet.': 'If the preferred style is unavailable for a game, the other one is used automatically.',
+  'Akzentfarbe': 'Accent color',
+  'Mehr Cover & Hero über SteamGridDB (optional)': 'More covers & heroes via SteamGridDB (optional)',
+  'Ohne Key läuft alles (Steam + Microsoft Store).': 'Everything works without a key (Steam + Microsoft Store).',
+  'Lohnt sich das? & in 2 Minuten einrichten': 'Worth it? Set up in 2 minutes',
+  'Was es bringt:': 'What it gives you:',
+  'So holst du den kostenlosen Key:': 'How to get the free key:',
+  'Generate API Key': 'Generate API Key',
+  'klicken und den Key kopieren.': 'and copy the key.',
+  'Hier oben ins Feld einfügen — fertig, sofort aktiv.': 'Paste it into the field above — done, active immediately.',
+  '↗ Key-Seite öffnen': '↗ Open key page',
+  'Performance-Overlay (OSD)': 'Performance overlay (OSD)',
+  'Blendet GPU-/CPU-Auslastung, Temperaturen und FPS über dem Spiel ein – funktioniert über randlos laufenden Spielen.': 'Shows GPU/CPU load, temperatures and FPS on top of your game – works over borderless games.',
+  'Ein-/ausblenden': 'Show/hide',
+  'Ändern': 'Change',
+  'Aus': 'Off',
+  'Aufnehmen': 'Record',
+  'Konfigurationsmodus (Live-Edit direkt am OSD)': 'Configuration mode (live edit on the OSD)',
+  'Overlay anzeigen': 'Show overlay',
+  'Grafikkarte': 'Graphics card',
+  'Automatisch (schnellste)': 'Automatic (fastest)',
+  'Anzeige-Art': 'Display mode',
+  'Overlay-Fenster (Standard)': 'Overlay window (default)',
+  'Im Spiel gerendert via RTSS – streambar': 'Rendered in-game via RTSS – streamable',
+  'Afterburner-OSD ein-/ausblenden': 'Toggle Afterburner OSD',
+  'Design': 'Design',
+  'Kompakt': 'Compact',
+  'Minimal': 'Minimal',
+  'Balken': 'Bars',
+  'Neon': 'Neon',
+  'Leiste (horizontal)': 'Strip (horizontal)',
+  'Kacheln (horizontal)': 'Tiles (horizontal)',
+  'Werte': 'Values',
+  'Einrichtung': 'Setup',
+  'Abgelehnt – FPS und CPU-Sensorwerte fehlen.': 'Declined – FPS and CPU sensor values are missing.',
+  'Jetzt einrichten': 'Set up now',
+  'FPS-Quelle': 'FPS source',
+  'Automatisch (RTSS, sonst PresentMon)': 'Automatic (RTSS, else PresentMon)',
+  'Nur RTSS/Afterburner': 'RTSS/Afterburner only',
+  'Nur PresentMon (ohne RTSS)': 'PresentMon only (no RTSS)',
+  'Größe': 'Size',
+  'Deckkraft': 'Opacity',
+  'Position': 'Position',
+  'Aufnahme & Qualität': 'Capture & quality',
+  'Teilt deinen Bildschirm live ins Internet – Zuschauer öffnen nur einen Link im Browser, ganz ohne Installation. Hardware-Encoding über deine Grafikkarte, Bild geht direkt von deinem PC zum Zuschauer.': 'Shares your screen live over the internet – viewers just open a link in their browser, no install needed. Hardware encoding on your GPU; video goes directly from your PC to the viewer.',
+  'Quelle': 'Source',
+  'Bildschirm': 'screen',
+  'Fenster/Spiel': 'window/game',
+  'Auflösung': 'Resolution',
+  'Nativ (volle Aufnahme)': 'Native (full capture)',
+  'Bildrate': 'Frame rate',
+  '120 fps (nur bei 120-Hz-Displays)': '120 fps (120 Hz displays only)',
+  'Bitrate': 'Bitrate',
+  '6 Mbit – sparsam (Mobilfunk)': '6 Mbit – light (mobile data)',
+  '8 Mbit – Full HD (empfohlen)': '8 Mbit – Full HD (recommended)',
+  '12 Mbit – Full HD hoch': '12 Mbit – Full HD high',
+  '16 Mbit – 1440p': '16 Mbit – 1440p',
+  '25 Mbit – 4K': '25 Mbit – 4K',
+  'Puffer': 'Buffer',
+  'Bitrate automatisch anpassen': 'Adapt bitrate automatically',
+  'Automatisch anpassen': 'Adapt automatically',
+  'Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum.': 'Constant bitrate via the GPU encoder – barely slows your game down.',
+  'Puffer & automatische Anpassung erklärt': 'Buffer & automatic adaptation explained',
+  'Für schnelle Spiele 1080p/1440p mit genug Bitrate; 4K ist am anspruchsvollsten. Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.': 'For fast games use 1080p/1440p with enough bitrate; 4K is the most demanding. Buffer: short = low latency, longer = smoother on shaky connections. Adapt automatically: temporarily lowers the bitrate when viewers (e.g. on mobile data) report poor reception – and raises it again once things stabilize.',
+  'Stream aus': 'Stream off',
+  'Stream starten': 'Start stream',
+  'Vorschau lädt…': 'Preview loading…',
+  'Kopieren': 'Copy',
+  'Teilen': 'Share',
+  'E-Mail': 'E-mail',
+  'Zuschauer: 0': 'Viewers: 0',
+  'Wer schaut zu': 'Who is watching',
+  'Beim Start öffnet Lumora automatisch den nötigen Port am Router (UPnP) und schließt ihn beim Stoppen wieder.': 'On start, Lumora opens the required router port automatically (UPnP) and closes it again when you stop.',
+  'Gruppe': 'Group',
+  'Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Dein Stream startet automatisch mit, ein Klick genügt.': 'Watch each other in a grid – perfect for playing together on a voice call. Your own stream starts along automatically, one click is all it takes.',
+  'Neue Gruppe': 'New group',
+  'Gruppe starten': 'Start group',
+  'Beitreten': 'Join',
+  '⚠️ Vermittlungs-Server gerade nicht erreichbar – laufende Streams funktionieren weiter, aber neue Mitglieder können momentan nicht beitreten.': '⚠️ Coordination server currently unreachable – running streams keep working, but new members cannot join right now.',
+  'Code': 'Code',
+  'Link kopieren': 'Copy link',
+  'Mitglieder': 'Members',
+  'Grid im Browser öffnen': 'Open grid in browser',
+  'Grid öffnen': 'Open grid',
+  'Gruppe verlassen': 'Leave group',
+  'Verlassen': 'Leave',
+  'Eigener Vermittlungs-Server': 'Custom coordination server',
+  'Skript-URL': 'Script URL',
+  'Schnellstart': 'Quick start',
+  'Schnellstart-Hotkey': 'Quick-start hotkey',
+  'aktuelle Fenster': 'current window',
+  'auch mitten im Spiel': 'even mid-game',
+  'Verbindung': 'Connection',
+  'Kann mein Anschluss streamen?': 'Can my connection stream?',
+  'Verbindung testen': 'Test connection',
+  'Für schwierige Anschlüsse (Relay & IPv6-Test)': 'For tricky connections (relay & IPv6 test)',
+  'Relay-Server': 'Relay server',
+  'Nur nötig, wenn der Test oben „nicht erreichbar" meldet. Zugangsdaten kommen vom Relay-Anbieter oder deinem eigenen coturn-Server („turn:" nicht nötig).': 'Only needed if the test above reports "not reachable". Credentials come from your relay provider or your own coturn server ("turn:" prefix not required).',
+  'Server': 'Server',
+  'Benutzer': 'Username',
+  'Passwort': 'Password',
+  'Nur über Relay (zum Testen)': 'Relay only (for testing)',
+  'IPv6 erzwingen (zum Testen)': 'Force IPv6 (for testing)',
+  'Startoptionen': 'Launch options',
+  'Startargumente': 'Launch arguments',
+  'Als Administrator starten': 'Run as administrator',
+  'Speichern': 'Save',
+  'Über Lumora': 'About Lumora',
+  'kostenlos': 'free',
+  'Artwork suchen': 'Find artwork',
+  'Cover (Hochformat)': 'Cover (portrait)',
+  'Suchen': 'Search',
+  'Eigenes Bild verwenden': 'Use your own image',
+  'Laden': 'Load',
+  'Lokale Datei wählen…': 'Choose local file…',
+  'Übernehmen': 'Apply',
+  'Dein Spielzeit-Rückblick': 'Your playtime recap',
+  'Update verfügbar': 'Update available',
+  'ist bereit zur Installation': 'is ready to install',
+  'Das ist neu': "What's new",
+  'Später': 'Later',
+  'Jetzt aktualisieren': 'Update now',
+  'Update': 'Update',
+  'Zum Stream-Tab': 'Go to stream tab',
+  'Detailansicht': 'Detail view',
+  'Rasteransicht': 'Grid view',
+  'Suchen…': 'Search…',
+  'Nur Favoriten anzeigen': 'Show favorites only',
+  'Spielzeit-Rückblick': 'Playtime recap',
+  'Doppelklick zum Umbenennen': 'Double-click to rename',
+  'Spiel entfernen': 'Remove game',
+  'z.B. Cyberpunk 2077': 'e.g. Cyberpunk 2077',
+  'API-Key hier einfügen': 'Paste API key here',
+  'Tastatur': 'Keyboard',
+  'Gamepad': 'Gamepad',
+  'Oben links': 'Top left',
+  'Oben rechts': 'Top right',
+  'Unten links': 'Bottom left',
+  'Unten rechts': 'Bottom right',
+  'Liste aktualisieren (z. B. nach Spielstart)': 'Refresh list (e.g. after launching the game)',
+  'Gruppen-Code oder Link einfügen': 'Paste group code or link',
+  'Schnellstart per Tastatur': 'Quick start via keyboard',
+  'z. B. turn.mein-server.de:3478': 'e.g. turn.my-server.com:3478',
+  'vom Anbieter (leer = ohne)': 'from your provider (empty = none)',
+  'z.B. -windowed -novid': 'e.g. -windowed -novid',
+  'Spielname…': 'Game name…',
+  'Bild-URL (https://…)': 'Image URL (https://…)',
+  // --- dynamisch erzeugte Strings (via window.tr) -----------------------------
+  'Stream läuft': 'Stream running',
+  'Stream stoppen': 'Stop stream',
+  'HDR an': 'HDR on',
+  'Noch keine Spiele': 'No games yet',
+  'Keine Treffer': 'No matches',
+  'Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.': 'No matches. Try a different search term or use "Use your own image".',
+  '⏳ Öffentlicher Link wird vorbereitet…': '⏳ Preparing public link…',
+  '  ·  ⏳ Router wird geprüft…': '  ·  ⏳ Checking router…',
+  '  ·  🌐 über IPv6 erreichbar (Zuschauer braucht IPv6, z. B. Mobilfunk)': '  ·  🌐 reachable via IPv6 (viewer needs IPv6, e.g. mobile data)',
+  '  ·  🌐 aus dem Internet erreichbar': '  ·  🌐 reachable from the internet',
+  '  ·  ⚠️ Ports (8787 TCP / 8189 UDP) am Router noch freigeben': '  ·  ⚠️ Still need to open ports (8787 TCP / 8189 UDP) on your router',
+  '  ·  nur im lokalen Netz': '  ·  local network only',
+  'Zuschauer: ': 'Viewers: ',
+  '⚠️ <b>Grafiktreiber veraltet.</b> Das Streaming benötigt einen aktuellen NVIDIA-Treiber (mindestens Version 610). Bitte über GeForce Experience oder nvidia.com aktualisieren – danach läuft es.': '⚠️ <b>Graphics driver outdated.</b> Streaming needs a current NVIDIA driver (at least version 610). Please update via GeForce Experience or nvidia.com – then it works.',
+  '⚠️ <b>Kein Bild.</b> Läuft dein Spiel im <b>exklusiven Vollbild</b>? Stelle es auf <b>randloses Fenster</b> („Borderless"/„Fenster-Vollbild") um – dann kann Lumora aufnehmen, ohne ins Spiel einzugreifen.': '⚠️ <b>No picture.</b> Is your game in <b>exclusive fullscreen</b>? Switch it to <b>borderless window</b> ("Borderless"/"Windowed fullscreen") – then Lumora can capture without interfering with the game.',
+  '📶 Bitrate automatisch gesenkt – ein Zuschauer hat schwachen Empfang. Geht von selbst wieder hoch, sobald es stabil läuft.': '📶 Bitrate lowered automatically – a viewer has weak reception. It rises again on its own once things stabilize.',
+  '🎨 <b>HDR-Bildschirm erkannt.</b> Beim Teilen des ganzen Bildschirms wirken die Farben für Zuschauer blass. Für korrekte Farben das Spiel als <b>Fenster</b> freigeben – dort wandelt Lumora HDR sauber um.': '🎨 <b>HDR display detected.</b> When sharing the whole screen, colors look washed out for viewers. For correct colors, share the game as a <b>window</b> – Lumora converts HDR properly there.',
+  // Toasts
+  '⚠️ Streaming braucht eine GPU mit Video-Encoder (NVIDIA, AMD oder Intel).': '⚠️ Streaming needs a GPU with a video encoder (NVIDIA, AMD or Intel).',
+  '❌ Dein Stream konnte nicht gestartet werden – prüfe den Stream-Bereich oben.': '❌ Your stream could not be started – check the stream section above.',
+  '❌ Das sieht nicht wie ein Gruppen-Code oder -Link aus (Code: 6 Zeichen, z. B. TG7KP2).': '❌ That does not look like a group code or link (code: 6 characters, e.g. TG7KP2).',
+  '❌ Diese Gruppe gibt es nicht (mehr) – Code prüfen oder eine neue starten.': '❌ This group does not exist (anymore) – check the code or start a new one.',
+  '❌ Vermittlungs-Server nicht erreichbar – Internet prüfen (oder die Skript-URL unter „Eigener Vermittlungs-Server").': '❌ Coordination server unreachable – check your internet (or the script URL under "Custom coordination server").',
+  '❌ Das hat nicht geklappt – bitte nochmal versuchen.': '❌ That did not work – please try again.',
+  'ℹ️ Füge zuerst den Gruppen-Code oder -Link eines Freundes ein.': "ℹ️ Paste a friend's group code or link first.",
+  '⏳ Link wird noch vorbereitet – gleich ist er da.': '⏳ Link is still being prepared – almost there.',
+  '📋 Link kopiert – in Discord mit Strg+V einfügen': '📋 Link copied – paste in Discord with Ctrl+V',
+  '👥 Gruppe auf einem anderen PC in deinem Netzwerk gefunden – automatisch beigetreten.': '👥 Group found on another PC in your network – joined automatically.',
+  '🎮 Controller verbunden': '🎮 Controller connected',
+  'Controller getrennt': 'Controller disconnected',
+  // Gruppen-Ablauf
+  'Gruppe starten': 'Start group',
+  'Beitreten': 'Join',
+  'Dein Stream wird gestartet…': 'Starting your stream…',
+  'Öffentliche Adresse wird eingerichtet…': 'Setting up public address…',
+  'über IPv6 erreichbar': 'reachable via IPv6',
+  'aus dem Internet erreichbar': 'reachable from the internet',
+  'nur im lokalen Netz erreichbar': 'reachable on local network only',
+  'Verbindung eingerichtet – ': 'Connection set up – ',
+  'Gruppe beigetreten': 'Joined group',
+  'Gruppenraum erstellt': 'Group room created',
+  'Beitritt fehlgeschlagen': 'Join failed',
+  'Gruppenraum konnte nicht erstellt werden': 'Could not create group room',
+  'Gruppe wird beigetreten…': 'Joining group…',
+  'Gruppenraum wird erstellt…': 'Creating group room…',
+  'Gib den <b>Code</b> an Freunde mit Lumora weiter oder teile den <b>Link</b> mit Zuschauern. Die Gruppe bleibt bestehen, egal wer kommt oder geht.': 'Give the <b>code</b> to friends with Lumora, or share the <b>link</b> with viewers. The group stays alive no matter who joins or leaves.',
+  '<br><span style="opacity:.8">⏸ Dein Stream ist gerade aus – die anderen sehen dich als pausiert. Starte ihn, um wieder gesehen zu werden.</span>': '<br><span style="opacity:.8">⏸ Your stream is currently off – the others see you as paused. Start it to be seen again.</span>',
+  'Noch allein hier – teile Code oder Link.': 'Alone here so far – share the code or link.',
+  '(du)': '(you)',
+  '· ⏸ pausiert': '· ⏸ paused',
+  'Spieler': 'Player',
+  // Zuschauer-Benachrichtigung
+  '👁 Neuer Zuschauer – ': '👁 New viewer – ',
+  ' Person schaut': ' person watching',
+  ' Personen schauen': ' people watching',
+  ' zu': '',
+  // Verbindungstest
+  'Teste…': 'Testing…',
+  'Erneut testen': 'Test again',
+  'Prüfe öffentliche Adresse, NAT-Typ und Router-Portfreigabe…': 'Checking public address, NAT type and router port forwarding…',
+  'Test fehlgeschlagen: ': 'Test failed: ',
+  // GPU-Auswahl
+  'Mehrere Grafikkarten erkannt. „Automatisch" nimmt die dedizierte (schnelle) Karte – falls die Anzeige nicht stimmt, hier fest einstellen.': 'Multiple graphics cards detected. "Automatic" picks the dedicated (fast) card – if the reading is wrong, set it manually here.',
+  // Scan-Dialog
+  'Noch keine Spiele gefunden': 'No games found yet',
+  'Wird hinzugefügt...': 'Adding...',
+  'Willkommen! Deine installierten Spiele werden gesucht – das kann einen Moment dauern…': 'Welcome! Searching for your installed games – this may take a moment…',
+  'Steam, Epic, GOG, Ubisoft, Xbox, EA, Rockstar, Battle.net, Amazon, Riot und Ordner werden gescannt…': 'Scanning Steam, Epic, GOG, Ubisoft, Xbox, EA, Rockstar, Battle.net, Amazon, Riot and folders…',
+  // Update-Dialog
+  'Update wird geladen': 'Downloading update',
+  'Bitte einen Moment…': 'One moment please…',
+  'Update bereit': 'Update ready',
+  'Verbesserungen und Fehlerbehebungen.': 'Improvements and bug fixes.',
+  'Du hast die neueste Version ✓': "You're on the latest version ✓",
+  'Prüfung fehlgeschlagen – erneut versuchen': 'Check failed – try again',
+  'Suche…': 'Searching…',
+  'Version ': 'Version ',
+  'Artwork suchen — ': 'Find artwork — ',
+  '⏹ Spiel läuft...': '⏹ Game running...',
+  'Wird gestartet...': 'Starting...',
+  '⏳ HDR wird aktiviert...': '⏳ Enabling HDR...',
+  '🚀 Spiel wird gestartet...': '🚀 Launching game...',
+  'Datenquellen — GPU: ': 'Data sources — GPU: ',
+  'Wird eingerichtet…': 'Setting up…',
+  'Noch keine Spielzeit erfasst.': 'No playtime recorded yet.',
+  'Starte ein Spiel über Lumora – dein Rückblick füllt sich dann automatisch.': 'Launch a game through Lumora – your recap will fill up automatically.',
+  'Meistgespielt': 'Most played',
+  'Lieblings-Genre': 'Favorite genre',
+  'Favoriten': 'Favorites',
+  'Spiel': 'game',
+  'Spiele': 'games',
+  'Top-Spiele nach Spielzeit': 'Top games by playtime',
+  'Kombination drücken…': 'Press a combination…',
+  'Bitte mit Strg/Alt/Shift kombinieren…': 'Please combine with Ctrl/Alt/Shift…',
+  'Kein Controller verbunden – bitte zuerst anschließen.': 'No controller connected – please connect one first.',
+  'Knöpfe drücken (auch mehrere gleichzeitig)…': 'Press buttons (several at once too)…',
+  'Tipp: z. B. D-Pad ← halten und Y dazu drücken. Loslassen speichert die Kombi.': 'Tip: e.g. hold D-pad ← and press Y as well. Releasing saves the combo.',
+  'Wird geladen… ': 'Downloading… ',
+  ' wurde geladen.': ' has been downloaded.',
+  ' · kostenlos': ' · free',
+}
+function lumoraLangEffective() {
+  try {
+    const c = localStorage.getItem('lumoraLang')
+    if (c === 'de' || c === 'en') return c
+  } catch (e) {}
+  return (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'
+}
+window.LANG = lumoraLangEffective()
+// Uebersetzungs-Helfer fuer DYNAMISCH erzeugte Strings (Etappe 2). BEWUSST
+// 'tr' statt 't': im Renderer gibt es lokale 't'-Variablen (Toast-Element,
+// Map-Iteratoren) - 't' als globale Funktion wuerde dort verdeckt.
+window.tr = function (s) {
+  // hasOwnProperty statt "|| s": eine LEERE Uebersetzung (z. B. ' zu' -> '')
+  // ist falsy und wuerde sonst auf das deutsche Original zurueckfallen.
+  if (window.LANG === 'en' && Object.prototype.hasOwnProperty.call(I18N_EN, s)) return I18N_EN[s]
+  return s
+}
+function applyI18n() {
+  if (window.LANG !== 'en') return
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  let n
+  while ((n = w.nextNode())) {
+    const raw = n.nodeValue
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(raw)
+    if (!m || !m[2]) continue
+    const tr = I18N_EN[m[2].replace(/\s+/g, ' ')]
+    if (tr) n.nodeValue = m[1] + tr + m[3]
+  }
+  document.querySelectorAll('[placeholder]').forEach((el) => {
+    const tr = I18N_EN[el.getAttribute('placeholder').replace(/\s+/g, ' ').trim()]
+    if (tr) el.setAttribute('placeholder', tr)
+  })
+  document.querySelectorAll('[title]').forEach((el) => {
+    const tr = I18N_EN[el.getAttribute('title').replace(/\s+/g, ' ').trim()]
+    if (tr) el.setAttribute('title', tr)
+  })
+}
+</script>
   <script>
     const { ipcRenderer } = require('electron')
 
@@ -930,7 +1285,7 @@
       // coverMode 'hero' → Hero-Banner, sonst ('poster') → Hochformat-Cover.
       coverSearchMode = (coverMode === 'hero') ? 'hero' : 'cover'
       const g = games[i]
-      document.getElementById('coverSearchTitle').textContent = 'Artwork suchen — ' + g.name
+      document.getElementById('coverSearchTitle').textContent = window.tr('Artwork suchen — ') + g.name
       document.getElementById('coverSearchInput').value = g.name
       document.getElementById('coverUrlInput').value = ''
       document.getElementById('coverApplyBtn').disabled = true
@@ -1034,7 +1389,7 @@
       if (coverResultCount === 0) {
         const d = document.createElement('div')
         d.className = 'cover-status'
-        d.textContent = 'Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.'
+        d.textContent = window.tr('Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.')
         box.appendChild(d)
       }
     }
@@ -1050,7 +1405,7 @@
       if (!list.length) {
         const d = document.createElement('div')
         d.className = 'cover-status'
-        d.textContent = 'Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.'
+        d.textContent = window.tr('Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.')
         box.appendChild(d)
         return
       }
@@ -1342,22 +1697,25 @@
 
     function formatPlaytime(sec) {
       sec = Math.floor(sec || 0)
-      if (sec < 60) return sec > 0 ? 'unter 1 Min' : '–'
+      const en = window.LANG === 'en'
+      if (sec < 60) return sec > 0 ? (en ? 'under 1 min' : 'unter 1 Min') : '–'
       const h = Math.floor(sec / 3600)
       const m = Math.floor((sec % 3600) / 60)
+      if (en) return h === 0 ? `${m} min` : `${h} h ${m} min`
       return h === 0 ? `${m} Min` : `${h} Std ${m} Min`
     }
 
     function formatLastPlayed(ts) {
-      if (!ts) return 'nie'
+      const en = window.LANG === 'en'
+      if (!ts) return en ? 'never' : 'nie'
       const diff = Date.now() - ts
       const day = 86400000
-      if (diff < 60000)    return 'gerade eben'
-      if (diff < 3600000)  return `vor ${Math.floor(diff / 60000)} Min`
-      if (diff < day)      return `vor ${Math.floor(diff / 3600000)} Std`
-      if (diff < 2 * day)  return 'gestern'
-      if (diff < 7 * day)  return `vor ${Math.floor(diff / day)} Tagen`
-      return new Date(ts).toLocaleDateString('de-DE')
+      if (diff < 60000)    return en ? 'just now' : 'gerade eben'
+      if (diff < 3600000)  return en ? `${Math.floor(diff / 60000)} min ago` : `vor ${Math.floor(diff / 60000)} Min`
+      if (diff < day)      return en ? `${Math.floor(diff / 3600000)} h ago` : `vor ${Math.floor(diff / 3600000)} Std`
+      if (diff < 2 * day)  return en ? 'yesterday' : 'gestern'
+      if (diff < 7 * day)  return en ? `${Math.floor(diff / day)} days ago` : `vor ${Math.floor(diff / day)} Tagen`
+      return new Date(ts).toLocaleDateString(en ? 'en-US' : 'de-DE')
     }
 
     function onSearch() {
@@ -1414,7 +1772,7 @@
       if (entries.length === 0) {
         const empty = document.createElement('div')
         empty.className = 'list-empty'
-        empty.textContent = games.length === 0 ? 'Noch keine Spiele' : 'Keine Treffer'
+        empty.textContent = games.length === 0 ? window.tr('Noch keine Spiele') : window.tr('Keine Treffer')
         list.appendChild(empty)
         return
       }
@@ -1534,7 +1892,7 @@
       wrap.innerHTML = ''
       const entries = sortedGameEntries()
       if (entries.length === 0) {
-        wrap.innerHTML = `<div class="list-empty">${games.length === 0 ? 'Noch keine Spiele' : 'Keine Treffer'}</div>`
+        wrap.innerHTML = `<div class="list-empty">${games.length === 0 ? window.tr('Noch keine Spiele') : window.tr('Keine Treffer')}</div>`
         return
       }
       entries.forEach(({ g, idx }) => {
@@ -1663,7 +2021,7 @@
       const g = games[selectedIndex]
       const btn = document.getElementById('launchBtn')
       btn.disabled = true
-      btn.innerHTML = '<span>Wird gestartet...</span>'
+      btn.innerHTML = '<span>' + window.tr('Wird gestartet...') + '</span>'
       g.lastPlayed = Date.now()
       saveGames()
       document.getElementById('detailLastPlayed').textContent = formatLastPlayed(g.lastPlayed)
@@ -1671,7 +2029,7 @@
       const result = await ipcRenderer.invoke('launch-game', g.path, { useHdr: g.hdr !== false, args: g.launchArgs || '', admin: !!g.runAsAdmin })
       if (!result.success) {
         btn.disabled = false
-        btn.innerHTML = '<span>▶ Spiel starten</span>'
+        btn.innerHTML = '<span>' + window.tr('▶ Spiel starten') + '</span>'
         alert('Fehler: ' + result.error)
       }
       // Bei Erfolg steuern die 'launch-status'-Events den Button-Zustand
@@ -1708,11 +2066,11 @@ function refreshLaunchBtn() {
   }
   const g = games[selectedIndex]
   if (launchStatus === 'idle' && g && externalRunning.has(g.path)) {
-    btn.innerHTML = '<span>⏹ Spiel läuft...</span>'   // fremd gestartet (z.B. Xbox-Einladung)
+    btn.innerHTML = '<span>' + window.tr('⏹ Spiel läuft...') + '</span>'   // fremd gestartet (z.B. Xbox-Einladung)
     btn.disabled = true
     return
   }
-  btn.innerHTML = `<span>${messages[launchStatus] || '▶ Spiel starten'}</span>`
+  btn.innerHTML = `<span>${window.tr(messages[launchStatus] || '▶ Spiel starten')}</span>`
   btn.disabled = launchStatus !== 'idle'
 }
 ipcRenderer.on('launch-status', (event, status) => { launchStatus = status; refreshLaunchBtn() })
@@ -1725,7 +2083,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const label = document.getElementById('hdrLabel')
       indicator.classList.toggle('active', enabled)
       dot.classList.toggle('active', enabled)
-      label.textContent = enabled ? 'HDR an' : 'HDR aus'
+      label.textContent = enabled ? window.tr('HDR an') : window.tr('HDR aus')
     })
 
     ipcRenderer.on('play-session', (event, { gamePath, durationMs }) => {
@@ -1757,8 +2115,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     function fmtBig(sec) {
       sec = Math.floor(sec || 0)
       const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60)
-      if (h === 0) return { num: m, unit: m === 1 ? 'Minute' : 'Minuten' }
-      return { num: h, unit: h === 1 ? 'Stunde' : 'Stunden', extra: m ? (m + ' Min') : '' }
+      const en = window.LANG === 'en'
+      if (h === 0) return { num: m, unit: en ? (m === 1 ? 'minute' : 'minutes') : (m === 1 ? 'Minute' : 'Minuten') }
+      return { num: h, unit: en ? (h === 1 ? 'hour' : 'hours') : (h === 1 ? 'Stunde' : 'Stunden'), extra: m ? (m + (en ? ' min' : ' Min')) : '' }
     }
     function showReview() {
       const body = document.getElementById('reviewBody')
@@ -1767,7 +2126,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
 
       if (!played.length) {
         body.innerHTML = '<div class="review-empty"><div class="review-empty-icon">🎮</div>' +
-          '<p>Noch keine Spielzeit erfasst.</p><span>Starte ein Spiel über Lumora – dein Rückblick füllt sich dann automatisch.</span></div>'
+          '<p>' + window.tr('Noch keine Spielzeit erfasst.') + '</p><span>' + window.tr('Starte ein Spiel über Lumora – dein Rückblick füllt sich dann automatisch.') + '</span></div>'
         document.getElementById('reviewOverlay').style.display = 'flex'
         return
       }
@@ -1803,15 +2162,15 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       body.innerHTML =
         `<div class="review-hero">
            <div class="review-hero-num">${big.num}<span class="review-hero-unit">${big.unit}${big.extra ? ' ' + big.extra : ''}</span></div>
-           <div class="review-hero-sub">Gesamtspielzeit über ${played.length} ${played.length === 1 ? 'Spiel' : 'Spiele'}</div>
+           <div class="review-hero-sub">${window.LANG === 'en' ? ('Total playtime across ' + played.length + (played.length === 1 ? ' game' : ' games')) : ('Gesamtspielzeit über ' + played.length + ' ' + (played.length === 1 ? 'Spiel' : 'Spiele'))}</div>
          </div>
          <div class="review-stats">
-           ${statCard('Meistgespielt', top[0].name, formatPlaytime(top[0].playtime))}
-           ${statCard('Lieblings-Genre', topGenre ? topGenre[0] : '–', topGenre ? formatPlaytime(topGenre[1]) : '')}
-           ${statCard('Favoriten', String(favCount), favCount === 1 ? 'Spiel' : 'Spiele')}
+           ${statCard(window.tr('Meistgespielt'), top[0].name, formatPlaytime(top[0].playtime))}
+           ${statCard(window.tr('Lieblings-Genre'), topGenre ? topGenre[0] : '–', topGenre ? formatPlaytime(topGenre[1]) : '')}
+           ${statCard(window.tr('Favoriten'), String(favCount), favCount === 1 ? window.tr('Spiel') : window.tr('Spiele'))}
          </div>
          <div class="review-topwrap">
-           <div class="review-section-label">Top-Spiele nach Spielzeit</div>
+           <div class="review-section-label">${window.tr('Top-Spiele nach Spielzeit')}</div>
            <div class="review-top">${rows}</div>
          </div>`
 
@@ -1856,7 +2215,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       // Datenquellen live anzeigen (GPU/CPU/FPS) – beantwortet "woher kommen die Werte".
       ipcRenderer.invoke('osd-sources').then(q => {
         const el = document.getElementById('osdSourcesInfo')
-        if (el && q) { el.textContent = 'Datenquellen — GPU: ' + q.gpu + ' · CPU: ' + q.cpu + ' · FPS: ' + q.fps; el.style.display = 'block' }
+        if (el && q) { el.textContent = window.tr('Datenquellen — GPU: ') + q.gpu + ' · CPU: ' + q.cpu + ' · FPS: ' + q.fps; el.style.display = 'block' }
       }).catch(() => {})
       document.getElementById('setOsdFpsSource').value = s.osdFpsSource || 'auto'
       const oScale = s.osdScale || 1, oOp = s.osdOpacity != null ? s.osdOpacity : 0.55
@@ -1989,9 +2348,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         const v = st && st.viewers || 0
         document.getElementById('streamIndLabel').textContent = on ? (v > 0 ? 'LIVE · ' + v + ' 👁' : 'LIVE') : 'LIVE'
       }
-      document.getElementById('streamStateLabel').textContent = on ? 'Stream läuft' : 'Stream aus'
+      document.getElementById('streamStateLabel').textContent = on ? window.tr('Stream läuft') : window.tr('Stream aus')
       const btn = document.getElementById('streamToggleBtn')
-      btn.textContent = on ? 'Stream stoppen' : 'Stream starten'
+      btn.textContent = on ? window.tr('Stream stoppen') : window.tr('Stream starten')
       document.getElementById('streamInfo').style.display = on ? 'block' : 'none'
       document.getElementById('streamHint').style.display = on ? 'none' : 'block'
       if (on) {
@@ -1999,28 +2358,28 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         // den NICHT als Freigabelink anbieten, sonst kopiert man die interne IP.
         _streamOpening = !!st.opening
         const linkEl = document.getElementById('streamLink')
-        if (st.opening) { linkEl.value = ''; linkEl.placeholder = '⏳ Öffentlicher Link wird vorbereitet…' }
+        if (st.opening) { linkEl.value = ''; linkEl.placeholder = window.tr('⏳ Öffentlicher Link wird vorbereitet…') }
         else { linkEl.value = st.link || ''; linkEl.placeholder = '' }
         let net = ''
-        if (st.opening) net = '  ·  ⏳ Router wird geprüft…'
-        else if (st.ipv6Only) net = '  ·  🌐 über IPv6 erreichbar (Zuschauer braucht IPv6, z. B. Mobilfunk)'
-        else if (st.internet) net = '  ·  🌐 aus dem Internet erreichbar'
-        else if (st.needsForward) net = '  ·  ⚠️ Ports (8787 TCP / 8189 UDP) am Router noch freigeben'
-        else net = '  ·  nur im lokalen Netz'
+        if (st.opening) net = window.tr('  ·  ⏳ Router wird geprüft…')
+        else if (st.ipv6Only) net = window.tr('  ·  🌐 über IPv6 erreichbar (Zuschauer braucht IPv6, z. B. Mobilfunk)')
+        else if (st.internet) net = window.tr('  ·  🌐 aus dem Internet erreichbar')
+        else if (st.needsForward) net = window.tr('  ·  ⚠️ Ports (8787 TCP / 8189 UDP) am Router noch freigeben')
+        else net = window.tr('  ·  nur im lokalen Netz')
         const cap = st.driverError
-          ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">⚠️ <b>Grafiktreiber veraltet.</b> Das Streaming benötigt einen aktuellen NVIDIA-Treiber (mindestens Version 610). Bitte über GeForce Experience oder nvidia.com aktualisieren – danach läuft es.</div>'
-          : st.captureError ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">⚠️ <b>Kein Bild.</b> Läuft dein Spiel im <b>exklusiven Vollbild</b>? Stelle es auf <b>randloses Fenster</b> („Borderless"/„Fenster-Vollbild") um – dann kann Lumora aufnehmen, ohne ins Spiel einzugreifen.</div>' : ''
+          ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">' + window.tr('⚠️ <b>Grafiktreiber veraltet.</b> Das Streaming benötigt einen aktuellen NVIDIA-Treiber (mindestens Version 610). Bitte über GeForce Experience oder nvidia.com aktualisieren – danach läuft es.') + '</div>'
+          : st.captureError ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">' + window.tr('⚠️ <b>Kein Bild.</b> Läuft dein Spiel im <b>exklusiven Vollbild</b>? Stelle es auf <b>randloses Fenster</b> („Borderless"/„Fenster-Vollbild") um – dann kann Lumora aufnehmen, ohne ins Spiel einzugreifen.') + '</div>' : ''
         // Adaptive Bitrate aktiv abgesenkt? Dezent, aber sichtbar erklaeren.
         const adapt = st.adaptKbit
-          ? '<div style="color:#7fb3e6; margin-top:6px">📶 Bitrate automatisch auf <b>' + (Math.round(st.adaptKbit / 100) / 10) + ' Mbit</b> gesenkt – ein Zuschauer hat schwachen Empfang. Geht von selbst wieder hoch, sobald es stabil läuft.</div>'
+          ? '<div style="color:#7fb3e6; margin-top:6px">' + window.tr('📶 Bitrate automatisch gesenkt – ein Zuschauer hat schwachen Empfang. Geht von selbst wieder hoch, sobald es stabil läuft.') + ' (' + (Math.round(st.adaptKbit / 100) / 10) + ' Mbit)</div>'
           : ''
         // HDR-Bildschirm im Monitor-Weg: Farben wirken beim Zuschauer blass
         // (kein Tonemapping auf diesem Pfad) - erklaeren + Fenster-Weg empfehlen.
         const hdrW = st.hdrMonitor
-          ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">🎨 <b>HDR-Bildschirm erkannt.</b> Beim Teilen des ganzen Bildschirms wirken die Farben für Zuschauer blass. Für korrekte Farben das Spiel als <b>Fenster</b> freigeben – dort wandelt Lumora HDR sauber um.</div>'
+          ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">' + window.tr('🎨 <b>HDR-Bildschirm erkannt.</b> Beim Teilen des ganzen Bildschirms wirken die Farben für Zuschauer blass. Für korrekte Farben das Spiel als <b>Fenster</b> freigeben – dort wandelt Lumora HDR sauber um.') + '</div>'
           : ''
         document.getElementById('streamStats').innerHTML =
-          'Zuschauer: ' + (st.viewers || 0) + (st.quality ? '  ·  ' + st.quality : '') + net + adapt + hdrW + cap
+          window.tr('Zuschauer: ') + (st.viewers || 0) + (st.quality ? '  ·  ' + st.quality : '') + net + adapt + hdrW + cap
         document.getElementById('streamForwardHelp').style.display = st.needsForward ? 'block' : 'none'
       }
       if (on) startViewerPoll(); else stopViewerPoll()
@@ -2091,18 +2450,18 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (relayHint) relayHint.style.display = st.relayUnreachable ? 'block' : 'none'
       // Stream gestoppt, aber weiter in der Gruppe: Mitgliedschaft haengt nicht
       // am eigenen Streamen - das dem Nutzer auch sagen.
-      const pauseNote = _streamActive ? '' : '<br><span style="opacity:.8">⏸ Dein Stream ist gerade aus – die anderen sehen dich als pausiert. Starte ihn, um wieder gesehen zu werden.</span>'
+      const pauseNote = _streamActive ? '' : window.tr('<br><span style="opacity:.8">⏸ Dein Stream ist gerade aus – die anderen sehen dich als pausiert. Starte ihn, um wieder gesehen zu werden.</span>')
       document.getElementById('groupRoleHint').innerHTML =
-        'Gib den <b>Code</b> an Freunde mit Lumora weiter oder teile den <b>Link</b> mit Zuschauern. Die Gruppe bleibt bestehen, egal wer kommt oder geht.' + pauseNote
+        window.tr('Gib den <b>Code</b> an Freunde mit Lumora weiter oder teile den <b>Link</b> mit Zuschauern. Die Gruppe bleibt bestehen, egal wer kommt oder geht.') + pauseNote
       document.getElementById('groupCode').value = st.code || ''
       document.getElementById('groupLink').value = st.link || ''
       const el = document.getElementById('groupMemberList')
       el.innerHTML = (st.members || []).map((m) => {
-        const you = m.isSelf ? ' <span style="opacity:.6">(du)</span>' : ''
-        const pause = m.streaming === false ? ' <span style="opacity:.6">· ⏸ pausiert</span>' : ''
+        const you = m.isSelf ? ' <span style="opacity:.6">' + window.tr('(du)') + '</span>' : ''
+        const pause = m.streaming === false ? ' <span style="opacity:.6">' + window.tr('· ⏸ pausiert') + '</span>' : ''
         return '<div style="display:flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(255,255,255,.05); border-radius:8px; margin-bottom:6px; font-size:13px">'
-          + '<span style="flex:1">' + escHtml(m.name || 'Spieler') + you + pause + '</span></div>'
-      }).join('') || '<p class="settings-hint" style="margin:0">Noch allein hier – teile Code oder Link.</p>'
+          + '<span style="flex:1">' + escHtml(m.name || window.tr('Spieler')) + you + pause + '</span></div>'
+      }).join('') || ('<p class="settings-hint" style="margin:0">' + window.tr('Noch allein hier – teile Code oder Link.') + '</p>')
     }
     // Waehrend "Gruppe starten"/"Beitreten" laeuft ggf. der automatische Stream-Start
     // inkl. Router-Pruefung (einige Sekunden). Die Knoepfe weichen dabei AN ORT UND
@@ -2122,21 +2481,21 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const err = '<span style="color:#f05a5a; font-weight:700">✕</span>'
       const rows = []
       // Schritt 1: eigener Stream
-      rows.push(_streamActive ? [ok, 'Stream läuft'] : [spin, 'Dein Stream wird gestartet…'])
+      rows.push(_streamActive ? [ok, window.tr('Stream läuft')] : [spin, window.tr('Dein Stream wird gestartet…')])
       // Schritt 2: Erreichbarkeit (erscheint, sobald der Stream steht)
       if (_streamActive) {
-        if (_streamOpening) rows.push([spin, 'Öffentliche Adresse wird eingerichtet…'])
+        if (_streamOpening) rows.push([spin, window.tr('Öffentliche Adresse wird eingerichtet…')])
         else {
           const s = _lastStreamState || {}
-          const det = s.ipv6Only ? 'über IPv6 erreichbar' : (s.internet ? 'aus dem Internet erreichbar' : 'nur im lokalen Netz erreichbar')
-          rows.push([ok, 'Verbindung eingerichtet – ' + det])
+          const det = s.ipv6Only ? window.tr('über IPv6 erreichbar') : (s.internet ? window.tr('aus dem Internet erreichbar') : window.tr('nur im lokalen Netz erreichbar'))
+          rows.push([ok, window.tr('Verbindung eingerichtet – ') + det])
         }
       }
       // Schritt 3: Gruppenraum (erscheint, sobald die Verbindung steht)
       if (_streamActive && !_streamOpening) {
-        if (state === 'done') rows.push([ok, _groupJoinMode ? 'Gruppe beigetreten' : 'Gruppenraum erstellt'])
-        else if (state === 'fail') rows.push([err, _groupJoinMode ? 'Beitritt fehlgeschlagen' : 'Gruppenraum konnte nicht erstellt werden'])
-        else rows.push([spin, _groupJoinMode ? 'Gruppe wird beigetreten…' : 'Gruppenraum wird erstellt…'])
+        if (state === 'done') rows.push([ok, _groupJoinMode ? window.tr('Gruppe beigetreten') : window.tr('Gruppenraum erstellt')])
+        else if (state === 'fail') rows.push([err, _groupJoinMode ? window.tr('Beitritt fehlgeschlagen') : window.tr('Gruppenraum konnte nicht erstellt werden')])
+        else rows.push([spin, _groupJoinMode ? window.tr('Gruppe wird beigetreten…') : window.tr('Gruppenraum wird erstellt…')])
       }
       box.innerHTML = rows.map((r) =>
         '<div style="display:flex; align-items:center; gap:9px; padding:3px 0; font-size:12.5px; color:#ccc">' + r[0] + '<span>' + r[1] + '</span></div>'
@@ -2148,15 +2507,15 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const bJoin = document.getElementById('groupJoinBtn')
       const inp = document.getElementById('groupJoinInput')
       const steps = document.getElementById('groupSetupSteps')
-      if (bStart) { bStart.disabled = busy; if (!busy) bStart.textContent = 'Gruppe starten' }
-      if (bJoin) { bJoin.disabled = busy; if (!busy) bJoin.textContent = 'Beitreten' }
+      if (bStart) { bStart.disabled = busy; if (!busy) bStart.textContent = window.tr('Gruppe starten') }
+      if (bJoin) { bJoin.disabled = busy; if (!busy) bJoin.textContent = window.tr('Beitreten') }
       if (inp) inp.disabled = busy
       clearInterval(_groupStepTimer); _groupStepTimer = null
       if (busy) {
         _groupBusySince = Date.now()
         _groupJoinMode = which === 'join'
         const btn = which === 'join' ? bJoin : bStart
-        if (btn) btn.innerHTML = '<span class="group-spinner" style="width:12px; height:12px; border-width:2px"></span> Wird eingerichtet…'
+        if (btn) btn.innerHTML = '<span class="group-spinner" style="width:12px; height:12px; border-width:2px"></span> ' + window.tr('Wird eingerichtet…')
         if (steps) steps.style.display = 'block'
         groupStepsRender('run')
         _groupStepTimer = setInterval(() => groupStepsRender('run'), 300)   // Schritte folgen dem ECHTEN Fortschritt
@@ -2209,12 +2568,12 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function groupErrorToast(st) {
       const e = st && st.error
-      if (e === 'no-encoder') streamToast('⚠️ Streaming braucht eine GPU mit Video-Encoder (NVIDIA, AMD oder Intel).')
-      else if (e === 'stream-start-failed') streamToast('❌ Dein Stream konnte nicht gestartet werden – prüfe den Stream-Bereich oben.')
-      else if (e === 'bad-code') streamToast('❌ Das sieht nicht wie ein Gruppen-Code oder -Link aus (Code: 6 Zeichen, z. B. TG7KP2).')
-      else if (e === 'no-room') streamToast('❌ Diese Gruppe gibt es nicht (mehr) – Code prüfen oder eine neue starten.')
-      else if (e === 'relay-unreachable') streamToast('❌ Vermittlungs-Server nicht erreichbar – Internet prüfen (oder die Skript-URL unter „Eigener Vermittlungs-Server").')
-      else streamToast('❌ Das hat nicht geklappt – bitte nochmal versuchen.')
+      if (e === 'no-encoder') streamToast(window.tr('⚠️ Streaming braucht eine GPU mit Video-Encoder (NVIDIA, AMD oder Intel).'))
+      else if (e === 'stream-start-failed') streamToast(window.tr('❌ Dein Stream konnte nicht gestartet werden – prüfe den Stream-Bereich oben.'))
+      else if (e === 'bad-code') streamToast(window.tr('❌ Das sieht nicht wie ein Gruppen-Code oder -Link aus (Code: 6 Zeichen, z. B. TG7KP2).'))
+      else if (e === 'no-room') streamToast(window.tr('❌ Diese Gruppe gibt es nicht (mehr) – Code prüfen oder eine neue starten.'))
+      else if (e === 'relay-unreachable') streamToast(window.tr('❌ Vermittlungs-Server nicht erreichbar – Internet prüfen (oder die Skript-URL unter „Eigener Vermittlungs-Server").'))
+      else streamToast(window.tr('❌ Das hat nicht geklappt – bitte nochmal versuchen.'))
     }
     async function groupStartClick() {
       if (_groupBusy) return
@@ -2228,7 +2587,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (_groupBusy) return
       const input = document.getElementById('groupJoinInput')
       const link = input.value.trim()
-      if (!link) { streamToast('ℹ️ Füge zuerst den Gruppen-Code oder -Link eines Freundes ein.'); input.focus(); return }
+      if (!link) { streamToast(window.tr('ℹ️ Füge zuerst den Gruppen-Code oder -Link eines Freundes ein.')); input.focus(); return }
       groupSetBusy(true, 'join')
       const st = await ipcRenderer.invoke('group-join', link).catch(() => null)
       await groupBusyMinTime()
@@ -2261,13 +2620,13 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       try {
         const cur = await ipcRenderer.invoke('broadcast-status')
         const st = cur && cur.active ? await ipcRenderer.invoke('stop-broadcast') : await ipcRenderer.invoke('start-broadcast')
-        if (st && st.noEncoder) streamToast('⚠️ Streaming braucht eine GPU mit Video-Encoder (NVIDIA, AMD oder Intel).')
+        if (st && st.noEncoder) streamToast(window.tr('⚠️ Streaming braucht eine GPU mit Video-Encoder (NVIDIA, AMD oder Intel).'))
         renderStreamState(st)
       } finally { btn.disabled = false }
     }
     function copyStreamLink() {
       const el = document.getElementById('streamLink')
-      if (_streamOpening || !el.value) { streamToast('⏳ Link wird noch vorbereitet – gleich ist er da.'); return }
+      if (_streamOpening || !el.value) { streamToast(window.tr('⏳ Link wird noch vorbereitet – gleich ist er da.')); return }
       el.select()
       navigator.clipboard.writeText(el.value).catch(() => { try { document.execCommand('copy') } catch {} })
     }
@@ -2279,7 +2638,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function shareStream(target) {
       const link = document.getElementById('streamLink').value
-      if (_streamOpening || !link) { streamToast('⏳ Link wird noch vorbereitet – gleich ist er da.'); return }
+      if (_streamOpening || !link) { streamToast(window.tr('⏳ Link wird noch vorbereitet – gleich ist er da.')); return }
       const msg = 'Schau bei meinem Live-Stream zu: ' + link
       const shell = require('electron').shell
       if (target === 'whatsapp') shell.openExternal('https://wa.me/?text=' + encodeURIComponent(msg))
@@ -2289,7 +2648,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         // Discord kennt keinen Teilen-Link -> Link kopieren + Discord öffnen, Nutzer fügt ein
         navigator.clipboard.writeText(link).catch(() => {})
         shell.openExternal('discord://').catch(() => {})
-        streamToast('📋 Link kopiert – in Discord mit Strg+V einfügen')
+        streamToast(window.tr('📋 Link kopiert – in Discord mit Strg+V einfügen'))
       }
     }
     function onStreamSettingChange() {
@@ -2422,9 +2781,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     async function runConnTest() {
       const btn = document.getElementById('connTestBtn'), box = document.getElementById('connTestResult')
-      btn.disabled = true; btn.textContent = 'Teste…'
+      btn.disabled = true; btn.textContent = window.tr('Teste…')
       box.style.display = 'block'
-      box.innerHTML = '<p class="settings-hint">Prüfe öffentliche Adresse, NAT-Typ und Router-Portfreigabe…</p>'
+      box.innerHTML = '<p class="settings-hint">' + window.tr('Prüfe öffentliche Adresse, NAT-Typ und Router-Portfreigabe…') + '</p>'
       try {
         const r = await ipcRenderer.invoke('test-connectivity')
         const icon = { ok: '✅', warn: '⚠️', error: '❌' }
@@ -2440,8 +2799,8 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         html += '</div>'
         box.innerHTML = html
       } catch (e) {
-        box.innerHTML = '<p class="settings-hint">Test fehlgeschlagen: ' + (e && e.message || e) + '</p>'
-      } finally { btn.disabled = false; btn.textContent = 'Erneut testen' }
+        box.innerHTML = '<p class="settings-hint">' + window.tr('Test fehlgeschlagen: ') + (e && e.message || e) + '</p>'
+      } finally { btn.disabled = false; btn.textContent = window.tr('Erneut testen') }
     }
     ipcRenderer.on('broadcast-status', (e, st) => renderStreamState(st))
     // Startfehler (Port belegt, mediamtx-Problem) sichtbar machen statt stumm
@@ -2454,14 +2813,14 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // Hotkey hat die Quelle auf das laufende Spiel gesetzt -> Dropdown nachziehen
     ipcRenderer.on('stream-source-changed', () => { if (settingsTab === 'stream') loadSources() })
     // Zweiter eigener PC im selben Netz hatte schon eine Gruppe laufen -> automatisch beigetreten
-    ipcRenderer.on('group-autojoin', () => streamToast('👥 Gruppe auf einem anderen PC in deinem Netzwerk gefunden – automatisch beigetreten.'))
+    ipcRenderer.on('group-autojoin', () => streamToast(window.tr('👥 Gruppe auf einem anderen PC in deinem Netzwerk gefunden – automatisch beigetreten.')))
     // Neuer Zuschauer: freundlicher Zwei-Ton + Hinweis-Toast (auch ausserhalb des Stream-Tabs)
     ipcRenderer.on('viewer-joined', (e, n) => {
       playJoinSound()
       const t = document.getElementById('gamepadToast')
       if (t) {
         clearTimeout(t._timer)
-        t.textContent = '👁 Neuer Zuschauer – ' + n + (n === 1 ? ' Person schaut' : ' Personen schauen') + ' zu'
+        t.textContent = window.tr('👁 Neuer Zuschauer – ') + n + (n === 1 ? window.tr(' Person schaut') : window.tr(' Personen schauen')) + window.tr(' zu')
         t.style.display = 'block'
         t._timer = setTimeout(() => { t.style.display = 'none' }, 4000)
       }
@@ -2598,7 +2957,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       sel.value = (current && [...sel.options].some(o => o.value === current)) ? current : 'auto'
       const hint = document.getElementById('osdGpuHint')
       if (hint) {
-        if (gpus.length > 1) { hint.style.display = 'block'; hint.textContent = 'Mehrere Grafikkarten erkannt. „Automatisch" nimmt die dedizierte (schnelle) Karte – falls die Anzeige nicht stimmt, hier fest einstellen.' }
+        if (gpus.length > 1) { hint.style.display = 'block'; hint.textContent = window.tr('Mehrere Grafikkarten erkannt. „Automatisch" nimmt die dedizierte (schnelle) Karte – falls die Anzeige nicht stimmt, hier fest einstellen.') }
         else hint.style.display = 'none'
       }
     }
@@ -2744,8 +3103,8 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('btnRunScan').disabled = true
       document.getElementById('scanStatus').style.display = 'flex'
       document.getElementById('scanStatusText').textContent = isAuto
-        ? 'Willkommen! Deine installierten Spiele werden gesucht – das kann einen Moment dauern…'
-        : 'Steam, Epic, GOG, Ubisoft, Xbox, EA, Rockstar, Battle.net, Amazon, Riot und Ordner werden gescannt…'
+        ? window.tr('Willkommen! Deine installierten Spiele werden gesucht – das kann einen Moment dauern…')
+        : window.tr('Steam, Epic, GOG, Ubisoft, Xbox, EA, Rockstar, Battle.net, Amazon, Riot und Ordner werden gescannt…')
       document.getElementById('scanResults').style.display = 'none'
       document.getElementById('scanEmpty').style.display = 'none'
       document.getElementById('btnAddScanned').style.display = 'none'
@@ -2773,7 +3132,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         return
       }
 
-      document.getElementById('scanResultCount').textContent = `${deduped.length} Spiel${deduped.length === 1 ? '' : 'e'} gefunden`
+      document.getElementById('scanResultCount').textContent = window.LANG === 'en'
+        ? `${deduped.length} game${deduped.length === 1 ? '' : 's'} found`
+        : `${deduped.length} Spiel${deduped.length === 1 ? '' : 'e'} gefunden`
       renderScanList()
       document.getElementById('scanResults').style.display = 'flex'
       document.getElementById('btnAddScanned').style.display = 'block'
@@ -2812,7 +3173,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
           scanFoundGames[parseInt(b.dataset.idx)].name, 'de', { sensitivity: 'base' }))
 
       document.getElementById('btnAddScanned').disabled = true
-      document.getElementById('btnAddScanned').textContent = 'Wird hinzugefügt...'
+      document.getElementById('btnAddScanned').textContent = window.tr('Wird hinzugefügt...')
 
       for (const cb of checked) {
         const g = scanFoundGames[parseInt(cb.dataset.idx)]
@@ -2837,7 +3198,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (selectedIndex < 0 && games.length > 0) selectGame(games.length - 1)
 
       document.getElementById('btnAddScanned').disabled = false
-      document.getElementById('btnAddScanned').textContent = 'Ausgewählte hinzufügen'
+      document.getElementById('btnAddScanned').textContent = window.tr('Ausgewählte hinzufügen')
     }
 
     // ─────────────────────────────────────────────────────────
@@ -2867,7 +3228,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const _ver = ipcRenderer.sendSync('get-version-sync')
       if (_ver) {
         document.getElementById('appVersion').textContent = 'v' + _ver
-        document.getElementById('aboutVersion').textContent = 'Version ' + _ver + ' · kostenlos'
+        document.getElementById('aboutVersion').textContent = window.tr('Version ') + _ver + window.tr(' · kostenlos')
       }
     } catch {}
 
@@ -2912,7 +3273,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       }
       if (!container.children.length) {
         const p = document.createElement('p'); p.className = 'changelog-intro'
-        p.textContent = 'Verbesserungen und Fehlerbehebungen.'; container.appendChild(p)
+        p.textContent = window.tr('Verbesserungen und Fehlerbehebungen.'); container.appendChild(p)
       }
     }
 
@@ -2920,8 +3281,8 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     function hideUpdateDialog() { updateOverlay.style.display = 'none' }
     function startUpdateDownload() {
       hideUpdateDialog()
-      upTitle.textContent = 'Update wird geladen'
-      upText.textContent = 'Bitte einen Moment…'
+      upTitle.textContent = window.tr('Update wird geladen')
+      upText.textContent = window.tr('Bitte einen Moment…')
       upTrack.style.display = 'block'
       upFill.style.width = '0%'
       setUpdateActions([])
@@ -2938,12 +3299,12 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     ipcRenderer.on('update-progress', (e, { percent }) => {
       upTrack.style.display = 'block'
       upFill.style.width = percent + '%'
-      upText.textContent = 'Wird geladen… ' + percent + '%'
+      upText.textContent = window.tr('Wird geladen… ') + percent + '%'
     })
 
     ipcRenderer.on('update-ready', (e, info) => {
-      upTitle.textContent = 'Update bereit'
-      upText.textContent = 'Lumora ' + info.version + ' wurde geladen.'
+      upTitle.textContent = window.tr('Update bereit')
+      upText.textContent = 'Lumora ' + info.version + window.tr(' wurde geladen.')
       upTrack.style.display = 'none'
       setUpdateActions([
         { label: 'Neu starten & installieren', primary: true, onClick: () => ipcRenderer.invoke('install-update') },
@@ -2955,13 +3316,13 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // Nur bei manueller Suche (aus den Einstellungen) sichtbar:
     ipcRenderer.on('update-none', () => {
       if (typeof updateCheckBtn !== 'undefined' && updateCheckBtn) {
-        updateCheckBtn.textContent = 'Du hast die neueste Version ✓'
+        updateCheckBtn.textContent = window.tr('Du hast die neueste Version ✓')
         updateCheckBtn.disabled = false
       }
     })
     ipcRenderer.on('update-error', (e, { message }) => {
       if (typeof updateCheckBtn !== 'undefined' && updateCheckBtn) {
-        updateCheckBtn.textContent = 'Prüfung fehlgeschlagen – erneut versuchen'
+        updateCheckBtn.textContent = window.tr('Prüfung fehlgeschlagen – erneut versuchen')
         updateCheckBtn.disabled = false
       }
     })
@@ -2969,7 +3330,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     let updateCheckBtn = null
     function checkForUpdatesManually() {
       updateCheckBtn = document.getElementById('updateCheckBtn')
-      if (updateCheckBtn) { updateCheckBtn.textContent = 'Suche…'; updateCheckBtn.disabled = true }
+      if (updateCheckBtn) { updateCheckBtn.textContent = window.tr('Suche…'); updateCheckBtn.disabled = true }
       ipcRenderer.invoke('check-for-updates')
     }
 
@@ -2996,14 +3357,14 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     function startHotkeyCapture(slot) {
       if (kbCaptureSlot && kbCaptureSlot !== slot) stopHotkeyCapture()
       kbCaptureSlot = slot
-      document.getElementById(KB_SLOTS[slot].disp).textContent = 'Kombination drücken…'
+      document.getElementById(KB_SLOTS[slot].disp).textContent = window.tr('Kombination drücken…')
       document.getElementById(KB_SLOTS[slot].btn).textContent = 'Abbrechen'
     }
     function stopHotkeyCapture() {
       const slot = kbCaptureSlot
       if (!slot) return
       kbCaptureSlot = null
-      const b = document.getElementById(KB_SLOTS[slot].btn); if (b) b.textContent = 'Ändern'
+      const b = document.getElementById(KB_SLOTS[slot].btn); if (b) b.textContent = window.tr('Ändern')
       refreshHotkeyDisplay(slot)
     }
     async function clearHotkey(slot) {
@@ -3033,11 +3394,11 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (e.metaKey) mods.push('Super')
       const key = hotkeyKeyName(e)
       if (!key) return                          // nur Modifier → weiter warten
-      if (mods.length === 0) { disp.textContent = 'Bitte mit Strg/Alt/Shift kombinieren…'; return }
+      if (mods.length === 0) { disp.textContent = window.tr('Bitte mit Strg/Alt/Shift kombinieren…'); return }
       const acc = [...mods, key].join('+')
       const res = await ipcRenderer.invoke('set-hotkey', acc, s.which)
       const done = kbCaptureSlot; kbCaptureSlot = null
-      document.getElementById(KB_SLOTS[done].btn).textContent = 'Ändern'
+      document.getElementById(KB_SLOTS[done].btn).textContent = window.tr('Ändern')
       if (res && res.ok) { appSettingsCache[s.key] = acc; disp.textContent = acc }
       else disp.textContent = acc + ' – belegt, andere wählen'
     }, true)
@@ -3070,15 +3431,15 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const s = GP_SLOTS[slot]
       const hint = document.getElementById(s.hint)
       if (gpPadIndex === null) {
-        if (hint) { hint.style.display = 'block'; hint.textContent = 'Kein Controller verbunden – bitte zuerst anschließen.' }
+        if (hint) { hint.style.display = 'block'; hint.textContent = window.tr('Kein Controller verbunden – bitte zuerst anschließen.') }
         return
       }
       gpCaptureSlot = slot
       gpCaptureSet = null
       gpCaptureArmed = false          // A, mit dem "Aufnehmen" aktiviert wurde, erst loslassen
-      document.getElementById(s.disp).textContent = 'Knöpfe drücken (auch mehrere gleichzeitig)…'
+      document.getElementById(s.disp).textContent = window.tr('Knöpfe drücken (auch mehrere gleichzeitig)…')
       document.getElementById(s.btn).textContent = 'Abbrechen'
-      if (hint) { hint.style.display = 'block'; hint.textContent = 'Tipp: z. B. D-Pad ← halten und Y dazu drücken. Loslassen speichert die Kombi.' }
+      if (hint) { hint.style.display = 'block'; hint.textContent = window.tr('Tipp: z. B. D-Pad ← halten und Y dazu drücken. Loslassen speichert die Kombi.') }
     }
     function stopGpHotkeyCapture() {
       const slot = gpCaptureSlot
@@ -3756,7 +4117,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     window.addEventListener('gamepadconnected', (e) => {
       gpPadIndex = e.gamepad.index
       setNavMode(true)
-      showGamepadToast('🎮 Controller verbunden')
+      showGamepadToast(window.tr('🎮 Controller verbunden'))
       const items = navFocusables(); if (items.length && !navFocusEl) setNavFocus(navPickStart(items))
       if (!gpTimer) gpTimer = setInterval(gpPoll, 30)
     })
@@ -3766,7 +4127,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       setNavMode(false)
       if (navFocusEl) { navFocusEl.classList.remove('nav-focus'); navFocusEl = null }
       if (gpTimer) { clearInterval(gpTimer); gpTimer = null }
-      showGamepadToast('Controller getrennt')
+      showGamepadToast(window.tr('Controller getrennt'))
     })
 
     // Einstellungs-Inhalt aus seiner HTML-Position in die Inline-Ansicht holen.
@@ -3804,243 +4165,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     document.getElementById('bootScreen').classList.add('hidden')
   </script>
 <script>
-// --- i18n (Etappe 1: statisches UI) -------------------------------------------
-// Deutsch bleibt die Quellsprache im Markup. Bei Sprache Englisch uebersetzt
-// applyI18n() die statischen Textknoten + placeholder/title-Attribute ueber
-// eine Text-zu-Text-Karte - ohne in Logik oder dynamische Renders einzugreifen
-// (die folgen in Etappe 2 ueber t()-Wrapper). Effektive Sprache: Einstellung
-// 'language' (auto = Systemsprache), gecacht in localStorage fuer die
-// flackerfreie Anwendung direkt beim Start.
-const I18N_EN = {
-  'Wird geladen…': 'Loading…',
-  'HDR aus': 'HDR off',
-  'Meine Spiele': 'My games',
-  'Manuelle Reihenfolge': 'Manual order',
-  'Name (A–Z)': 'Name (A–Z)',
-  'Name (Z–A)': 'Name (Z–A)',
-  'Zuletzt gespielt': 'Last played',
-  'Spielzeit': 'Playtime',
-  'Zuletzt hinzugefügt': 'Recently added',
-  '📊 Rückblick': '📊 Recap',
-  'ⓘ Über': 'ⓘ About',
-  'Bibliothek': 'Library',
-  'Allgemein': 'General',
-  'Darstellung': 'Appearance',
-  'Steuerung': 'Controls',
-  'Kein Spiel ausgewählt': 'No game selected',
-  'Erstes Spiel hinzufügen': 'Add your first game',
-  'Bild hier ablegen': 'Drop image here',
-  'nie': 'never',
-  'HDR-Automatik': 'Auto HDR',
-  'HDR wird beim Start aktiviert und beim Beenden abgeschaltet.': 'HDR turns on at launch and back off when the game exits.',
-  '▶ Spiel starten': '▶ Launch game',
-  '✏ Umbenennen': '✏ Rename',
-  '🖼 Icon ändern...': '🖼 Change icon...',
-  '🎨 Cover suchen...': '🎨 Find cover...',
-  '📂 Speicherort öffnen': '📂 Open location',
-  '⚙ Startoptionen...': '⚙ Launch options...',
-  '✕ Entfernen': '✕ Remove',
-  'Spiele suchen': 'Find games',
-  '📁 Ordner hinzufügen...': '📁 Add folder...',
-  '🔍 Automatisch scannen': '🔍 Scan automatically',
-  'Wird gescannt...': 'Scanning...',
-  '0 Spiele gefunden': '0 games found',
-  'Alle': 'All',
-  'Keine': 'None',
-  'Keine neuen Spiele gefunden.': 'No new games found.',
-  'Schließen': 'Close',
-  'Ausgewählte hinzufügen': 'Add selected',
-  'Spiel hinzufügen': 'Add game',
-  'Pfad zur .exe': 'Path to the .exe',
-  'Durchsuchen': 'Browse',
-  'Abbrechen': 'Cancel',
-  'Hinzufügen': 'Add',
-  'Sprache / Language': 'Language',
-  'Automatisch / Auto (System)': 'Auto (system)',
-  'Mit Windows starten': 'Start with Windows',
-  'Beim Autostart minimiert starten': 'Start minimized on autostart',
-  'Beim Schließen in den Infobereich (Tray)': 'Close to tray',
-  'Lumora sucht beim Start automatisch nach Updates. Du kannst auch jederzeit selbst prüfen.': 'Lumora checks for updates automatically at startup. You can also check manually anytime.',
-  'Jetzt nach Updates suchen': 'Check for updates now',
-  'Cover-Darstellung': 'Cover style',
-  'Hero-Banner': 'Hero banner',
-  'Breites Querformat': 'Wide landscape',
-  'Poster': 'Poster',
-  'Hochformat-Cover': 'Portrait cover',
-  'Ist die bevorzugte Variante für ein Spiel nicht verfügbar, wird automatisch die andere als Fallback verwendet.': 'If the preferred style is unavailable for a game, the other one is used automatically.',
-  'Akzentfarbe': 'Accent color',
-  'Mehr Cover & Hero über SteamGridDB (optional)': 'More covers & heroes via SteamGridDB (optional)',
-  'Ohne Key läuft alles (Steam + Microsoft Store).': 'Everything works without a key (Steam + Microsoft Store).',
-  'Lohnt sich das? & in 2 Minuten einrichten': 'Worth it? Set up in 2 minutes',
-  'Was es bringt:': 'What it gives you:',
-  'So holst du den kostenlosen Key:': 'How to get the free key:',
-  'Generate API Key': 'Generate API Key',
-  'klicken und den Key kopieren.': 'and copy the key.',
-  'Hier oben ins Feld einfügen — fertig, sofort aktiv.': 'Paste it into the field above — done, active immediately.',
-  '↗ Key-Seite öffnen': '↗ Open key page',
-  'Performance-Overlay (OSD)': 'Performance overlay (OSD)',
-  'Blendet GPU-/CPU-Auslastung, Temperaturen und FPS über dem Spiel ein – funktioniert über randlos laufenden Spielen.': 'Shows GPU/CPU load, temperatures and FPS on top of your game – works over borderless games.',
-  'Ein-/ausblenden': 'Show/hide',
-  'Ändern': 'Change',
-  'Aus': 'Off',
-  'Aufnehmen': 'Record',
-  'Konfigurationsmodus (Live-Edit direkt am OSD)': 'Configuration mode (live edit on the OSD)',
-  'Overlay anzeigen': 'Show overlay',
-  'Grafikkarte': 'Graphics card',
-  'Automatisch (schnellste)': 'Automatic (fastest)',
-  'Anzeige-Art': 'Display mode',
-  'Overlay-Fenster (Standard)': 'Overlay window (default)',
-  'Im Spiel gerendert via RTSS – streambar': 'Rendered in-game via RTSS – streamable',
-  'Afterburner-OSD ein-/ausblenden': 'Toggle Afterburner OSD',
-  'Design': 'Design',
-  'Kompakt': 'Compact',
-  'Minimal': 'Minimal',
-  'Balken': 'Bars',
-  'Neon': 'Neon',
-  'Leiste (horizontal)': 'Strip (horizontal)',
-  'Kacheln (horizontal)': 'Tiles (horizontal)',
-  'Werte': 'Values',
-  'Einrichtung': 'Setup',
-  'Abgelehnt – FPS und CPU-Sensorwerte fehlen.': 'Declined – FPS and CPU sensor values are missing.',
-  'Jetzt einrichten': 'Set up now',
-  'FPS-Quelle': 'FPS source',
-  'Automatisch (RTSS, sonst PresentMon)': 'Automatic (RTSS, else PresentMon)',
-  'Nur RTSS/Afterburner': 'RTSS/Afterburner only',
-  'Nur PresentMon (ohne RTSS)': 'PresentMon only (no RTSS)',
-  'Größe': 'Size',
-  'Deckkraft': 'Opacity',
-  'Position': 'Position',
-  'Aufnahme & Qualität': 'Capture & quality',
-  'Teilt deinen Bildschirm live ins Internet – Zuschauer öffnen nur einen Link im Browser, ganz ohne Installation. Hardware-Encoding über deine Grafikkarte, Bild geht direkt von deinem PC zum Zuschauer.': 'Shares your screen live over the internet – viewers just open a link in their browser, no install needed. Hardware encoding on your GPU; video goes directly from your PC to the viewer.',
-  'Quelle': 'Source',
-  'Bildschirm': 'screen',
-  'Fenster/Spiel': 'window/game',
-  'Auflösung': 'Resolution',
-  'Nativ (volle Aufnahme)': 'Native (full capture)',
-  'Bildrate': 'Frame rate',
-  '120 fps (nur bei 120-Hz-Displays)': '120 fps (120 Hz displays only)',
-  'Bitrate': 'Bitrate',
-  '6 Mbit – sparsam (Mobilfunk)': '6 Mbit – light (mobile data)',
-  '8 Mbit – Full HD (empfohlen)': '8 Mbit – Full HD (recommended)',
-  '12 Mbit – Full HD hoch': '12 Mbit – Full HD high',
-  '16 Mbit – 1440p': '16 Mbit – 1440p',
-  '25 Mbit – 4K': '25 Mbit – 4K',
-  'Puffer': 'Buffer',
-  'Bitrate automatisch anpassen': 'Adapt bitrate automatically',
-  'Automatisch anpassen': 'Adapt automatically',
-  'Stream aus': 'Stream off',
-  'Stream starten': 'Start stream',
-  'Vorschau lädt…': 'Preview loading…',
-  'Kopieren': 'Copy',
-  'Teilen': 'Share',
-  'E-Mail': 'E-mail',
-  'Zuschauer: 0': 'Viewers: 0',
-  'Wer schaut zu': 'Who is watching',
-  'Beim Start öffnet Lumora automatisch den nötigen Port am Router (UPnP) und schließt ihn beim Stoppen wieder.': 'On start, Lumora opens the required router port automatically (UPnP) and closes it again when you stop.',
-  'Gruppe': 'Group',
-  'Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Dein Stream startet automatisch mit, ein Klick genügt.': 'Watch each other in a grid – perfect for playing together on a voice call. Your own stream starts along automatically, one click is all it takes.',
-  'Neue Gruppe': 'New group',
-  'Gruppe starten': 'Start group',
-  'Beitreten': 'Join',
-  '⚠️ Vermittlungs-Server gerade nicht erreichbar – laufende Streams funktionieren weiter, aber neue Mitglieder können momentan nicht beitreten.': '⚠️ Coordination server currently unreachable – running streams keep working, but new members cannot join right now.',
-  'Code': 'Code',
-  'Link kopieren': 'Copy link',
-  'Mitglieder': 'Members',
-  'Grid im Browser öffnen': 'Open grid in browser',
-  'Grid öffnen': 'Open grid',
-  'Gruppe verlassen': 'Leave group',
-  'Verlassen': 'Leave',
-  'Eigener Vermittlungs-Server': 'Custom coordination server',
-  'Skript-URL': 'Script URL',
-  'Schnellstart': 'Quick start',
-  'Schnellstart-Hotkey': 'Quick-start hotkey',
-  'aktuelle Fenster': 'current window',
-  'auch mitten im Spiel': 'even mid-game',
-  'Verbindung': 'Connection',
-  'Kann mein Anschluss streamen?': 'Can my connection stream?',
-  'Verbindung testen': 'Test connection',
-  'Für schwierige Anschlüsse (Relay & IPv6-Test)': 'For tricky connections (relay & IPv6 test)',
-  'Relay-Server': 'Relay server',
-  'Nur nötig, wenn der Test oben „nicht erreichbar" meldet. Zugangsdaten kommen vom Relay-Anbieter oder deinem eigenen coturn-Server („turn:" nicht nötig).': 'Only needed if the test above reports "not reachable". Credentials come from your relay provider or your own coturn server ("turn:" prefix not required).',
-  'Server': 'Server',
-  'Benutzer': 'Username',
-  'Passwort': 'Password',
-  'Nur über Relay (zum Testen)': 'Relay only (for testing)',
-  'IPv6 erzwingen (zum Testen)': 'Force IPv6 (for testing)',
-  'Startoptionen': 'Launch options',
-  'Startargumente': 'Launch arguments',
-  'Als Administrator starten': 'Run as administrator',
-  'Speichern': 'Save',
-  'Über Lumora': 'About Lumora',
-  'kostenlos': 'free',
-  'Artwork suchen': 'Find artwork',
-  'Cover (Hochformat)': 'Cover (portrait)',
-  'Suchen': 'Search',
-  'Eigenes Bild verwenden': 'Use your own image',
-  'Laden': 'Load',
-  'Lokale Datei wählen…': 'Choose local file…',
-  'Übernehmen': 'Apply',
-  'Dein Spielzeit-Rückblick': 'Your playtime recap',
-  'Update verfügbar': 'Update available',
-  'ist bereit zur Installation': 'is ready to install',
-  'Das ist neu': "What's new",
-  'Später': 'Later',
-  'Jetzt aktualisieren': 'Update now',
-  'Update': 'Update',
-  'Zum Stream-Tab': 'Go to stream tab',
-  'Detailansicht': 'Detail view',
-  'Rasteransicht': 'Grid view',
-  'Suchen…': 'Search…',
-  'Nur Favoriten anzeigen': 'Show favorites only',
-  'Spielzeit-Rückblick': 'Playtime recap',
-  'Doppelklick zum Umbenennen': 'Double-click to rename',
-  'Spiel entfernen': 'Remove game',
-  'z.B. Cyberpunk 2077': 'e.g. Cyberpunk 2077',
-  'API-Key hier einfügen': 'Paste API key here',
-  'Tastatur': 'Keyboard',
-  'Gamepad': 'Gamepad',
-  'Oben links': 'Top left',
-  'Oben rechts': 'Top right',
-  'Unten links': 'Bottom left',
-  'Unten rechts': 'Bottom right',
-  'Liste aktualisieren (z. B. nach Spielstart)': 'Refresh list (e.g. after launching the game)',
-  'Gruppen-Code oder Link einfügen': 'Paste group code or link',
-  'Schnellstart per Tastatur': 'Quick start via keyboard',
-  'z. B. turn.mein-server.de:3478': 'e.g. turn.my-server.com:3478',
-  'vom Anbieter (leer = ohne)': 'from your provider (empty = none)',
-  'z.B. -windowed -novid': 'e.g. -windowed -novid',
-  'Spielname…': 'Game name…',
-  'Bild-URL (https://…)': 'Image URL (https://…)',
-}
-function lumoraLangEffective() {
-  try {
-    const c = localStorage.getItem('lumoraLang')
-    if (c === 'de' || c === 'en') return c
-  } catch (e) {}
-  return (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'
-}
-window.LANG = lumoraLangEffective()
-window.t = function (s) { return (window.LANG === 'en' && I18N_EN[s]) || s }
-function applyI18n() {
-  if (window.LANG !== 'en') return
-  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
-  let n
-  while ((n = w.nextNode())) {
-    const raw = n.nodeValue
-    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(raw)
-    if (!m || !m[2]) continue
-    const tr = I18N_EN[m[2].replace(/\s+/g, ' ')]
-    if (tr) n.nodeValue = m[1] + tr + m[3]
-  }
-  document.querySelectorAll('[placeholder]').forEach((el) => {
-    const tr = I18N_EN[el.getAttribute('placeholder').replace(/\s+/g, ' ').trim()]
-    if (tr) el.setAttribute('placeholder', tr)
-  })
-  document.querySelectorAll('[title]').forEach((el) => {
-    const tr = I18N_EN[el.getAttribute('title').replace(/\s+/g, ' ').trim()]
-    if (tr) el.setAttribute('title', tr)
-  })
-}
 // Sofort anwenden (localStorage-Cache -> kein Flackern) und danach mit der
 // echten Einstellung abgleichen (erster Start / geaenderte Systemsprache).
 applyI18n()

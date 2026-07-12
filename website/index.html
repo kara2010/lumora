@@ -3,6 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+  /* Sprach-Weiche fuer DIREKTbesucher: ohne gespeicherte Wahl und mit nicht-
+     deutschem Browser einmalig auf die englische Version leiten. hreflang steuert
+     Google-Treffer, dieses Skript die Direkteinstiege. Eine bewusste Sprachwahl
+     (der Umschalter setzt lumoraSiteLang) wird respektiert. Kein Loop: nur die
+     deutsche Startseite leitet um, die englische bleibt stehen. Laeuft synchron
+     im <head> -> im Weiterleitungsfall kein Aufblitzen der falschen Sprache. */
+  (function () {
+    try {
+      var pref = localStorage.getItem('lumoraSiteLang');
+      if (pref === 'de') return;
+      if (pref === 'en') { location.replace('en/'); return; }
+      var l = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+      if (l.indexOf('de') !== 0) location.replace('en/');
+    } catch (e) {}
+  })();
+  </script>
   <title>Lumora – Alle Spiele in einer Bibliothek, automatisches HDR &amp; Gaming-OSD</title>
   <meta name="description" content="Lumora vereint deine Spiele aus Steam, Epic, GOG, Xbox, EA &amp; Co. in einer schönen Cover-Bibliothek – komplett per Gamepad bedienbar. HDR schaltet sich pro Spiel automatisch. Neu: Spiel live in 4K mit Ton per Link teilen – Verbindung inkl. IPv6-Direktweg richtet sich automatisch ein –, plus Performance-OSD mit FPS, GPU- und CPU-Werten im Spiel. Kostenlos für Windows 10 &amp; 11.">
   <meta name="keywords" content="Game Launcher, Spiele-Launcher, alle Spiele an einem Ort, Steam Epic GOG Xbox zusammen, Spielbibliothek Windows, Launcher mit Gamepad, Couch Gaming PC, Wohnzimmer Gaming, HDR automatisch, FPS Anzeige, OSD Overlay, GPU CPU Temperatur anzeigen, Spiel per Link streamen, 4K Spiel im Browser streamen, IPv6 Streaming ohne Portfreigabe, kostenlos">
@@ -139,6 +156,16 @@
     .nav-logo span { color: var(--text); }
 
     .nav-logo-img { width: 26px; height: 26px; border-radius: 6px; display: block; }
+
+    .nav-right { display: flex; align-items: center; gap: 28px; }
+
+    .nav-lang {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 13px; font-weight: 600; color: var(--text);
+      border: 1px solid var(--border); padding: 5px 12px; border-radius: 999px;
+      white-space: nowrap; transition: border-color .2s, color .2s;
+    }
+    .nav-lang:hover { border-color: var(--accent2); color: var(--accent2); text-decoration: none; }
 
     nav ul {
       display: flex;
@@ -875,12 +902,15 @@
 
 <nav>
   <a class="nav-logo" href="#"><img src="icon.png" alt="" class="nav-logo-img"> <span>Lumora</span></a>
-  <ul>
-    <li><a href="#features">Funktionen</a></li>
-    <li><a href="#changelog">Neuerungen</a></li>
-    <li><a href="#install">Installation</a></li>
-    <li><a href="#transparency">Transparenz</a></li>
-  </ul>
+  <div class="nav-right">
+    <ul>
+      <li><a href="#features">Funktionen</a></li>
+      <li><a href="#changelog">Neuerungen</a></li>
+      <li><a href="#install">Installation</a></li>
+      <li><a href="#transparency">Transparenz</a></li>
+    </ul>
+    <a class="nav-lang" href="en/" hreflang="en" title="English version" onclick="try{localStorage.setItem('lumoraSiteLang','en')}catch(e){}">🌐 EN</a>
+  </div>
 </nav>
 
 <!-- HERO -->
@@ -1540,8 +1570,7 @@
     <a href="streaming.html">Gameplay in 4K mit Freunden teilen</a> ·
     <a href="discord-alternative.html">Streaming-Qualität im Vergleich</a> ·
     <a href="gaming-osd.html">FPS &amp; Hardware-Werte im Spiel</a> ·
-    <a href="gamepad.html">Bedienung per Gamepad</a> ·
-    <a href="en/index.html">🇬🇧 English version</a>
+    <a href="gamepad.html">Bedienung per Gamepad</a>
   </p>
   <p>
     Lumora 2.2.11 · Kostenlos &amp; Open-Source-basiert ·
