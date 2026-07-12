@@ -40,4 +40,4 @@ Launcher-Check, Artwork-Check) und sind vom Build ausgeschlossen.
 ## Website
 
 Der Ordner [`website/`](website/) enthält die Downloadseite
-(kara-webdesign.de/hdr-launcher/).
+(lumora.kara-webdesign.de/).

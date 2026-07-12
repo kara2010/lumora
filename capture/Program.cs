@@ -132,6 +132,7 @@ static class Program
                 return RunAudio(audHwnd);
             }
             if (Array.IndexOf(args, "--list") >= 0) return ListWindows(); // Fenster-Liste (zuverlaessiger als Electrons desktopCapturer)
+            if (Array.IndexOf(args, "--hdr-check") >= 0) return HdrCheck(); // HDR-Status je Monitor (fuer den Farb-Hinweis im Monitor-Weg)
             IntPtr hwnd = IntPtr.Zero;
             int fps = 60, maxHeight = 0;
             string pipeName = null;
@@ -597,6 +598,39 @@ static class Program
             try { _vctx.VideoProcessorSetOutputColorSpace1(_vproc, ColorSpaceType.RgbFullG22NoneP709); } catch { }
             try { _vctx.VideoProcessorSetStreamAutoProcessingMode(_vproc, 0u, true); } catch { }
         }
+    }
+    // HDR-Status ALLER Monitore in ddagrab-Reihenfolge (Adapter-, dann Output-
+    // Index) auf stdout: "HDR <idx> <0|1>" je Monitor. Lumora warnt im Monitor-
+    // Weg vor blassen Farben, wenn der gewaehlte Bildschirm in HDR laeuft - der
+    // ddagrab-Weg hat (anders als der Fenster-Weg) kein Tonemapping (Audit).
+    static int HdrCheck()
+    {
+        try
+        {
+            Vortice.DXGI.DXGI.CreateDXGIFactory1(out Vortice.DXGI.IDXGIFactory1 factory).CheckError();
+            using (factory)
+            {
+                int idx = 0;
+                for (uint ai = 0; factory.EnumAdapters1(ai, out Vortice.DXGI.IDXGIAdapter1 adapter).Success; ai++)
+                {
+                    using (adapter)
+                    {
+                        for (uint oi = 0; adapter.EnumOutputs(oi, out IDXGIOutput output).Success; oi++)
+                        {
+                            using (output)
+                            {
+                                bool hdrOn = false;
+                                try { using var o6 = output.QueryInterface<IDXGIOutput6>(); hdrOn = o6.Description1.ColorSpace == ColorSpaceType.RgbFullG2084NoneP2020; } catch { }
+                                Console.Out.WriteLine("HDR " + idx + " " + (hdrOn ? "1" : "0"));
+                                idx++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex) { Console.Error.WriteLine("ERR " + ex.Message); }
+        return 0;
     }
     // HDR aktiv? Prueft, ob ein angeschlossener Monitor im HDR-Modus (PQ/BT.2020) laeuft.
     static bool DetectHdr()

@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://kara-webdesign.de/hdr-launcher/sitemap.xml
+Sitemap: https://lumora.kara-webdesign.de/sitemap.xml

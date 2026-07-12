@@ -580,7 +580,7 @@
                 <p class="settings-hint" style="margin-top:0">Die Gruppen-Vermittlung läuft über ein kleines PHP-Skript. Es wird mit Lumora mitgeliefert (<span style="font-family:monospace">resources\gruppe.php</span> im Installationsordner) – lege es auf einen beliebigen PHP-Webspace und trage hier die Adresse ein. Leer = Standard-Server. Der Video-Traffic läuft nie über diesen Server.</p>
                 <div class="osd-field">
                   <span class="osd-field-label">Skript-URL</span>
-                  <input type="text" id="setGroupRelay" class="sort-select" style="flex:1; font-family:monospace" placeholder="https://kara-webdesign.de/hdr-launcher/gruppe.php" onchange="onGroupRelayChange()">
+                  <input type="text" id="setGroupRelay" class="sort-select" style="flex:1; font-family:monospace" placeholder="https://lumora.kara-webdesign.de/gruppe.php" onchange="onGroupRelayChange()">
                 </div>
               </div>
             </details>
@@ -1996,8 +1996,13 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         const adapt = st.adaptKbit
           ? '<div style="color:#7fb3e6; margin-top:6px">📶 Bitrate automatisch auf <b>' + (Math.round(st.adaptKbit / 100) / 10) + ' Mbit</b> gesenkt – ein Zuschauer hat schwachen Empfang. Geht von selbst wieder hoch, sobald es stabil läuft.</div>'
           : ''
+        // HDR-Bildschirm im Monitor-Weg: Farben wirken beim Zuschauer blass
+        // (kein Tonemapping auf diesem Pfad) - erklaeren + Fenster-Weg empfehlen.
+        const hdrW = st.hdrMonitor
+          ? '<div style="color:#f5b942; margin-top:8px; line-height:1.4">🎨 <b>HDR-Bildschirm erkannt.</b> Beim Teilen des ganzen Bildschirms wirken die Farben für Zuschauer blass. Für korrekte Farben das Spiel als <b>Fenster</b> freigeben – dort wandelt Lumora HDR sauber um.</div>'
+          : ''
         document.getElementById('streamStats').innerHTML =
-          'Zuschauer: ' + (st.viewers || 0) + (st.quality ? '  ·  ' + st.quality : '') + net + adapt + cap
+          'Zuschauer: ' + (st.viewers || 0) + (st.quality ? '  ·  ' + st.quality : '') + net + adapt + hdrW + cap
         document.getElementById('streamForwardHelp').style.display = st.needsForward ? 'block' : 'none'
       }
       if (on) startViewerPoll(); else stopViewerPoll()

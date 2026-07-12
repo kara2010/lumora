@@ -37,7 +37,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://kara-webdesign.de/hdr-launcher/updates/"
+        "url": "https://lumora.kara-webdesign.de/updates/"
       }
     ],
     "win": {

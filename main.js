@@ -4262,7 +4262,7 @@ function bcStartServer(port) {
 // der Installation bei (resources/gruppe.php) - jeder kann es auf den eigenen
 // Webspace legen und bleibt damit unabhaengig.
 const GROUP_HEARTBEAT_MS = 8000     // Intervall fuer den Anwesenheits-Heartbeat
-const GROUP_RELAY_DEFAULT = 'https://kara-webdesign.de/hdr-launcher/gruppe.php'
+const GROUP_RELAY_DEFAULT = 'https://lumora.kara-webdesign.de/gruppe.php'
 let bcGroup = null                  // null = nicht in einer Gruppe, sonst { code, members: [], relayFails }
 let bcGroupTimer = null
 
@@ -4677,15 +4677,35 @@ function bcStartWindowCapture(cfg) {
   capProc = cap
   bcBoostPriority(cap, 'capture')
   cap.on('error', (e) => { bcLogStream('cap-error: ' + (e && e.message)) })
-  cap.on('exit', (code) => { if (capProc === cap) capProc = null; bcLogStream('cap beendet (' + code + ')') })
-  let sized = false, errbuf = ''
+  let sized = false, errbuf = '', capW = 0, capH = 0, rszTimer = null
+  cap.on('exit', (code) => { if (rszTimer) { clearTimeout(rszTimer); rszTimer = null } if (capProc === cap) capProc = null; bcLogStream('cap beendet (' + code + ')') })
   cap.stderr.on('data', (d) => {
     const s = d.toString(); errbuf = (errbuf + s).slice(-1000); bcLogStream('cap: ' + s.trim())
-    if (sized) return
+    if (sized) {
+      // Deutliche Fenster-Groessenaenderung (z.B. kleines Video -> Vollbild):
+      // Der Helfer letterboxt in die START-Aufloesung - das Vollbild bliebe
+      // dauerhaft unscharf (Audit-Befund). Bei >=50 % Flaechenaenderung, die
+      // 3 s stabil bleibt, die Aufnahme einmal neu aufsetzen: der Neustart
+      // misst die Groesse frisch und streamt wieder nativ.
+      const rm = /RESIZE (\d+) (\d+) ->/.exec(s)
+      if (rm && capW && capH) {
+        const ratio = (parseInt(rm[1], 10) * parseInt(rm[2], 10)) / (capW * capH)
+        if (ratio >= 1.5 || ratio <= 0.67) {
+          if (rszTimer) clearTimeout(rszTimer)
+          rszTimer = setTimeout(() => {
+            rszTimer = null
+            if (capProc !== cap || !broadcastState.active || ffStopping) return
+            bcLogStream('resize: Fenster deutlich veraendert (Faktor ' + ratio.toFixed(2) + ') -> Aufnahme passt sich an')
+            bcRestartFfmpeg()
+          }, 3000)
+        }
+      }
+      return
+    }
     const m = /SIZE (\d+) (\d+)/.exec(errbuf)
     if (!m) return
     sized = true
-    const capW = parseInt(m[1], 10), capH = parseInt(m[2], 10)
+    capW = parseInt(m[1], 10); capH = parseInt(m[2], 10)
     if (capProc !== cap || !broadcastState.active || ffStopping) return
     // Das Video laeuft ueber die Named Pipe des Helfers (siehe oben) - FFmpeg
     // oeffnet sie selbst per Dateiname. Historie der Transportwege: Node-Piping
@@ -4927,6 +4947,20 @@ async function startBroadcast() {
   }
   const cfg = bcStreamCfg(enc)
   bcStartFfmpeg(cfg)
+  // HDR-Farb-Hinweis (Audit): der Monitor-Weg (ddagrab) hat kein HDR-Tone-
+  // mapping - laeuft der gewaehlte Bildschirm in HDR, wirken die Farben beim
+  // Zuschauer blass. Einmal pro Stream-Start pruefen und in der UI erklaeren
+  // (der Fenster-Weg wandelt HDR sauber, dorthin verweist der Hinweis).
+  if (cfg.mode === 'monitor') {
+    require('child_process').execFile(streamBin('lumora-capture.exe'), ['--hdr-check'], { windowsHide: true, timeout: 8000 }, (err, out) => {
+      if (err || !broadcastState.active) return
+      if (new RegExp('^HDR ' + cfg.outputIdx + ' 1', 'm').test(String(out))) {
+        broadcastState.hdrMonitor = true
+        bcLogStream('hdr-check: Monitor ' + cfg.outputIdx + ' laeuft in HDR -> Farb-Hinweis aktiv')
+        bcPushState()
+      }
+    })
+  }
   bcStartViewerPoll()
   broadcastState.quality = bcQualityLabel(cfg)
   bcPushState()   // Medien laufen – Vorschau kann verbinden (opening bleibt true bis der Router geprueft ist)
@@ -4959,6 +4993,7 @@ async function startBroadcast() {
         if (t6) bcPinholeIds.push(t6)
         if (u6) bcPinholeIds.push(u6)
         v6Ok = !!(t6 && u6)
+        if (v6Ok) bcPinholeSetAt = Date.now()   // fuer die 12-h-Erneuerung im IP-Watcher
       })()
       if (!forceV6 && pubIp) {
         // Kurzer Timeout (statt der 4s-Voreinstellung): eine ANDERE Instanz im
@@ -5018,6 +5053,13 @@ async function startBroadcast() {
     broadcastState.needsForward = !!(pubIp && !v4Reachable && !(v6Ok && pubIp6))
     bcPushState()
     osdDbg('[stream] aktiv: ' + broadcastState.link + ' enc=' + enc.encoder + ' tcp=' + tcpOk + ' udp=' + udpOk + ' ip=' + pubIp + ' v6=' + v6Ok + ' ip6=' + pubIp6 + (v4OccupiedBy ? ' (IPv4 belegt von ' + v4OccupiedBy + ')' : ''))
+    // IP-Wechsel-Watcher (s. bcIpWatchTick): raeumt sich nach Stream-Ende selbst weg.
+    if (!bcIpWatchTimer) {
+      bcIpWatchTimer = setInterval(() => {
+        if (!broadcastState.active) { clearInterval(bcIpWatchTimer); bcIpWatchTimer = null; return }
+        bcIpWatchTick().catch(() => {})
+      }, 300000)
+    }
     // Zweiter PC im selben Netz: laeuft auf der anderen Lumora-Instanz bereits eine
     // Gruppe, automatisch per Raumcode beitreten - der Nutzer startet auf Rechner 2
     // nur den Stream und ist dabei, ohne Code-Kopieren zwischen den eigenen Geraeten.
@@ -5031,6 +5073,52 @@ async function startBroadcast() {
     }
   })()
   return broadcastState
+}
+// --- IP-Wechsel-Watcher (Audit-Befund: DSL-Zwangstrennung mitten im Stream) ----
+// Alle 5 min die oeffentlichen Adressen pruefen (UPnP-Control ist gecacht ->
+// billig, kein Discovery-Lauf). Aendern sie sich, werden mediamtx-Hosts (per
+// Hot-Reload), Portfreigabe, IPv6-Pinholes, Anzeige-Links und das Gruppen-
+// Roster nachgezogen - vorher blieb der Stream nach einer Zwangstrennung still
+// unerreichbar, waehrend die UI weiter gruen zeigte. Nebenbei werden die
+// IPv6-Pinholes (24-h-Lease) nach 12 h erneuert (Marathon-Streams/Dauergruppe).
+let bcIpWatchTimer = null
+let bcPinholeSetAt = 0
+async function bcIpWatchTick() {
+  if (!broadcastState.active || broadcastState.opening) return
+  let ip = null, ip6 = null
+  try { ip = await upnpGetExternalIp() } catch {}
+  if (!ip) upnpCtrl = null   // Router neu gestartet? Control-Cache verwerfen -> naechster Tick discovert frisch
+  try { ip6 = await bcPublicIPv6() } catch {}
+  const forceV6 = !!appSettings.streamForceIPv6
+  const hosts = (forceV6 ? [ip6] : [ip, ip6]).filter(Boolean)
+  if (!hosts.length) return   // gerade gar kein Netz: nichts anfassen, naechster Tick prueft wieder
+  const cur = Array.isArray(appSettings.streamLastHosts) ? appSettings.streamLastHosts.filter(Boolean) : []
+  const changed = JSON.stringify(hosts) !== JSON.stringify(cur)
+  const renewPinholes = !!ip6 && bcPinholeSetAt > 0 && Date.now() - bcPinholeSetAt > 12 * 3600 * 1000
+  if (!changed && !renewPinholes) return
+  if (changed) {
+    bcLogStream('ipwatch: oeffentliche Adresse geaendert ' + JSON.stringify(cur) + ' -> ' + JSON.stringify(hosts))
+    try { bcWriteMtxConfig(hosts) } catch {}   // mediamtx uebernimmt per Hot-Reload
+    appSettings.streamLastHosts = hosts
+    saveAppSettings()
+    if (!forceV6 && ip) { try { await Promise.all([upnpMapPort(BROADCAST_PORT, 'TCP', 'Lumora Stream'), upnpMapPort(MTX_ICE_UDP, 'UDP', 'Lumora Stream Medien')]) } catch {} }
+    if (ip) broadcastState.linkV4 = 'http://' + ip + ':' + BROADCAST_PORT + '/'
+    if (ip6) broadcastState.linkV6 = 'http://[' + ip6 + ']:' + BROADCAST_PORT + '/'
+    broadcastState.link = broadcastState.linkV4 || broadcastState.linkV6 || broadcastState.link
+    bcPushState()
+    if (bcGroup) { groupPushState(); groupTick().catch(() => {}) }   // neue Adressen ins Gruppen-Roster
+  }
+  if (ip6 && (changed || renewPinholes)) {
+    const ids = bcPinholeIds; bcPinholeIds = []
+    for (const id of ids) { try { upnpDeletePinhole(id) } catch {} }
+    try {
+      const [t6, u6] = await Promise.all([upnpAddPinhole(ip6, BROADCAST_PORT, 'TCP'), upnpAddPinhole(ip6, MTX_ICE_UDP, 'UDP')])
+      if (t6) bcPinholeIds.push(t6)
+      if (u6) bcPinholeIds.push(u6)
+      if (t6 && u6) bcPinholeSetAt = Date.now()
+      bcLogStream('ipwatch: IPv6-Pinholes ' + (changed ? 'neu gesetzt' : 'erneuert') + ' (' + bcPinholeIds.length + ')')
+    } catch {}
+  }
 }
 // Server + Freigaben komplett abbauen - der Teil des Stopps, der bei aktiver
 // Gruppe NICHT laufen darf (siehe stopBroadcast): der HTTP-Server ist die

@@ -78,7 +78,7 @@ $updSrc = "$src\dist\win-unpacked\resources\app-update.yml"
 if (-not (Test-Path $updSrc)) {
   @"
 provider: generic
-url: https://kara-webdesign.de/hdr-launcher/updates/
+url: https://lumora.kara-webdesign.de/updates/
 updaterCacheDirName: lumora-updater
 "@ | Set-Content -Encoding UTF8 $updSrc
 }
