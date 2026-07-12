@@ -49,7 +49,10 @@
       "perMachine": false,
       "selectPerMachineByDefault": false,
       "allowToChangeInstallationDirectory": true,
-      "include": "installer.nsh"
+      "include": "installer.nsh",
+      "multiLanguageInstaller": true,
+      "displayLanguageSelector": true,
+      "installerLanguages": ["de_DE", "en_US"]
     },
     "extraResources": [
       {

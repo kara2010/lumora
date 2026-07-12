@@ -238,6 +238,14 @@
           <div class="form-group">
             <label>Allgemein</label>
             <div class="setting-toggle-row">
+              <span class="setting-toggle-label">Sprache / Language</span>
+              <select id="setLanguage" class="sort-select" style="min-width:190px" onchange="onLanguageChange()">
+                <option value="auto">Automatisch / Auto (System)</option>
+                <option value="de">Deutsch</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+            <div class="setting-toggle-row">
               <span class="setting-toggle-label">Mit Windows starten</span>
               <label class="switch"><input type="checkbox" id="setAutostart" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
             </div>
@@ -1883,6 +1891,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setStreamBuffer').value = String(sbuf)
       document.getElementById('streamBufferVal').textContent = sbuf + ' ms'
       document.getElementById('setStreamAdaptive').checked = s.streamAdaptive !== false
+      document.getElementById('setLanguage').value = s.language || 'auto'
       document.getElementById('setTurnEnabled').checked = !!s.streamTurnEnabled
       document.getElementById('turnFields').style.display = s.streamTurnEnabled ? 'block' : 'none'
       document.getElementById('setTurnUrl').value = s.streamTurnUrl || ''
@@ -1895,6 +1904,15 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function hideSettings() { stopHotkeyCapture(); if (settingsTab != null) showLibraryView() }
 
+    // Sprachwechsel: Einstellung speichern, effektive Sprache cachen (fuer die
+    // flackerfreie Anwendung beim naechsten Start) und den Renderer neu laden -
+    // so greift die Uebersetzung sofort in beide Richtungen.
+    function onLanguageChange() {
+      const v = document.getElementById('setLanguage').value
+      const eff = v === 'auto' ? ((navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en') : v
+      try { localStorage.setItem('lumoraLang', eff) } catch (e) {}
+      ipcRenderer.invoke('set-app-settings', { language: v }).then(() => location.reload())
+    }
     function onAppSettingChange() {
       ipcRenderer.invoke('set-app-settings', {
         autostart: document.getElementById('setAutostart').checked,
@@ -3785,5 +3803,255 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // UI steht → Boot-Screen ausblenden
     document.getElementById('bootScreen').classList.add('hidden')
   </script>
+<script>
+// --- i18n (Etappe 1: statisches UI) -------------------------------------------
+// Deutsch bleibt die Quellsprache im Markup. Bei Sprache Englisch uebersetzt
+// applyI18n() die statischen Textknoten + placeholder/title-Attribute ueber
+// eine Text-zu-Text-Karte - ohne in Logik oder dynamische Renders einzugreifen
+// (die folgen in Etappe 2 ueber t()-Wrapper). Effektive Sprache: Einstellung
+// 'language' (auto = Systemsprache), gecacht in localStorage fuer die
+// flackerfreie Anwendung direkt beim Start.
+const I18N_EN = {
+  'Wird geladen…': 'Loading…',
+  'HDR aus': 'HDR off',
+  'Meine Spiele': 'My games',
+  'Manuelle Reihenfolge': 'Manual order',
+  'Name (A–Z)': 'Name (A–Z)',
+  'Name (Z–A)': 'Name (Z–A)',
+  'Zuletzt gespielt': 'Last played',
+  'Spielzeit': 'Playtime',
+  'Zuletzt hinzugefügt': 'Recently added',
+  '📊 Rückblick': '📊 Recap',
+  'ⓘ Über': 'ⓘ About',
+  'Bibliothek': 'Library',
+  'Allgemein': 'General',
+  'Darstellung': 'Appearance',
+  'Steuerung': 'Controls',
+  'Kein Spiel ausgewählt': 'No game selected',
+  'Erstes Spiel hinzufügen': 'Add your first game',
+  'Bild hier ablegen': 'Drop image here',
+  'nie': 'never',
+  'HDR-Automatik': 'Auto HDR',
+  'HDR wird beim Start aktiviert und beim Beenden abgeschaltet.': 'HDR turns on at launch and back off when the game exits.',
+  '▶ Spiel starten': '▶ Launch game',
+  '✏ Umbenennen': '✏ Rename',
+  '🖼 Icon ändern...': '🖼 Change icon...',
+  '🎨 Cover suchen...': '🎨 Find cover...',
+  '📂 Speicherort öffnen': '📂 Open location',
+  '⚙ Startoptionen...': '⚙ Launch options...',
+  '✕ Entfernen': '✕ Remove',
+  'Spiele suchen': 'Find games',
+  '📁 Ordner hinzufügen...': '📁 Add folder...',
+  '🔍 Automatisch scannen': '🔍 Scan automatically',
+  'Wird gescannt...': 'Scanning...',
+  '0 Spiele gefunden': '0 games found',
+  'Alle': 'All',
+  'Keine': 'None',
+  'Keine neuen Spiele gefunden.': 'No new games found.',
+  'Schließen': 'Close',
+  'Ausgewählte hinzufügen': 'Add selected',
+  'Spiel hinzufügen': 'Add game',
+  'Pfad zur .exe': 'Path to the .exe',
+  'Durchsuchen': 'Browse',
+  'Abbrechen': 'Cancel',
+  'Hinzufügen': 'Add',
+  'Sprache / Language': 'Language',
+  'Automatisch / Auto (System)': 'Auto (system)',
+  'Mit Windows starten': 'Start with Windows',
+  'Beim Autostart minimiert starten': 'Start minimized on autostart',
+  'Beim Schließen in den Infobereich (Tray)': 'Close to tray',
+  'Lumora sucht beim Start automatisch nach Updates. Du kannst auch jederzeit selbst prüfen.': 'Lumora checks for updates automatically at startup. You can also check manually anytime.',
+  'Jetzt nach Updates suchen': 'Check for updates now',
+  'Cover-Darstellung': 'Cover style',
+  'Hero-Banner': 'Hero banner',
+  'Breites Querformat': 'Wide landscape',
+  'Poster': 'Poster',
+  'Hochformat-Cover': 'Portrait cover',
+  'Ist die bevorzugte Variante für ein Spiel nicht verfügbar, wird automatisch die andere als Fallback verwendet.': 'If the preferred style is unavailable for a game, the other one is used automatically.',
+  'Akzentfarbe': 'Accent color',
+  'Mehr Cover & Hero über SteamGridDB (optional)': 'More covers & heroes via SteamGridDB (optional)',
+  'Ohne Key läuft alles (Steam + Microsoft Store).': 'Everything works without a key (Steam + Microsoft Store).',
+  'Lohnt sich das? & in 2 Minuten einrichten': 'Worth it? Set up in 2 minutes',
+  'Was es bringt:': 'What it gives you:',
+  'So holst du den kostenlosen Key:': 'How to get the free key:',
+  'Generate API Key': 'Generate API Key',
+  'klicken und den Key kopieren.': 'and copy the key.',
+  'Hier oben ins Feld einfügen — fertig, sofort aktiv.': 'Paste it into the field above — done, active immediately.',
+  '↗ Key-Seite öffnen': '↗ Open key page',
+  'Performance-Overlay (OSD)': 'Performance overlay (OSD)',
+  'Blendet GPU-/CPU-Auslastung, Temperaturen und FPS über dem Spiel ein – funktioniert über randlos laufenden Spielen.': 'Shows GPU/CPU load, temperatures and FPS on top of your game – works over borderless games.',
+  'Ein-/ausblenden': 'Show/hide',
+  'Ändern': 'Change',
+  'Aus': 'Off',
+  'Aufnehmen': 'Record',
+  'Konfigurationsmodus (Live-Edit direkt am OSD)': 'Configuration mode (live edit on the OSD)',
+  'Overlay anzeigen': 'Show overlay',
+  'Grafikkarte': 'Graphics card',
+  'Automatisch (schnellste)': 'Automatic (fastest)',
+  'Anzeige-Art': 'Display mode',
+  'Overlay-Fenster (Standard)': 'Overlay window (default)',
+  'Im Spiel gerendert via RTSS – streambar': 'Rendered in-game via RTSS – streamable',
+  'Afterburner-OSD ein-/ausblenden': 'Toggle Afterburner OSD',
+  'Design': 'Design',
+  'Kompakt': 'Compact',
+  'Minimal': 'Minimal',
+  'Balken': 'Bars',
+  'Neon': 'Neon',
+  'Leiste (horizontal)': 'Strip (horizontal)',
+  'Kacheln (horizontal)': 'Tiles (horizontal)',
+  'Werte': 'Values',
+  'Einrichtung': 'Setup',
+  'Abgelehnt – FPS und CPU-Sensorwerte fehlen.': 'Declined – FPS and CPU sensor values are missing.',
+  'Jetzt einrichten': 'Set up now',
+  'FPS-Quelle': 'FPS source',
+  'Automatisch (RTSS, sonst PresentMon)': 'Automatic (RTSS, else PresentMon)',
+  'Nur RTSS/Afterburner': 'RTSS/Afterburner only',
+  'Nur PresentMon (ohne RTSS)': 'PresentMon only (no RTSS)',
+  'Größe': 'Size',
+  'Deckkraft': 'Opacity',
+  'Position': 'Position',
+  'Aufnahme & Qualität': 'Capture & quality',
+  'Teilt deinen Bildschirm live ins Internet – Zuschauer öffnen nur einen Link im Browser, ganz ohne Installation. Hardware-Encoding über deine Grafikkarte, Bild geht direkt von deinem PC zum Zuschauer.': 'Shares your screen live over the internet – viewers just open a link in their browser, no install needed. Hardware encoding on your GPU; video goes directly from your PC to the viewer.',
+  'Quelle': 'Source',
+  'Bildschirm': 'screen',
+  'Fenster/Spiel': 'window/game',
+  'Auflösung': 'Resolution',
+  'Nativ (volle Aufnahme)': 'Native (full capture)',
+  'Bildrate': 'Frame rate',
+  '120 fps (nur bei 120-Hz-Displays)': '120 fps (120 Hz displays only)',
+  'Bitrate': 'Bitrate',
+  '6 Mbit – sparsam (Mobilfunk)': '6 Mbit – light (mobile data)',
+  '8 Mbit – Full HD (empfohlen)': '8 Mbit – Full HD (recommended)',
+  '12 Mbit – Full HD hoch': '12 Mbit – Full HD high',
+  '16 Mbit – 1440p': '16 Mbit – 1440p',
+  '25 Mbit – 4K': '25 Mbit – 4K',
+  'Puffer': 'Buffer',
+  'Bitrate automatisch anpassen': 'Adapt bitrate automatically',
+  'Automatisch anpassen': 'Adapt automatically',
+  'Stream aus': 'Stream off',
+  'Stream starten': 'Start stream',
+  'Vorschau lädt…': 'Preview loading…',
+  'Kopieren': 'Copy',
+  'Teilen': 'Share',
+  'E-Mail': 'E-mail',
+  'Zuschauer: 0': 'Viewers: 0',
+  'Wer schaut zu': 'Who is watching',
+  'Beim Start öffnet Lumora automatisch den nötigen Port am Router (UPnP) und schließt ihn beim Stoppen wieder.': 'On start, Lumora opens the required router port automatically (UPnP) and closes it again when you stop.',
+  'Gruppe': 'Group',
+  'Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Dein Stream startet automatisch mit, ein Klick genügt.': 'Watch each other in a grid – perfect for playing together on a voice call. Your own stream starts along automatically, one click is all it takes.',
+  'Neue Gruppe': 'New group',
+  'Gruppe starten': 'Start group',
+  'Beitreten': 'Join',
+  '⚠️ Vermittlungs-Server gerade nicht erreichbar – laufende Streams funktionieren weiter, aber neue Mitglieder können momentan nicht beitreten.': '⚠️ Coordination server currently unreachable – running streams keep working, but new members cannot join right now.',
+  'Code': 'Code',
+  'Link kopieren': 'Copy link',
+  'Mitglieder': 'Members',
+  'Grid im Browser öffnen': 'Open grid in browser',
+  'Grid öffnen': 'Open grid',
+  'Gruppe verlassen': 'Leave group',
+  'Verlassen': 'Leave',
+  'Eigener Vermittlungs-Server': 'Custom coordination server',
+  'Skript-URL': 'Script URL',
+  'Schnellstart': 'Quick start',
+  'Schnellstart-Hotkey': 'Quick-start hotkey',
+  'aktuelle Fenster': 'current window',
+  'auch mitten im Spiel': 'even mid-game',
+  'Verbindung': 'Connection',
+  'Kann mein Anschluss streamen?': 'Can my connection stream?',
+  'Verbindung testen': 'Test connection',
+  'Für schwierige Anschlüsse (Relay & IPv6-Test)': 'For tricky connections (relay & IPv6 test)',
+  'Relay-Server': 'Relay server',
+  'Nur nötig, wenn der Test oben „nicht erreichbar" meldet. Zugangsdaten kommen vom Relay-Anbieter oder deinem eigenen coturn-Server („turn:" nicht nötig).': 'Only needed if the test above reports "not reachable". Credentials come from your relay provider or your own coturn server ("turn:" prefix not required).',
+  'Server': 'Server',
+  'Benutzer': 'Username',
+  'Passwort': 'Password',
+  'Nur über Relay (zum Testen)': 'Relay only (for testing)',
+  'IPv6 erzwingen (zum Testen)': 'Force IPv6 (for testing)',
+  'Startoptionen': 'Launch options',
+  'Startargumente': 'Launch arguments',
+  'Als Administrator starten': 'Run as administrator',
+  'Speichern': 'Save',
+  'Über Lumora': 'About Lumora',
+  'kostenlos': 'free',
+  'Artwork suchen': 'Find artwork',
+  'Cover (Hochformat)': 'Cover (portrait)',
+  'Suchen': 'Search',
+  'Eigenes Bild verwenden': 'Use your own image',
+  'Laden': 'Load',
+  'Lokale Datei wählen…': 'Choose local file…',
+  'Übernehmen': 'Apply',
+  'Dein Spielzeit-Rückblick': 'Your playtime recap',
+  'Update verfügbar': 'Update available',
+  'ist bereit zur Installation': 'is ready to install',
+  'Das ist neu': "What's new",
+  'Später': 'Later',
+  'Jetzt aktualisieren': 'Update now',
+  'Update': 'Update',
+  'Zum Stream-Tab': 'Go to stream tab',
+  'Detailansicht': 'Detail view',
+  'Rasteransicht': 'Grid view',
+  'Suchen…': 'Search…',
+  'Nur Favoriten anzeigen': 'Show favorites only',
+  'Spielzeit-Rückblick': 'Playtime recap',
+  'Doppelklick zum Umbenennen': 'Double-click to rename',
+  'Spiel entfernen': 'Remove game',
+  'z.B. Cyberpunk 2077': 'e.g. Cyberpunk 2077',
+  'API-Key hier einfügen': 'Paste API key here',
+  'Tastatur': 'Keyboard',
+  'Gamepad': 'Gamepad',
+  'Oben links': 'Top left',
+  'Oben rechts': 'Top right',
+  'Unten links': 'Bottom left',
+  'Unten rechts': 'Bottom right',
+  'Liste aktualisieren (z. B. nach Spielstart)': 'Refresh list (e.g. after launching the game)',
+  'Gruppen-Code oder Link einfügen': 'Paste group code or link',
+  'Schnellstart per Tastatur': 'Quick start via keyboard',
+  'z. B. turn.mein-server.de:3478': 'e.g. turn.my-server.com:3478',
+  'vom Anbieter (leer = ohne)': 'from your provider (empty = none)',
+  'z.B. -windowed -novid': 'e.g. -windowed -novid',
+  'Spielname…': 'Game name…',
+  'Bild-URL (https://…)': 'Image URL (https://…)',
+}
+function lumoraLangEffective() {
+  try {
+    const c = localStorage.getItem('lumoraLang')
+    if (c === 'de' || c === 'en') return c
+  } catch (e) {}
+  return (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'
+}
+window.LANG = lumoraLangEffective()
+window.t = function (s) { return (window.LANG === 'en' && I18N_EN[s]) || s }
+function applyI18n() {
+  if (window.LANG !== 'en') return
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  let n
+  while ((n = w.nextNode())) {
+    const raw = n.nodeValue
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(raw)
+    if (!m || !m[2]) continue
+    const tr = I18N_EN[m[2].replace(/\s+/g, ' ')]
+    if (tr) n.nodeValue = m[1] + tr + m[3]
+  }
+  document.querySelectorAll('[placeholder]').forEach((el) => {
+    const tr = I18N_EN[el.getAttribute('placeholder').replace(/\s+/g, ' ').trim()]
+    if (tr) el.setAttribute('placeholder', tr)
+  })
+  document.querySelectorAll('[title]').forEach((el) => {
+    const tr = I18N_EN[el.getAttribute('title').replace(/\s+/g, ' ').trim()]
+    if (tr) el.setAttribute('title', tr)
+  })
+}
+// Sofort anwenden (localStorage-Cache -> kein Flackern) und danach mit der
+// echten Einstellung abgleichen (erster Start / geaenderte Systemsprache).
+applyI18n()
+try {
+  ipcRenderer.invoke('get-app-settings').then((s) => {
+    const v = (s && s.language) || 'auto'
+    const eff = v === 'auto' ? ((navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en') : v
+    try { localStorage.setItem('lumoraLang', eff) } catch (e) {}
+    if (eff !== window.LANG) { window.LANG = eff; applyI18n() }
+  }).catch(() => {})
+} catch (e) {}
+</script>
 </body>
 </html>
