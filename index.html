@@ -2421,6 +2421,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       } finally { btn.disabled = false; btn.textContent = 'Erneut testen' }
     }
     ipcRenderer.on('broadcast-status', (e, st) => renderStreamState(st))
+    // Startfehler (Port belegt, mediamtx-Problem) sichtbar machen statt stumm
+    // auf "Stream aus" zurueckzuspringen (Audit-Befund).
+    ipcRenderer.on('stream-error', (e, msg) => streamToast('⚠️ ' + msg))
     // Waehrend der Gruppen-Einrichtung KEINE Push-Renders: main.js meldet den
     // aktiven Zustand schon mittendrin - das riss den Knopf-Ladezustand vorzeitig
     // weg. Der Klick-Handler rendert nach der Mindestdauer selbst.

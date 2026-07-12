@@ -3468,10 +3468,19 @@ ipcMain.handle('set-app-settings', (event, partial) => {
   // Parametern (Aufloesung/Bitrate/fps/Quelle) neu starten. Der kurze Aussetzer
   // ist unkritisch; mediamtx + der WHEP-Server laufen durch, die Zuschauer
   // verbinden nach dem Neustart automatisch weiter.
-  // streamBufferMs ausgenommen: der Player-Jitter-Puffer ist eine reine Zuschauer-
-  // Einstellung (Client setzt ihn live per /cfg), kein FFmpeg-Parameter -> KEIN
-  // Aufnahme-Neustart, sonst wuerde jede Regler-Bewegung den Stream kurz abreissen.
-  if (partial && Object.keys(partial).some(k => k.startsWith('stream') && k !== 'streamBufferMs') && broadcastState.active) {
+  // AUSGENOMMEN sind alle Einstellungen, die KEINE Encoder-Parameter sind
+  // (Audit-Befund: TURN-/IPv6-Umschalten riss den Stream grundlos ab):
+  // Puffer (Zuschauer-seitig live via /cfg), TURN (wirkt live via /cfg bzw.
+  // erst beim naechsten Start), IPv6-Testschalter, Hosts-Cache, Hotkey,
+  // Adaptiv-Schalter (Sonderfall direkt darunter).
+  const bcNoRestart = new Set(['streamBufferMs', 'streamAdaptive', 'streamTurnEnabled', 'streamTurnUrl', 'streamTurnUser', 'streamTurnPass', 'streamTurnForce', 'streamForceIPv6', 'streamLastHosts', 'streamHotkey'])
+  // Adaptiv ausgeschaltet, waehrend die Bitrate gerade abgesenkt ist: zurueck
+  // zur vollen eingestellten Bitrate (dafuer ist EIN Neustart gerechtfertigt).
+  if (partial && partial.streamAdaptive === false && bcAdaptLevel > 0 && broadcastState.active) {
+    bcAdaptLevel = 0; bcAdaptUpAt = 0; bcAdaptUpHold = 0
+    bcRestartFfmpeg()
+  }
+  if (partial && Object.keys(partial).some(k => k.startsWith('stream') && !bcNoRestart.has(k)) && broadcastState.active) {
     bcRestartFfmpeg()
     bcPushState()
   }
@@ -3868,9 +3877,27 @@ function streamBin(name) {
   return app.isPackaged ? path.join(process.resourcesPath, 'bin', name) : path.join(__dirname, 'bin', name)
 }
 // Kurzzeile ins Stream-Log (Diagnose).
+let bcLogRotated = false
 function bcLogStream(line) {
   if (!line) return
-  try { require('fs').appendFileSync(path.join(app.getPath('temp'), 'lumora-stream.log'), Date.now() + ' ' + line + '\n') } catch {}
+  try {
+    const p = path.join(app.getPath('temp'), 'lumora-stream.log')
+    if (!bcLogRotated) {
+      bcLogRotated = true
+      // Rotation (Audit-Befund: wuchs unbegrenzt, ~2-5 MB je 12-h-Stream).
+      // Einmal pro App-Lauf: ueber 5 MB -> nach .old verschieben; eine
+      // Vorgaenger-Generation bleibt fuer Diagnosen erhalten.
+      try {
+        const fs2 = require('fs')
+        if (fs2.existsSync(p) && fs2.statSync(p).size > 5 * 1024 * 1024) {
+          const old = path.join(app.getPath('temp'), 'lumora-stream.old.log')
+          try { fs2.rmSync(old, { force: true }) } catch {}
+          fs2.renameSync(p, old)
+        }
+      } catch {}
+    }
+    require('fs').appendFileSync(p, Date.now() + ' ' + line + '\n')
+  } catch {}
 }
 // Aufloesungs-Obergrenzen (Hoehe). 'auto'/2160 = native Aufloesung (kein Scale).
 const STREAM_Q_H = { '2160': 2160, '1440': 1440, '1080': 1080, '720': 720 }
@@ -3947,6 +3974,18 @@ function bcStreamCfg(enc) {
   let mode = 'monitor', outputIdx = 0, hwnd = 0
   if (src.startsWith('window:')) { hwnd = parseInt(src.slice(7), 10) || 0; if (hwnd) mode = 'window' }
   else if (src.startsWith('screen:')) { const n = parseInt(src.slice(7), 10); if (!isNaN(n)) outputIdx = n }
+  // Monitor-Weg: Preset-Hoehe >= native Monitorhoehe -> NICHT skalieren (Audit-
+  // Befund). Sonst liefe der haeufigste Fall (1080p-Monitor + 1080p-Preset)
+  // unnoetig durch die CPU-Kette statt Zero-Copy, und ein Preset UEBER der
+  // Monitorhoehe wuerde sinnlos HOCHskaliert (weicheres Bild, mehr Last).
+  // Physische Pixel (size*scaleFactor) wie im Quellen-Label; Index-Konvention
+  // Electron-Display == ddagrab output_idx ist im Quellen-Picker etabliert.
+  if (mode === 'monitor' && scaleH) {
+    try {
+      const d = require('electron').screen.getAllDisplays()[outputIdx]
+      if (d && scaleH >= Math.round(d.size.height * d.scaleFactor)) scaleH = 0
+    } catch {}
+  }
   return { encoder: enc.encoder, fps: appSettings.streamFps || 60, kbit, scaleH, mode, outputIdx, hwnd }
 }
 function bcQualityLabel(cfg) {
@@ -3995,7 +4034,8 @@ function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
   // FFmpeg nicht (scale_d3d11 bricht beim Konfigurieren ab, D3D11->CUDA-
   // Ableitung nicht einkompiliert - beides real getestet), und AMF/QSV sind
   // mit D3D11-Frames ungetestet -> ueberall sonst bleibt die CPU-Kette.
-  const zeroCopy = cfg.encoder === 'h264_nvenc' && !cfg.scaleH
+  const zeroCopy = cfg.encoder === 'h264_nvenc' && !cfg.scaleH && !bcZeroCopyBroken
+  bcLastZeroCopy = zeroCopy
   const vf = ['ddagrab=output_idx=' + cfg.outputIdx + ':framerate=' + cfg.fps]
   if (!zeroCopy) {
     vf.push('hwdownload', 'format=bgra')
@@ -4073,6 +4113,8 @@ const BC_ADAPT_F = [1, 0.7, 0.5, 0.35]   // Stufen-Faktoren auf die eingestellte
 let bcAdaptLevel = 0                     // aktuelle Stufe (0 = volle Bitrate)
 let bcAdaptLastChange = 0                // letzter Stufenwechsel (Hysterese)
 let bcAdaptBadSince = 0, bcAdaptGoodSince = 0
+let bcAdaptUpAt = 0                      // Zeitpunkt der letzten Rauf-Probe
+let bcAdaptUpHold = 0                    // Rauf-Sperre nach gescheiterter Probe (Anti-Pendeln)
 let bcQosMap = new Map()                 // viewerId/IP -> juengster QoS-Report
 let bcQosLogLast = new Map()             // Drossel fuer OK-Logzeilen
 let bcAdaptTimer = null
@@ -4086,7 +4128,11 @@ function bcQosReport(ip, q) {
   // verworfene Frames im 5-s-Fenster.
   const bad = lossRate > 0.02 || frz > 0 || drop > 15
   const key = String(q.id || ip).slice(0, 40)
-  bcQosMap.set(key, { t: Date.now(), bad })
+  // badStreak: erst ZWEI schlechte Reports in Folge zaehlen als "leidet" -
+  // ein einzelner Freeze (Tab-Wechsel am Handy, kurzer Funk-Blip) drosselt
+  // sonst sofort alle Zuschauer (Audit-Befund).
+  const prev = bcQosMap.get(key)
+  bcQosMap.set(key, { t: Date.now(), bad, badStreak: bad ? (((prev && prev.badStreak) || 0) + 1) : 0 })
   const last = bcQosLogLast.get(key) || 0
   if (bad || Date.now() - last > 60000) {
     bcLogStream('qos: ' + key + ' lost=' + lost + '/' + (lost + recv) + ' jit=' + (q.jit | 0) + 'ms fps=' + (q.fps == null ? '?' : Math.round(q.fps)) + ' drop=' + drop + ' frz=' + frz + (bad ? ' !' : ''))
@@ -4102,23 +4148,37 @@ function bcAdaptTick() {
   const now = Date.now()
   let bad = false
   for (const [k, r] of bcQosMap) {
-    if (now - r.t > 15000) { bcQosMap.delete(k); continue }
-    if (r.bad) bad = true
+    if (now - r.t > 15000) { bcQosMap.delete(k); bcQosLogLast.delete(k); continue }
+    if ((r.badStreak || 0) >= 2) bad = true
   }
   if (bad) { if (!bcAdaptBadSince) bcAdaptBadSince = now; bcAdaptGoodSince = 0 }
   else { bcAdaptBadSince = 0; if (!bcAdaptGoodSince) bcAdaptGoodSince = now }
-  // Runter: >=8 s anhaltend schlecht (>=2 Reports in Folge). Rauf: 90 s sauber.
-  // Zwischen Wechseln >=20 s Ruhe - jeder Wechsel ist ein kurzer Neustart,
-  // Flattern waere schlimmer als eine zu niedrige Stufe.
+  // Runter: >=8 s anhaltend schlecht (>=2 Reports in Folge). Rauf: 90 s sauber
+  // UND keine Rauf-Sperre - scheitert eine Rauf-Probe (danach binnen 60 s
+  // wieder schlecht), pausieren weitere Versuche 10 min. Sonst pendelt ein
+  // dauerhaft schwacher Zuschauer die Kette ewig rauf/runter, mit einem
+  // Doppel-Aussetzer fuer ALLE alle ~2 Minuten (Audit-Befund).
+  // Zwischen Wechseln >=20 s Ruhe - jeder Wechsel ist ein kurzer Neustart.
   let next = bcAdaptLevel
   if (bad && bcAdaptBadSince && now - bcAdaptBadSince >= 8000 && bcAdaptLevel < BC_ADAPT_F.length - 1) next = bcAdaptLevel + 1
-  else if (!bad && bcAdaptGoodSince && now - bcAdaptGoodSince >= 90000 && bcAdaptLevel > 0) next = bcAdaptLevel - 1
+  else if (!bad && bcAdaptGoodSince && now - bcAdaptGoodSince >= 90000 && bcAdaptLevel > 0 && now >= bcAdaptUpHold) next = bcAdaptLevel - 1
   if (next === bcAdaptLevel || now - bcAdaptLastChange < 20000) return
   const base = Math.max(1000, Math.round(appSettings.streamUploadKbit || 8000))
+  const oldKbit = bcAdaptKbit(base)
+  const goingDown = next > bcAdaptLevel   // hoehere Stufe = niedrigere Bitrate
+  if (goingDown && bcAdaptUpAt && now - bcAdaptUpAt < 60000) {
+    bcAdaptUpHold = now + 600000
+    bcLogStream('adapt: Rauf-Probe gescheitert -> Empfang traegt die hoehere Stufe nicht, naechster Versuch in 10 min')
+  }
+  if (!goingDown) bcAdaptUpAt = now
   bcAdaptLevel = next
   bcAdaptLastChange = now
   bcAdaptBadSince = 0; bcAdaptGoodSince = 0
-  bcLogStream('adapt: Stufe ' + next + ' -> ' + bcAdaptKbit(base) + ' kbit (' + (next > 0 ? 'Zuschauer-Empfang schlecht' : 'Empfang wieder stabil') + ')')
+  const newKbit = bcAdaptKbit(base)
+  // Identische Bitrate (z.B. 6-Mbit-Basis: Stufe 2 und 3 = je 3000-Floor):
+  // Stufe merken, aber KEIN wirkungsloser Neustart mit 10-s-Aussetzer (Audit).
+  if (newKbit === oldKbit) { bcLogStream('adapt: Stufe ' + next + ' (Bitrate unveraendert ' + newKbit + ' kbit - kein Neustart)'); return }
+  bcLogStream('adapt: Stufe ' + next + ' -> ' + newKbit + ' kbit (' + (goingDown ? 'Zuschauer-Empfang schlecht' : 'Empfang wieder stabil') + ')')
   bcRestartFfmpeg()
 }
 
@@ -4509,7 +4569,22 @@ function bcStartMtx(configPath) {
     if (p.stdout) p.stdout.on('data', onData)
     if (p.stderr) p.stderr.on('data', onData)
     p.on('error', (e) => { if (!done) { done = true; reject(e) } })
-    p.on('exit', (code) => { if (!done) { done = true; reject(new Error('mediamtx beendet (' + code + '): ' + out.slice(-200))) } })
+    p.on('exit', (code) => {
+      if (!done) { done = true; reject(new Error('mediamtx beendet (' + code + '): ' + out.slice(-200))); return }
+      // mediamtx starb NACH erfolgreichem Start (Absturz/externer Kill): bei
+      // aktivem Stream neu starten - FFmpeg verliert derweil nur kurz seine
+      // RTSP-Verbindung und dockt nach seinem Auto-Neustart wieder an (Audit-
+      // Befund: vorher drehte FFmpeg eine endlose Neustart-Schleife und die
+      // UI zeigte den irrefuehrenden Vollbild-Hinweis).
+      if (mtxProc === p) mtxProc = null
+      if (broadcastState.active && !mtxProc) {
+        bcLogStream('mtx: unerwartet beendet (' + code + ') -> Neustart')
+        setTimeout(() => {
+          if (!broadcastState.active || mtxProc) return
+          bcStartMtx(configPath).then((np) => { mtxProc = np }).catch((e) => bcLogStream('mtx: Neustart fehlgeschlagen: ' + (e && e.message)))
+        }, 800)
+      }
+    })
     // Aktiver Ready-Check statt blindem Warten: sobald der RTSP-Port annimmt, ist
     // mediamtx bereit (typisch ~150 ms). Das feste Timeout bleibt nur als Fallback –
     // jede gesparte Zehntelsekunde verkuerzt die Zeit bis zum ersten Vorschaubild.
@@ -4566,6 +4641,13 @@ function bcStartAudio(hwnd) {
 let ffFastFails = 0   // aufeinanderfolgende Sofort-Abstuerze
 let ffGpuTimer = null // GPU-Telemetrie-Poll (Diagnose), laeuft nur waehrend FFmpeg lebt
 let ffLagTimer = null // Event-Loop-Messung (Diagnose): haengt NODE, stockt die fd3-Audio-Pipe
+// Zero-Copy-Selbstheilung (Audit-Befund Hybrid-Systeme): haengt der Monitor an
+// der iGPU, kann NVENC die fremden D3D11-Frames nicht encodieren -> der Start
+// scheitert deterministisch. Nach einem Sofort-Absturz im Zero-Copy-Modus
+// (der NICHT nach exklusivem Vollbild aussieht) faellt die Session dauerhaft
+// auf die adapter-tolerante CPU-Kette zurueck, statt endlos neu zu starten.
+let bcZeroCopyBroken = false
+let bcLastZeroCopy = false
 function bcStartFfmpeg(cfg) {
   bcKillCap()   // evtl. verwaisten Helfer aufraeumen
   // Anzeige nachfuehren: die adaptive Bitrate aendert cfg.kbit bei Neustarts -
@@ -4716,6 +4798,13 @@ function bcSpawnEncoder(args, capOfThis, stdinStream, audOfThis) {
     // den Zugriff, DXGI_ERROR_ACCESS_LOST). Nach mehreren schnellen Abstuerzen
     // langsamer neu versuchen und die UI warnen, statt im Sekundentakt zu spammen.
     if (Date.now() - startedAt < 4000) ffFastFails++; else ffFastFails = 0
+    // Zero-Copy-Selbstheilung (s. Deklaration bei bcZeroCopyBroken): Sofort-
+    // Absturz im GPU-Direktmodus OHNE Vollbild-Signatur (ACCESS_LOST waere die
+    // ddagrab-Meldung fuer exklusives Vollbild) -> ab jetzt CPU-Kette.
+    if (Date.now() - startedAt < 4000 && bcLastZeroCopy && !bcZeroCopyBroken && !/ACCESS_LOST|887a0026/i.test(errbuf)) {
+      bcZeroCopyBroken = true
+      bcLogStream('video: GPU-direkt fehlgeschlagen -> Rueckfall auf CPU-Kette (Hybrid-GPU?): ' + errbuf.replace(/\s+/g, ' ').slice(-160))
+    }
     const delay = ffFastFails >= 3 ? 5000 : 1200
     // NVENC-Treiber zu alt (deterministisch – jeder Neuversuch scheitert gleich):
     // sofort klaren Hinweis. Der aktuelle FFmpeg-Build braucht NVIDIA-Treiber >= 610.
@@ -4805,7 +4894,8 @@ async function startBroadcast() {
   const prevV6 = broadcastServer ? (broadcastState.linkV6 || '') : ''
   // Adaptive Bitrate: jeder Stream beginnt mit der vollen eingestellten Bitrate.
   bcAdaptLevel = 0; bcAdaptLastChange = 0; bcAdaptBadSince = 0; bcAdaptGoodSince = 0
-  bcQosMap.clear()
+  bcAdaptUpAt = 0; bcAdaptUpHold = 0
+  bcQosMap.clear(); bcQosLogLast.clear()
   broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, linkV4: prevV4, linkV6: prevV6, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder }
   bcPushState()   // LAN-Link sofort anzeigen
   bcPinholeIds = []
@@ -4825,6 +4915,13 @@ async function startBroadcast() {
     if (!broadcastServer) broadcastServer = await bcStartServer(BROADCAST_PORT)
   } catch (e) {
     osdDbg('[stream] Start fehlgeschlagen: ' + (e && e.message))
+    bcLogStream('start: FEHLGESCHLAGEN: ' + (e && e.message))
+    // Dem Nutzer den Grund ZEIGEN (Audit-Befund: Portkonflikt/mediamtx-Fehler
+    // blieben komplett stumm - Knopf sprang einfach auf "aus" zurueck).
+    const msg = /EADDRINUSE/i.test(String(e && e.message))
+      ? 'Stream-Start fehlgeschlagen: Port wird von einem anderen Programm belegt. Läuft Lumora doppelt oder nutzt eine andere App Port 8787/8554?'
+      : 'Stream-Start fehlgeschlagen: ' + ((e && e.message) || 'unbekannter Fehler').slice(0, 140)
+    sendToUi('stream-error', msg)
     stopBroadcast()
     return broadcastState
   }
