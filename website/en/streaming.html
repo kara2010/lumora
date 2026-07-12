@@ -20,17 +20,101 @@
   <meta property="og:image" content="https://lumora.kara-webdesign.de/screenshot.png">
   <meta property="og:locale" content="en_US">
   <script type="application/ld+json">
-  {
+    {
     "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      { "@type": "Question", "name": "What do my friends need to watch?", "acceptedAnswer": { "@type": "Answer", "text": "Just a browser. You send a link or a 6-letter room code – viewers open it on their PC, tablet or phone and watch your game live with sound. No install, no account, no sign-up." } },
-      { "@type": "Question", "name": "What quality is possible?", "acceptedAnswer": { "@type": "Answer", "text": "Up to 4K at 60 frames per second and up to 25 Mbit/s constant bitrate, encoded by your graphics card's hardware encoder (NVIDIA, AMD, Intel). Your game is barely affected because the encoder runs on dedicated silicon. If a viewer has a weak connection (e.g. mobile data), Lumora steps the bitrate down automatically and raises it again once the connection recovers." } },
-      { "@type": "Question", "name": "Does the stream go through a server?", "acceptedAnswer": { "@type": "Answer", "text": "No. Video and audio travel directly from your PC to your viewers (peer-to-peer via WebRTC). There is no vendor server in between that downscales quality, adds delay or sees your content." } },
-      { "@type": "Question", "name": "Do I need to forward ports or configure my router?", "acceptedAnswer": { "@type": "Answer", "text": "Usually not. Lumora sets the connection up automatically (UPnP) and uses the IPv6 direct path on connections without a public IPv4 address (DS-Lite/CGNAT). The public link is typically ready in about two seconds." } },
-      { "@type": "Question", "name": "What does streaming cost?", "acceptedAnswer": { "@type": "Answer", "text": "Nothing. Lumora is free – no subscription, no premium tier, no artificial quality limit. Full streaming quality is free for everyone." } },
-      { "@type": "Question", "name": "Does it work on iPhone?", "acceptedAnswer": { "@type": "Answer", "text": "Yes – via the group link (room code), which is served over a secure HTTPS address and therefore works in Safari on iPhone and iPad." } },
-      { "@type": "Question", "name": "Will viewers hear all my PC audio?", "acceptedAnswer": { "@type": "Answer", "text": "Only if you share your whole screen. When you share a single game window, Lumora transmits only that game's audio – your music, notifications and voice chats stay private." } }
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Lumora",
+        "operatingSystem": "Windows 10, Windows 11",
+        "applicationCategory": "GameApplication",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "url": "https://lumora.kara-webdesign.de/en/",
+        "downloadUrl": "https://lumora.kara-webdesign.de/download.php",
+        "description": "Free game streaming in up to 4K/60 fps, a gaming OSD and full gamepad control – no subscription, no account."
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Lumora",
+            "item": "https://lumora.kara-webdesign.de/en/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Stream your game in 4K to friends",
+            "item": "https://lumora.kara-webdesign.de/en/streaming.html"
+          }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What do my friends need to watch?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Just a browser. You send a link or a 6-letter room code – viewers open it on their PC, tablet or phone and watch your game live with sound. No install, no account, no sign-up."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What quality is possible?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Up to 4K at 60 frames per second and up to 25 Mbit/s constant bitrate, encoded by your graphics card's hardware encoder (NVIDIA, AMD, Intel). Your game is barely affected because the encoder runs on dedicated silicon. If a viewer has a weak connection (e.g. mobile data), Lumora steps the bitrate down automatically and raises it again once the connection recovers."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does the stream go through a server?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Video and audio travel directly from your PC to your viewers (peer-to-peer via WebRTC). There is no vendor server in between that downscales quality, adds delay or sees your content."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to forward ports or configure my router?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Usually not. Lumora sets the connection up automatically (UPnP) and uses the IPv6 direct path on connections without a public IPv4 address (DS-Lite/CGNAT). The public link is typically ready in about two seconds."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What does streaming cost?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Nothing. Lumora is free – no subscription, no premium tier, no artificial quality limit. Full streaming quality is free for everyone."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does it work on iPhone?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes – via the group link (room code), which is served over a secure HTTPS address and therefore works in Safari on iPhone and iPad."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Will viewers hear all my PC audio?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Only if you share your whole screen. When you share a single game window, Lumora transmits only that game's audio – your music, notifications and voice chats stay private."
+            }
+          }
+        ]
+      }
     ]
   }
   </script>

@@ -20,14 +20,77 @@
   <meta property="og:image" content="https://lumora.kara-webdesign.de/screenshot.png">
   <meta property="og:locale" content="de_DE">
   <script type="application/ld+json">
-  {
+    {
     "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      { "@type": "Question", "name": "Wie zeige ich meine FPS im Spiel an?", "acceptedAnswer": { "@type": "Answer", "text": "Lumora installieren, OSD einschalten, Spiel starten – die FPS-Anzeige (auf Wunsch mit Frametime-Graph, GPU- und CPU-Werten) liegt über dem Spiel. Ein- und ausblenden per frei belegbarem Hotkey oder einer Gamepad-Tastenkombination, auch mitten im Spiel." } },
-      { "@type": "Question", "name": "Welche Werte kann das OSD anzeigen?", "acceptedAnswer": { "@type": "Answer", "text": "FPS und Frametime-Graph, GPU-Auslastung, -Temperatur, -Takt, -Verbrauch und VRAM sowie CPU-Auslastung, -Temperatur, -Takt, -Verbrauch und RAM. Welche Werte sichtbar sind, wählst du pro Kategorie selbst." } },
-      { "@type": "Question", "name": "Brauche ich MSI Afterburner oder RTSS dafür?", "acceptedAnswer": { "@type": "Answer", "text": "Nein. Lumora bringt die komplette Messkette selbst mit: FPS über Intels PresentMon, CPU-Sensorik über den signierten Open-Source-Treiber PawnIO – dasselbe Fundament, das auch bekannte Tools wie LibreHardwareMonitor und FanControl nutzen. Falls du Afterburner bereits verwendest, laufen beide problemlos nebeneinander." } },
-      { "@type": "Question", "name": "Funktioniert das OSD im Vollbild?", "acceptedAnswer": { "@type": "Answer", "text": "Über randlosen Spielen (Borderless/Fenster-Vollbild) liegt das OSD direkt auf – das ist heute der Standardmodus der meisten Spiele. Position, Größe, Design und Transparenz bearbeitest du live im Spiel, mit Maus oder Gamepad." } }
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Lumora",
+        "operatingSystem": "Windows 10, Windows 11",
+        "applicationCategory": "GameApplication",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "EUR"
+        },
+        "url": "https://lumora.kara-webdesign.de/",
+        "downloadUrl": "https://lumora.kara-webdesign.de/download.php",
+        "description": "Kostenloses Spiele-Streaming in bis zu 4K/60 fps, Gaming-OSD und komplette Gamepad-Steuerung – ohne Abo, ohne Konto."
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Lumora",
+            "item": "https://lumora.kara-webdesign.de/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "FPS & Hardware-Werte im Spiel (Gaming-OSD)",
+            "item": "https://lumora.kara-webdesign.de/gaming-osd.html"
+          }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Wie zeige ich meine FPS im Spiel an?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Lumora installieren, OSD einschalten, Spiel starten – die FPS-Anzeige (auf Wunsch mit Frametime-Graph, GPU- und CPU-Werten) liegt über dem Spiel. Ein- und ausblenden per frei belegbarem Hotkey oder einer Gamepad-Tastenkombination, auch mitten im Spiel."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Welche Werte kann das OSD anzeigen?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "FPS und Frametime-Graph, GPU-Auslastung, -Temperatur, -Takt, -Verbrauch und VRAM sowie CPU-Auslastung, -Temperatur, -Takt, -Verbrauch und RAM. Welche Werte sichtbar sind, wählst du pro Kategorie selbst."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Brauche ich MSI Afterburner oder RTSS dafür?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Nein. Lumora bringt die komplette Messkette selbst mit: FPS über Intels PresentMon, CPU-Sensorik über den signierten Open-Source-Treiber PawnIO – dasselbe Fundament, das auch bekannte Tools wie LibreHardwareMonitor und FanControl nutzen. Falls du Afterburner bereits verwendest, laufen beide problemlos nebeneinander."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Funktioniert das OSD im Vollbild?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Über randlosen Spielen (Borderless/Fenster-Vollbild) liegt das OSD direkt auf – das ist heute der Standardmodus der meisten Spiele. Position, Größe, Design und Transparenz bearbeitest du live im Spiel, mit Maus oder Gamepad."
+            }
+          }
+        ]
+      }
     ]
   }
   </script>

@@ -20,14 +20,77 @@
   <meta property="og:image" content="https://lumora.kara-webdesign.de/screenshot.png">
   <meta property="og:locale" content="de_DE">
   <script type="application/ld+json">
-  {
+    {
     "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      { "@type": "Question", "name": "Kann ich wirklich alles per Gamepad bedienen?", "acceptedAnswer": { "@type": "Answer", "text": "Ja – die komplette Oberfläche: durch die Cover-Bibliothek navigieren, Spiele starten, suchen, sortieren, Favoriten setzen, Einstellungen und Dialoge bedienen, sogar das OSD im Spiel bearbeiten. Ein sichtbarer Fokus-Ring zeigt immer, wo du bist; der rechte Stick scrollt Listen." } },
-      { "@type": "Question", "name": "Welche Controller werden unterstützt?", "acceptedAnswer": { "@type": "Answer", "text": "Xbox-Controller (XInput) – kabelgebunden oder per Funk/Bluetooth. Damit ist auch der Xbox-Guide-Knopf als Bestandteil von Tastenkombinationen nutzbar." } },
-      { "@type": "Question", "name": "Kann ich Aktionen auf Gamepad-Tasten legen?", "acceptedAnswer": { "@type": "Answer", "text": "Ja. Globale Hotkeys lassen sich frei als Tastatur- ODER Gamepad-Kombination belegen – zum Beispiel Lumora in den Vordergrund holen, das OSD ein-/ausblenden oder den Stream des laufenden Spiels starten und stoppen, ohne das Spiel zu verlassen." } },
-      { "@type": "Question", "name": "Welche Stores werden zusammengeführt?", "acceptedAnswer": { "@type": "Answer", "text": "Steam, Epic Games, GOG, Ubisoft, Xbox / Game Pass, EA, Battle.net, Rockstar, Amazon Games und Riot – alle Spiele erscheinen gemeinsam in einer Cover-Bibliothek mit Suche, Sortierung, Favoriten und Spielzeit-Tracking." } }
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Lumora",
+        "operatingSystem": "Windows 10, Windows 11",
+        "applicationCategory": "GameApplication",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "EUR"
+        },
+        "url": "https://lumora.kara-webdesign.de/",
+        "downloadUrl": "https://lumora.kara-webdesign.de/download.php",
+        "description": "Kostenloses Spiele-Streaming in bis zu 4K/60 fps, Gaming-OSD und komplette Gamepad-Steuerung – ohne Abo, ohne Konto."
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Lumora",
+            "item": "https://lumora.kara-webdesign.de/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Bedienung per Gamepad",
+            "item": "https://lumora.kara-webdesign.de/gamepad.html"
+          }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Kann ich wirklich alles per Gamepad bedienen?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja – die komplette Oberfläche: durch die Cover-Bibliothek navigieren, Spiele starten, suchen, sortieren, Favoriten setzen, Einstellungen und Dialoge bedienen, sogar das OSD im Spiel bearbeiten. Ein sichtbarer Fokus-Ring zeigt immer, wo du bist; der rechte Stick scrollt Listen."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Welche Controller werden unterstützt?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Xbox-Controller (XInput) – kabelgebunden oder per Funk/Bluetooth. Damit ist auch der Xbox-Guide-Knopf als Bestandteil von Tastenkombinationen nutzbar."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Kann ich Aktionen auf Gamepad-Tasten legen?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja. Globale Hotkeys lassen sich frei als Tastatur- ODER Gamepad-Kombination belegen – zum Beispiel Lumora in den Vordergrund holen, das OSD ein-/ausblenden oder den Stream des laufenden Spiels starten und stoppen, ohne das Spiel zu verlassen."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Welche Stores werden zusammengeführt?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Steam, Epic Games, GOG, Ubisoft, Xbox / Game Pass, EA, Battle.net, Rockstar, Amazon Games und Riot – alle Spiele erscheinen gemeinsam in einer Cover-Bibliothek mit Suche, Sortierung, Favoriten und Spielzeit-Tracking."
+            }
+          }
+        ]
+      }
     ]
   }
   </script>

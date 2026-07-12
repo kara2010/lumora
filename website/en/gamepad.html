@@ -20,14 +20,77 @@
   <meta property="og:image" content="https://lumora.kara-webdesign.de/screenshot.png">
   <meta property="og:locale" content="en_US">
   <script type="application/ld+json">
-  {
+    {
     "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      { "@type": "Question", "name": "Can I really control everything with a gamepad?", "acceptedAnswer": { "@type": "Answer", "text": "Yes – the entire interface: browse the cover library, launch games, search, sort, set favorites, use settings and dialogs, even edit the OSD in-game. A visible focus ring always shows where you are; the right stick scrolls lists." } },
-      { "@type": "Question", "name": "Which controllers are supported?", "acceptedAnswer": { "@type": "Answer", "text": "Xbox controllers (XInput) – wired or wireless/Bluetooth. The Xbox Guide button can even be part of button combinations." } },
-      { "@type": "Question", "name": "Can I bind actions to gamepad buttons?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Global hotkeys can be bound freely to keyboard OR gamepad combinations – for example bring Lumora to the front, toggle the OSD, or start/stop streaming the game you're playing, without leaving the game." } },
-      { "@type": "Question", "name": "Which stores are unified?", "acceptedAnswer": { "@type": "Answer", "text": "Steam, Epic Games, GOG, Ubisoft, Xbox / Game Pass, EA, Battle.net, Rockstar, Amazon Games and Riot – all games appear together in one cover library with search, sorting, favorites and playtime tracking." } }
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Lumora",
+        "operatingSystem": "Windows 10, Windows 11",
+        "applicationCategory": "GameApplication",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "url": "https://lumora.kara-webdesign.de/en/",
+        "downloadUrl": "https://lumora.kara-webdesign.de/download.php",
+        "description": "Free game streaming in up to 4K/60 fps, a gaming OSD and full gamepad control – no subscription, no account."
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Lumora",
+            "item": "https://lumora.kara-webdesign.de/en/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Control the launcher with a gamepad",
+            "item": "https://lumora.kara-webdesign.de/en/gamepad.html"
+          }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Can I really control everything with a gamepad?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes – the entire interface: browse the cover library, launch games, search, sort, set favorites, use settings and dialogs, even edit the OSD in-game. A visible focus ring always shows where you are; the right stick scrolls lists."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Which controllers are supported?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Xbox controllers (XInput) – wired or wireless/Bluetooth. The Xbox Guide button can even be part of button combinations."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I bind actions to gamepad buttons?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Global hotkeys can be bound freely to keyboard OR gamepad combinations – for example bring Lumora to the front, toggle the OSD, or start/stop streaming the game you're playing, without leaving the game."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Which stores are unified?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Steam, Epic Games, GOG, Ubisoft, Xbox / Game Pass, EA, Battle.net, Rockstar, Amazon Games and Riot – all games appear together in one cover library with search, sorting, favorites and playtime tracking."
+            }
+          }
+        ]
+      }
     ]
   }
   </script>
