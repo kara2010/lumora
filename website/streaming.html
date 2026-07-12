@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gameplay in 4K mit Freunden teilen – kostenlos, direkt, ohne Konto | Lumora</title>
+  <meta name="description" content="Spiele-Streaming in bis zu 4K mit 60 fps: Freunde schauen per Link oder Raumcode direkt im Browser zu – ohne Installation, ohne Konto, ohne Abo. Direkte Verbindung ohne Server dazwischen, Bitrate passt sich dem Empfang automatisch an. Kostenlos für Windows.">
+  <meta name="keywords" content="Gameplay mit Freunden teilen, Spiel streamen an Freunde, Bildschirm teilen ohne Qualitätsverlust, 4K 60fps Streaming kostenlos, Spiel im Browser anschauen, Screen Sharing Gaming, Stream ruckelt Alternative, Spiele-Streaming ohne Abo">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://lumora.kara-webdesign.de/streaming.html">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://lumora.kara-webdesign.de/streaming.html">
+  <meta property="og:title" content="Gameplay in 4K mit Freunden teilen – kostenlos &amp; direkt">
+  <meta property="og:description" content="Bis zu 4K/60 fps, Zuschauer brauchen nur einen Browser-Link. Direkte Verbindung, kein Konto, kein Abo. Kostenlos für Windows 10/11.">
+  <meta property="og:image" content="https://lumora.kara-webdesign.de/screenshot.png">
+  <meta property="og:locale" content="de_DE">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      { "@type": "Question", "name": "Was brauchen meine Freunde, um zuzuschauen?", "acceptedAnswer": { "@type": "Answer", "text": "Nur einen Browser. Du schickst einen Link oder einen 6-stelligen Raumcode – Zuschauer öffnen ihn am PC, Tablet oder Handy und sehen dein Spiel live mit Ton. Keine Installation, kein Konto, keine Anmeldung." } },
+      { "@type": "Question", "name": "Welche Qualität ist möglich?", "acceptedAnswer": { "@type": "Answer", "text": "Bis zu 4K mit 60 Bildern pro Sekunde und bis zu 25 Mbit/s konstanter Bitrate über den Hardware-Encoder der Grafikkarte (NVIDIA, AMD, Intel). Das Spiel wird dabei kaum gebremst, weil der Encoder auf eigenen Chip-Einheiten läuft. Hat ein Zuschauer schwachen Empfang (z. B. Mobilfunk), senkt Lumora die Bitrate automatisch in Stufen und hebt sie wieder an, sobald die Verbindung es hergibt." } },
+      { "@type": "Question", "name": "Läuft der Stream über einen Server?", "acceptedAnswer": { "@type": "Answer", "text": "Nein. Bild und Ton laufen direkt von deinem PC zu den Zuschauern (Peer-to-Peer über WebRTC). Es gibt keinen Anbieter-Server dazwischen, der die Qualität herunterrechnet, Wartezeiten verursacht oder deine Inhalte sieht." } },
+      { "@type": "Question", "name": "Muss ich Ports freigeben oder den Router konfigurieren?", "acceptedAnswer": { "@type": "Answer", "text": "In der Regel nicht. Lumora richtet die Verbindung automatisch ein (UPnP) und nutzt bei Anschlüssen ohne öffentliche IPv4-Adresse (DS-Lite/CGNAT) automatisch den IPv6-Direktweg. Der öffentliche Link steht typisch in rund zwei Sekunden." } },
+      { "@type": "Question", "name": "Was kostet das Streaming?", "acceptedAnswer": { "@type": "Answer", "text": "Nichts. Lumora ist kostenlos, es gibt kein Abo, keine Premium-Stufe und keine künstliche Qualitätsgrenze. Die volle Streaming-Qualität ist für alle frei." } },
+      { "@type": "Question", "name": "Funktioniert es auch auf dem iPhone?", "acceptedAnswer": { "@type": "Answer", "text": "Ja – über den Gruppen-Link (Raumcode). Der wird über eine sichere HTTPS-Adresse ausgeliefert und funktioniert damit auch in Safari auf iPhone und iPad." } },
+      { "@type": "Question", "name": "Hört man im Stream meinen ganzen PC-Ton?", "acceptedAnswer": { "@type": "Answer", "text": "Nur wenn du den ganzen Bildschirm teilst. Teilst du ein einzelnes Spiel-Fenster, überträgt Lumora gezielt nur den Ton dieses Spiels – Musik, Benachrichtigungen oder Sprach-Chats auf deinem PC bleiben privat." } }
+    ]
+  }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg:#0a0a0f; --border:#1e1e2e; --accent:#8a6cff; --accent2:#7ab3ff; --text:#d8d8e8; --muted:#6a6a8a; --card:#111118; }
+    html { scrollbar-width: thin; scrollbar-color: #2a2a3a transparent; scroll-behavior: smooth; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 48px 20px; }
+    .wrap { max-width: 860px; margin: 0 auto; }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .back { display: inline-block; margin-bottom: 26px; font-size: 14px; color: var(--muted); }
+    h1 { font-size: 2.2rem; color: #fff; margin-bottom: 12px; letter-spacing: -.5px; line-height: 1.25; }
+    h2 { font-size: 1.3rem; color: #fff; margin: 40px 0 12px; }
+    h3 { font-size: 1.02rem; color: #fff; margin: 22px 0 6px; }
+    p { margin-bottom: 12px; }
+    .lead { font-size: 1.08rem; color: #b8b8cc; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .cta { display: inline-block; background: linear-gradient(135deg, var(--accent), #6a8cff); color: #fff; font-weight: 700; padding: 13px 30px; border-radius: 12px; margin: 18px 0 6px; }
+    .cta:hover { text-decoration: none; filter: brightness(1.1); }
+    ul.feat { list-style: none; margin: 12px 0; }
+    ul.feat li { padding: 7px 0 7px 30px; position: relative; }
+    ul.feat li::before { content: "✔"; position: absolute; left: 4px; color: #6ee7a0; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px; margin: 14px 0; }
+    .steps { counter-reset: s; list-style: none; margin: 12px 0; }
+    .steps li { counter-increment: s; padding: 8px 0 8px 44px; position: relative; }
+    .steps li::before { content: counter(s); position: absolute; left: 0; top: 8px; width: 28px; height: 28px; border-radius: 50%; background: rgba(138,108,255,.18); color: var(--accent2); font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+    footer { max-width: 860px; margin: 48px auto 0; padding-top: 18px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="index.html">← Lumora – Startseite</a>
+
+    <h1>Gameplay in 4K mit Freunden teilen – kostenlos, direkt &amp; ohne Konto</h1>
+    <p class="lead">Du willst, dass deine Freunde dein Spiel <strong>wirklich in guter Qualität</strong> sehen – nicht als matschigen, ruckelnden Brei? Lumora streamt dein Spiel in bis zu <strong>4K mit 60 fps</strong> direkt an jeden Browser. Ohne Abo, ohne Anmeldung, ohne Server dazwischen.</p>
+    <a class="cta" href="download.php">⬇ Lumora kostenlos laden</a>
+    <p class="muted">Für Windows 10 &amp; 11 · keine Registrierung · Open-Source-basiert</p>
+
+    <h2>So einfach geht's</h2>
+    <ol class="steps">
+      <li><strong>Stream starten:</strong> Spiel-Fenster oder Bildschirm auswählen, ein Klick (oder Hotkey mitten im Spiel) – fertig. Die Verbindung richtet sich automatisch ein, der öffentliche Link steht in rund zwei Sekunden.</li>
+      <li><strong>Link oder Raumcode schicken:</strong> Für eine Person den Direktlink, für die Runde einen 6-stelligen Raumcode – Freunde mit Lumora sind mit einem Klick dabei und streamen auf Wunsch ihr eigenes Spiel zurück.</li>
+      <li><strong>Zuschauen im Browser:</strong> PC, Tablet oder Handy – Zuschauer brauchen nur den Link. Keine Installation, kein Konto. In der Gruppen-Ansicht sieht jeder jeden im Raster, ein Tipp holt den Ton der gewünschten Person.</li>
+    </ol>
+
+    <h2>Warum die Qualität so gut ist</h2>
+    <div class="card">
+      <ul class="feat">
+        <li><strong>Bis 4K / 60 fps / 25 Mbit konstant</strong> – encodiert vom Hardware-Encoder deiner Grafikkarte (NVIDIA, AMD, Intel). Das Spiel verliert dadurch kaum Leistung.</li>
+        <li><strong>Direkte Verbindung (P2P):</strong> Bild und Ton gehen von deinem PC direkt zum Zuschauer. Kein Anbieter-Server, der die Qualität herunterrechnet oder mitliest.</li>
+        <li><strong>Automatische Bitraten-Anpassung:</strong> Hat ein Zuschauer unterwegs schwachen Empfang, regelt Lumora die Bitrate in Stufen herunter – und wieder hoch, sobald es stabil läuft. Kein Dauer-Ruckeln, kein manuelles Nachstellen.</li>
+        <li><strong>Gezielter Spiel-Ton:</strong> Beim Teilen eines Fensters überträgt Lumora nur den Ton dieses Spiels – private Musik, Anrufe und Benachrichtigungen bleiben draußen.</li>
+        <li><strong>HDR-Spiele werden sauber umgewandelt</strong>, damit Zuschauer ohne HDR-Display korrekte Farben sehen.</li>
+        <li><strong>Verbindung ohne Gefrickel:</strong> Router-Freigaben automatisch (UPnP), IPv6-Direktweg bei DS-Lite/CGNAT-Anschlüssen, optional eigener TURN-Server – alles eingebaut.</li>
+      </ul>
+    </div>
+
+    <h2>Gruppen: Zockt zusammen, schaut euch gegenseitig zu</h2>
+    <p>„Gruppe starten" erzeugt einen kurzen Raumcode (z.&nbsp;B. <code>TG7KP2</code>). Freunde tippen ihn in Lumora ein – ihr eigener Stream startet automatisch mit. Wer keinen PC hat, öffnet den Gruppen-Link im Browser (funktioniert auch auf dem iPhone) und sieht alle Streams gleichzeitig im Raster: Vollbild per Klick, Ton pro Person wählbar, Live-Statistik zuschaltbar. Die Gruppe hängt an niemandem – wer geht, geht; für alle anderen läuft alles ununterbrochen weiter.</p>
+
+    <h2>Häufige Fragen</h2>
+    <h3>Was brauchen meine Freunde?</h3>
+    <p>Nur einen Browser. Link öffnen, zuschauen – mit Ton, auf Wunsch im Vollbild. Keine App, kein Konto.</p>
+    <h3>Wie viel Verzögerung hat der Stream?</h3>
+    <p>Typisch unter einer Sekunde, da die Verbindung direkt läuft (WebRTC). Der Empfangspuffer ist einstellbar: kurz für minimale Verzögerung, länger für maximal ruhiges Bild bei schwankender Leitung.</p>
+    <h3>Wie viele Zuschauer gehen?</h3>
+    <p>Ehrliche Antwort: Das begrenzt dein Internet-Upload, denn jeder Zuschauer erhält den Stream direkt von dir (Bitrate × Zuschauerzahl). Für den Kumpel-Kreis ist das ideal – für hunderte Zuschauer sind Plattformen mit Verteil-Servern die richtige Wahl.</p>
+    <h3>Was kostet es?</h3>
+    <p>Nichts. Keine Werbung, kein Abo, keine Qualitäts-Bezahlschranke. Lumora ist kostenlos und Open-Source-basiert.</p>
+
+    <p style="margin-top:28px"><a class="cta" href="download.php">⬇ Jetzt kostenlos laden &amp; ausprobieren</a></p>
+
+    <h2>Mehr von Lumora</h2>
+    <p>
+      <a href="discord-alternative.html">Vergleich: Game-Streaming-Qualität kostenlos vs. Abo-Modelle →</a><br>
+      <a href="gaming-osd.html">FPS, GPU- &amp; CPU-Werte im Spiel anzeigen (Gaming-OSD) →</a><br>
+      <a href="gamepad.html">Den ganzen Launcher per Gamepad bedienen (Couch-Gaming) →</a>
+    </p>
+  </div>
+  <footer>
+    <p><a href="index.html">Lumora</a> · Kostenlos für Windows 10/11 · <a href="impressum.html">Impressum</a> · <a href="datenschutz.html">Datenschutz</a></p>
+  </footer>
+</body>
+</html>
