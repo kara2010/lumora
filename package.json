@@ -37,7 +37,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://[alte Domain]/updates/"
+        "url": "https://[Hosting-Domain]/updates/"
       }
     ],
     "win": {

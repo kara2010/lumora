@@ -378,6 +378,12 @@
     })
   }
   var retrying = false
+  // Verbindungs-Generation (wie im Grid-Player): jede neue connect()-Kette
+  // entwertet alle laufenden alten. Ohne das konnte eine parallel gestartete
+  // alte Kette (Retry + resume gleichzeitig) die frische Verbindung kapern,
+  // die Session-Referenz ueberschreiben oder unsichtbar weiterempfangen und
+  // Bandbreite doppeln (Audit-Befund).
+  var _gen = 0
   function retry() {
     if (retrying) return
     retrying = true
@@ -386,6 +392,7 @@
     setTimeout(function () { retrying = false; connect() }, 800)
   }
   async function connect() {
+    var gen = ++_gen
     status('Verbinde…')
     window._wdStarted = Date.now()   // Aufbau-Beginn fuer den Watchdog (haengt der Aufbau?)
     overlay.classList.remove('hidden')
@@ -398,6 +405,7 @@
       if (cfg && Array.isArray(cfg.iceServers) && cfg.iceServers.length) ice = cfg.iceServers
       relay = !!(cfg && cfg.forceRelay)
     } catch (e) {}
+    if (gen !== _gen) return   // inzwischen hat eine neuere Kette uebernommen
     var pc = new RTCPeerConnection({ iceServers: ice, iceTransportPolicy: relay ? 'relay' : 'all', bundlePolicy: 'max-bundle' })
     window._pc = pc
     // Diagnose (F12-Konsole): kommt ein "relay"-Kandidat vom TURN-Server? Welcher
@@ -441,14 +449,24 @@
       var offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       await iceComplete(pc)
+      if (gen !== _gen) { try { pc.close() } catch (e) {}; return }
       // WHEP: das komplette Offer als application/sdp posten -> Answer im Body.
       var resp = await fetch('/whep', { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp })
+      if (gen !== _gen) {
+        // Veraltet: die soeben angelegte Session direkt wieder abmelden, damit
+        // kein Zombie-Zuschauer Bandbreite zieht, und still aussteigen.
+        try { var l0 = resp.headers.get('location'); if (l0) fetch(l0, { method: 'DELETE', keepalive: true }) } catch (e) {}
+        try { pc.close() } catch (e) {}
+        return
+      }
       if (resp.status !== 201 && !resp.ok) { status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return }
       // Session-URL fuer sauberes Abmelden (DELETE) merken.
       var loc = resp.headers.get('location'); if (loc) window._whepSession = loc
       var answer = await resp.text()
       await pc.setRemoteDescription({ type: 'answer', sdp: answer })
+      if (gen !== _gen) { try { pc.close() } catch (e) {}; return }
     } catch (e) {
+      if (gen !== _gen) return
       status('Server nicht erreichbar', 'err')
       setTimeout(retry, 3000)
     }

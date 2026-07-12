@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://[alte Domain]/sitemap.xml
+Sitemap: https://[Hosting-Domain]/sitemap.xml
