@@ -346,6 +346,10 @@
   var _qosPrev = null
   setInterval(async function () {
     if (!window._pc || window._pc.connectionState !== 'connected') { _qosPrev = null; return }
+    // Hintergrund-Tab: Browser drosseln Rendering -> framesDropped/freezeCount
+    // steigen OHNE echtes Netzproblem. Nicht melden, sonst drosselt der
+    // Streamer die Bitrate fuer ALLE Zuschauer (Audit-Befund).
+    if (document.visibilityState !== 'visible') { _qosPrev = null; return }
     try {
       var s = await window._pc.getStats(), inb = null
       s.forEach(function (r) { if (r.type === 'inbound-rtp' && r.kind === 'video') inb = r })

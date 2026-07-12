@@ -394,6 +394,9 @@ echo <<<'HTMLJS'
   // bei anhaltend schlechtem Empfang automatisch seine Bitrate.
   var qosId = Math.random().toString(36).slice(2, 8)
   setInterval(function () {
+    // Hintergrund-Tab: gedrosseltes Rendering laesst drop/freeze steigen, ohne
+    // dass das Netz ein Problem hat - nicht melden (sonst Fehl-Drosselung).
+    if (document.visibilityState !== 'visible') { tiles.forEach(function (t) { t.qosPrev = null }); return }
     tiles.forEach(function (t) {
       if (!t.pc || t.pc.connectionState !== 'connected') { t.qosPrev = null; return }
       t.pc.getStats().then(function (s) {

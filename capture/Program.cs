@@ -933,7 +933,38 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             if (procClient == null) { sysCapture = new NAudio.Wave.WasapiLoopbackCapture(); Console.Error.WriteLine("AUDIOSRC system"); }
 
             var fmt = procClient != null ? procFmt : sysCapture.WaveFormat;
-            Console.Error.WriteLine($"AUDIO {fmt.SampleRate} {fmt.Channels} {fmt.BitsPerSample} {(fmt.Encoding == NAudio.Wave.WaveFormatEncoding.IeeeFloat ? "f" : "i")}");
+            // FFmpeg ist auf der Empfangsseite FEST auf f32/48kHz/stereo verdrahtet
+            // (pipe:3). Das System-Loopback liefert aber das MIX-Format des Standard-
+            // Ausgabegeraets - auf 44,1-kHz-Geraeten (Hi-Fi-DACs, AVR) waere der Ton
+            // verstimmt und liefe dem Bild davon, bei 5.1/7.1 waere er unbrauchbar
+            // (Audit-Befund). Weicht das Geraeteformat ab, wird deshalb VOR der Queue
+            // per MediaFoundation-Resampler auf f32/48k/stereo gewandelt; Writer und
+            // Echtzeit-Byte-Budget arbeiten dann wie gehabt auf dem Zielformat.
+            var outFmt = NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
+            NAudio.Wave.BufferedWaveProvider convBuf = null;
+            NAudio.Wave.MediaFoundationResampler conv = null;
+            if (sysCapture != null && (fmt.SampleRate != 48000 || fmt.Channels != 2 || fmt.Encoding != NAudio.Wave.WaveFormatEncoding.IeeeFloat))
+            {
+                try
+                {
+                    // ReadFully=false: der Resampler liefert nur, was aus den bisher
+                    // zugefuehrten Samples entsteht - KEIN Nullen-Padding (das wuerde
+                    // Stille in den laufenden Ton mischen, die 2.2.8-Falle).
+                    convBuf = new NAudio.Wave.BufferedWaveProvider(fmt) { ReadFully = false, BufferDuration = TimeSpan.FromSeconds(2), DiscardOnBufferOverflow = true };
+                    conv = new NAudio.Wave.MediaFoundationResampler(convBuf, outFmt);
+                    Console.Error.WriteLine($"AUDIOCONV {fmt.SampleRate}Hz/{fmt.Channels}ch/{fmt.Encoding} -> 48000Hz/2ch/f32");
+                }
+                catch (Exception ex)
+                {
+                    // Kein MediaFoundation? Dann wie bisher roh liefern (auf 48k/2-
+                    // Systemen korrekt; die Meldung macht den Sonderfall im Log sichtbar).
+                    Console.Error.WriteLine("AUDIOCONV FEHLER: " + ex.Message + " - liefere Geraeteformat");
+                    try { conv?.Dispose(); } catch { }
+                    conv = null; convBuf = null;
+                }
+            }
+            var outInfo = conv != null ? outFmt : fmt;
+            Console.Error.WriteLine($"AUDIO {outInfo.SampleRate} {outInfo.Channels} {outInfo.BitsPerSample} {(outInfo.Encoding == NAudio.Wave.WaveFormatEncoding.IeeeFloat ? "f" : "i")}");
             Console.Error.Flush();
             var stdout = Console.OpenStandardOutput();
             // Producer-Consumer: Der WASAPI-Thread darf NICHT im stdout-Write
@@ -948,6 +979,15 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 sysCapture.DataAvailable += (s, e) =>
                 {
                     if (broken || e.BytesRecorded <= 0) return;
+                    if (conv != null)
+                    {
+                        // Geraeteformat -> f32/48k/stereo (s. Konverter-Setup oben).
+                        convBuf.AddSamples(e.Buffer, 0, e.BytesRecorded);
+                        var tmp = new byte[e.BytesRecorded * 4 + 65536];
+                        int n = conv.Read(tmp, 0, tmp.Length / 8 * 8);
+                        if (n > 0) { var outB = new byte[n]; Array.Copy(tmp, outB, n); queue.TryAdd(outB); }
+                        return;
+                    }
                     var buf = new byte[e.BytesRecorded];
                     Array.Copy(e.Buffer, buf, e.BytesRecorded);
                     queue.TryAdd(buf);
@@ -972,8 +1012,8 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             // Laeuft die Soundkarten-Uhr dauerhaft VOR (Budget-Ueberschuss > 500 ms),
             // werden ganze Chunks ausgelassen, bis der Ueberschuss abgebaut ist -
             // passiert nur bei starkem Uhren-Drift und in seltenen Einzelschritten.
-            int bps = fmt.AverageBytesPerSecond;                  // 48000*2*4 = 384000
-            int align = Math.Max(1, fmt.BlockAlign);              // NIE mitten im Sample-Frame schneiden (Kanal-Versatz!)
+            int bps = outInfo.AverageBytesPerSecond;              // 48000*2*4 = 384000 (Format NACH Konvertierung)
+            int align = Math.Max(1, outInfo.BlockAlign);          // NIE mitten im Sample-Frame schneiden (Kanal-Versatz!)
             byte[] silence = new byte[Math.Max(align, bps / 50 / align * align)];   // 20-ms-Haeppchen, align-gerundet
             var writer = new Thread(() =>
             {
