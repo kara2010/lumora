@@ -65,7 +65,50 @@ if (Test-Path $php) {
   Write-Host "WARN: download.php nicht gefunden - Download-Button NICHT aktualisiert!"
 }
 
+# 5) Datei-Update-Manifest (Basis-Installer-Strategie, seit 2.2.12): app.asar,
+#    entpackte Module und Binaries mit sha512 nach website/updates/app/.
+#    Installierte Clients (ab 2.2.12) aktualisieren sich darueber selbst -
+#    hochgeladen werden muessen nur manifest.json + die als GEAENDERT
+#    gemeldeten Dateien. latest.yml bleibt fuer seltene Basis-Wechsel
+#    (neue Electron-Version) bestehen.
+$res = "$src\dist\win-unpacked\resources"
+$appUpd = "$src\website\updates\app"
+New-Item -ItemType Directory -Force $appUpd | Out-Null
+$files = @()
+foreach ($it in 'app.asar','gruppe.php','PresentMon.exe','HDRCmd.exe','AMDFamily17.bin','IntelMSR.bin') {
+  if (Test-Path "$res\$it") { $files += Get-Item "$res\$it" }
+}
+$files += Get-ChildItem -Recurse -File "$res\app.asar.unpacked" -ErrorAction SilentlyContinue
+$files += Get-ChildItem -Recurse -File "$res\bin" -ErrorAction SilentlyContinue
+$oldMf = $null
+if (Test-Path "$appUpd\manifest.json") { $oldMf = [System.IO.File]::ReadAllText("$appUpd\manifest.json") | ConvertFrom-Json }
+$entries = @()
+$changedList = @()
+foreach ($f in $files) {
+  $rel = $f.FullName.Substring($res.Length + 1) -replace '\\','/'
+  $sha = (Get-FileHash -Algorithm SHA512 $f.FullName).Hash.ToLower()
+  $entries += [pscustomobject]@{ path = $rel; size = $f.Length; sha512 = $sha }
+  $dst = Join-Path $appUpd ($rel -replace '/','\')
+  New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
+  Copy-Item $f.FullName $dst -Force
+  $old = $null
+  if ($oldMf) { $old = $oldMf.files | Where-Object { $_.path -eq $rel } }
+  if (-not $old -or $old.sha512 -ne $sha) { $changedList += $rel }
+}
+$notesText = ''
+if (Test-Path $notesFile) { $notesText = ([System.IO.File]::ReadAllText($notesFile)).Trim() }
+$elRaw = (Get-Content "$src\package.json" -Raw | ConvertFrom-Json).devDependencies.electron
+$elMajor = [int][regex]::Match($elRaw, '\d+').Value
+$mf = [pscustomobject]@{ version = $ver; minElectron = $elMajor; notes = $notesText; files = $entries }
+[System.IO.File]::WriteAllText("$appUpd\manifest.json", ($mf | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding($false)))
+Write-Host ("Datei-Update-Manifest: " + $entries.Count + " Dateien erfasst, " + $changedList.Count + " geaendert seit letztem Manifest.")
+
 Write-Host "`nBereit zum Hochladen:"
-Write-Host "  1) die 3 Dateien in website\updates\  (Auto-Update)"
-Write-Host "  2) website\download.php               (Download-Button -> neue .exe)"
-Get-ChildItem $upd | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}} | Format-Table -AutoSize
+Write-Host "  1) IMMER: Datei-Update fuer Bestandsclients (ab 2.2.12) nach updates/app/:"
+Write-Host "       updates/app/manifest.json"
+foreach ($c in $changedList) { Write-Host ("       updates/app/" + $c) }
+Write-Host "  2) NUR BEI BASIS-WECHSEL (neue Electron-Version) oder Erst-Go-Live:"
+Write-Host "     die 3 Dateien in website\updates\ + website\download.php."
+Write-Host "     Sonst Setup/latest.yml/download.php auf dem Server EINGEFROREN lassen -"
+Write-Host "     der Basis-Installer sammelt SmartScreen-Reputation nur, wenn er sich nicht aendert."
+Get-ChildItem $upd -File | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}} | Format-Table -AutoSize

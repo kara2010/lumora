@@ -5258,6 +5258,9 @@ function sendToUi(channel, payload) {
 }
 
 function setupAutoUpdate() {
+  // Reste eines frueheren Datei-Updates aufraeumen (angewandt oder abgebrochen -
+  // beim Start ist nie ein Staging in Benutzung).
+  try { require('fs').rmSync(fuStagingDir(), { recursive: true, force: true }) } catch {}
   if (!autoUpdater) return
   autoUpdater.autoDownload = false           // nie ungefragt laden
   autoUpdater.autoInstallOnAppQuit = false   // Installation steuern wir selbst
@@ -5270,8 +5273,12 @@ function setupAutoUpdate() {
     sendToUi('update-available', { version: info.version, notes })
   })
   autoUpdater.on('update-not-available', () => {
-    if (updateManualCheck) sendToUi('update-none', {})
+    // Kein neuer Basis-Installer -> Datei-Update (Manifest) pruefen. Erst wenn
+    // AUCH das nichts hat, bekommt ein manueller Check sein "aktuell".
+    const manual = updateManualCheck
     updateManualCheck = false
+    fuCheck().then((found) => { if (!found && manual) sendToUi('update-none', {}) })
+      .catch(() => { if (manual) sendToUi('update-none', {}) })
   })
   autoUpdater.on('download-progress', (p) => {
     sendToUi('update-progress', { percent: Math.round(p.percent || 0) })
@@ -5280,13 +5287,23 @@ function setupAutoUpdate() {
     sendToUi('update-ready', { version: info.version })
   })
   autoUpdater.on('error', (err) => {
-    if (updateManualCheck) sendToUi('update-error', { message: String(err && err.message || err) })
+    // Feed-Fehler (z.B. latest.yml nicht erreichbar): der Manifest-Weg kann
+    // trotzdem funktionieren - erst versuchen, dann ggf. den Fehler melden.
+    const manual = updateManualCheck
     updateManualCheck = false
+    fuCheck().then((found) => { if (!found && manual) sendToUi('update-error', { message: String(err && err.message || err) }) })
+      .catch(() => { if (manual) sendToUi('update-error', { message: String(err && err.message || err) }) })
   })
 }
 
 function checkForUpdates(manual) {
-  if (!autoUpdater || !app.isPackaged) {   // kein Modul oder Dev-Modus: kein Update-Paket
+  if (!autoUpdater || !app.isPackaged) {
+    // Ohne electron-updater-Modul, aber gepackt: wenigstens den Datei-Update-
+    // Weg (Manifest) versuchen. Im Dev-Modus gibt es nichts zu aktualisieren.
+    if (app.isPackaged) {
+      fuCheck().then((found) => { if (!found && manual) sendToUi('update-none', {}) }).catch(() => { if (manual) sendToUi('update-none', {}) })
+      return
+    }
     if (manual) sendToUi('update-none', {})
     return
   }
@@ -5295,6 +5312,193 @@ function checkForUpdates(manual) {
     if (manual) sendToUi('update-error', { message: String(err && err.message || err) })
     updateManualCheck = false
   })
+}
+
+// --- Datei-Updater (Basis-Installer-Strategie, seit 2.2.12) --------------------
+// Problem: Jedes klassische Update laedt einen kompletten neuen unsignierten
+// Installer (~170 MB), der bei SmartScreen wieder bei null anfaengt. Strategie
+// jetzt: Der einmal verteilte Basis-Installer bleibt eingefroren (sammelt
+// Reputation); Updates tauschen nur noch die App-Dateien (app.asar ~5 MB plus
+// geaenderte Binaries) anhand von updates/app/manifest.json - Version, Notes,
+// minElectron, Dateiliste mit sha512+Groesse (erzeugt release.ps1).
+// Arbeitsteilung: latest.yml/electron-updater wird ZUERST gefragt und bleibt
+// fuer seltene Basis-Wechsel (neue Electron-Version -> neue exe). Meldet er
+// nichts, prueft fuCheck das Manifest. Die bestehende Update-UI laeuft
+// unveraendert mit (gleiche IPC-Kanaele update-available/-progress/-ready).
+// "Laden" holt nur Dateien mit abweichendem sha512 in ein Staging und
+// verifiziert jeden Download; "Neu starten" schreibt apply.ps1 + Dateiliste
+// und beendet die App - das Skript wartet auf den Prozess-Exit, tauscht mit
+// .bak-Rollback und startet Lumora neu. Installation liegt unter
+// %LOCALAPPDATA%\Programs -> kein Admin noetig. Log: %TEMP%\lumora-update.log.
+const FU_MANIFEST_URL = 'https://lumora.kara-webdesign.de/updates/app/manifest.json'
+let fuPending = null   // Manifest eines ausstehenden Updates (nach fuCheck)
+let fuReady = false    // Staging vollstaendig verifiziert -> Neustart moeglich
+function fuStagingDir() { return path.join(app.getPath('userData'), 'update-staging') }
+function fuVersionNewer(a, b) {   // ist a neuer als b?
+  const pa = String(a).split('.').map((x) => parseInt(x, 10) || 0)
+  const pb = String(b).split('.').map((x) => parseInt(x, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0)
+  }
+  return false
+}
+// Manifest-Pfade absichern: nur schlichte relative Pfade INNERHALB von
+// resources (Tiefenverteidigung, obwohl das Manifest von der eigenen
+// HTTPS-Domain kommt).
+function fuSafeTarget(rel) {
+  if (typeof rel !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(rel) || rel.includes('..')) return null
+  const abs = path.resolve(process.resourcesPath, rel)
+  return abs.startsWith(path.resolve(process.resourcesPath) + path.sep) ? abs : null
+}
+function fuHttpsGet(url, destPath, onData, redirects) {
+  return new Promise((resolve, reject) => {
+    if ((redirects || 0) > 3) return reject(new Error('zu viele Weiterleitungen'))
+    const req = require('https').get(url, { headers: { 'User-Agent': 'Lumora-Updater' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume()
+        return resolve(fuHttpsGet(new URL(res.headers.location, url).toString(), destPath, onData, (redirects || 0) + 1))
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP ' + res.statusCode + ': ' + url)) }
+      if (!destPath) {
+        let buf = ''
+        res.on('data', (c) => { buf += c; if (buf.length > 1048576) req.destroy(new Error('Manifest zu gross')) })
+        res.on('end', () => resolve(buf))
+      } else {
+        const fs2 = require('fs')
+        fs2.mkdirSync(path.dirname(destPath), { recursive: true })
+        const out = fs2.createWriteStream(destPath)
+        res.on('data', (c) => { if (onData) onData(c.length) })
+        res.pipe(out)
+        out.on('finish', () => out.close(() => resolve(destPath)))
+        out.on('error', reject)
+      }
+      res.on('error', reject)
+    })
+    req.on('error', reject)
+    req.setTimeout(30000, () => req.destroy(new Error('Timeout: ' + url)))
+  })
+}
+function fuSha512(file) {
+  return new Promise((resolve, reject) => {
+    const h = require('crypto').createHash('sha512')
+    const s = require('fs').createReadStream(file)
+    s.on('data', (c) => h.update(c))
+    s.on('end', () => resolve(h.digest('hex')))
+    s.on('error', reject)
+  })
+}
+async function fuCheck() {
+  if (!app.isPackaged) return false
+  let mf
+  try { mf = JSON.parse(await fuHttpsGet(FU_MANIFEST_URL)) } catch (e) { osdDbg('[update] Manifest nicht ladbar: ' + (e && e.message)); return false }
+  if (!mf || !mf.version || !Array.isArray(mf.files)) return false
+  // Braucht das Update eine neuere Electron-Basis, kommt die (selten) als
+  // klassisches Setup ueber latest.yml - dieses Manifest ist dann nicht fuer uns.
+  if (mf.minElectron && parseInt(process.versions.electron, 10) < mf.minElectron) {
+    osdDbg('[update] Manifest ' + mf.version + ' braucht Electron ' + mf.minElectron + ' - Basis zu alt')
+    return false
+  }
+  if (!fuVersionNewer(mf.version, app.getVersion())) return false
+  fuPending = mf
+  fuReady = false
+  osdDbg('[update] Datei-Update verfuegbar: ' + app.getVersion() + ' -> ' + mf.version)
+  sendToUi('update-available', { version: mf.version, notes: mf.notes || '' })
+  return true
+}
+async function fuDownload() {
+  const mf = fuPending
+  if (!mf) return
+  const base = FU_MANIFEST_URL.replace(/manifest\.json$/, '')
+  const staging = fuStagingDir()
+  try { require('fs').rmSync(staging, { recursive: true, force: true }) } catch {}
+  // Nur laden, was lokal wirklich abweicht (erst Groesse - billig, dann Hash).
+  const todo = []
+  for (const f of mf.files) {
+    const target = fuSafeTarget(f.path)
+    if (!target || !f.sha512) throw new Error('Manifest-Eintrag ungueltig: ' + f.path)
+    let same = false
+    try {
+      const st = require('fs').statSync(target)
+      if (st.size === f.size) same = (await fuSha512(target)) === f.sha512
+    } catch {}
+    if (!same) todo.push(f)
+  }
+  if (!todo.length) { fuReady = true; sendToUi('update-ready', { version: mf.version }); return }
+  const total = todo.reduce((s, f) => s + (f.size || 0), 0)
+  let got = 0, lastPct = -1
+  for (const f of todo) {
+    const dest = path.join(staging, f.path)
+    await fuHttpsGet(base + f.path.split('/').map(encodeURIComponent).join('/'), dest, (n) => {
+      got += n
+      const pct = total ? Math.min(99, Math.round(got * 100 / total)) : 0
+      if (pct !== lastPct) { lastPct = pct; sendToUi('update-progress', { percent: pct }) }
+    })
+    const hash = await fuSha512(dest)
+    if (hash !== f.sha512) throw new Error('Pruefsumme falsch: ' + f.path)
+  }
+  osdDbg('[update] ' + todo.length + ' Datei(en) geladen und verifiziert (' + Math.round(total / 1024) + ' KB)')
+  fuReady = true
+  sendToUi('update-progress', { percent: 100 })
+  sendToUi('update-ready', { version: mf.version })
+}
+function fuInstall() {
+  const mf = fuPending
+  if (!mf || !fuReady) return
+  const fs2 = require('fs')
+  const staging = fuStagingDir()
+  const lines = []
+  for (const f of mf.files) {
+    const src = path.join(staging, f.path)
+    const dst = fuSafeTarget(f.path)
+    if (dst && fs2.existsSync(src)) lines.push(src + '|' + dst)
+  }
+  if (!lines.length) return
+  fs2.writeFileSync(path.join(staging, 'apply-list.txt'), lines.join('\r\n'), 'utf8')
+  // Apply-Skript (ASCII-only, PowerShell 5.1): wartet auf den Prozess-Exit,
+  // tauscht jede Datei mit .bak-Sicherung (Retry gegen kurze Sperren), rollt
+  // bei Fehlern komplett zurueck und startet Lumora neu.
+  const ps1 = path.join(staging, 'apply.ps1')
+  fs2.writeFileSync(ps1, [
+    'param([int]$LumoraPid, [string]$ExePath)',
+    "$log = Join-Path $env:TEMP 'lumora-update.log'",
+    'function L($m) { try { Add-Content -Path $log -Value ((Get-Date -Format o) + \" \" + $m) } catch {} }',
+    'L (\"apply start pid=\" + $LumoraPid)',
+    'try { Wait-Process -Id $LumoraPid -Timeout 30 -ErrorAction SilentlyContinue } catch {}',
+    'Start-Sleep -Milliseconds 500',
+    "$list = Get-Content (Join-Path $PSScriptRoot 'apply-list.txt')",
+    '$done = @()',
+    '$ok = $true',
+    'foreach ($line in $list) {',
+    "  $p = $line -split '\\|'",
+    '  $src = $p[0]; $dst = $p[1]; $bak = $dst + \".bak\"',
+    '  try {',
+    '    New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null',
+    '    if (Test-Path $bak) { Remove-Item -Force $bak }',
+    '    $moved = $false',
+    '    for ($i = 0; $i -lt 20; $i++) {',
+    '      try { if (Test-Path $dst) { Move-Item -Force $dst $bak }; Move-Item -Force $src $dst; $moved = $true; break }',
+    '      catch { Start-Sleep -Milliseconds 500 }',
+    '    }',
+    '    if (-not $moved) { throw (\"gesperrt: \" + $dst) }',
+    '    $done += ,@($dst, $bak)',
+    '    L (\"ok \" + $dst)',
+    '  } catch { L (\"FEHLER \" + $_.Exception.Message); $ok = $false; break }',
+    '}',
+    'if (-not $ok) {',
+    '  foreach ($d in $done) { try { if (Test-Path $d[1]) { Move-Item -Force $d[1] $d[0] } } catch {} }',
+    '  L \"rollback\"',
+    '} else {',
+    '  foreach ($d in $done) { try { if (Test-Path $d[1]) { Remove-Item -Force $d[1] } } catch {} }',
+    '  L \"fertig\"',
+    '}',
+    'if ($ExePath) { try { Start-Process $ExePath } catch { L (\"start-fehler \" + $_.Exception.Message) } }',
+  ].join('\r\n'), 'utf8')
+  osdDbg('[update] Apply-Skript geschrieben (' + lines.length + ' Datei(en)) - App beendet sich fuer den Tausch')
+  try {
+    spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-LumoraPid', String(process.pid), '-ExePath', process.execPath], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+  } catch (e) { osdDbg('[update] Apply-Start fehlgeschlagen: ' + (e && e.message)); return }
+  app.isQuitting = true
+  app.quit()
 }
 
 // Toggle-Hotkey aus den Einstellungen setzen. Leerer String = deaktiviert.
@@ -5351,11 +5555,23 @@ ipcMain.handle('fps-grant-access', () => {
 })
 
 ipcMain.handle('check-for-updates', () => { checkForUpdates(true) })
-ipcMain.handle('download-update', () => { if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {}) })
+ipcMain.handle('download-update', () => {
+  // Ausstehendes Datei-Update hat Vorrang (fuCheck lief nach dem Feed-Check).
+  if (fuPending) {
+    return fuDownload().catch((e) => {
+      osdDbg('[update] Download fehlgeschlagen: ' + (e && e.message))
+      sendToUi('update-error', { message: String(e && e.message || e) })
+    })
+  }
+  if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {})
+})
 // isSilent=true -> Installer mit /S (kein Wizard, In-Place-Update am gespeicherten
 // Pfad); isForceRunAfter=true -> Lumora danach automatisch neu starten. Ohne das
 // erste true liefe beim Auto-Update der komplette Ersteinrichtungs-Assistent auf.
-ipcMain.handle('install-update', () => { if (autoUpdater) { app.isQuitting = true; autoUpdater.quitAndInstall(true, true) } })
+ipcMain.handle('install-update', () => {
+  if (fuPending && fuReady) return fuInstall()   // Datei-Update: Tausch beim Beenden + Neustart
+  if (autoUpdater) { app.isQuitting = true; autoUpdater.quitAndInstall(true, true) }
+})
 
 // Nur eine Instanz zulassen: ein zweiter Start holt das vorhandene (ggf. im Tray
 // versteckte) Fenster nach vorne, statt eine neue Instanz zu öffnen.
