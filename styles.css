@@ -414,11 +414,31 @@ body::before {
 .stream-sec > label { font-size: 12px; color: #777; text-transform: uppercase; letter-spacing: .6px; font-weight: 600; }
 /* Der globale Akzent-Schleier (body::before, z-index 9999) liegt ueber der ganzen
    UI und wuerde sich auch ueber das Vorschau-VIDEO legen -> Bild wirkt aufgehellt
-   und farbstichig. Die Vorschau-Vorfahren bilden keinen Stacking-Context, daher
-   hebt ein z-index > 9999 das Bild zuverlaessig ueber den Schleier (Wrap hat schon
-   position:relative). So bleibt der Schleier auf der Chrome, nicht auf dem Video. */
+   und farbstichig. Ein z-index > 9999 hebt das Bild zuverlaessig ueber den Schleier
+   (Wrap hat schon position:relative) - ABER NUR, wenn keiner der Vorfahren selbst
+   einen eigenen Stacking-Context aufmacht (per DevTools verifiziert 2026-07-08:
+   .settings-view/.detail-nav hatten frueher z-index:1 gesetzt und sperrten damit
+   JEDEN Nachfahren-z-index in ihrem eigenen, viel niedrigeren Stacking-Context ein -
+   der hohe Wert hier wirkte dadurch nie gegen body::before. Fix: .detail-bg (der
+   Grund fuer das z-index:1 auf den Geschwistern) hat jetzt selbst z-index:-1, siehe
+   dort - dadurch brauchen .settings-view/.detail-nav/.empty-state/.game-detail/
+   .grid-view gar keinen eigenen Stacking-Context mehr). So bleibt der Schleier auf
+   der Chrome, nicht auf dem Video. */
 #streamPreviewWrap { z-index: 10000; }
 .stream-advanced { margin-top: 6px; }
+/* Einrichtungs-Spinner der Gruppen-Sektion: laeuft IM geklickten Knopf (inline),
+   damit waehrend der Einrichtung kein Element ersetzt oder verschoben wird. */
+.group-spinner { display: inline-block; vertical-align: -2px; width: 15px; height: 15px; flex-shrink: 0;
+  border: 2px solid rgba(255,255,255,.22); border-top-color: var(--accent); border-radius: 50%;
+  animation: groupSpin .8s linear infinite; }
+@keyframes groupSpin { to { transform: rotate(360deg); } }
+/* Nach der Einrichtung: Code+Link-Zeile leuchtet EINMAL ruhig auf - das Ergebnis
+   rueckt in den Fokus, ohne zu scrollen oder zu springen. */
+.group-highlight { animation: groupFlash 1.4s ease-out; }
+@keyframes groupFlash {
+  0%   { box-shadow: 0 0 0 2px var(--accent), 0 0 18px rgba(var(--accent-rgb), .45); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
 .stream-advanced .setting-toggle-row { padding: 6px 0; }
 
 .setting-toggle-row {
@@ -893,14 +913,20 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
 .detail > .game-detail,
 .detail > .grid-view {
   position: relative;
-  z-index: 1;
 }
 
-/* Dynamischer Hintergrund aus dem Artwork des gewählten Spiels */
+/* Dynamischer Hintergrund aus dem Artwork des gewählten Spiels. NEGATIVES
+   z-index (statt 0 + z-index:1 auf den Geschwistern oben): so reicht die
+   normale Stapel-Regel ("positioniert schlaegt statisch") allein, OHNE dass
+   die Geschwister selbst einen eigenen Stacking-Context per z-index brauchen.
+   Ein z-index>=0 auf einem Vorfahren wuerde sonst dessen Nachkommen in einem
+   eigenen Stacking-Context einsperren und z.B. die Stream-Vorschau (#streamPreviewWrap,
+   z-index 10000) daran hindern, den globalen Akzent-Schleier body::before
+   (z-index 9999) zu ueberdecken - genau das beobachtete Problem. */
 .detail-bg {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: -1;
   background-size: cover;
   background-position: center top;
   filter: blur(50px) brightness(0.4) saturate(1.15);
@@ -1356,7 +1382,6 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
   padding: 12px 18px 0;
   flex-shrink: 0;
   position: relative;
-  z-index: 1;
   border-bottom: 1px solid #1c1c1c;
 }
 .detail-nav-tab {
@@ -1388,7 +1413,6 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
   overflow-y: auto;
   padding: 20px 22px;
   position: relative;
-  z-index: 1;
   flex-direction: column;
 }
 .settings-view .settings-body { max-width: 640px; width: 100%; }

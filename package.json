@@ -1,6 +1,6 @@
 {
   "name": "lumora",
-  "version": "2.2.8",
+  "version": "2.2.11",
   "description": "Lumora – Game Launcher mit automatischem HDR",
   "main": "main.js",
   "scripts": {
@@ -55,6 +55,10 @@
       {
         "from": "bin",
         "to": "bin"
+      },
+      {
+        "from": "website/gruppe.php",
+        "to": "gruppe.php"
       },
       {
         "from": "HDRCmd.exe",
