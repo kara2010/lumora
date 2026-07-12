@@ -4110,7 +4110,14 @@ function bcWriteMtxConfig(hosts) {
 // beim Zuschauer (real diagnostiziert: 1440p/16 Mbit auf Handy; Sender
 // nachweislich makellos). Ein Encode fuer alle -> es zaehlt der schlechteste
 // aktive Zuschauer; die eigene Vorschau (localhost) regelt NICHT mit.
-const BC_ADAPT_F = [1, 0.7, 0.5, 0.35]   // Stufen-Faktoren auf die eingestellte Bitrate
+// Stufen-Faktoren auf die eingestellte Bitrate. Zwei tiefe Stufen ergaenzt
+// (0.24/0.16), damit hohe Basiswerte fuer schwaches Mobilfunknetz weit genug
+// heruntergeregelt werden: 25 Mbit -> 17,5 / 12,5 / 8,8 / 6,0 / 4,0 Mbit.
+// (Vorher endete die Kette bei 8,8 Mbit - fuer 4K auf Mobilfunk zu hoch,
+// Log-belegt 39-50% Paketverlust.) Fuer niedrige Basiswerte fangen tiefe
+// Stufen ohnehin am 3-Mbit-Boden ab (bcAdaptKbit); der No-op-Neustart-Schutz
+// verhindert dort wirkungslose Neustarts.
+const BC_ADAPT_F = [1, 0.7, 0.5, 0.35, 0.24, 0.16]
 let bcAdaptLevel = 0                     // aktuelle Stufe (0 = volle Bitrate)
 let bcAdaptLastChange = 0                // letzter Stufenwechsel (Hysterese)
 let bcAdaptBadSince = 0, bcAdaptGoodSince = 0
@@ -4133,24 +4140,49 @@ function bcQosReport(ip, q) {
   // ein einzelner Freeze (Tab-Wechsel am Handy, kurzer Funk-Blip) drosselt
   // sonst sofort alle Zuschauer (Audit-Befund).
   const prev = bcQosMap.get(key)
-  bcQosMap.set(key, { t: Date.now(), bad, badStreak: bad ? (((prev && prev.badStreak) || 0) + 1) : 0 })
+  bcQosMap.set(key, { t: Date.now(), bad, lossRate, badStreak: bad ? (((prev && prev.badStreak) || 0) + 1) : 0 })
   const last = bcQosLogLast.get(key) || 0
   if (bad || Date.now() - last > 60000) {
     bcLogStream('qos: ' + key + ' lost=' + lost + '/' + (lost + recv) + ' jit=' + (q.jit | 0) + 'ms fps=' + (q.fps == null ? '?' : Math.round(q.fps)) + ' drop=' + drop + ' frz=' + frz + (bad ? ' !' : ''))
     bcQosLogLast.set(key, Date.now())
   }
 }
-function bcAdaptKbit(baseKbit) {
-  if (bcAdaptLevel <= 0 || appSettings.streamAdaptive === false) return baseKbit
-  return Math.max(3000, Math.round(baseKbit * BC_ADAPT_F[bcAdaptLevel] / 100) * 100)
+function bcAdaptKbit(baseKbit, level) {
+  const lv = level == null ? bcAdaptLevel : level
+  if (lv <= 0 || appSettings.streamAdaptive === false) return baseKbit
+  return Math.max(3000, Math.round(baseKbit * BC_ADAPT_F[lv] / 100) * 100)
 }
 function bcAdaptTick() {
   if (!broadcastState.active || appSettings.streamAdaptive === false) return
   const now = Date.now()
-  let bad = false
+  let bad = false, worstLoss = 0
   for (const [k, r] of bcQosMap) {
     if (now - r.t > 15000) { bcQosMap.delete(k); bcQosLogLast.delete(k); continue }
     if ((r.badStreak || 0) >= 2) bad = true
+    if (now - r.t <= 8000 && (r.lossRate || 0) > worstLoss) worstLoss = r.lossRate || 0
+  }
+  const maxLevel = BC_ADAPT_F.length - 1
+  const base = Math.max(1000, Math.round(appSettings.streamUploadKbit || 8000))
+  // NOTABSTIEG: katastrophaler Paketverlust (>=12%, normale Schwelle ist 2%) ->
+  // SOFORT mehrere Stufen tiefer, OHNE die 2-Meldungen-/8s-/20s-Gates der sanften
+  // Regelung. Genau der Fall 4K@25 Mbit auf schwaches Mobilfunknetz (real:
+  // 39-50% Verlust, erster Abstieg bisher erst nach ~19s und nur EINE Stufe).
+  // Ueberschiessen ist unkritisch - die sanfte Rauf-Logik (90s sauber) holt die
+  // Bitrate danach zurueck. 6s-Sperre + Map-Leerung verhindern, dass STALE
+  // Severe-Reports (Bitrate VOR dem Neustart) mehrfach nachfeuern.
+  if (worstLoss >= 0.12 && bcAdaptLevel < maxLevel && now - bcAdaptLastChange >= 6000) {
+    const oldKbit = bcAdaptKbit(base)
+    const target = Math.min(maxLevel, bcAdaptLevel + (worstLoss >= 0.30 ? 3 : 2))
+    const targetKbit = bcAdaptKbit(base, target)
+    if (targetKbit < oldKbit) {
+      bcAdaptLevel = target
+      bcAdaptLastChange = now
+      bcAdaptBadSince = 0; bcAdaptGoodSince = 0
+      bcQosMap.clear(); bcQosLogLast.clear()
+      bcLogStream('adapt: NOTABSTIEG bei ' + Math.round(worstLoss * 100) + '% Verlust -> Stufe ' + target + ' -> ' + targetKbit + ' kbit')
+      bcRestartFfmpeg()
+    }
+    return
   }
   if (bad) { if (!bcAdaptBadSince) bcAdaptBadSince = now; bcAdaptGoodSince = 0 }
   else { bcAdaptBadSince = 0; if (!bcAdaptGoodSince) bcAdaptGoodSince = now }
@@ -4164,7 +4196,6 @@ function bcAdaptTick() {
   if (bad && bcAdaptBadSince && now - bcAdaptBadSince >= 8000 && bcAdaptLevel < BC_ADAPT_F.length - 1) next = bcAdaptLevel + 1
   else if (!bad && bcAdaptGoodSince && now - bcAdaptGoodSince >= 90000 && bcAdaptLevel > 0 && now >= bcAdaptUpHold) next = bcAdaptLevel - 1
   if (next === bcAdaptLevel || now - bcAdaptLastChange < 20000) return
-  const base = Math.max(1000, Math.round(appSettings.streamUploadKbit || 8000))
   const oldKbit = bcAdaptKbit(base)
   const goingDown = next > bcAdaptLevel   // hoehere Stufe = niedrigere Bitrate
   if (goingDown && bcAdaptUpAt && now - bcAdaptUpAt < 60000) {
