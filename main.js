@@ -80,6 +80,7 @@ const appSettings = { autostart: false, startMinimized: false, minimizeToTray: f
   streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 300, streamHotkey: '',
   streamTurnEnabled: false, streamTurnUrl: '', streamTurnUser: '', streamTurnPass: '', streamTurnForce: false,
   streamForceIPv6: false,
+  language: 'auto',    // UI-Sprache: 'auto' (Systemsprache), 'de', 'en' - Uebersetzung im Renderer (i18n-Block)
   groupRelayUrl: '',   // '' = eingebauter Standard (GROUP_RELAY_DEFAULT); austauschbar fuer Selbst-Hoster
   groupLastCode: '',   // zuletzt genutzter Raumcode (Beitreten-Feld vorbefuellen)
   streamSource: '',   // '' = Hauptbildschirm bzw. 'screen:<idx>' (ddagrab-Monitor)

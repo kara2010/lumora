@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Show FPS in-game: gaming OSD with GPU &amp; CPU stats – free, no extra tools | Lumora</title>
+  <meta name="description" content="Show FPS, frametime graph, GPU and CPU temperature, load and power draw right in your game – without juggling extra tools. 6 designs, live editing in-game, toggle via hotkey or gamepad. Free for Windows 10/11.">
+  <meta name="keywords" content="show FPS Windows, FPS overlay free, GPU temperature in game, CPU temperature overlay, frametime graph, hardware monitoring game, gaming OSD, FPS counter without Steam overlay">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://lumora.kara-webdesign.de/en/gaming-osd.html">
+  <link rel="alternate" hreflang="de" href="https://lumora.kara-webdesign.de/gaming-osd.html">
+  <link rel="alternate" hreflang="en" href="https://lumora.kara-webdesign.de/en/gaming-osd.html">
+  <link rel="alternate" hreflang="x-default" href="https://lumora.kara-webdesign.de/gaming-osd.html">
+  <link rel="icon" href="../favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="../icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://lumora.kara-webdesign.de/en/gaming-osd.html">
+  <meta property="og:title" content="FPS &amp; hardware stats in-game – Lumora's gaming OSD">
+  <meta property="og:description" content="FPS, frametimes, GPU/CPU temperature and power draw as an in-game overlay – live editing, 6 designs, hotkey/gamepad. Free.">
+  <meta property="og:image" content="https://lumora.kara-webdesign.de/screenshot.png">
+  <meta property="og:locale" content="en_US">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      { "@type": "Question", "name": "How do I show my FPS in-game?", "acceptedAnswer": { "@type": "Answer", "text": "Install Lumora, enable the OSD, start your game – the FPS display (optionally with frametime graph, GPU and CPU stats) sits on top of your game. Toggle it with a freely bindable hotkey or gamepad button combo, even mid-game." } },
+      { "@type": "Question", "name": "Which values can the OSD show?", "acceptedAnswer": { "@type": "Answer", "text": "FPS and a frametime graph, GPU load, temperature, clock, power draw and VRAM, plus CPU load, temperature, clock, power draw and RAM. You choose per category which values are visible." } },
+      { "@type": "Question", "name": "Do I need MSI Afterburner or RTSS for this?", "acceptedAnswer": { "@type": "Answer", "text": "No. Lumora ships the complete measurement chain itself: FPS via Intel's PresentMon, CPU sensors via the signed open-source driver PawnIO – the same foundation used by well-known tools like LibreHardwareMonitor and FanControl. If you already use Afterburner, both run side by side just fine." } },
+      { "@type": "Question", "name": "Does the OSD work in fullscreen?", "acceptedAnswer": { "@type": "Answer", "text": "The OSD overlays borderless games (borderless/windowed fullscreen) – the standard mode of most modern games. Position, size, design and transparency are edited live in-game, with mouse or gamepad." } }
+    ]
+  }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg:#0a0a0f; --border:#1e1e2e; --accent:#8a6cff; --accent2:#7ab3ff; --text:#d8d8e8; --muted:#6a6a8a; --card:#111118; }
+    html { scrollbar-width: thin; scrollbar-color: #2a2a3a transparent; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 48px 20px; }
+    .wrap { max-width: 860px; margin: 0 auto; }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .back { display: inline-block; margin-bottom: 26px; font-size: 14px; color: var(--muted); }
+    .lang { float: right; font-size: 14px; }
+    h1 { font-size: 2.1rem; color: #fff; margin-bottom: 12px; letter-spacing: -.5px; line-height: 1.25; }
+    h2 { font-size: 1.3rem; color: #fff; margin: 40px 0 12px; }
+    p { margin-bottom: 12px; }
+    .lead { font-size: 1.08rem; color: #b8b8cc; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .cta { display: inline-block; background: linear-gradient(135deg, var(--accent), #6a8cff); color: #fff; font-weight: 700; padding: 13px 30px; border-radius: 12px; margin: 18px 0 6px; }
+    .cta:hover { text-decoration: none; filter: brightness(1.1); }
+    ul.feat { list-style: none; margin: 12px 0; }
+    ul.feat li { padding: 7px 0 7px 30px; position: relative; }
+    ul.feat li::before { content: "✔"; position: absolute; left: 4px; color: #6ee7a0; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px; margin: 14px 0; }
+    footer { max-width: 860px; margin: 48px auto 0; padding-top: 18px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <span class="lang"><a href="../gaming-osd.html">🇩🇪 Deutsch</a></span>
+    <a class="back" href="index.html">← Lumora – Home</a>
+
+    <h1>Show FPS &amp; hardware stats in-game – without tool juggling</h1>
+    <p class="lead">How many FPS? Is the GPU running hot? Are frametimes causing the stutter? Lumora's gaming OSD overlays exactly the values you care about on top of your game – <strong>pretty, configurable and completely free.</strong></p>
+    <a class="cta" href="../download.php">⬇ Download Lumora for free</a>
+    <p class="muted">For Windows 10 &amp; 11 · NVIDIA, AMD &amp; Intel · open-source based</p>
+
+    <h2>What the OSD can do</h2>
+    <div class="card">
+      <ul class="feat">
+        <li><strong>FPS &amp; frametime graph</strong> – measured precisely via Intel's PresentMon, not estimated.</li>
+        <li><strong>GPU:</strong> load, temperature, clock, power draw, VRAM – NVIDIA, AMD and Intel, including multi-GPU systems (display GPU selectable).</li>
+        <li><strong>CPU:</strong> load, temperature, clock, power draw, RAM – sensors run through the <em>signed</em> open-source driver PawnIO (the same foundation as LibreHardwareMonitor and FanControl), set up with a single click.</li>
+        <li><strong>6 designs</strong>, from subtle to detailed – plus a free choice of which values appear per category.</li>
+        <li><strong>Live editing in-game:</strong> change position, design and transparency right on top of your running game – with mouse or gamepad, no alt-tabbing.</li>
+        <li><strong>Hotkey or gamepad combo</strong> to toggle – freely bindable, works mid-game.</li>
+      </ul>
+    </div>
+
+    <h2>Why no extra tool is needed</h2>
+    <p>Getting an FPS display plus hardware monitoring used to mean combining several programs with separate configuration. Lumora ships the whole chain – measurement, display, controls – built into the launcher you use to start your games anyway. Already using Afterburner &amp; co.? Both coexist peacefully.</p>
+
+    <h2>And by the way…</h2>
+    <p>Lumora is first and foremost a game launcher: all your games from Steam, Epic, GOG, Xbox, EA &amp; more in one cover library, per-game automatic HDR, playtime tracking – and <a href="streaming.html">4K game streaming to your friends' browsers</a>. The OSD is one of many building blocks.</p>
+
+    <p><a class="cta" href="../download.php">⬇ Download now for free</a></p>
+
+    <h2>More from Lumora</h2>
+    <p>
+      <a href="streaming.html">Stream your game in 4K to friends →</a><br>
+      <a href="gamepad.html">Control the whole launcher with a gamepad →</a>
+    </p>
+  </div>
+  <footer>
+    <p><a href="index.html">Lumora</a> · Free for Windows 10/11 · <a href="../impressum.html">Imprint</a> · <a href="../datenschutz.html">Privacy</a> · <a href="../gaming-osd.html">Deutsch</a></p>
+    <p style="margin-top:6px">MSI Afterburner, RTSS and all mentioned tools are trademarks or projects of their respective owners.</p>
+  </footer>
+</body>
+</html>
