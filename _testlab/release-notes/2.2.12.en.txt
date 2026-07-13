@@ -1,0 +1,8 @@
+New: Lumora now in English – and even more stable streaming
+
+• Bilingual: Lumora is now fully available in English and German. The language can be switched in the settings and is asked for right during installation.
+• 4K over mobile data tamed: if a viewer has weak reception, Lumora now lowers the bitrate immediately and far enough (down to 4 Mbit) – a stable picture is there in seconds instead of after several attempts.
+• Clean audio on every system: even with 44.1 kHz devices (hi-fi DACs) or surround outputs, the stream audio stays correct and in sync.
+• More robust streaming: automatic recovery if the transmission service briefly drops out; a clear message if a port is in use; the picture stays sharp when the shared window switches to fullscreen; a color hint for HDR displays.
+• Connection stays alive: after a forced nightly reconnect (new IP address), the share link re-establishes itself automatically.
+• Leaner updates: from now on new versions only download the changed parts instead of the whole package – faster and more data-friendly.

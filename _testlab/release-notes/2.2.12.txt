@@ -1,0 +1,8 @@
+Neu: Lumora auf Englisch – und noch stabileres Streaming
+
+• Zweisprachig: Lumora gibt es jetzt komplett auf Deutsch und Englisch. Die Sprache lässt sich in den Einstellungen umschalten und wird schon bei der Installation abgefragt.
+• 4K über Mobilfunk gezähmt: Hat ein Zuschauer schwachen Empfang, senkt Lumora die Bitrate jetzt sofort und tief genug (bis 4 Mbit) – ein stabiles Bild steht in Sekunden statt nach mehreren Anläufen.
+• Ton auf jedem System sauber: Auch mit 44,1-kHz-Geräten (Hi-Fi-DACs) oder Surround-Ausgängen bleibt der Stream-Ton korrekt und synchron.
+• Streaming robuster: automatische Erholung, wenn der Übertragungsdienst kurz aussetzt; klare Meldung, falls ein Port belegt ist; das Bild bleibt scharf, wenn das geteilte Fenster auf Vollbild wechselt; Farb-Hinweis bei HDR-Bildschirmen.
+• Verbindung bleibt bestehen: Bei einer nächtlichen Zwangstrennung (neue IP-Adresse) richtet sich der Freigabe-Link automatisch neu ein.
+• Schlankere Updates: Neue Versionen laden künftig nur noch die geänderten Teile statt des kompletten Pakets – schneller und datensparsamer.
