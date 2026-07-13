@@ -487,6 +487,10 @@ function setupGpuName() {
 // und Power brauchen ein Sensor-Tool -> wir lesen sie aus Afterburner (MAHM),
 // falls aktiv; sonst bleiben sie null und werden im OSD ausgeblendet.
 let prevCpu = null
+// CPU-Last: Delta aus os.cpus()-Zeiten, zusaetzlich per EMA (~1 s) geglaettet -
+// das OSD tickt 5x/s, der Rohwert eines 200-ms-Fensters zappelt sonst stark
+// (Task-Manager mittelt genauso ueber ~1 s). Temp/Takt/Power bleiben ungeglaettet.
+let cpuLoadEma = null
 function cpuLoadPercent() {
   const cpus = os.cpus()
   let idle = 0, total = 0
@@ -494,7 +498,9 @@ function cpuLoadPercent() {
   if (!prevCpu) { prevCpu = { idle, total }; return 0 }
   const di = idle - prevCpu.idle, dt = total - prevCpu.total
   prevCpu = { idle, total }
-  return dt > 0 ? Math.max(0, Math.min(100, Math.round((1 - di / dt) * 100))) : 0
+  const raw = dt > 0 ? Math.max(0, Math.min(100, (1 - di / dt) * 100)) : 0
+  cpuLoadEma = cpuLoadEma == null ? raw : cpuLoadEma + 0.2 * (raw - cpuLoadEma)
+  return Math.round(cpuLoadEma)
 }
 function readCpu() {
   const raw = (os.cpus()[0] && os.cpus()[0].model) || 'CPU'
@@ -1438,7 +1444,7 @@ function runSensorBroker() {
       powerX10: watts >= 0 ? Math.round(watts * 10) : -1,
       pid: process.pid, _r: 0,
     })
-  }, 1000)
+  }, 500)   // 2 Hz: Temp/Power reagieren fluessiger; Power-Delta bleibt genau genug (MSR-Read kostet ~us, separater Broker-Prozess)
   let cleaned = false
   function cleanup() { if (cleaned) return; cleaned = true; clearInterval(timer); if (pio) pio.close(); app.quit() }
   app.on('window-all-closed', (e) => e.preventDefault())   // Broker hat kein Fenster
