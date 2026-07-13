@@ -1,0 +1,9 @@
+New: the stream adapts to reception – and runs smoother all around
+
+• Automatic bitrate: if a viewer has weak reception (e.g. on mobile data), Lumora lowers the bitrate in steps until the picture runs stable – and raises it again once the connection allows. The stream status shows when it's being reduced; can be turned off in the stream settings.
+• Stutters and audio dropouts eliminated: two deep-seated bottlenecks in the transmission chain caused periodic dropouts – both tracked down and fixed. 4K at 60 fps now runs smoothly throughout.
+• Audio and video stay permanently in sync: even with audio pauses (e.g. YouTube), window-size changes or hours-long streams, no delay builds up anymore.
+• Stream start in about 2 seconds instead of 10: router queries run in parallel with short timeouts – the public link is ready almost instantly.
+• Screen streams now go GPU-direct into the encoder (no detour via the main processor) – less load, more headroom for the game.
+• Web player: subtle playback-duration display; a tap on the picture shows and hides the controls.
+• Default receive buffer raised to 300 ms – smoother picture on shaky connections (still freely adjustable).

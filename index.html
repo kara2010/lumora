@@ -3292,7 +3292,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
 
     ipcRenderer.on('update-available', (e, info) => {
       document.getElementById('updateVersion').textContent = info.version
-      renderChangelog(document.getElementById('updateChangelog'), info.notes)
+      // Zweisprachige Release-Notes: englische Version zeigen, wenn die App auf
+      // Englisch laeuft UND welche mitgeliefert wurden; sonst die deutschen.
+      const notes = (window.LANG === 'en' && info.notesEn) ? info.notesEn : info.notes
+      renderChangelog(document.getElementById('updateChangelog'), notes)
       updateOverlay.style.display = 'flex'
     })
 

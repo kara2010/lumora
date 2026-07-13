@@ -19,7 +19,12 @@ $yml = "$src\dist\latest.yml"
 if (-not (Test-Path $yml)) { throw "latest.yml fehlt - Build fehlgeschlagen?" }
 
 # 2) Release-Notes einfuegen (YAML Block-Scalar); evtl. vorhandenen Block ersetzen.
+#    Zweisprachig: gibt es <version>.en.txt, wird sie mit dem Marker ===EN===
+#    an die deutschen Notes angehaengt (latest.yml kann nur EIN releaseNotes-Feld;
+#    main.js splittet den Marker clientseitig). Der Update-Dialog zeigt je nach
+#    App-Sprache DE oder EN.
 $notesFile = "$src\_testlab\release-notes\$ver.txt"
+$notesFileEn = "$src\_testlab\release-notes\$ver.en.txt"
 if (Test-Path $notesFile) {
   $keep = @()
   $skip = $false
@@ -32,10 +37,16 @@ if (Test-Path $notesFile) {
   $notes = Get-Content $notesFile -Encoding UTF8
   $block = @("releaseNotes: |")
   foreach ($n in $notes) { $block += ("  " + $n) }
+  if (Test-Path $notesFileEn) {
+    $block += "  ===EN==="
+    foreach ($n in (Get-Content $notesFileEn -Encoding UTF8)) { $block += ("  " + $n) }
+  } else {
+    Write-Host "WARN: keine EN-Notes-Datei $notesFileEn - englische Nutzer sehen die deutschen Notes."
+  }
   # UTF-8 OHNE BOM schreiben (BOM kann den YAML-Parser des Updaters stoeren).
   $outText = (($keep + $block) -join "`n") + "`n"
   [System.IO.File]::WriteAllText($yml, $outText, (New-Object System.Text.UTF8Encoding($false)))
-  Write-Host ("Release-Notes eingefuegt: " + $notes.Count + " Zeilen.")
+  Write-Host ("Release-Notes eingefuegt: " + $notes.Count + " Zeilen DE" + $(if (Test-Path $notesFileEn) { " + EN" } else { "" }) + ".")
 } else {
   Write-Host "WARN: keine Notes-Datei $notesFile - latest.yml ohne releaseNotes."
 }
@@ -97,9 +108,11 @@ foreach ($f in $files) {
 }
 $notesText = ''
 if (Test-Path $notesFile) { $notesText = ([System.IO.File]::ReadAllText($notesFile)).Trim() }
+$notesTextEn = ''
+if (Test-Path $notesFileEn) { $notesTextEn = ([System.IO.File]::ReadAllText($notesFileEn)).Trim() }
 $elRaw = (Get-Content "$src\package.json" -Raw | ConvertFrom-Json).devDependencies.electron
 $elMajor = [int][regex]::Match($elRaw, '\d+').Value
-$mf = [pscustomobject]@{ version = $ver; minElectron = $elMajor; notes = $notesText; files = $entries }
+$mf = [pscustomobject]@{ version = $ver; minElectron = $elMajor; notes = $notesText; notesEn = $notesTextEn; files = $entries }
 [System.IO.File]::WriteAllText("$appUpd\manifest.json", ($mf | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding($false)))
 Write-Host ("Datei-Update-Manifest: " + $entries.Count + " Dateien erfasst, " + $changedList.Count + " geaendert seit letztem Manifest.")
 
