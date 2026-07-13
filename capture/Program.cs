@@ -1054,6 +1054,7 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                 try
                 {
                     var clock = new System.Diagnostics.Stopwatch();
+                    var startWait = System.Diagnostics.Stopwatch.StartNew();   // Anlaufzeit bis Stille-Notstart
                     long written = 0;
                     bool started = false;
                     long filledTotal = 0;
@@ -1100,7 +1101,16 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
                             continue;
                         }
                         if (queue.IsAddingCompleted) break;        // Recording gestoppt & leer
-                        if (!started) continue;                    // vor dem ersten Ton nichts erzwingen
+                        if (!started)
+                        {
+                            // Kommt binnen 200 ms KEIN echter Ton (das Ausgabegeraet spielt nichts ab
+                            // -> WASAPI-Loopback feuert DataAvailable GAR NICHT), selbst mit Stille als
+                            // Nullpunkt beginnen. Sonst wartet FFmpeg ewig auf den ersten Audio-Frame
+                            // und der GANZE Bild-Stream blockiert -> der Bildschirm-Stream startet bei
+                            // Stille nicht. Sobald echter Ton kommt, laeuft die Budget-Logik ab hier.
+                            if (startWait.ElapsedMilliseconds < 200) continue;
+                            started = true; clock.Restart();
+                        }
                         // 150 ms Hysterese (praxiserprobter Wert) fuer den EINSTIEG in eine
                         // Pause: Lieferstaus unterhalb davon sind normale Latenzspitzen unter
                         // Last - dort NICHT fuellen, sonst entstuende genau dann ein hoerbarer
