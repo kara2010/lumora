@@ -39,3 +39,8 @@ capture/obj/
 # TLS-Schluessel/Zertifikat fuer das lokale Streaming (Secrets – NIE ins Repo)
 auto.key
 auto.crt
+
+# Deployment-Geheimnisse (Token) – NIE ins Repo. Nur die *.example-Vorlagen sind getrackt.
+website/deploy.secret.php
+_testlab/deploy.local.json
+_testlab/deploy-plan*.json
