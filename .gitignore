@@ -41,6 +41,8 @@ auto.key
 auto.crt
 
 # Deployment-Geheimnisse (Token) – NIE ins Repo. Nur die *.example-Vorlagen sind getrackt.
-website/deploy.secret.php
+# Das Geheimnis-File hat einen unauffaelligen Zufallsnamen (Praefix lib-), damit es
+# nicht erratbar ist; der Endpunkt selbst (sync-<random>.php) IST getrackt (Code).
+website/lib-*.php
 _testlab/deploy.local.json
 _testlab/deploy-plan*.json
