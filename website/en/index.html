@@ -584,6 +584,20 @@
     }
     .release li strong { color: var(--text); }
 
+    /* Changelog: only the latest 4 versions visible, rest expandable */
+    .changelog-rest { display: none; flex-direction: column; gap: 18px; }
+    .changelog-rest.open { display: flex; }
+    /* Feature grid: only the key ones visible, rest flows back into the grid via display:contents */
+    .features-rest { display: none; }
+    .features-rest.open { display: contents; }
+    .more-toggle {
+      display: block; margin: 24px auto 0; padding: 11px 22px;
+      background: none; border: 1px solid var(--border); border-radius: 999px;
+      color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer;
+      transition: border-color .2s, color .2s;
+    }
+    .more-toggle:hover { border-color: var(--accent2); color: var(--accent2); }
+
     /* ── INSTALL NOTE ───────────────────── */
     .install-steps {
       display: flex;
@@ -1138,7 +1152,7 @@
         <div class="feature-icon">📡</div>
         <div>
           <h3>Share your game live via link</h3>
-          <p>Stream your game with sound straight from Lumora – smoothly in Full&nbsp;HD (1920×1080, 60&nbsp;fps) with a good bitrate, up to 1440p or 4K if you like. Viewers just open a link in their browser, no install at all. Either the whole screen or a specific window/game. Hardware encoding on your graphics card, with a viewer list and an adjustable playback buffer. <strong>The connection sets itself up automatically</strong> – Lumora detects your router, opens the required port itself and, on modern connections without a public IPv4 address, uses the <strong>IPv6 direct path</strong>. A custom TURN server is possible, for pros.</p>
+          <p>Stream your game with sound via a link – smooth Full&nbsp;HD (1080p60), up to 4K if you like. Viewers just open the link in their browser, no install at all. The connection sets itself up <strong>automatically</strong>. <a href="streaming.html" style="color:var(--accent2)">More on streaming →</a></p>
         </div>
       </div>
       <div class="feature">
@@ -1148,6 +1162,7 @@
           <p>Mark favorites, search instantly and sort by name, playtime or last played.</p>
         </div>
       </div>
+      <div class="features-rest" id="featuresRest">
       <div class="feature">
         <div class="feature-icon">🎮</div>
         <div>
@@ -1204,7 +1219,9 @@
           <p>No cloud, no registration, no background processes after closing. Internet only for loading covers &amp; info.</p>
         </div>
       </div>
+      </div><!-- /#featuresRest -->
     </div>
+    <button class="more-toggle" id="featuresToggle" onclick="toggleFeatures()" aria-expanded="false">Show all features (8)</button>
   </div>
 </section>
 
@@ -1261,6 +1278,7 @@
           <li><strong>Web player</strong>: subtle playback-duration display · controls toggled by tapping · default receive buffer raised to 300&nbsp;ms (smoother picture on shaky connections).</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.10</span>
@@ -1401,7 +1419,9 @@
           <li>More reliable <strong>playtime tracking</strong> and improvements to game launching across all stores.</li>
         </ul>
       </div>
+      </div><!-- /#changelogRest -->
     </div>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (13)</button>
   </div>
 </section>
 
@@ -1775,6 +1795,24 @@
       + '&body=' + encodeURIComponent('Open and download on your Windows PC:\n\n' + url);
     if (isMobileDevice()) document.body.classList.add('is-mobile');
   })();
+
+  function toggleChangelog() {
+    var rest = document.getElementById('changelogRest');
+    var btn = document.getElementById('changelogToggle');
+    if (!rest || !btn) return;
+    var open = rest.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.textContent = open ? 'Show less' : 'Show older versions (13)';
+  }
+
+  function toggleFeatures() {
+    var rest = document.getElementById('featuresRest');
+    var btn = document.getElementById('featuresToggle');
+    if (!rest || !btn) return;
+    var open = rest.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.textContent = open ? 'Show less' : 'Show all features (8)';
+  }
 
   loadCount();
 
