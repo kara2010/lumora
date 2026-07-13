@@ -45,7 +45,7 @@ if (!$https) bail(403, 'https required');
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') bail(405, 'post only');
 
 // --- 1) Geheimnis + optionale Allowlist laden (separat, gitignored) ---------
-$secretFile = __DIR__ . '/deploy.secret.php';
+$secretFile = __DIR__ . '/lib-46e31f11e28b.php';
 if (!is_file($secretFile)) bail(503, 'disabled');
 $cfg = require $secretFile;
 // deploy.secret.php gibt entweder das Token (String) ODER ein Array zurueck:
@@ -71,8 +71,9 @@ if (!preg_match('#^[A-Za-z0-9._/-]+$#', $rel)) bail(400, 'bad path');
 foreach (explode('/', $rel) as $seg) {
   if ($seg === '' || $seg === '.' || $seg === '..') bail(400, 'bad path');
 }
-// Selbstschutz: Endpunkt, Geheimnis und Server-Config nie ueberschreibbar
-$protected = ['deploy.php', 'deploy.secret.php', '.htaccess', '.htpasswd'];
+// Selbstschutz: der Endpunkt und sein Geheimnis (dynamisch ermittelt, egal wie
+// die Dateien heissen) sowie Server-Config sind nie ueberschreibbar.
+$protected = [strtolower(basename(__FILE__)), strtolower(basename($secretFile)), '.htaccess', '.htpasswd'];
 if (in_array(strtolower(basename($rel)), $protected, true)) bail(403, 'protected');
 
 // Pfad-Policy (Blast-Radius-Begrenzung eines Token-Leaks). 'deny' hat Vorrang:
