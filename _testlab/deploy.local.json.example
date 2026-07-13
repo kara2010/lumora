@@ -1,0 +1,5 @@
+{
+  "_hinweis": "VORLAGE. Kopie ohne '.example' (deploy.local.json) ist gitignored. Enthaelt Deploy-Ziel + Token (identisch mit deploy.secret.php auf dem Server).",
+  "baseUrl": "https://lumora.kara-webdesign.de/deploy.php",
+  "token": "HIER-DASSELBE-GEHEIME-TOKEN-WIE-AUF-DEM-SERVER"
+}
