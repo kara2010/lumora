@@ -1,0 +1,4 @@
+Zuverlässige Updates – und Lumora lückenlos auf Englisch
+
+• Schlanke Updates repariert: Neue Versionen laden sich jetzt zuverlässig als kleines Paket herunter – der Update-Vorgang bleibt nicht mehr hängen und meldet Fehler klar, statt stehen zu bleiben.
+• Lumora lückenlos auf Englisch: die letzten noch deutschen Texte (Info-/Transparenz-Dialog, SteamGridDB-Anleitung, FritzBox-Hilfe, OSD-Erklärungen) erscheinen im Englisch-Modus jetzt vollständig auf Englisch.

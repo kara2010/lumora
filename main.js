@@ -5370,6 +5370,7 @@ function checkForUpdates(manual) {
 const FU_MANIFEST_URL = 'https://lumora.kara-webdesign.de/updates/app/manifest.json'
 let fuPending = null   // Manifest eines ausstehenden Updates (nach fuCheck)
 let fuReady = false    // Staging vollstaendig verifiziert -> Neustart moeglich
+let fuDownloading = false  // Re-Entrancy-Schutz: laeuft gerade ein Datei-Download?
 function fuStagingDir() { return path.join(app.getPath('userData'), 'update-staging') }
 function fuVersionNewer(a, b) {   // ist a neuer als b?
   const pa = String(a).split('.').map((x) => parseInt(x, 10) || 0)
@@ -5381,9 +5382,12 @@ function fuVersionNewer(a, b) {   // ist a neuer als b?
 }
 // Manifest-Pfade absichern: nur schlichte relative Pfade INNERHALB von
 // resources (Tiefenverteidigung, obwohl das Manifest von der eigenen
-// HTTPS-Domain kommt).
+// HTTPS-Domain kommt). Das Zeichen-Whitelist MUSS scoped npm-Pakete zulassen
+// (@scope/name, z.B. @koromix/koffi) sowie '+'/'~' - sonst scheitert der
+// gesamte Download an einem einzigen gueltigen Modulpfad. Die eigentliche
+// Ausbruch-Sicherheit leisten der '..'-Ausschluss + der startsWith-Check.
 function fuSafeTarget(rel) {
-  if (typeof rel !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(rel) || rel.includes('..')) return null
+  if (typeof rel !== 'string' || !/^[A-Za-z0-9._@+~/-]+$/.test(rel) || rel.includes('..')) return null
   const abs = path.resolve(process.resourcesPath, rel)
   return abs.startsWith(path.resolve(process.resourcesPath) + path.sep) ? abs : null
 }
@@ -5401,13 +5405,18 @@ function fuHttpsGet(url, destPath, onData, redirects) {
         res.on('data', (c) => { buf += c; if (buf.length > 1048576) req.destroy(new Error('Manifest zu gross')) })
         res.on('end', () => resolve(buf))
       } else {
-        const fs2 = require('fs')
-        fs2.mkdirSync(path.dirname(destPath), { recursive: true })
-        const out = fs2.createWriteStream(destPath)
-        res.on('data', (c) => { if (onData) onData(c.length) })
-        res.pipe(out)
-        out.on('finish', () => out.close(() => resolve(destPath)))
-        out.on('error', reject)
+        // Synchrone Fehler (mkdirSync: MAX_PATH, Platte voll, ENOTDIR) laufen im
+        // Response-Callback AUSSERHALB des Promise-Executors - ohne dieses
+        // try/catch bliebe das Promise ewig offen und fuDownload haenge still.
+        try {
+          const fs2 = require('fs')
+          fs2.mkdirSync(path.dirname(destPath), { recursive: true })
+          const out = fs2.createWriteStream(destPath)
+          res.on('data', (c) => { if (onData) onData(c.length) })
+          res.pipe(out)
+          out.on('finish', () => out.close(() => resolve(destPath)))
+          out.on('error', reject)
+        } catch (e) { res.resume(); reject(e) }
       }
       res.on('error', reject)
     })
@@ -5501,8 +5510,9 @@ function fuInstall() {
     'function L($m) { try { Add-Content -Path $log -Value ((Get-Date -Format o) + \" \" + $m) } catch {} }',
     'L (\"apply start pid=\" + $LumoraPid)',
     'try { Wait-Process -Id $LumoraPid -Timeout 30 -ErrorAction SilentlyContinue } catch {}',
+    "if ($ExePath) { try { Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $ExePath } | Stop-Process -Force -ErrorAction SilentlyContinue } catch {} }",
     'Start-Sleep -Milliseconds 500',
-    "$list = Get-Content (Join-Path $PSScriptRoot 'apply-list.txt')",
+    "$list = Get-Content -Encoding UTF8 (Join-Path $PSScriptRoot 'apply-list.txt')",
     '$done = @()',
     '$ok = $true',
     'foreach ($line in $list) {',
@@ -5512,11 +5522,17 @@ function fuInstall() {
     '    New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null',
     '    if (Test-Path $bak) { Remove-Item -Force $bak }',
     '    $moved = $false',
+    '    $backedUp = $false',
     '    for ($i = 0; $i -lt 20; $i++) {',
-    '      try { if (Test-Path $dst) { Move-Item -Force $dst $bak }; Move-Item -Force $src $dst; $moved = $true; break }',
-    '      catch { Start-Sleep -Milliseconds 500 }',
+    '      try {',
+    '        if (Test-Path $dst) { Move-Item -Force $dst $bak; $backedUp = $true }',
+    '        Move-Item -Force $src $dst; $moved = $true; break',
+    '      } catch { Start-Sleep -Milliseconds 500 }',
     '    }',
-    '    if (-not $moved) { throw (\"gesperrt: \" + $dst) }',
+    '    if (-not $moved) {',
+    '      if ($backedUp -and (Test-Path $bak) -and -not (Test-Path $dst)) { try { Move-Item -Force $bak $dst } catch {} }',
+    '      throw (\"gesperrt: \" + $dst)',
+    '    }',
     '    $done += ,@($dst, $bak)',
     '    L (\"ok \" + $dst)',
     '  } catch { L (\"FEHLER \" + $_.Exception.Message); $ok = $false; break }',
@@ -5595,12 +5611,16 @@ ipcMain.handle('check-for-updates', () => { checkForUpdates(true) })
 ipcMain.handle('download-update', () => {
   // Ausstehendes Datei-Update hat Vorrang (fuCheck lief nach dem Feed-Check).
   if (fuPending) {
+    if (fuDownloading) return   // Re-Entrancy: laeuft schon -> zweiten Klick ignorieren
+    fuDownloading = true
     return fuDownload().catch((e) => {
       osdDbg('[update] Download fehlgeschlagen: ' + (e && e.message))
       sendToUi('update-error', { message: String(e && e.message || e) })
-    })
+    }).finally(() => { fuDownloading = false })
   }
-  if (autoUpdater) autoUpdater.downloadUpdate().catch(() => {})
+  // electron-updater-Zweig: Fehler NICHT verschlucken - sonst haengt der
+  // sichtbare "Update wird geladen"-Toast ewig (dieselbe Klasse wie BUG B).
+  if (autoUpdater) autoUpdater.downloadUpdate().catch((err) => sendToUi('update-error', { message: String(err && err.message || err) }))
 })
 // isSilent=true -> Installer mit /S (kein Wizard, In-Place-Update am gespeicherten
 // Pfad); isForceRunAfter=true -> Lumora danach automatisch neu starten. Ohne das

@@ -1,0 +1,4 @@
+Reliable updates – and Lumora fully in English
+
+• Lean updates fixed: new versions now download reliably as a small package – the update no longer gets stuck and reports errors clearly instead of hanging.
+• Lumora fully in English: the last remaining German texts (About/Transparency dialog, SteamGridDB guide, FritzBox help, OSD explanations) now appear entirely in English in English mode.
