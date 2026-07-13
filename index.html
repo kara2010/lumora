@@ -852,6 +852,21 @@ const I18N_EN = {
   'Update fehlgeschlagen': 'Update failed',
   'Bitte später erneut versuchen.': 'Please try again later.',
   'Neu starten & installieren': 'Restart & install',
+  'Last': 'Load',
+  'Verbrauch': 'Power',
+  'Takt': 'Clock',
+  'Blau': 'Blue',
+  'Lila': 'Purple',
+  'Türkis': 'Turquoise',
+  'Grün': 'Green',
+  'Aktuell': 'Current',
+  'Aktuelles ': 'Current ',
+  'HDR wird beim Start aktiviert und beim Beenden abgeschaltet.': 'HDR is enabled on launch and turned off on exit.',
+  'Spiel wird ohne HDR-Umschaltung gestartet.': 'Game starts without HDR switching.',
+  'Alles bereit – dein Stream ist aus dem Internet erreichbar.': 'All set – your stream is reachable from the internet.',
+  'Grundsätzlich möglich, aber ein Punkt braucht deine Aufmerksamkeit:': 'Basically possible, but one point needs your attention:',
+  'Direktes Streaming ist mit diesem Anschluss nicht möglich.': 'Direct streaming is not possible with this connection.',
+  ' – belegt, andere wählen': ' – taken, choose another',
   'Ausgewählte hinzufügen': 'Add selected',
   'Spiel hinzufügen': 'Add game',
   'Pfad zur .exe': 'Path to the .exe',
@@ -1384,8 +1399,8 @@ function applyI18n() {
       const cur = document.createElement('div')
       cur.className = 'cover-cell current'
       cur.innerHTML = '<img src="' + mediaSrc(currentArt) + '">' +
-        '<span class="current-badge">Aktuell</span>' +
-        '<span class="cover-cell-cap">Aktuelles ' + (coverSearchMode === 'hero' ? 'Hero-Banner' : 'Cover') + '</span>'
+        '<span class="current-badge">' + window.tr('Aktuell') + '</span>' +
+        '<span class="cover-cell-cap">' + window.tr('Aktuelles ') + window.tr(coverSearchMode === 'hero' ? 'Hero-Banner' : 'Cover') + '</span>'
       box.appendChild(cur)
     }
 
@@ -2064,8 +2079,8 @@ function applyI18n() {
 
     function updateHdrSubLabel(on) {
       document.getElementById('hdrSubLabel').textContent = on
-        ? 'HDR wird beim Start aktiviert und beim Beenden abgeschaltet.'
-        : 'Spiel wird ohne HDR-Umschaltung gestartet.'
+        ? window.tr('HDR wird beim Start aktiviert und beim Beenden abgeschaltet.')
+        : window.tr('Spiel wird ohne HDR-Umschaltung gestartet.')
     }
 
     function toggleGameHdr() {
@@ -2356,7 +2371,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('osdFieldsUi').innerHTML = Object.keys(OSD_FIELD_DEFS).map(cat =>
         `<div class="osd-fields-grp"><div class="grp">${cat.toUpperCase()}</div><div class="osd-chips-grid">` +
         OSD_FIELD_DEFS[cat].map(([f, lbl]) =>
-          `<button type="button" class="osd-chip${osdFieldsState[cat].includes(f) ? ' on' : ''}" data-cat="${cat}" data-f="${f}" onclick="toggleOsdField('${cat}','${f}')">${lbl}</button>`
+          `<button type="button" class="osd-chip${osdFieldsState[cat].includes(f) ? ' on' : ''}" data-cat="${cat}" data-f="${f}" onclick="toggleOsdField('${cat}','${f}')">${window.tr(lbl)}</button>`
         ).join('') + `</div></div>`
       ).join('')
     }
@@ -2852,7 +2867,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
           error: 'Direktes Streaming ist mit diesem Anschluss nicht möglich.' }
         const border = { ok: '#4ade80', warn: '#f5b942', error: '#f05a5a' }
         let html = '<div style="border-left:3px solid ' + border[r.verdict] + '; padding:8px 12px; background:rgba(255,255,255,.03); border-radius:6px">'
-        html += '<p style="margin:0 0 8px; font-weight:600">' + icon[r.verdict] + ' ' + head[r.verdict] + '</p>'
+        html += '<p style="margin:0 0 8px; font-weight:600">' + icon[r.verdict] + ' ' + window.tr(head[r.verdict]) + '</p>'
         for (const s of r.steps) {
           html += '<p class="settings-hint" style="margin:5px 0"><b>' + icon[s.state] + ' ' + s.label + ':</b> ' + s.detail + '</p>'
         }
@@ -3007,7 +3022,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       try { gpus = await ipcRenderer.invoke('list-gpus') } catch {}
       sel.innerHTML = ''
       const optAuto = document.createElement('option')
-      optAuto.value = 'auto'; optAuto.textContent = 'Automatisch (schnellste)'
+      optAuto.value = 'auto'; optAuto.textContent = window.tr('Automatisch (schnellste)')
       sel.appendChild(optAuto)
       for (const g of gpus) {
         const o = document.createElement('option')
@@ -3061,7 +3076,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const wrap = document.getElementById('accentSwatches')
       if (!wrap) return
       wrap.innerHTML = ACCENTS.map(a =>
-        `<button class="accent-swatch${a.hex.toLowerCase() === accentHex.toLowerCase() ? ' active' : ''}" style="background:${a.hex}" title="${a.name}" onclick="setAccent('${a.hex}','${a.rgb}')"></button>`
+        `<button class="accent-swatch${a.hex.toLowerCase() === accentHex.toLowerCase() ? ' active' : ''}" style="background:${a.hex}" title="${window.tr(a.name)}" onclick="setAccent('${a.hex}','${a.rgb}')"></button>`
       ).join('')
     }
 
@@ -3426,14 +3441,14 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     let kbCaptureSlot = null           // null | 'main' | 'osd' | 'osdEdit'
     function refreshHotkeyDisplay(slot) {
       const s = KB_SLOTS[slot]; const disp = document.getElementById(s.disp)
-      if (disp) disp.textContent = appSettingsCache[s.key] || 'Aus'
+      if (disp) disp.textContent = appSettingsCache[s.key] || window.tr('Aus')
     }
     function toggleHotkeyCapture(slot) { kbCaptureSlot === slot ? stopHotkeyCapture() : startHotkeyCapture(slot) }
     function startHotkeyCapture(slot) {
       if (kbCaptureSlot && kbCaptureSlot !== slot) stopHotkeyCapture()
       kbCaptureSlot = slot
       document.getElementById(KB_SLOTS[slot].disp).textContent = window.tr('Kombination drücken…')
-      document.getElementById(KB_SLOTS[slot].btn).textContent = 'Abbrechen'
+      document.getElementById(KB_SLOTS[slot].btn).textContent = window.tr('Abbrechen')
     }
     function stopHotkeyCapture() {
       const slot = kbCaptureSlot
@@ -3475,7 +3490,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const done = kbCaptureSlot; kbCaptureSlot = null
       document.getElementById(KB_SLOTS[done].btn).textContent = window.tr('Ändern')
       if (res && res.ok) { appSettingsCache[s.key] = acc; disp.textContent = acc }
-      else disp.textContent = acc + ' – belegt, andere wählen'
+      else disp.textContent = acc + window.tr(' – belegt, andere wählen')
     }, true)
 
     // ---- Gamepad-Hotkey (globale Knopf-Kombi zum Ein-/Ausblenden) ----
@@ -3513,7 +3528,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       gpCaptureSet = null
       gpCaptureArmed = false          // A, mit dem "Aufnehmen" aktiviert wurde, erst loslassen
       document.getElementById(s.disp).textContent = window.tr('Knöpfe drücken (auch mehrere gleichzeitig)…')
-      document.getElementById(s.btn).textContent = 'Abbrechen'
+      document.getElementById(s.btn).textContent = window.tr('Abbrechen')
       if (hint) { hint.style.display = 'block'; hint.textContent = window.tr('Tipp: z. B. D-Pad ← halten und Y dazu drücken. Loslassen speichert die Kombi.') }
     }
     function stopGpHotkeyCapture() {
@@ -3522,7 +3537,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       gpCaptureSet = null
       if (!slot) return
       const s = GP_SLOTS[slot]
-      const b = document.getElementById(s.btn); if (b) b.textContent = 'Aufnehmen'
+      const b = document.getElementById(s.btn); if (b) b.textContent = window.tr('Aufnehmen')
       const hint = document.getElementById(s.hint); if (hint) hint.style.display = 'none'
       refreshGpHotkeyDisplay(slot)
     }
@@ -3532,7 +3547,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       gpCaptureSet = null
       if (!slot) return
       const s = GP_SLOTS[slot]
-      const b = document.getElementById(s.btn); if (b) b.textContent = 'Aufnehmen'
+      const b = document.getElementById(s.btn); if (b) b.textContent = window.tr('Aufnehmen')
       const hint = document.getElementById(s.hint); if (hint) hint.style.display = 'none'
       appSettingsCache[s.key] = combo
       await ipcRenderer.invoke('set-app-settings', { [s.key]: combo })
