@@ -2684,7 +2684,7 @@ function playLog(msg) {
 }
 
 ipcMain.handle('launch-game', async (event, gamePath, opts = {}) => {
-  const useHdr = opts.useHdr !== false
+  const useHdr = opts.useHdr === true
   const launchArgs = tokenizeArgs(opts.args || '')
   const admin = !!opts.admin
   try {
@@ -2962,10 +2962,10 @@ function startExternalWatcher() {
         const s = { gamePath: g.path, name: g.name, startTs: Date.now(), absent: 0, hdrOn: false }
         externalSessions.set(exe, s)
         sendExternalRunning()
-        playLog(`EXTERN erkannt: ${exe} (${g.name}) hdr=${g.hdr !== false}`)
+        playLog(`EXTERN erkannt: ${exe} (${g.name}) hdr=${g.hdr === true}`)
         // HDR wie beim Eigenstart – aber nur, wenn nicht schon eine andere
         // Session (Eigenstart/anderes Spiel) das HDR verwaltet.
-        if (g.hdr !== false && !hdrEnabledByLauncher) {
+        if (g.hdr === true && !hdrEnabledByLauncher) {
           setHDR(true); lastHdrState = true; hdrEnabledByLauncher = true; s.hdrOn = true
           try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hdr-status', true) } catch {}
         }
