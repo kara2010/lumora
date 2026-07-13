@@ -1,0 +1,3 @@
+Polish: Lumora is now fully in English
+
+• The last remaining German texts have been translated – the About/Transparency dialog, the SteamGridDB guide, the FritzBox port-forwarding help and the OSD explanations now appear entirely in English.

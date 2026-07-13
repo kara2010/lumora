@@ -1,6 +1,6 @@
 {
   "name": "lumora",
-  "version": "2.2.12",
+  "version": "2.2.13",
   "description": "Lumora – Game Launcher mit automatischem HDR",
   "main": "main.js",
   "scripts": {

@@ -1,0 +1,3 @@
+Feinschliff: Lumora jetzt lückenlos auf Englisch
+
+• Die letzten noch deutschen Texte sind übersetzt – der Info-/Transparenz-Dialog, die SteamGridDB-Anleitung, die FritzBox-Hilfe zur Portfreigabe und die OSD-Erklärungen erscheinen im Englisch-Modus nun vollständig auf Englisch.
