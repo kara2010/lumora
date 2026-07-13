@@ -2012,7 +2012,7 @@ function applyI18n() {
       document.getElementById('detailPath').textContent = g.path
       document.getElementById('detailPlaytime').textContent = formatPlaytime(g.playtime)
       document.getElementById('detailLastPlayed').textContent = formatLastPlayed(g.lastPlayed)
-      const hdrOn = g.hdr !== false
+      const hdrOn = g.hdr === true
       document.getElementById('hdrToggle').checked = hdrOn
       updateHdrSubLabel(hdrOn)
       updateDetailInfo(g)
@@ -2101,7 +2101,7 @@ function applyI18n() {
       saveGames()
       document.getElementById('detailLastPlayed').textContent = formatLastPlayed(g.lastPlayed)
       renderList()
-      const result = await ipcRenderer.invoke('launch-game', g.path, { useHdr: g.hdr !== false, args: g.launchArgs || '', admin: !!g.runAsAdmin })
+      const result = await ipcRenderer.invoke('launch-game', g.path, { useHdr: g.hdr === true, args: g.launchArgs || '', admin: !!g.runAsAdmin })
       if (!result.success) {
         btn.disabled = false
         btn.innerHTML = '<span>' + window.tr('▶ Spiel starten') + '</span>'

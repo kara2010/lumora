@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lumora – All your games in one library, 4K game streaming &amp; gaming OSD</title>
-  <meta name="description" content="Lumora unifies your games from Steam, Epic, GOG, Xbox, EA &amp; more in one beautiful cover library – fully gamepad-controlled. HDR switches on per game automatically. New: stream your game live in 4K with sound via a link – connection incl. IPv6 direct path sets itself up automatically – plus a performance OSD with FPS, GPU and CPU stats in-game. Free for Windows 10 &amp; 11.">
+  <title>Lumora – All your games in one library, game streaming &amp; gaming OSD</title>
+  <meta name="description" content="Lumora unifies your games from Steam, Epic, GOG, Xbox, EA &amp; more in one beautiful cover library – fully gamepad-controlled. HDR switches on per game automatically. New: stream your game live via a link – smooth Full HD (1080p60) with a good bitrate, up to 4K if you like; connection incl. IPv6 direct path sets itself up automatically – plus a performance OSD with FPS, GPU and CPU stats in-game. Free for Windows 10 &amp; 11.">
   <meta name="keywords" content="game launcher, all games in one place, Steam Epic GOG Xbox together, game library Windows, launcher with gamepad, couch gaming PC, living room gaming, auto HDR, FPS counter, OSD overlay, show GPU CPU temperature, stream game via link, watch 4K game in browser, IPv6 streaming without port forwarding, free">
   <meta name="robots" content="index, follow">
   <meta name="author" content="Lumora">
@@ -21,13 +21,13 @@
   <meta property="og:type"        content="website">
   <meta property="og:url"         content="https://lumora.kara-webdesign.de/en/">
   <meta property="og:title"       content="Lumora – All your games. Auto HDR. Gaming OSD.">
-  <meta property="og:description" content="Steam, Epic, GOG, Xbox, EA & more in one beautiful cover library – fully gamepad-controlled. Auto HDR per game. New: stream your game live in 4K via a link (connection incl. IPv6 direct path automatic), FPS, GPU & CPU display in-game without Afterburner/RTSS. Free for Windows 10 / 11.">
+  <meta property="og:description" content="Steam, Epic, GOG, Xbox, EA & more in one beautiful cover library – fully gamepad-controlled. Auto HDR per game. New: stream your game live via a link – smooth Full HD (1080p60), up to 4K (connection incl. IPv6 direct path automatic), FPS, GPU & CPU display in-game without Afterburner/RTSS. Free for Windows 10 / 11.">
   <meta property="og:locale"      content="en_US">
 
   <!-- Twitter Card -->
   <meta name="twitter:card"        content="summary_large_image">
   <meta name="twitter:title"       content="Lumora – All your games. Auto HDR. Gaming OSD.">
-  <meta name="twitter:description" content="Steam, Epic, GOG, Xbox, EA & more in one beautiful cover library – fully gamepad-controlled. Auto HDR per game. New: stream your game live in 4K via a link (connection incl. IPv6 direct path automatic), FPS, GPU & CPU display in-game without Afterburner/RTSS. Free for Windows 10 / 11.">
+  <meta name="twitter:description" content="Steam, Epic, GOG, Xbox, EA & more in one beautiful cover library – fully gamepad-controlled. Auto HDR per game. New: stream your game live via a link – smooth Full HD (1080p60), up to 4K (connection incl. IPv6 direct path automatic), FPS, GPU & CPU display in-game without Afterburner/RTSS. Free for Windows 10 / 11.">
   <meta name="twitter:image"       content="https://lumora.kara-webdesign.de/screenshot.png">
 
   <!-- og:image -->
@@ -46,7 +46,7 @@
     "operatingSystem": "Windows 10, Windows 11",
     "applicationCategory": "GameApplication",
     "applicationSubCategory": "Utility",
-    "description": "Lumora unifies all your games from Steam, Epic, GOG, Ubisoft, Xbox Game Pass, EA, Battle.net, Rockstar, Amazon and Riot in one beautiful cover library – at your desk with a mouse, on the couch entirely with an Xbox gamepad, with playtime tracking, favorites, automatic HDR, a performance OSD (FPS, GPU and CPU stats in-game, no extra software) and live streaming via link in up to 4K – the connection, including an IPv6 direct path, sets itself up automatically. Free.",
+    "description": "Lumora unifies all your games from Steam, Epic, GOG, Ubisoft, Xbox Game Pass, EA, Battle.net, Rockstar, Amazon and Riot in one beautiful cover library – at your desk with a mouse, on the couch entirely with an Xbox gamepad, with playtime tracking, favorites, automatic HDR, a performance OSD (FPS, GPU and CPU stats in-game, no extra software) and live streaming via link in Full HD (1080p60) with a good bitrate, up to 4K – the connection, including an IPv6 direct path, sets itself up automatically. Free.",
     "offers": {
       "@type": "Offer",
       "price": "0",
@@ -60,7 +60,7 @@
       "In-game performance OSD: FPS, frametime graph, GPU and CPU stats – without Afterburner/RTSS",
       "OSD live editing right in the game: position, design, transparency and values via mouse or gamepad",
       "6 OSD designs, toggled via hotkey or gamepad combo",
-      "Share your game live in up to 4K with sound via link – viewers only need a browser, no install",
+      "Share your game live via link – smooth Full HD (1080p60) with a good bitrate, up to 1440p or 4K; viewers only need a browser, no install",
       "Automatic connection setup: detects the router, opens ports itself, IPv6 direct path on connections without a public IPv4 address, optional custom TURN server",
       "CPU temperature and power via a signed open-source driver (PawnIO), set up with one click",
       "Playtime tracking, last played and a playtime recap",
@@ -149,6 +149,40 @@
       white-space: nowrap; transition: border-color .2s, color .2s;
     }
     .nav-lang:hover { border-color: var(--accent2); color: var(--accent2); text-decoration: none; }
+
+    .nav-burger {
+      display: none; background: none; border: 1px solid var(--border);
+      color: var(--text); font-size: 19px; line-height: 1;
+      width: 42px; height: 38px; border-radius: 10px; cursor: pointer;
+      align-items: center; justify-content: center; transition: border-color .2s, color .2s;
+    }
+    .nav-burger:hover { border-color: var(--accent2); color: var(--accent2); }
+
+    /* ── Off-canvas drawer (mobile): docks on the right and pushes page content aside ── */
+    .page { transition: transform .32s cubic-bezier(.4, 0, .2, 1); }
+    .drawer {
+      position: fixed; top: 0; right: 0; height: 100dvh; width: min(280px, 80vw);
+      display: flex; flex-direction: column;
+      background: #14141e; border-left: 1px solid var(--border);
+      box-shadow: -24px 0 60px rgba(0, 0, 0, .45);
+      transform: translateX(100%); transition: transform .32s cubic-bezier(.4, 0, .2, 1);
+      z-index: 200; padding: 16px 18px;
+    }
+    .drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .drawer-title { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .drawer-close { background: none; border: none; color: var(--text); font-size: 20px; width: 36px; height: 36px; border-radius: 8px; cursor: pointer; line-height: 1; }
+    .drawer-close:hover { color: var(--accent2); }
+    .drawer-links { display: flex; flex-direction: column; }
+    .drawer-links a { display: block; padding: 15px 4px; font-size: 16px; font-weight: 500; color: var(--text); text-decoration: none; border-bottom: 1px solid var(--border); }
+    .drawer-links a:last-child { border-bottom: 0; }
+    .drawer-links a:hover { color: var(--accent2); }
+    .drawer-cta { margin-top: 18px; text-align: center; padding: 13px 16px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 700; text-decoration: none; }
+    .drawer-cta:hover { background: var(--accent2); }
+    .drawer-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); opacity: 0; visibility: hidden; transition: opacity .32s, visibility .32s; z-index: 150; }
+    body.menu-open .drawer { transform: translateX(0); }
+    body.menu-open .drawer-backdrop { opacity: 1; visibility: visible; }
+    body.menu-open .page { transform: translateX(calc(-1 * min(280px, 80vw))); }
+    body.menu-open { overflow: hidden; }
 
     nav ul {
       display: flex;
@@ -828,6 +862,10 @@
 
     /* ── RESPONSIVE ─────────────────────── */
     @media (max-width: 640px) {
+      nav { padding: 12px 16px; }
+      .nav-right { gap: 12px; }
+      .nav-burger { display: flex; }
+      /* Section links live in the off-canvas drawer; the language switch stays visible in the header. */
       nav ul { display: none; }
 
       .hero { padding: 48px 16px 40px; }
@@ -883,6 +921,7 @@
 </head>
 <body>
 
+<div class="page">
 <nav>
   <a class="nav-logo" href="#"><img src="../icon.png" alt="" class="nav-logo-img"> <span>Lumora</span></a>
   <div class="nav-right">
@@ -893,6 +932,7 @@
       <li><a href="#transparency">Transparency</a></li>
     </ul>
     <a class="nav-lang" href="../" hreflang="de" title="Deutsche Version" onclick="try{localStorage.setItem('lumoraSiteLang','de')}catch(e){}">🌐 DE</a>
+    <button class="nav-burger" id="navBurger" aria-label="Menu" aria-expanded="false">☰</button>
   </div>
 </nav>
 
@@ -900,12 +940,12 @@
 <section class="hero">
   <div class="hero-badge">⬡ Free · Windows 10 / 11</div>
   <h1>All your games. One launcher.<br><em>With automatic HDR and a gaming OSD.</em></h1>
-  <p>Steam, Epic, GOG, Xbox, EA, Ubisoft &amp; more — Lumora unifies your whole game collection in one beautiful cover library. At your desk with a mouse, on the couch entirely with a gamepad. HDR switches on per game automatically. The performance OSD shows you FPS, GPU and CPU right in the game — <strong>with no Afterburner &amp; co.</strong> — and you share your game live in 4K with sound via a link — Lumora sets up the connection <strong>automatically, with no manual port forwarding</strong>, thanks to an IPv6 direct path even on many modern connections without a public IPv4 address.</p>
+  <p>Steam, Epic, GOG, Xbox, EA, Ubisoft &amp; more — Lumora unifies your whole game collection in one beautiful cover library. At your desk with a mouse, on the couch entirely with a gamepad. HDR switches on per game automatically. The performance OSD shows you FPS, GPU and CPU right in the game — <strong>with no Afterburner &amp; co.</strong> — and you share your game live with sound via a link — smoothly in Full&nbsp;HD (1920×1080, 60&nbsp;fps) with a good bitrate, up to 1440p or 4K if you like. Lumora sets up the connection <strong>automatically, with no manual port forwarding</strong>, thanks to an IPv6 direct path even on many modern connections without a public IPv4 address.</p>
   <div class="hero-pills">
     <span class="hero-pill">🗂 All stores unified</span>
     <span class="hero-pill">🌈 Fully automatic HDR</span>
     <span class="hero-pill">📊 OSD without extra tools</span>
-    <span class="hero-pill">📡 4K streaming via link</span>
+    <span class="hero-pill">📡 1080p60 streaming via link</span>
     <span class="hero-pill">🎮 100% gamepad-ready</span>
   </div>
   <div class="hero-actions">
@@ -913,7 +953,7 @@
       ⬇ Download &nbsp;·&nbsp; 171 MB
     </button>
     <a class="btn-ghost" href="#features">
-      ✨ New: 4K streaming &amp; OSD
+      ✨ New: Game streaming &amp; OSD
     </a>
   </div>
 
@@ -966,7 +1006,7 @@
       </button>
     </div>
     <div class="screenshot-wrap" onclick="openLightbox()">
-      <img id="shot" src="../1.jpg" alt="Lumora game launcher – list view with all games from Steam, Epic, GOG &amp; more, HDR toggle and 4K streaming" class="screenshot-img">
+      <img id="shot" src="../1.jpg" alt="Lumora game launcher – list view with all games from Steam, Epic, GOG &amp; more, HDR toggle and game streaming" class="screenshot-img">
     </div>
     <p class="view-caption" id="viewCaption">List view – details, description &amp; per-game HDR toggle</p>
     <p class="screenshot-tap-hint">Tap to enlarge</p>
@@ -1098,7 +1138,7 @@
         <div class="feature-icon">📡</div>
         <div>
           <h3>Share your game live via link</h3>
-          <p>Stream your game in up to 4K with sound straight from Lumora – viewers just open a link in their browser, no install at all. Either the whole screen or a specific window/game. Hardware encoding on your graphics card, with a viewer list and an adjustable playback buffer. <strong>The connection sets itself up automatically</strong> – Lumora detects your router, opens the required port itself and, on modern connections without a public IPv4 address, uses the <strong>IPv6 direct path</strong>. A custom TURN server is possible, for pros.</p>
+          <p>Stream your game with sound straight from Lumora – smoothly in Full&nbsp;HD (1920×1080, 60&nbsp;fps) with a good bitrate, up to 1440p or 4K if you like. Viewers just open a link in their browser, no install at all. Either the whole screen or a specific window/game. Hardware encoding on your graphics card, with a viewer list and an adjustable playback buffer. <strong>The connection sets itself up automatically</strong> – Lumora detects your router, opens the required port itself and, on modern connections without a public IPv4 address, uses the <strong>IPv6 direct path</strong>. A custom TURN server is possible, for pros.</p>
         </div>
       </div>
       <div class="feature">
@@ -1580,7 +1620,7 @@
 <footer>
   <p style="margin-bottom:10px">
     <strong>Topics:</strong>
-    <a href="streaming.html">Stream your game in 4K to friends</a> ·
+    <a href="streaming.html">Stream your game to friends via a link</a> ·
     <a href="discord-alternative.html">Streaming quality compared</a> ·
     <a href="gaming-osd.html">FPS &amp; hardware stats in-game</a> ·
     <a href="gamepad.html">Gamepad control</a>
@@ -1598,6 +1638,22 @@
     <a href="../impressum.html">Imprint</a> &nbsp;·&nbsp; <a href="../datenschutz.html">Privacy Policy</a>
   </p>
 </footer>
+</div><!-- /.page -->
+
+<aside class="drawer" id="navDrawer" aria-label="Menu">
+  <div class="drawer-head">
+    <span class="drawer-title">Menu</span>
+    <button class="drawer-close" id="drawerClose" aria-label="Close menu">✕</button>
+  </div>
+  <nav class="drawer-links">
+    <a href="#features">Features</a>
+    <a href="#changelog">What’s new</a>
+    <a href="#install">Install</a>
+    <a href="#transparency">Transparency</a>
+  </nav>
+  <a class="drawer-cta" href="#install">⬇ Download free</a>
+</aside>
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
 
 <div class="lightbox" id="lightbox" onclick="closeLightbox()">
   <span class="lightbox-close" onclick="closeLightbox(event)" aria-label="Close">✕</span>
@@ -1720,7 +1776,25 @@
     if (isMobileDevice()) document.body.classList.add('is-mobile');
   })();
 
-  loadCount()
+  loadCount();
+
+  // Off-canvas drawer (mobile): docks on the right and pushes page content aside
+  ;(function(){
+    var burger = document.getElementById('navBurger');
+    var drawer = document.getElementById('navDrawer');
+    var backdrop = document.getElementById('drawerBackdrop');
+    var drawerClose = document.getElementById('drawerClose');
+    if (!burger || !drawer) return;
+    function openMenu(){ document.body.classList.add('menu-open'); burger.setAttribute('aria-expanded', 'true'); }
+    function closeMenu(){ document.body.classList.remove('menu-open'); burger.setAttribute('aria-expanded', 'false'); }
+    burger.addEventListener('click', function(){
+      if (document.body.classList.contains('menu-open')) closeMenu(); else openMenu();
+    });
+    if (drawerClose) drawerClose.addEventListener('click', closeMenu);
+    if (backdrop) backdrop.addEventListener('click', closeMenu);
+    Array.prototype.forEach.call(drawer.querySelectorAll('a'), function(a){ a.addEventListener('click', closeMenu); });
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeMenu(); });
+  })();
 </script>
 
 </body>
