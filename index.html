@@ -849,6 +849,9 @@ const I18N_EN = {
   'Keine': 'None',
   'Keine neuen Spiele gefunden.': 'No new games found.',
   'Schließen': 'Close',
+  'Update fehlgeschlagen': 'Update failed',
+  'Bitte später erneut versuchen.': 'Please try again later.',
+  'Neu starten & installieren': 'Restart & install',
   'Ausgewählte hinzufügen': 'Add selected',
   'Spiel hinzufügen': 'Add game',
   'Pfad zur .exe': 'Path to the .exe',
@@ -3348,6 +3351,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
 
     ipcRenderer.on('update-available', (e, info) => {
+      // Läuft bereits ein sichtbarer Update-Toast (Download läuft oder ist fertig),
+      // NICHT erneut das Overlay öffnen – sonst Doppel-UI und ein „Jetzt aktualisieren“
+      // würde den kompletten Download neu starten.
+      if (upToast && upToast.style.display !== 'none') return
       document.getElementById('updateVersion').textContent = info.version
       // Zweisprachige Release-Notes: englische Version zeigen, wenn die App auf
       // Englisch laeuft UND welche mitgeliefert wurden; sonst die deutschen.
@@ -3367,8 +3374,8 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       upText.textContent = 'Lumora ' + info.version + window.tr(' wurde geladen.')
       upTrack.style.display = 'none'
       setUpdateActions([
-        { label: 'Neu starten & installieren', primary: true, onClick: () => ipcRenderer.invoke('install-update') },
-        { label: 'Später', primary: false, onClick: dismissUpdateToast },
+        { label: window.tr('Neu starten & installieren'), primary: true, onClick: () => ipcRenderer.invoke('install-update') },
+        { label: window.tr('Später'), primary: false, onClick: dismissUpdateToast },
       ])
       showUpdateToast()
     })
@@ -3384,6 +3391,14 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (typeof updateCheckBtn !== 'undefined' && updateCheckBtn) {
         updateCheckBtn.textContent = window.tr('Prüfung fehlgeschlagen – erneut versuchen')
         updateCheckBtn.disabled = false
+      }
+      // Läuft ein sichtbarer Update-Toast (z.B. mitten im Download), darf er nicht
+      // ewig bei „Update wird geladen“ hängen bleiben -> klaren Fehler + Schließen.
+      if (upToast && upToast.style.display !== 'none') {
+        upTitle.textContent = window.tr('Update fehlgeschlagen')
+        upText.textContent = window.tr('Bitte später erneut versuchen.')
+        upTrack.style.display = 'none'
+        setUpdateActions([{ label: window.tr('Schließen'), primary: true, onClick: dismissUpdateToast }])
       }
     })
 
