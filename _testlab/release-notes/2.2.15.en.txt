@@ -1,0 +1,6 @@
+Screen streaming fixed – and polish
+
+• Screen streaming starts reliably again: a silent system (no sound currently playing) used to block the start – now the stream runs immediately, whether audio is playing or not.
+• Calmer, faster hardware readout: CPU usage is smoothed (no more jitter, just like Task Manager), while temperature and power respond more fluidly.
+• Lumora fully in English: even the last dynamically-set texts (OSD values, colors, buttons) now appear in English in English mode.
+• More reliable updates under the hood.

@@ -1,0 +1,6 @@
+Bildschirm-Streaming repariert – und Feinschliff
+
+• Bildschirm-Streaming startet wieder zuverlässig: Ein stummes System (es wird gerade kein Ton abgespielt) hat den Start bisher blockiert – jetzt läuft der Stream sofort, egal ob Ton läuft oder nicht.
+• Hardware-Anzeige ruhiger und schneller: Die CPU-Auslastung ist geglättet (kein Zappeln mehr, wie im Task-Manager), Temperatur und Verbrauch reagieren flüssiger.
+• Lumora vollständig auf Englisch: auch die letzten dynamisch gesetzten Texte (OSD-Werte, Farben, Schaltflächen) erscheinen im Englisch-Modus jetzt auf Englisch.
+• Zuverlässigere Updates unter der Haube.
