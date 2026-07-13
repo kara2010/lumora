@@ -5302,7 +5302,12 @@ function setupAutoUpdate() {
     let notes = ''
     if (typeof info.releaseNotes === 'string') notes = info.releaseNotes
     else if (Array.isArray(info.releaseNotes)) notes = info.releaseNotes.map(n => (n && n.note) || '').join('\n\n')
-    sendToUi('update-available', { version: info.version, notes })
+    // Zweisprachig: release.ps1 packt bei vorhandener EN-Notes-Datei DE + Marker
+    // + EN in EIN releaseNotes-Feld (latest.yml kann nur eines). Hier trennen.
+    let notesEn = ''
+    const sp = notes.split(/^===EN===$/m)
+    if (sp.length > 1) { notes = sp[0].trim(); notesEn = sp[1].trim() }
+    sendToUi('update-available', { version: info.version, notes, notesEn })
   })
   autoUpdater.on('update-not-available', () => {
     // Kein neuer Basis-Installer -> Datei-Update (Manifest) pruefen. Erst wenn
@@ -5434,7 +5439,7 @@ async function fuCheck() {
   fuPending = mf
   fuReady = false
   osdDbg('[update] Datei-Update verfuegbar: ' + app.getVersion() + ' -> ' + mf.version)
-  sendToUi('update-available', { version: mf.version, notes: mf.notes || '' })
+  sendToUi('update-available', { version: mf.version, notes: mf.notes || '', notesEn: mf.notesEn || '' })
   return true
 }
 async function fuDownload() {
