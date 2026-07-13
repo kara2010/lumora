@@ -67,7 +67,9 @@ if ($rel === '' || strlen($rel) > 255) bail(400, 'bad path');
 if (strpos($rel, "\0") !== false) bail(400, 'bad path');
 if (strpos($rel, '\\') !== false) bail(400, 'bad path');
 if ($rel[0] === '/') bail(400, 'bad path');
-if (!preg_match('#^[A-Za-z0-9._/-]+$#', $rel)) bail(400, 'bad path');
+// Leerzeichen erlaubt (Setup heisst "Lumora Setup X.exe"); Ausbruchschutz traegt
+// der ..-Ausschluss + realpath-Schranke, nicht die Zeichenliste.
+if (!preg_match('#^[A-Za-z0-9._/ -]+$#', $rel)) bail(400, 'bad path');
 foreach (explode('/', $rel) as $seg) {
   if ($seg === '' || $seg === '.' || $seg === '..') bail(400, 'bad path');
 }
