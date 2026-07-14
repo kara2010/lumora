@@ -4080,18 +4080,23 @@ function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
   // Ton kurz jittert. A/V bleiben ueber die RTP-Timestamps trotzdem synchron.
   const aEnc = withAudio ? ['-map', '0:v:0', '-map', '1:a:0', '-c:a', 'libopus', '-b:a', '128k', '-max_interleave_delta', '0'] : []
   if (cfg.mode === 'window') {
+    // Pixel-Format vom Helfer (FMT-Meldung): nv12 = bereits GPU-konvertiert ->
+    // FFmpeg braucht KEINE format=yuv420p-CPU-Stufe mehr (nv12 nehmen alle
+    // drei HW-Encoder nativ); bgra = bewaehrter Weg wie bisher.
+    const pixFmt = cfg.capFmt === 'nv12' ? 'nv12' : 'bgra'
     const vf = []
     if (cfg.scaleH && capH && cfg.scaleH < capH) vf.push('scale=-2:' + cfg.scaleH + ':flags=bicubic')
-    vf.push('format=yuv420p')
+    if (pixFmt === 'bgra') vf.push('format=yuv420p')
+    else if (vf.length) vf.push('format=nv12')   // nach dem (seltenen) Sicherheits-Scale zurueck nach nv12
     // -progress: Encoder-Eigenauskunft (frame/fps/speed) alle 5s auf stderr -
     // Diagnose der maxwrite-Stalls: bricht der AUSSTOSS ein (GPU-These) oder
     // nur die Pipe-Annahme? Wird in bcSpawnEncoder kompakt geloggt.
     return ['-hide_banner', '-loglevel', 'warning', '-progress', 'pipe:2', '-stats_period', '5',
-      '-thread_queue_size', '4096', '-f', 'rawvideo', '-pixel_format', 'bgra', '-video_size', capW + 'x' + capH, '-framerate', String(cfg.fps),
+      '-thread_queue_size', '4096', '-f', 'rawvideo', '-pixel_format', pixFmt, '-video_size', capW + 'x' + capH, '-framerate', String(cfg.fps),
       // Named Pipe des Helfers (grosser Puffer) statt stdin - s. bcStartWindowCapture.
       '-i', cfg.vidPipe ? '\\\\.\\pipe\\' + cfg.vidPipe : 'pipe:0',
       ...aIn,
-      '-vf', vf.join(','),
+      ...(vf.length ? ['-vf', vf.join(',')] : []),
       ...bcEncoderArgs(cfg.encoder, cfg.kbit, cfg.fps),
       ...aEnc, ...rtsp]
   }
@@ -4763,6 +4768,13 @@ let ffLagTimer = null // Event-Loop-Messung (Diagnose): haengt NODE, stockt die 
 // GPU-Direktpfad mangels Testhardware ungetestet ist (s. bcBuildFfmpegArgs).
 let bcZeroCopyBroken = false
 let bcLastZeroCopy = false
+// NV12-Selbstheilung (Fenster-Weg, analog bcZeroCopyBroken): Der Capture-Helfer
+// liefert mit --nv12 GPU-konvertierte NV12-Frames (-62 % Pipe-Daten, keine CPU-
+// Farbkonvertierung in FFmpeg). Meldet er NV12ERR (Init- oder Laufzeit-Fehler)
+// oder stirbt der NV12-Stream sofort, laeuft der naechste Versuch dauerhaft im
+// bewaehrten BGRA-Modus - exakt das Verhalten von heute, keine Verschlechterung.
+let bcNv12Broken = false
+let bcLastCapFmt = 'bgra'
 function bcStartFfmpeg(cfg) {
   bcKillCap()   // evtl. verwaisten Helfer aufraeumen
   // Anzeige nachfuehren: die adaptive Bitrate aendert cfg.kbit bei Neustarts -
@@ -4786,8 +4798,15 @@ function bcStartWindowCapture(cfg) {
   // Die Standard-stdout-Pipe (64-KB-Puffer) war bei 4K-Rohframes der belegte
   // Engpass (13 statt 157 fps im Direktvergleich) - siehe Program.cs.
   cfg.vidPipe = 'lumora-vid-' + process.pid + '-' + Date.now()
+  // NV12-Modus anfordern, solange er nicht als kaputt markiert ist (Selbst-
+  // heilung s. bcNv12Broken) und nicht per Setting abgeschaltet wurde. Der
+  // Helfer entscheidet selbst, ob seine GPU das kann (FMT-Meldung) - ein
+  // alter Helfer ohne --nv12-Support ignoriert das Flag einfach (FMT fehlt
+  // -> unten Default bgra, alles wie bisher).
+  const capArgs = ['--hwnd', String(cfg.hwnd), '--fps', String(cfg.fps), '--max-height', String(cfg.scaleH || 0), '--pipe', cfg.vidPipe]
+  if (appSettings.streamNv12 !== false && !bcNv12Broken) capArgs.push('--nv12')
   let cap
-  try { cap = spawn(streamBin('lumora-capture.exe'), ['--hwnd', String(cfg.hwnd), '--fps', String(cfg.fps), '--max-height', String(cfg.scaleH || 0), '--pipe', cfg.vidPipe], { windowsHide: true }) }
+  try { cap = spawn(streamBin('lumora-capture.exe'), capArgs, { windowsHide: true }) }
   catch (e) { osdDbg('[stream] capture-Start fehlgeschlagen: ' + (e && e.message)); return null }
   capProc = cap
   bcBoostPriority(cap, 'capture')
@@ -4796,6 +4815,15 @@ function bcStartWindowCapture(cfg) {
   cap.on('exit', (code) => { if (rszTimer) { clearTimeout(rszTimer); rszTimer = null } if (capProc === cap) capProc = null; bcLogStream('cap beendet (' + code + ')') })
   cap.stderr.on('data', (d) => {
     const s = d.toString(); errbuf = (errbuf + s).slice(-1000); bcLogStream('cap: ' + s.trim())
+    // NV12-Ausfall (Init ODER Laufzeit): dauerhaft auf BGRA zurueckfallen. Bei
+    // einem Laufzeit-Fehler beendet sich der Helfer selbst (Exit 6) -> FFmpeg
+    // bekommt EOF -> der bestehende Auto-Neustart baut die Aufnahme neu auf,
+    // dann ohne --nv12 (bcNv12Broken). Der Zuschauer sieht nur einen kurzen
+    // Aussetzer wie bei jedem Encoder-Neustart.
+    if (!bcNv12Broken && /NV12ERR/.test(s)) {
+      bcNv12Broken = true
+      bcLogStream('nv12: Helfer meldet Fehler -> dauerhaft BGRA-Weg (Details in der cap:-Zeile darueber)')
+    }
     if (sized) {
       // Deutliche Fenster-Groessenaenderung (z.B. kleines Video -> Vollbild):
       // Der Helfer letterboxt in die START-Aufloesung - das Vollbild bliebe
@@ -4821,6 +4849,11 @@ function bcStartWindowCapture(cfg) {
     if (!m) return
     sized = true
     capW = parseInt(m[1], 10); capH = parseInt(m[2], 10)
+    // Pixel-Format des Helfers (VOR SIZE gemeldet): nv12 = GPU-konvertiert,
+    // sonst bgra (auch wenn die FMT-Zeile fehlt - alte Helfer-Version).
+    const fm = /FMT (\w+)/.exec(errbuf)
+    cfg.capFmt = (fm && fm[1] === 'nv12') ? 'nv12' : 'bgra'
+    bcLastCapFmt = cfg.capFmt
     if (capProc !== cap || !broadcastState.active || ffStopping) return
     // Das Video laeuft ueber die Named Pipe des Helfers (siehe oben) - FFmpeg
     // oeffnet sie selbst per Dateiname. Historie der Transportwege: Node-Piping
@@ -4939,6 +4972,14 @@ function bcSpawnEncoder(args, capOfThis, stdinStream, audOfThis) {
     if (Date.now() - startedAt < 4000 && bcLastZeroCopy && !bcZeroCopyBroken && !/ACCESS_LOST|887a0026/i.test(errbuf)) {
       bcZeroCopyBroken = true
       bcLogStream('video: GPU-direkt fehlgeschlagen -> Rueckfall auf CPU-Kette (Hybrid-GPU?): ' + errbuf.replace(/\s+/g, ' ').slice(-160))
+    }
+    // NV12-Selbstheilung, zweites Standbein (s. bcNv12Broken): Stirbt der
+    // Fenster-Stream im NV12-Modus sofort, OHNE dass der Helfer NV12ERR
+    // gemeldet hat (z.B. FFmpeg-seitiges Problem mit dem Rohformat), ebenfalls
+    // dauerhaft auf den bewaehrten BGRA-Weg zurueck.
+    if (Date.now() - startedAt < 4000 && capOfThis && bcLastCapFmt === 'nv12' && !bcNv12Broken) {
+      bcNv12Broken = true
+      bcLogStream('nv12: Fenster-Stream starb sofort im NV12-Modus -> dauerhaft BGRA-Weg: ' + errbuf.replace(/\s+/g, ' ').slice(-160))
     }
     const delay = ffFastFails >= 3 ? 5000 : 1200
     // NVENC-Treiber zu alt (deterministisch – jeder Neuversuch scheitert gleich):
