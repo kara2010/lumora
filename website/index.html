@@ -205,17 +205,24 @@
     .nav-drop-caret { font-size: 10px; transition: transform .2s; }
     .nav-drop:hover .nav-drop-caret, .nav-drop:focus-within .nav-drop-caret { transform: rotate(180deg); }
     .nav-drop-menu {
-      position: absolute; top: calc(100% + 12px); left: 50%; transform: translateX(-50%) translateY(-8px);
-      min-width: 236px; background: #14141e; border: 1px solid var(--border); border-radius: 14px;
-      padding: 7px; box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+      position: absolute; top: calc(100% + 14px); left: 50%; transform: translateX(-50%) translateY(-8px);
+      width: 300px; background: #14141e; border: 1px solid var(--border); border-radius: 16px;
+      padding: 8px; box-shadow: 0 28px 70px rgba(0, 0, 0, .5);
       opacity: 0; visibility: hidden; pointer-events: none;
       transition: opacity .2s, transform .2s, visibility .2s; z-index: 120;
     }
     .nav-drop-menu::before { content: ""; position: absolute; bottom: 100%; left: 0; right: 0; height: 14px; }
     .nav-drop:hover .nav-drop-menu, .nav-drop:focus-within .nav-drop-menu { opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(-50%) translateY(0); }
-    .nav-drop-menu a { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 9px; color: var(--text); text-decoration: none; font-size: 14px; white-space: nowrap; transition: background .16s; }
+    .nav-drop-label { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 8px 10px 6px; }
+    .nav-drop-menu a { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 11px; color: var(--text); text-decoration: none; font-size: 14px; font-weight: 500; transition: background .16s; }
     .nav-drop-menu a:hover { background: rgba(122, 179, 255, .1); }
-    .nav-drop-menu a .di { width: 20px; text-align: center; }
+    .nav-drop-menu a .di {
+      width: 36px; height: 36px; flex: none; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center; font-size: 17px;
+      background: rgba(122, 179, 255, .1); border: 1px solid rgba(122, 179, 255, .14);
+    }
+    .nav-drop-menu a .dtxt { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+    .nav-drop-menu a .dsub { font-size: 11.5px; color: var(--muted); font-weight: 400; margin-top: 1px; white-space: normal; }
 
     /* ── Off-Canvas-Drawer (mobil): dockt rechts an und schiebt den Seiteninhalt zur Seite ── */
     .page { transition: transform .34s cubic-bezier(.33, 1, .68, 1); }
@@ -1055,10 +1062,11 @@
       <li class="nav-drop">
         <button class="nav-drop-btn" aria-haspopup="true" aria-expanded="false">Themen <span class="nav-drop-caret" aria-hidden="true">▾</span></button>
         <div class="nav-drop-menu">
-          <a href="streaming.html"><span class="di" aria-hidden="true">📡</span> Game-Streaming</a>
-          <a href="gaming-osd.html"><span class="di" aria-hidden="true">📊</span> Gaming-OSD</a>
-          <a href="gamepad.html"><span class="di" aria-hidden="true">🎮</span> Gamepad-Steuerung</a>
-          <a href="discord-alternative.html"><span class="di" aria-hidden="true">💬</span> Vergleich mit Discord</a>
+          <p class="nav-drop-label">Entdecken</p>
+          <a href="streaming.html"><span class="di" aria-hidden="true">📡</span><span class="dtxt">Game-Streaming<span class="dsub">Per Link in 1080p60 – bis 4K</span></span></a>
+          <a href="gaming-osd.html"><span class="di" aria-hidden="true">📊</span><span class="dtxt">Gaming-OSD<span class="dsub">FPS, GPU &amp; CPU ohne Afterburner</span></span></a>
+          <a href="gamepad.html"><span class="di" aria-hidden="true">🎮</span><span class="dtxt">Gamepad-Steuerung<span class="dsub">Couch-Gaming am TV</span></span></a>
+          <a href="discord-alternative.html"><span class="di" aria-hidden="true">💬</span><span class="dtxt">Vergleich mit Discord<span class="dsub">Streaming ohne Nitro</span></span></a>
         </div>
       </li>
       <li><a href="#install">Installation</a></li>
