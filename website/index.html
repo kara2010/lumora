@@ -136,6 +136,7 @@
       scroll-behavior: smooth;
       scrollbar-width: thin;                       /* Firefox */
       scrollbar-color: #2a2a3a transparent;        /* Firefox */
+      overflow-x: hidden;   /* Absicherung: das per transform verschobene Off-Canvas-Menue darf nie horizontales Scrollen der Seite erzeugen */
     }
 
     /* Dezente, zum Design passende Scrollbar (Chrome/Edge/Safari) */
@@ -220,7 +221,7 @@
     .page { transition: transform .34s cubic-bezier(.33, 1, .68, 1); }
     .drawer {
       position: fixed; top: 0; right: 0; height: 100dvh; width: min(320px, 85vw);
-      display: flex; flex-direction: column; overflow-y: auto;
+      display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto;
       background: #101017; border-left: 1px solid var(--border);
       box-shadow: -34px 0 80px rgba(0, 0, 0, .55);
       transform: translateX(100%); transition: transform .34s cubic-bezier(.33, 1, .68, 1);
@@ -1790,7 +1791,7 @@
     <span class="drawer-brand">Lumora</span>
     <button class="drawer-close" id="drawerClose" aria-label="Menü schließen">✕</button>
   </div>
-  <nav class="drawer-nav" aria-label="Hauptmenü">
+  <div class="drawer-nav" role="navigation" aria-label="Hauptmenü">
     <p class="drawer-group-label">Entdecken</p>
     <a class="drawer-item" href="streaming.html"><span class="ico" aria-hidden="true">📡</span><span class="txt">Game-Streaming<span class="sub">Per Link in 1080p60 – bis 4K</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="gaming-osd.html"><span class="ico" aria-hidden="true">📊</span><span class="txt">Gaming-OSD<span class="sub">FPS, GPU &amp; CPU ohne Afterburner</span></span><span class="chev" aria-hidden="true">›</span></a>
@@ -1801,7 +1802,7 @@
     <a class="drawer-item" href="#changelog"><span class="ico" aria-hidden="true">🆕</span><span class="txt">Neuerungen</span></a>
     <a class="drawer-item" href="#install"><span class="ico" aria-hidden="true">⬇️</span><span class="txt">Installation</span></a>
     <a class="drawer-item" href="#transparency"><span class="ico" aria-hidden="true">🛡️</span><span class="txt">Transparenz</span></a>
-  </nav>
+  </div>
   <div class="drawer-foot">
     <a class="drawer-cta" href="#install">⬇ Kostenlos laden</a>
     <a class="drawer-lang" href="en/" hreflang="en" title="English version" onclick="try{localStorage.setItem('lumoraSiteLang','en')}catch(e){}">🌐 English</a>
