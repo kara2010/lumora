@@ -372,6 +372,29 @@ body::before {
   margin-top: 4px;
 }
 
+/* Aktiver, schwer zu uebersehender Warnkasten (z.B. Router oeffnet Ports nicht
+   selbst) - deutlich mehr Gewicht als .settings-hint, gleiche Amber-Warnfarbe
+   wie die uebrigen Stream-Hinweise (Treiber/Aufnahme/HDR). */
+.stream-forward-warn {
+  margin-top: 10px;
+  padding: 14px 16px;
+  background: rgba(245, 185, 66, 0.1);
+  border: 1px solid rgba(245, 185, 66, 0.35);
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.stream-forward-warn .sfw-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: #f5b942;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+.stream-forward-warn .sfw-steps { color: #ddd; }
+
 /* Aufklappbare SteamGridDB-Anleitung in den Einstellungen */
 .sgdb-guide { margin-top: 8px; }
 .sgdb-guide summary {
