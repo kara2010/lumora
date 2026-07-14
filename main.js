@@ -4042,9 +4042,10 @@ function bcStreamCfg(enc) {
   // Physische Pixel (size*scaleFactor) wie im Quellen-Label; Index-Konvention
   // Electron-Display == ddagrab output_idx ist im Quellen-Picker etabliert.
   // scaleW wird zusaetzlich im ECHTEN Seitenverhaeltnis des Monitors berechnet
-  // (nicht pauschal 16:9 angenommen - Ultrawide/4:3 etc. sollen nicht verzerren)
-  // und dient ddagrabs eigenem video_size-Parameter (s. bcBuildFfmpegArgs):
-  // DXGI liefert die Zielaufloesung direkt, kein CPU-Scale-Umweg noetig.
+  // (nicht pauschal 16:9 angenommen - Ultrawide/4:3 etc. sollen nicht verzerren).
+  // Aktuell ungenutzt (ddagrabs video_size CROPPT nur - s. bcBuildFfmpegArgs);
+  // vorgehalten fuer die vendor-spezifischen GPU-Skalierketten (vpp_amf/vpp_qsv
+  // brauchen w UND h), sobald diese auf echter AMD/Intel-Hardware verifiziert sind.
   let scaleW = 0
   if (mode === 'monitor' && scaleH) {
     try {
@@ -4097,42 +4098,33 @@ function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
   // Monitor-Weg (ddagrab). Bei Ton wird der Audio-Helfer zu Input 0 (pipe:3); das
   // ddagrab-Bild kommt aus dem Filtergraphen und wird per Label [v] explizit
   // gemappt (sonst zieht FFmpeg ohne -map das Audio als "Video" heran).
-  // GPU-Direktkette: ddagrabs D3D11-Texturen gehen unveraendert in den Encoder,
-  // der BGRA->NV12 auf der GPU wandelt. hwdownload+format+scale (CPU-Umweg, bei
-  // 4K ~2 GB/s memcpy) entfallen komplett - das ist besonders auf schwacher/
-  // geteilter Hardware (Laptop-iGPU teilt sich die Speicherbandbreite mit der
-  // CPU) der groesste Hebel.
-  // Skalierung LAEUFT MIT: ddagrabs eigener video_size-Parameter laesst DXGI
-  // direkt in der Zielaufloesung liefern - real gemessen ~8-10% schneller als
-  // der alte CPU-Scale-Umweg UND spart zusaetzlich den vollen nativen hwdownload-
-  // Transfer (vorher wurde bei JEDER Skalierung auf die CPU-Kette zurueckgefallen,
-  // obwohl das Bild danach eh verkleinert wurde). scale_d3d11 (FFmpeg-Filter)
-  // bleibt bewusst ungenutzt - bricht beim Konfigurieren ab, real getestet.
-  // Alle drei HW-Encoder (NVENC/AMF/QSV) versuchen jetzt den GPU-Direktpfad,
-  // nicht mehr nur NVENC: FFmpeg braucht dafuer keine encoderspezifischen
-  // Filter (siehe oben, dieselbe simple ddagrab->Encoder-Kette), NVENC ist es
-  // real verifiziert, AMD/Intel mangels Testhardware NICHT - dafuer greift die
-  // bereits bestehende, encoderunabhaengige Selbstheilung (bcZeroCopyBroken,
-  // s.u.): scheitert der GPU-Direktpfad, faellt der naechste Versuch automatisch
-  // auf die bewaehrte CPU-Kette zurueck, exakt wie im NVENC-Hybrid-GPU-Fall.
-  // canScale: Skalierung angefordert (scaleH) UND Zielbreite bekannt (scaleW) -
-  // oder gar keine Skalierung noetig. Faellt die Display-Abfrage in bcStreamCfg
-  // je aus (leerer catch dort), bliebe scaleW=0 bei gesetztem scaleH - OHNE diese
-  // Bedingung wuerde dann still in NATIVER statt der gewuenschten Aufloesung
-  // aufgenommen (kein video_size, aber trotzdem "zeroCopy"). Stattdessen in genau
-  // diesem Fall sicher auf die bewaehrte CPU-Kette zurueckfallen (die kommt ohne
-  // scaleW aus, siehe scale=-2:H unten).
-  const canScale = !cfg.scaleH || !!cfg.scaleW
-  const zeroCopy = !bcZeroCopyBroken && canScale
+  // GPU-Direktkette (NVENC, keine Skalierung noetig): ddagrabs D3D11-Texturen
+  // gehen unveraendert in den Encoder, der BGRA->NV12 auf der GPU wandelt.
+  // hwdownload+format+scale (CPU-Umweg, bei 4K ~2 GB/s memcpy) entfallen komplett.
+  //
+  // GELERNT (2026-07-14, zwei zurueckgerollte Irrwege):
+  // - ddagrabs video_size ist ein CROP (CopySubresourceRegion), KEINE Skalierung -
+  //   per SSIM bewiesen (Crop-Vergleich 0.9999 vs. Scale-Vergleich 0.598). Der
+  //   kurzzeitig ausgelieferte video_size-Pfad haette auf >1080p-Monitoren nur
+  //   das obere linke Viertel gestreamt. Bei Skalierungsbedarf daher weiterhin
+  //   CPU-Kette (scale_d3d11 bricht real ab, D3D11->CUDA nicht einkompiliert).
+  // - h264_amf nimmt die rohe BGRA-D3D11-Textur NICHT an: real belegt auf
+  //   Radeon 680M via SubmitInput() error 18 = AMF_DIRECTX_FAILED (die interne
+  //   Konvertierung des Encoders scheitert; Sunshine/OBS konvertieren deshalb
+  //   IMMER vor dem Encoder nach NV12). h264_qsv listet gar kein d3d11-Format.
+  //   -> Zero-Copy bleibt auf NVENC beschraenkt, bis die recherchierten Vendor-
+  //   Ketten (AMD: ddagrab->vpp_amf=w:h:format=nv12->h264_amf; Intel: ddagrab->
+  //   hwmap=derive_device=qsv,vpp_qsv=...->h264_qsv) auf echter Hardware
+  //   verifiziert sind (Testskript _testlab/amf-gpu-test.cmd).
+  const zeroCopy = cfg.encoder === 'h264_nvenc' && !cfg.scaleH && !bcZeroCopyBroken
   bcLastZeroCopy = zeroCopy
-  const ddScale = (zeroCopy && cfg.scaleH && cfg.scaleW) ? (':video_size=' + cfg.scaleW + 'x' + cfg.scaleH) : ''
-  const vf = ['ddagrab=output_idx=' + cfg.outputIdx + ':framerate=' + cfg.fps + ddScale]
+  const vf = ['ddagrab=output_idx=' + cfg.outputIdx + ':framerate=' + cfg.fps]
   if (!zeroCopy) {
     vf.push('hwdownload', 'format=bgra')
     if (cfg.scaleH) vf.push('scale=-2:' + cfg.scaleH + ':flags=bicubic')
     vf.push('format=yuv420p')
   }
-  bcLogStream('video: ddagrab ' + (zeroCopy ? 'GPU-direkt (zero-copy' + (ddScale ? ', skaliert ' + cfg.scaleW + 'x' + cfg.scaleH : '') + ')' : 'CPU-Kette' + (cfg.scaleH ? ', scale ' + cfg.scaleH + 'p' : '')))
+  bcLogStream('video: ddagrab ' + (zeroCopy ? 'GPU-direkt (zero-copy)' : 'CPU-Kette' + (cfg.scaleH ? ', scale ' + cfg.scaleH + 'p' : '')))
   const mMap = withAudio ? ['-map', '[v]', '-map', '0:a:0', '-c:a', 'libopus', '-b:a', '128k', '-max_interleave_delta', '0'] : []
   return ['-hide_banner', '-loglevel', 'warning', '-progress', 'pipe:2', '-stats_period', '5',
     ...aIn,
