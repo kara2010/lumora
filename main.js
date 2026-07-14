@@ -4041,13 +4041,22 @@ function bcStreamCfg(enc) {
   // Monitorhoehe wuerde sinnlos HOCHskaliert (weicheres Bild, mehr Last).
   // Physische Pixel (size*scaleFactor) wie im Quellen-Label; Index-Konvention
   // Electron-Display == ddagrab output_idx ist im Quellen-Picker etabliert.
+  // scaleW wird zusaetzlich im ECHTEN Seitenverhaeltnis des Monitors berechnet
+  // (nicht pauschal 16:9 angenommen - Ultrawide/4:3 etc. sollen nicht verzerren)
+  // und dient ddagrabs eigenem video_size-Parameter (s. bcBuildFfmpegArgs):
+  // DXGI liefert die Zielaufloesung direkt, kein CPU-Scale-Umweg noetig.
+  let scaleW = 0
   if (mode === 'monitor' && scaleH) {
     try {
       const d = require('electron').screen.getAllDisplays()[outputIdx]
-      if (d && scaleH >= Math.round(d.size.height * d.scaleFactor)) scaleH = 0
+      if (d) {
+        const nativeH = Math.round(d.size.height * d.scaleFactor)
+        if (scaleH >= nativeH) scaleH = 0
+        else scaleW = Math.round(d.size.width * d.scaleFactor * scaleH / nativeH / 2) * 2   // gerade Breite (H.264-Pflicht)
+      }
     } catch {}
   }
-  return { encoder: enc.encoder, fps: appSettings.streamFps || 60, kbit, scaleH, mode, outputIdx, hwnd }
+  return { encoder: enc.encoder, fps: appSettings.streamFps || 60, kbit, scaleH, scaleW, mode, outputIdx, hwnd }
 }
 function bcQualityLabel(cfg) {
   const h = cfg.scaleH ? cfg.scaleH + 'p' : 'nativ'
@@ -4088,22 +4097,42 @@ function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
   // Monitor-Weg (ddagrab). Bei Ton wird der Audio-Helfer zu Input 0 (pipe:3); das
   // ddagrab-Bild kommt aus dem Filtergraphen und wird per Label [v] explizit
   // gemappt (sonst zieht FFmpeg ohne -map das Audio als "Video" heran).
-  // GPU-Direktkette (NVENC, keine Skalierung noetig): ddagrabs D3D11-Texturen
-  // gehen unveraendert in den Encoder, der BGRA->NV12 auf der GPU wandelt.
-  // hwdownload+format+scale (CPU-Umweg, bei 4K ~2 GB/s memcpy) entfallen
-  // komplett. Nur fuer diesen Fall: GPU-Skalierung kann das mitgelieferte
-  // FFmpeg nicht (scale_d3d11 bricht beim Konfigurieren ab, D3D11->CUDA-
-  // Ableitung nicht einkompiliert - beides real getestet), und AMF/QSV sind
-  // mit D3D11-Frames ungetestet -> ueberall sonst bleibt die CPU-Kette.
-  const zeroCopy = cfg.encoder === 'h264_nvenc' && !cfg.scaleH && !bcZeroCopyBroken
+  // GPU-Direktkette: ddagrabs D3D11-Texturen gehen unveraendert in den Encoder,
+  // der BGRA->NV12 auf der GPU wandelt. hwdownload+format+scale (CPU-Umweg, bei
+  // 4K ~2 GB/s memcpy) entfallen komplett - das ist besonders auf schwacher/
+  // geteilter Hardware (Laptop-iGPU teilt sich die Speicherbandbreite mit der
+  // CPU) der groesste Hebel.
+  // Skalierung LAEUFT MIT: ddagrabs eigener video_size-Parameter laesst DXGI
+  // direkt in der Zielaufloesung liefern - real gemessen ~8-10% schneller als
+  // der alte CPU-Scale-Umweg UND spart zusaetzlich den vollen nativen hwdownload-
+  // Transfer (vorher wurde bei JEDER Skalierung auf die CPU-Kette zurueckgefallen,
+  // obwohl das Bild danach eh verkleinert wurde). scale_d3d11 (FFmpeg-Filter)
+  // bleibt bewusst ungenutzt - bricht beim Konfigurieren ab, real getestet.
+  // Alle drei HW-Encoder (NVENC/AMF/QSV) versuchen jetzt den GPU-Direktpfad,
+  // nicht mehr nur NVENC: FFmpeg braucht dafuer keine encoderspezifischen
+  // Filter (siehe oben, dieselbe simple ddagrab->Encoder-Kette), NVENC ist es
+  // real verifiziert, AMD/Intel mangels Testhardware NICHT - dafuer greift die
+  // bereits bestehende, encoderunabhaengige Selbstheilung (bcZeroCopyBroken,
+  // s.u.): scheitert der GPU-Direktpfad, faellt der naechste Versuch automatisch
+  // auf die bewaehrte CPU-Kette zurueck, exakt wie im NVENC-Hybrid-GPU-Fall.
+  // canScale: Skalierung angefordert (scaleH) UND Zielbreite bekannt (scaleW) -
+  // oder gar keine Skalierung noetig. Faellt die Display-Abfrage in bcStreamCfg
+  // je aus (leerer catch dort), bliebe scaleW=0 bei gesetztem scaleH - OHNE diese
+  // Bedingung wuerde dann still in NATIVER statt der gewuenschten Aufloesung
+  // aufgenommen (kein video_size, aber trotzdem "zeroCopy"). Stattdessen in genau
+  // diesem Fall sicher auf die bewaehrte CPU-Kette zurueckfallen (die kommt ohne
+  // scaleW aus, siehe scale=-2:H unten).
+  const canScale = !cfg.scaleH || !!cfg.scaleW
+  const zeroCopy = !bcZeroCopyBroken && canScale
   bcLastZeroCopy = zeroCopy
-  const vf = ['ddagrab=output_idx=' + cfg.outputIdx + ':framerate=' + cfg.fps]
+  const ddScale = (zeroCopy && cfg.scaleH && cfg.scaleW) ? (':video_size=' + cfg.scaleW + 'x' + cfg.scaleH) : ''
+  const vf = ['ddagrab=output_idx=' + cfg.outputIdx + ':framerate=' + cfg.fps + ddScale]
   if (!zeroCopy) {
     vf.push('hwdownload', 'format=bgra')
     if (cfg.scaleH) vf.push('scale=-2:' + cfg.scaleH + ':flags=bicubic')
     vf.push('format=yuv420p')
   }
-  bcLogStream('video: ddagrab ' + (zeroCopy ? 'GPU-direkt (zero-copy)' : 'CPU-Kette' + (cfg.scaleH ? ', scale ' + cfg.scaleH + 'p' : '')))
+  bcLogStream('video: ddagrab ' + (zeroCopy ? 'GPU-direkt (zero-copy' + (ddScale ? ', skaliert ' + cfg.scaleW + 'x' + cfg.scaleH : '') + ')' : 'CPU-Kette' + (cfg.scaleH ? ', scale ' + cfg.scaleH + 'p' : '')))
   const mMap = withAudio ? ['-map', '[v]', '-map', '0:a:0', '-c:a', 'libopus', '-b:a', '128k', '-max_interleave_delta', '0'] : []
   return ['-hide_banner', '-loglevel', 'warning', '-progress', 'pipe:2', '-stats_period', '5',
     ...aIn,
@@ -4734,10 +4763,12 @@ let ffFastFails = 0   // aufeinanderfolgende Sofort-Abstuerze
 let ffGpuTimer = null // GPU-Telemetrie-Poll (Diagnose), laeuft nur waehrend FFmpeg lebt
 let ffLagTimer = null // Event-Loop-Messung (Diagnose): haengt NODE, stockt die fd3-Audio-Pipe
 // Zero-Copy-Selbstheilung (Audit-Befund Hybrid-Systeme): haengt der Monitor an
-// der iGPU, kann NVENC die fremden D3D11-Frames nicht encodieren -> der Start
-// scheitert deterministisch. Nach einem Sofort-Absturz im Zero-Copy-Modus
-// (der NICHT nach exklusivem Vollbild aussieht) faellt die Session dauerhaft
-// auf die adapter-tolerante CPU-Kette zurueck, statt endlos neu zu starten.
+// der iGPU, kann der Encoder (NVENC/AMF/QSV) die fremden D3D11-Frames nicht
+// verarbeiten -> der Start scheitert deterministisch. Nach einem Sofort-Absturz
+// im Zero-Copy-Modus (der NICHT nach exklusivem Vollbild aussieht) faellt die
+// Session dauerhaft auf die adapter-tolerante CPU-Kette zurueck, statt endlos
+// neu zu starten. Dieselbe Absicherung greift jetzt auch fuer AMD/Intel, deren
+// GPU-Direktpfad mangels Testhardware ungetestet ist (s. bcBuildFfmpegArgs).
 let bcZeroCopyBroken = false
 let bcLastZeroCopy = false
 function bcStartFfmpeg(cfg) {
