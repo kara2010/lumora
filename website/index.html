@@ -1147,6 +1147,10 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 17 8 11 12 14 17 7 21 10"/><line x1="3" y1="21" x2="21" y2="21"/></svg>
         Gaming-OSD
       </button>
+      <button id="tabStreaming" onclick="setView('streaming')" role="tab" aria-selected="false">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="4" width="13" height="10" rx="1.5"/><line x1="5.5" y1="17.5" x2="11.5" y2="17.5"/><path d="M18 8a4 4 0 0 1 0 6"/><path d="M21 5.5a8 8 0 0 1 0 11"/></svg>
+        Streaming
+      </button>
     </div>
     <div class="screenshot-wrap" onclick="openLightbox()">
       <img id="shot" src="1.webp" width="1920" height="1079" decoding="async" alt="Lumora Game-Launcher – Listenansicht mit allen Spielen aus Steam, Epic, GOG &amp; Co., HDR-Schalter und Game-Streaming" class="screenshot-img">
@@ -1830,7 +1834,8 @@
   const VIEWS = {
     list:  { img: '1.webp', alt: 'Lumora – Listenansicht', cap: 'Listenansicht – Details, Beschreibung &amp; HDR-Schalter pro Spiel' },
     cover: { img: '2.webp', alt: 'Lumora – Cover-Ansicht', cap: 'Cover-Ansicht – deine Bibliothek als Raster aus Spiel-Covern' },
-    osd:   { img: '3.webp', alt: 'Lumora – Gaming-OSD mit GPU-, CPU- und FPS-Werten', cap: 'Gaming-OSD – GPU, CPU &amp; FPS live über dem Spiel, hier über der Bibliothek (echte Werte)' }
+    osd:   { img: '3.webp', alt: 'Lumora – Gaming-OSD mit GPU-, CPU- und FPS-Werten', cap: 'Gaming-OSD – GPU, CPU &amp; FPS live über dem Spiel, hier über der Bibliothek (echte Werte)' },
+    streaming: { img: 'stream.webp', alt: 'Lumora – Stream-Tab mit Live-Vorschau, Zuschauer-Liste und Bitrate-Einstellungen', cap: 'Stream-Tab – Live-Vorschau, Zuschauer im Blick, Bitrate &amp; Qualität einstellbar' }
   };
   function setView(v) {
     const d = VIEWS[v];
@@ -1838,7 +1843,7 @@
     shot.src = d.img;
     shot.alt = d.alt;
     document.getElementById('viewCaption').innerHTML = d.cap;
-    for (const [key, id] of [['list', 'tabList'], ['cover', 'tabCover'], ['osd', 'tabOsd']]) {
+    for (const [key, id] of [['list', 'tabList'], ['cover', 'tabCover'], ['osd', 'tabOsd'], ['streaming', 'tabStreaming']]) {
       const b = document.getElementById(id);
       if (!b) continue;
       b.classList.toggle('active', v === key);
@@ -1849,7 +1854,8 @@
   const GALLERY = [
     { img: '1.webp', alt: 'Lumora – Listenansicht', cap: 'Listenansicht' },
     { img: '2.webp', alt: 'Lumora – Cover-Ansicht',  cap: 'Cover-Ansicht' },
-    { img: '3.webp', alt: 'Lumora – Gaming-OSD',     cap: 'Gaming-OSD (Live-Werte)' }
+    { img: '3.webp', alt: 'Lumora – Gaming-OSD',     cap: 'Gaming-OSD (Live-Werte)' },
+    { img: 'stream.webp', alt: 'Lumora – Stream-Tab', cap: 'Stream-Tab (Live-Vorschau &amp; Bitrate)' }
   ];
   let lightboxIndex = 0;
   function lightboxSet(i) {

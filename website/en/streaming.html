@@ -143,6 +143,7 @@
     ul.feat li { padding: 7px 0 7px 30px; position: relative; }
     ul.feat li::before { content: "✔"; position: absolute; left: 4px; color: #6ee7a0; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px; margin: 14px 0; }
+    .shot { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--border); margin: 22px 0; }
     .steps { counter-reset: s; list-style: none; margin: 12px 0; }
     .steps li { counter-increment: s; padding: 8px 0 8px 44px; position: relative; }
     .steps li::before { content: counter(s); position: absolute; left: 0; top: 8px; width: 28px; height: 28px; border-radius: 50%; background: rgba(138,108,255,.18); color: var(--accent2); font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 14px; }
@@ -159,6 +160,8 @@
     <p class="lead">You want your friends to see your game <strong>in actual good quality</strong> – not as a blurry, stuttering mess? Lumora streams your game in up to <strong>4K at 60&nbsp;fps</strong> straight to any browser. No subscription, no sign-up, no server in between.</p>
     <a class="cta" href="../download.php">⬇ Download Lumora for free</a>
     <p class="muted">For Windows 10 &amp; 11 · no registration · open-source based</p>
+
+    <img class="shot" src="../stream.webp" width="1920" height="1044" decoding="async" alt="Lumora stream tab: live preview, viewer list and bitrate settings while sharing your screen">
 
     <h2>How it works</h2>
     <ol class="steps">
