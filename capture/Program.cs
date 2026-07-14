@@ -117,6 +117,23 @@ static class Program
     static ID3D11VideoProcessorOutputView _lbVout;
     static ID3D11RenderTargetView _lbRtv;
 
+    // --- NV12-Ausgabe (GPU-Farbkonvertierung, -62 % Pipe-Daten) --------------
+    // Alle Verarbeitungspfade enden in einer BGRA-Textur (_outW x _outH); ein
+    // finaler VideoProcessorBlt wandelt sie GPU-seitig nach NV12 (BT.709
+    // limited range, explizit gesetzt). FFmpeg liest dann -pixel_format nv12
+    // und spart die komplette CPU-Farbkonvertierung (format=yuv420p) - auf
+    // iGPUs mit geteilter Speicherbandbreite der groesste Einzelgewinn der
+    // Kette. Scheitert die Initialisierung (Treiber/GPU ohne NV12-VP-Ausgang),
+    // laeuft automatisch der bewaehrte BGRA-Weg (FMT bgra an Lumora).
+    static bool _nv12On;
+    static ID3D11Texture2D _finalTex;         // BGRA-Sammelziel aller Pfade
+    static ID3D11RenderTargetView _finalRtv;  // fuers Schwarz-Clearen (Letterbox-Raender)
+    static ID3D11Texture2D _nv12Tex;          // NV12-Ziel des Konvertier-Blts
+    static ID3D11Texture2D _nv12Staging;      // CPU-lesbare NV12-Kopie
+    static ID3D11VideoProcessorEnumerator _nvVenum;
+    static ID3D11VideoProcessor _nvVproc;
+    static ID3D11VideoProcessorOutputView _nvVout;
+
     static int Main(string[] args)
     {
         try
@@ -136,6 +153,7 @@ static class Program
             IntPtr hwnd = IntPtr.Zero;
             int fps = 60, maxHeight = 0;
             string pipeName = null;
+            bool wantNv12 = false;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--hwnd" && i + 1 < args.Length) hwnd = (IntPtr)long.Parse(args[++i]);
@@ -143,6 +161,7 @@ static class Program
                 else if (args[i] == "--fps" && i + 1 < args.Length) fps = int.Parse(args[++i]);
                 else if (args[i] == "--max-height" && i + 1 < args.Length) maxHeight = int.Parse(args[++i]);
                 else if (args[i] == "--pipe" && i + 1 < args.Length) pipeName = args[++i];
+                else if (args[i] == "--nv12") wantNv12 = true;
             }
             if (hwnd == IntPtr.Zero) { Console.Error.WriteLine("ERR kein Fenster gefunden"); return 2; }
             // Video-Ausgang als Named Pipe mit GROSSEM Puffer statt Prozess-stdout.
@@ -226,11 +245,19 @@ static class Program
             {
                 int tW = _width, tH = _height, m = 0;
                 while (tH / 2 >= maxHeight) { tW /= 2; tH /= 2; m++; }
-                if (tH == maxHeight) { _numMips = m; _outW = tW; _outH = tH; }   // exakt -> Mipmap
+                // &~1: Halbierungen koennen UNGERADE Masse ergeben (z.B. 2838/2 = 1419) -
+                // H.264 und NV12-Texturen verlangen gerade; die Mip-Kopie croppt das
+                // ueberstehende Pixel per SrcBox (s. CopyFrameInto). Vorher lief die
+                // ungerade Breite ungeprueft durch (Encoder-Fehler-Risiko, latent).
+                if (tH == maxHeight) { _numMips = m; _outW = tW & ~1; _outH = tH & ~1; }   // exakt -> Mipmap
                 else _useVp = true;                                              // krumm -> Video-Processor
             }
 
             EnsureCropTex(hdr);
+            // NV12-Endstufe VOR der SIZE-Meldung initialisieren: Lumora liest FMT
+            // und startet FFmpeg direkt nach SIZE mit dem passenden -pixel_format.
+            if (wantNv12) TryInitNv12();
+            Console.Error.WriteLine("FMT " + (_nv12On ? "nv12" : "bgra"));
             Console.Error.WriteLine($"SIZE {_outW} {_outH}");
             if (_cropOn) Console.Error.WriteLine($"CLIP {_cropX},{_cropY} {_curW}x{_curH} in {_texW}x{_texH}");
             Console.Error.Flush();
@@ -371,7 +398,11 @@ static class Program
                                 EnsureCropTex(hdr);
                                 try { ConfigureLetterbox(hdr); }
                                 catch (Exception ex) { if (!_vpLogged) { _vpLogged = true; Console.Error.WriteLine("RSZERR " + ex.Message); } }
-                                if (frameBuf != null) Array.Clear(frameBuf, 0, frameBuf.Length);   // Raender schwarz
+                                // Raender schwarz: nur im BGRA-Weg noetig (CPU-Komposition).
+                                // Im NV12-Weg kommt jedes Frame KOMPLETT aus dem GPU-Blt
+                                // (Raender per ClearRenderTargetView in ConfigureLetterbox);
+                                // Array.Clear waere hier sogar falsch (Y=0/UV=0 = Gruenstich).
+                                if (frameBuf != null && !_nv12On) Array.Clear(frameBuf, 0, frameBuf.Length);
                             }
                             else
                             {
@@ -387,7 +418,7 @@ static class Program
                     else
                     {
                         rszW = rszH = 0;
-                        if (frameBuf == null) frameBuf = new byte[_outW * 4 * _outH];
+                        if (frameBuf == null) frameBuf = new byte[_nv12On ? _outW * _outH * 3 / 2 : _outW * 4 * _outH];
                         double c0 = sw.Elapsed.TotalMilliseconds;
                         try { CopyFrameInto(latest, frameBuf); } catch { }
                         statMaxCopy = Math.Max(statMaxCopy, sw.Elapsed.TotalMilliseconds - c0);
@@ -432,18 +463,24 @@ static class Program
         // Rahmenpixel im Stream); die gesamte Pipeline arbeitet auf dem Ausschnitt.
         var srcTex = PrepareSource(wgcTex);
         if (_resized) { CopyFrameLetterbox(srcTex, dst); return; }
+        // Ziel der Verarbeitungspfade: im NV12-Modus die BGRA-Sammel-Textur
+        // (_finalTex, GPU-intern, danach EIN Konvertier-Blt), im BGRA-Modus wie
+        // gehabt direkt die CPU-Staging-Textur. Die Pfade selbst sind identisch.
+        ID3D11Texture2D target = _nv12On ? _finalTex : _staging;
         if (_numMips > 0)
         {
             // Content -> mip0, Mip-Kette auf der GPU erzeugen, Ziel-Mip (kleiner)
-            // in die Staging-Textur kopieren.
+            // in die Ziel-Textur kopieren. SrcBox croppt auf die GERADE Ausgabe-
+            // groesse (die Mip selbst kann 1 px breiter/hoeher sein, s. &~1 oben).
             _context.CopySubresourceRegion(_mipTex, 0, 0, 0, 0, srcTex, 0);
             _context.GenerateMips(_mipSrv);
-            _context.CopySubresourceRegion(_staging, 0, 0, 0, 0, _mipTex, (uint)_numMips);
+            _context.CopySubresourceRegion(target, 0, 0, 0, 0, _mipTex, (uint)_numMips,
+                new Vortice.Mathematics.Box(0, 0, 0, _outW, _outH, 1));
         }
         else if (_useShader)
         {
             RenderShaderTonemap(srcTex);
-            _context.CopyResource(_staging, _scaleTex);
+            _context.CopyResource(target, _scaleTex);
         }
         else if (_useVp)
         {
@@ -453,17 +490,120 @@ static class Program
                     new VideoProcessorInputViewDescription { FourCC = 0, ViewDimension = VideoProcessorInputViewDimension.Texture2D });
                 var stream = new VideoProcessorStream { Enable = true, InputSurface = inView };
                 _vctx.VideoProcessorBlt(_vproc, _voutView, 0, 1, new[] { stream });
-                _context.CopyResource(_staging, _scaleTex);
+                _context.CopyResource(target, _scaleTex);
             }
             catch (Exception ex) { if (!_vpLogged) { _vpLogged = true; Console.Error.WriteLine("VPERR " + ex.Message); } throw; }
         }
-        else _context.CopyResource(_staging, srcTex);
+        else _context.CopyResource(target, srcTex);
+        if (_nv12On) { Nv12Finish(dst); return; }
         var map = _context.Map(_staging, 0, Vortice.Direct3D11.MapMode.Read, Vortice.Direct3D11.MapFlags.None);
         int rowBytes = _outW * 4, pitch = (int)map.RowPitch;
         IntPtr src = map.DataPointer;
         if (pitch == rowBytes) Marshal.Copy(src, dst, 0, rowBytes * _outH);   // dicht gepackt -> ein Rutsch
         else for (int y = 0; y < _outH; y++) Marshal.Copy(src + y * pitch, dst, y * rowBytes, rowBytes);
         _context.Unmap(_staging, 0);
+    }
+
+    // NV12-Endstufe initialisieren: VideoProcessor (BGRA _outW x _outH -> NV12
+    // gleicher Groesse) + Sammel-/Ziel-/Staging-Texturen. Farbraeume EXPLIZIT
+    // setzen (Eingang sRGB voll, Ausgang BT.709 Studio/limited - der Standard
+    // fuer H.264-Streams; ohne explizite Angabe waehlen Treiber unterschiedlich
+    // -> Farbstich-Risiko). Scheitert IRGENDWAS: sauber aufraeumen und im
+    // bewaehrten BGRA-Modus weiterlaufen (kein Risiko einer Verschlechterung).
+    static void TryInitNv12()
+    {
+        try
+        {
+            if (_vdev == null) _vdev = _device.QueryInterface<ID3D11VideoDevice>();
+            if (_vctx == null) _vctx = _context.QueryInterface<ID3D11VideoContext1>();
+            _nvVenum = _vdev.CreateVideoProcessorEnumerator(new VideoProcessorContentDescription
+            {
+                InputFrameFormat = VideoFrameFormat.Progressive,
+                InputWidth = (uint)_outW, InputHeight = (uint)_outH,
+                OutputWidth = (uint)_outW, OutputHeight = (uint)_outH,
+                Usage = VideoUsage.PlaybackNormal,
+            });
+            _nvVproc = _vdev.CreateVideoProcessor(_nvVenum, 0);
+            _finalTex = _device.CreateTexture2D(new Texture2DDescription
+            {
+                Width = (uint)_outW, Height = (uint)_outH, MipLevels = 1, ArraySize = 1,
+                Format = Vortice.DXGI.Format.B8G8R8A8_UNorm, SampleDescription = new SampleDescription(1, 0),
+                Usage = ResourceUsage.Default, BindFlags = BindFlags.RenderTarget | BindFlags.ShaderResource,
+            });
+            _finalRtv = _device.CreateRenderTargetView(_finalTex);
+            _nv12Tex = _device.CreateTexture2D(new Texture2DDescription
+            {
+                Width = (uint)_outW, Height = (uint)_outH, MipLevels = 1, ArraySize = 1,
+                Format = Vortice.DXGI.Format.NV12, SampleDescription = new SampleDescription(1, 0),
+                Usage = ResourceUsage.Default, BindFlags = BindFlags.RenderTarget,
+            });
+            _nvVout = _vdev.CreateVideoProcessorOutputView(_nv12Tex, _nvVenum,
+                new VideoProcessorOutputViewDescription { ViewDimension = VideoProcessorOutputViewDimension.Texture2D });
+            _nv12Staging = _device.CreateTexture2D(new Texture2DDescription
+            {
+                Width = (uint)_outW, Height = (uint)_outH, MipLevels = 1, ArraySize = 1,
+                Format = Vortice.DXGI.Format.NV12, SampleDescription = new SampleDescription(1, 0),
+                Usage = ResourceUsage.Staging, BindFlags = BindFlags.None,
+                CPUAccessFlags = CpuAccessFlags.Read, MiscFlags = ResourceOptionFlags.None,
+            });
+            try { _vctx.VideoProcessorSetStreamColorSpace1(_nvVproc, 0u, ColorSpaceType.RgbFullG22NoneP709); } catch { }
+            try { _vctx.VideoProcessorSetOutputColorSpace1(_nvVproc, ColorSpaceType.YcbcrStudioG22LeftP709); } catch { }
+            _nv12On = true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("NV12ERR init: " + ex.Message);
+            _nvVout?.Dispose(); _nvVout = null;
+            _nv12Staging?.Dispose(); _nv12Staging = null;
+            _nv12Tex?.Dispose(); _nv12Tex = null;
+            _finalRtv?.Dispose(); _finalRtv = null;
+            _finalTex?.Dispose(); _finalTex = null;
+            _nvVproc?.Dispose(); _nvVproc = null;
+            _nvVenum?.Dispose(); _nvVenum = null;
+            _nv12On = false;
+        }
+    }
+
+    // Finale NV12-Stufe eines Frames: BGRA-Sammel-Textur -> VideoProcessorBlt
+    // (Farbkonvertierung auf der GPU) -> NV12-Staging -> dicht gepackt in den
+    // Ausgabepuffer (erst Y-Plane, dann UV-Plane; D3D11-Layout: UV beginnt bei
+    // DataPointer + RowPitch * Hoehe, beide Planes teilen sich die RowPitch).
+    static void Nv12Finish(byte[] dst)
+    {
+        try
+        {
+            using var inView = _vdev.CreateVideoProcessorInputView(_finalTex, _nvVenum,
+                new VideoProcessorInputViewDescription { FourCC = 0, ViewDimension = VideoProcessorInputViewDimension.Texture2D });
+            var stream = new VideoProcessorStream { Enable = true, InputSurface = inView };
+            _vctx.VideoProcessorBlt(_nvVproc, _nvVout, 0, 1, new[] { stream });
+            _context.CopyResource(_nv12Staging, _nv12Tex);
+            var map = _context.Map(_nv12Staging, 0, Vortice.Direct3D11.MapMode.Read, Vortice.Direct3D11.MapFlags.None);
+            int pitch = (int)map.RowPitch;
+            IntPtr src = map.DataPointer;
+            int ySize = _outW * _outH;
+            if (pitch == _outW)
+            {
+                Marshal.Copy(src, dst, 0, ySize);                                   // Y dicht -> ein Rutsch
+                Marshal.Copy(src + (nint)pitch * _outH, dst, ySize, ySize / 2);     // UV dicht -> ein Rutsch
+            }
+            else
+            {
+                for (int y = 0; y < _outH; y++) Marshal.Copy(src + (nint)y * pitch, dst, y * _outW, _outW);
+                IntPtr uv = src + (nint)pitch * _outH;
+                for (int y = 0; y < _outH / 2; y++) Marshal.Copy(uv + (nint)y * pitch, dst, ySize + y * _outW, _outW);
+            }
+            _context.Unmap(_nv12Staging, 0);
+        }
+        catch (Exception ex)
+        {
+            // Blt zur LAUFZEIT kaputt (Treiber-Eigenheit): NICHT still schwarz
+            // weiterstreamen - klare Meldung + Selbstbeendigung. Lumora erkennt
+            // NV12ERR, merkt sich den Ausfall und startet die Aufnahme
+            // automatisch im bewaehrten BGRA-Modus neu.
+            Console.Error.WriteLine("NV12ERR blt: " + ex.Message);
+            Console.Error.Flush();
+            Environment.Exit(6);
+        }
     }
 
     // Nach einer Fenster-Groessenaenderung: Scaler (neu) aufbauen, der den aktuellen
@@ -528,6 +668,12 @@ static class Program
             _lbVout = _vdev.CreateVideoProcessorOutputView(_lbScaleTex, _lbVenum,
                 new VideoProcessorOutputViewDescription { ViewDimension = VideoProcessorOutputViewDimension.Texture2D });
         }
+        // NV12-Weg: Die Letterbox-Raender leben in der BGRA-Sammel-Textur (der
+        // GPU-Blt liefert jedes Frame KOMPLETT inkl. Raender) - einmal pro
+        // Umbau schwarz clearen; das zentrierte Inhalts-Rechteck ueberschreibt
+        // CopyFrameLetterbox danach in jedem Frame.
+        if (_nv12On && _finalRtv != null)
+            _context.ClearRenderTargetView(_finalRtv, new Vortice.Mathematics.Color4(0f, 0f, 0f, 1f));
         _resized = true;
         Console.Error.WriteLine($"RESIZE {_curW} {_curH} -> {_dw}x{_dh}@{_dx},{_dy}");
         Console.Error.Flush();
@@ -557,6 +703,15 @@ static class Program
                 new VideoProcessorInputViewDescription { FourCC = 0, ViewDimension = VideoProcessorInputViewDimension.Texture2D });
             var stream = new VideoProcessorStream { Enable = true, InputSurface = inView };
             _vctx.VideoProcessorBlt(_lbVproc, _lbVout, 0, 1, new[] { stream });
+        }
+        if (_nv12On)
+        {
+            // Skalierter Inhalt zentriert in die (schwarz geclearte) Sammel-
+            // Textur - Komposition auf der GPU statt zeilenweise auf der CPU;
+            // danach dieselbe NV12-Endstufe wie im Normalpfad.
+            _context.CopySubresourceRegion(_finalTex, 0, (uint)_dx, (uint)_dy, 0, _lbScaleTex, 0);
+            Nv12Finish(dst);
+            return;
         }
         _context.CopyResource(_lbStaging, _lbScaleTex);
         var map = _context.Map(_lbStaging, 0, Vortice.Direct3D11.MapMode.Read, Vortice.Direct3D11.MapFlags.None);
