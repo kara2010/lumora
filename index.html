@@ -529,9 +529,10 @@
                 <div style="font-weight:600; font-size:13px; margin-bottom:6px; opacity:.85">Wer schaut zu</div>
                 <div id="viewerList"></div>
               </div>
-              <p class="settings-hint" id="streamForwardHelp" style="display:none; border-left:3px solid #f5b942; padding-left:10px">
-                Der Link nutzt deine öffentliche IP, aber deine FritzBox lässt Lumora den Port nicht selbst öffnen. Zwei Wege: <b>(A)</b> In der FritzBox <i>Heimnetz → Netzwerk → [dieser&nbsp;PC] → Bearbeiten</i> das Häkchen <i>„Selbstständige Portfreigaben für dieses Gerät erlauben"</i> setzen — dann öffnet Lumora den Port künftig automatisch. <b>(B)</b> Oder dauerhaft manuell: <i>Internet → Freigaben → Portfreigaben</i>, Port <b>8787 TCP</b> auf diesen PC.
-              </p>
+              <div class="stream-forward-warn" id="streamForwardHelp" style="display:none">
+                <div class="sfw-title">⚠️ <span id="streamForwardTitle"></span></div>
+                <div class="sfw-steps" id="streamForwardSteps"></div>
+              </div>
             </div>
             <p class="settings-hint" id="streamHint" style="margin-top:8px">Beim Start öffnet Lumora automatisch den nötigen Port am Router (UPnP) und schließt ihn beim Stoppen wieder.</p>
           </div>
@@ -1038,7 +1039,44 @@ const I18N_EN = {
   'HDR an': 'HDR on',
   'Noch keine Spiele': 'No games yet',
   'Keine Treffer': 'No matches',
+  'Keine Treffer.': 'No matches.',
   'Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.': 'No matches. Try a different search term or use "Use your own image".',
+  'SteamGridDB einrichten': 'Set up SteamGridDB',
+  'bringt für so gut wie jedes Spiel Cover & Hero-Banner — auch für Epic-/GOG-/Ubisoft-Titel. Kostenlos, 2 Minuten.': 'gets you covers & hero banners for almost any game — including Epic/GOG/Ubisoft titles. Free, 2 minutes.',
+  // --- Router-Portfreigabe-Anleitungen (dynamisch aus main.js, siehe routerUpnpHint) ---
+  'Router öffnet die Ports nicht automatisch': 'Router isn’t opening the ports automatically',
+  'In der FRITZ!Box: „Internet → Freigaben → Portfreigaben“. Beim Eintrag für diesen PC „Selbstständige Portfreigaben für dieses Gerät erlauben“ anhaken – und ganz unten „Selbstständige Portfreigaben für alle Geräte erlauben“ aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the FRITZ!Box: open “Internet → Freigaben → Portfreigaben” (Internet → Permissions → Port Forwarding). For the entry for this PC, check “Selbstständige Portfreigaben für dieses Gerät erlauben” (allow automatic port forwarding for this device) – and at the very bottom, enable “Selbstständige Portfreigaben für alle Geräte erlauben” (allow automatic port forwarding for all devices). If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im Speedport: „Internet → Portfreigaben“ (bzw. „Netzwerk → NAT“) öffnen und „UPnP“ bzw. „Portfreigaben automatisch zulassen“ einschalten. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the Speedport interface, open “Internet → Portfreigaben” (Internet → Port Forwarding, or “Netzwerk → NAT”) and enable “UPnP” or “Portfreigaben automatisch zulassen” (allow automatic port forwarding). If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'In der Vodafone Station den Experten-/Erweitert-Modus öffnen und „UPnP“ aktivieren (je nach Modell unter „Firewall“ oder „NAT“). Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the Vodafone Station, open expert/advanced mode and enable “UPnP” (depending on the model, under “Firewall” or “NAT”). If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im BT Smart Hub: „Advanced Settings → Firewall“ öffnen und „UPnP“ aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the BT Smart Hub: open “Advanced Settings → Firewall” and enable “UPnP”. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im Sky-Router-Menü unter „Advanced Settings“ die Option „UPnP“ aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the Sky Router menu, under “Advanced Settings”, enable the “UPnP” option. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im Virgin-Media-Hub-Menü (meist 192.168.0.1) unter „Advanced Settings → Firewall“ die Option „UPnP Enabled“ aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the Virgin Media Hub menu (usually 192.168.0.1), under “Advanced Settings → Firewall”, enable “UPnP Enabled”. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'In der Xfinity-App unter „WiFi → Gateway → Advanced Settings → Port Forwarding“ UPnP aktivieren – oder im Router-Adminbereich (meist 10.0.0.1) unter „Gateway → Connection → Port Forwarding“. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the Xfinity app, under “WiFi → Gateway → Advanced Settings → Port Forwarding”, enable UPnP – or in the router admin area (usually 10.0.0.1) under “Gateway → Connection → Port Forwarding”. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im AT&T-Gateway-Adminbereich (meist 192.168.1.254) unter „Firewall → NAT/Gaming“ die Option „UPnP“ aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the AT&T Gateway admin area (usually 192.168.1.254), under “Firewall → NAT/Gaming”, enable the “UPnP” option. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im TP-Link-Adminbereich unter „Advanced → NAT Forwarding → UPnP“ (bzw. „Forwarding → UPnP“) die Option einschalten. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the TP-Link admin area, under “Advanced → NAT Forwarding → UPnP” (or “Forwarding → UPnP”), turn the option on. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im Netgear-Adminbereich unter „Advanced → Advanced Setup → UPnP“ die Option „Turn UPnP On“ aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the Netgear admin area, under “Advanced → Advanced Setup → UPnP”, enable “Turn UPnP On”. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im ASUS-Adminbereich unter „WAN → NAT Passthrough“ (bzw. „Administration“) die Option „Enable UPnP“ aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the ASUS admin area, under “WAN → NAT Passthrough” (or “Administration”), enable “Enable UPnP”. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im D-Link-Adminbereich unter „Advanced → Network Settings“ die Option „Enable UPnP“ aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the D-Link admin area, under “Advanced → Network Settings”, enable “Enable UPnP”. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im Linksys-Adminbereich unter „Security“ (bzw. „Apps and Gaming → UPnP“) die Option UPnP aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the Linksys admin area, under “Security” (or “Apps and Gaming → UPnP”), enable the UPnP option. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Im Huawei-Router-Adminbereich unter „Advanced → NAT → UPnP“ die Option aktivieren. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'In the Huawei router admin area, under “Advanced → NAT → UPnP”, enable the option. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Das ist ein vom Internetanbieter bereitgestellter Router. Suche im Adminbereich (meist 192.168.0.1 oder 192.168.1.1) nach „UPnP“, „NAT“ oder „Firewall“ und aktiviere dort die automatische Portfreigabe – oder schau in der App bzw. im Kundenportal deines Anbieters nach „Port Forwarding“. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'This is a router provided by your internet provider. Look in the admin area (usually 192.168.0.1 or 192.168.1.1) for “UPnP”, “NAT”, or “Firewall” and enable automatic port forwarding there – or check your provider’s app or customer portal for “Port Forwarding”. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
+  'Aktiviere im Router „UPnP“ bzw. „automatische/selbstständige Portfreigaben“. Klappt das nicht, gib ersatzweise Port 8787 (TCP) und 8189 (UDP) manuell auf diesen PC frei.':
+    'Enable “UPnP” or “automatic port forwarding” in your router. If that doesn’t work, forward port 8787 (TCP) and 8189 (UDP) to this PC manually instead.',
   '⏳ Öffentlicher Link wird vorbereitet…': '⏳ Preparing public link…',
   '  ·  ⏳ Router wird geprüft…': '  ·  ⏳ Checking router…',
   '  ·  🌐 über IPv6 erreichbar (Zuschauer braucht IPv6, z. B. Mobilfunk)': '  ·  🌐 reachable via IPv6 (viewer needs IPv6, e.g. mobile data)',
@@ -1457,16 +1495,36 @@ function applyI18n() {
       }
     }
 
-    function finishCoverSearch(token) {
+    async function finishCoverSearch(token) {
       if (token !== coverSearchToken) return
       const box = document.getElementById('coverResults')
       box.querySelectorAll('.cover-skeleton, .cover-loading-status').forEach(el => el.remove())
       if (coverResultCount === 0) {
+        let sgdbConfigured = true
+        try { const s = await ipcRenderer.invoke('get-app-settings'); sgdbConfigured = !!(s && s.steamGridDbKey) } catch {}
+        if (token !== coverSearchToken) return   // waehrend des Abrufs ist eine neuere Suche gestartet
         const d = document.createElement('div')
         d.className = 'cover-status'
-        d.textContent = window.tr('Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.')
+        if (!sgdbConfigured) {
+          d.innerHTML = esc(window.tr('Keine Treffer.')) + ' <strong>' + esc(window.tr('SteamGridDB einrichten')) + '</strong> ' +
+            esc(window.tr('bringt für so gut wie jedes Spiel Cover & Hero-Banner — auch für Epic-/GOG-/Ubisoft-Titel. Kostenlos, 2 Minuten.')) +
+            '<br><button class="btn-browse" style="margin-top:8px" onclick="openSgdbSetup()">' + esc(window.tr('Jetzt einrichten')) + '</button>'
+        } else {
+          d.textContent = window.tr('Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild" verwenden.')
+        }
         box.appendChild(d)
       }
+    }
+    // Springt aus der leeren Cover-Suche direkt zur SteamGridDB-Einrichtung in den Einstellungen.
+    function openSgdbSetup() {
+      hideCoverSearch()
+      showSettings('darstellung')
+      setTimeout(() => {
+        const details = document.querySelector('.sgdb-guide')
+        if (details) details.open = true
+        const field = document.getElementById('setSgdbKey')
+        if (field) field.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 50)
     }
 
     // Einzelbild anzeigen (eigene URL/Datei) – ersetzt das Raster sofort,
@@ -2456,6 +2514,11 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         document.getElementById('streamStats').innerHTML =
           window.tr('Zuschauer: ') + (st.viewers || 0) + (st.quality ? '  ·  ' + st.quality : '') + net + adapt + hdrW + cap
         document.getElementById('streamForwardHelp').style.display = st.needsForward ? 'block' : 'none'
+        if (st.needsForward && st.forwardHint) {
+          document.getElementById('streamForwardTitle').textContent =
+            window.tr('Router öffnet die Ports nicht automatisch') + (st.forwardHint.router ? ' (' + st.forwardHint.router + ')' : '')
+          document.getElementById('streamForwardSteps').textContent = window.tr(st.forwardHint.steps)
+        }
       }
       if (on) startViewerPoll(); else stopViewerPoll()
       // Bei laufendem Stream die Stream-Sektion (mit der Vorschau) nach oben holen.
@@ -2881,6 +2944,16 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // Startfehler (Port belegt, mediamtx-Problem) sichtbar machen statt stumm
     // auf "Stream aus" zurueckzuspringen (Audit-Befund).
     ipcRenderer.on('stream-error', (e, msg) => streamToast('⚠️ ' + msg))
+    // Klick auf die native "Router öffnet Ports nicht"-Benachrichtigung: direkt
+    // zur Anleitung springen (Lumora selbst wird von showMainWindow() im
+    // Hauptprozess bereits nach vorne geholt, auch aus einem Vollbild-Spiel heraus).
+    ipcRenderer.on('show-forward-help', () => {
+      showSettings('stream')
+      setTimeout(() => {
+        const box = document.getElementById('streamForwardHelp')
+        if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 80)
+    })
     // Waehrend der Gruppen-Einrichtung KEINE Push-Renders: main.js meldet den
     // aktiven Zustand schon mittendrin - das riss den Knopf-Ladezustand vorzeitig
     // weg. Der Klick-Handler rendert nach der Mindestdauer selbst.

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage, globalShortcut, desktopCapturer, session } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage, globalShortcut, desktopCapturer, session, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -3526,7 +3526,7 @@ let ffRestartTimer = null         // Auto-Neustart bei FFmpeg-Absturz
 let ffRestartDebounce = null      // sammelt schnelle Einstellungsaenderungen
 let ffStopping = false            // true = gewollt beendet (kein Auto-Neustart)
 let bcViewerPoll = null           // Intervall: Zuschauerzahl von der mediamtx-API
-let broadcastState = { active: false, port: 0, link: '', linkV4: '', linkV6: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false }
+let broadcastState = { active: false, port: 0, link: '', linkV4: '', linkV6: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false, forwardHint: null }
 let bcPlayerHtmlCache = null
 let bcEncoderCache = null         // { vendor, encoder, hw } – einmal ermittelt
 
@@ -3560,15 +3560,69 @@ function bcTurnServer() {
   if (!/^turns?:/i.test(url)) url = 'turn:' + url
   return { url, username: appSettings.streamTurnUser || '', password: appSettings.streamTurnPass || '' }
 }
-// Herstellerspezifische Kurzanleitung, wenn die UPnP-Freigabe scheitert.
+// Effektive UI-Sprache fuer die wenigen im Hauptprozess selbst erzeugten Texte
+// (Notifications - kein DOM/i18n-System hier verfuegbar). Spiegelt exakt die
+// Aufloesung der Renderer-Seite (index.html: navigator.language-Praefix "de").
+function mainLang() {
+  const v = appSettings.language || 'auto'
+  if (v !== 'auto') return v
+  return (app.getLocale() || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'
+}
+// Aktive Benachrichtigung, wenn der Router die Ports beim Streamstart nicht selbst
+// freigibt - bewusst eine ECHTE Windows-Benachrichtigung statt nur ein Hinweis
+// irgendwo im UI: waehrend des Streamens ist meist ein Vollbild-Spiel im Fokus,
+// Lumora selbst sieht man gar nicht. Ein Klick holt Lumora nach vorne (auch aus
+// dem Vollbild-Spiel heraus, siehe showMainWindow) und zeigt die Router-Anleitung.
+let bcForwardNotified = false   // pro Stream-Start nur einmal nerven
+function notifyForwardIssue() {
+  if (bcForwardNotified) return
+  bcForwardNotified = true
+  try {
+    if (!Notification.isSupported()) return
+    const de = mainLang() === 'de'
+    const n = new Notification({
+      title: de ? '⚠️ Stream nur im lokalen Netz erreichbar' : '⚠️ Stream reachable on local network only',
+      body: de ? 'Dein Router öffnet die Ports nicht automatisch. Klicken für eine Schritt-für-Schritt-Anleitung.' : "Your router isn't opening the ports automatically. Click for step-by-step help.",
+    })
+    n.on('click', () => { showMainWindow(); sendToUi('show-forward-help', {}) })
+    n.show()
+  } catch {}
+}
+// Herstellerspezifische Kurzanleitung, wenn die UPnP-Freigabe scheitert. International
+// sortiert: DACH zuerst (groesste Nutzerbasis), dann UK/US-Provider-Gateways, dann
+// globale Einzelhandelsmarken. Baugleiche Chipsaetze (Arris/Technicolor/Sagemcom)
+// werden von VIELEN Providern weltweit rebranded - deshalb NICHT pauschal einer
+// bestimmten Marke (z.B. Vodafone) zuschreiben, das waere international oft falsch;
+// stattdessen ein neutraler Hinweis fuer diesen Fall (siehe unten).
 function routerUpnpHint() {
   const name = (upnpRouter && (upnpRouter.modelName || upnpRouter.friendlyName)) || ''
-  const nm = (name + ' ' + ((upnpRouter && upnpRouter.manufacturer) || '')).toLowerCase()
+  const nm = (name + ' ' + ((upnpRouter && upnpRouter.manufacturer) || '') + ' ' + ((upnpRouter && upnpRouter.friendlyName) || '')).toLowerCase()
   const ports = 'Port ' + BROADCAST_PORT + ' (TCP) und ' + MTX_ICE_UDP + ' (UDP)'
-  if (/avm|fritz/.test(nm)) return { router: name || 'FRITZ!Box', steps: 'In der FRITZ!Box: „Internet → Freigaben → Portfreigaben“. Beim Eintrag für diesen PC „Selbstständige Portfreigaben für dieses Gerät erlauben“ anhaken – und ganz unten „Selbstständige Portfreigaben für alle Geräte erlauben“ aktivieren.' }
-  if (/speedport|telekom/.test(nm)) return { router: name || 'Speedport', steps: 'Im Speedport: „Internet → Portfreigaben“ (bzw. „Netzwerk → NAT“) öffnen und „UPnP“ bzw. „Portfreigaben automatisch zulassen“ einschalten.' }
-  if (/vodafone|arris|technicolor|hitron/.test(nm)) return { router: name || 'Vodafone Station', steps: 'In der Vodafone Station den Experten-/Erweitert-Modus öffnen und „UPnP“ aktivieren (je nach Modell unter „Firewall“ oder „NAT“).' }
-  return { router: name || 'deinem Router', steps: 'Aktiviere im Router „UPnP“ bzw. „automatische/selbstständige Portfreigaben“ – oder gib ' + ports + ' manuell auf diesen PC frei.' }
+  const manualFallback = ' Klappt das nicht, gib ersatzweise ' + ports + ' manuell auf diesen PC frei.'
+  const brands = [
+    [/avm|fritz/, 'FRITZ!Box', 'In der FRITZ!Box: „Internet → Freigaben → Portfreigaben“. Beim Eintrag für diesen PC „Selbstständige Portfreigaben für dieses Gerät erlauben“ anhaken – und ganz unten „Selbstständige Portfreigaben für alle Geräte erlauben“ aktivieren.'],
+    [/speedport|telekom/, 'Speedport', 'Im Speedport: „Internet → Portfreigaben“ (bzw. „Netzwerk → NAT“) öffnen und „UPnP“ bzw. „Portfreigaben automatisch zulassen“ einschalten.'],
+    [/vodafone.?station|vodafone.?easybox/, 'Vodafone Station', 'In der Vodafone Station den Experten-/Erweitert-Modus öffnen und „UPnP“ aktivieren (je nach Modell unter „Firewall“ oder „NAT“).'],
+    [/bt\s?smart\s?hub|bthomehub|\bbt\s?hub\b/, 'BT Smart Hub', 'Im BT Smart Hub: „Advanced Settings → Firewall“ öffnen und „UPnP“ aktivieren.'],
+    [/sky\s?hub|sky\s?router/, 'Sky Router', 'Im Sky-Router-Menü unter „Advanced Settings“ die Option „UPnP“ aktivieren.'],
+    [/virgin\s?media|super\s?hub/, 'Virgin Media Hub', 'Im Virgin-Media-Hub-Menü (meist 192.168.0.1) unter „Advanced Settings → Firewall“ die Option „UPnP Enabled“ aktivieren.'],
+    [/xfinity|xfi\s?gateway|comcast/, 'Xfinity Gateway', 'In der Xfinity-App unter „WiFi → Gateway → Advanced Settings → Port Forwarding“ UPnP aktivieren – oder im Router-Adminbereich (meist 10.0.0.1) unter „Gateway → Connection → Port Forwarding“.'],
+    [/\bbgw\d|at&t|arris.?bgw/, 'AT&T Gateway', 'Im AT&T-Gateway-Adminbereich (meist 192.168.1.254) unter „Firewall → NAT/Gaming“ die Option „UPnP“ aktivieren.'],
+    [/tp-?link/, 'TP-Link', 'Im TP-Link-Adminbereich unter „Advanced → NAT Forwarding → UPnP“ (bzw. „Forwarding → UPnP“) die Option einschalten.'],
+    [/netgear|nighthawk|\borbi\b/, 'Netgear', 'Im Netgear-Adminbereich unter „Advanced → Advanced Setup → UPnP“ die Option „Turn UPnP On“ aktivieren.'],
+    [/asus(tek)?/, 'ASUS', 'Im ASUS-Adminbereich unter „WAN → NAT Passthrough“ (bzw. „Administration“) die Option „Enable UPnP“ aktivieren.'],
+    [/d-?link/, 'D-Link', 'Im D-Link-Adminbereich unter „Advanced → Network Settings“ die Option „Enable UPnP“ aktivieren.'],
+    [/linksys|belkin/, 'Linksys', 'Im Linksys-Adminbereich unter „Security“ (bzw. „Apps and Gaming → UPnP“) die Option UPnP aktivieren.'],
+    [/huawei/, 'Huawei', 'Im Huawei-Router-Adminbereich unter „Advanced → NAT → UPnP“ die Option aktivieren.'],
+  ]
+  for (const [re, brand, steps] of brands) {
+    if (re.test(nm)) return { router: name || brand, steps: steps + manualFallback }
+  }
+  // Marke unklar, aber ein bekannter Provider-Chipsatz erkannt: neutral bleiben statt zu raten.
+  if (/arris|technicolor|hitron|sagemcom|compal|askey|zyxel|\bzte\b/.test(nm)) {
+    return { router: name || 'deinem Kabel-/DSL-Router', steps: 'Das ist ein vom Internetanbieter bereitgestellter Router. Suche im Adminbereich (meist 192.168.0.1 oder 192.168.1.1) nach „UPnP“, „NAT“ oder „Firewall“ und aktiviere dort die automatische Portfreigabe – oder schau in der App bzw. im Kundenportal deines Anbieters nach „Port Forwarding“.' + manualFallback }
+  }
+  return { router: name || 'deinem Router', steps: 'Aktiviere im Router „UPnP“ bzw. „automatische/selbstständige Portfreigaben“.' + manualFallback }
 }
 function upnpDiscover(timeoutMs) {
   return new Promise((resolve) => {
@@ -4954,6 +5008,7 @@ async function startBroadcast() {
   bcAdaptLevel = 0; bcAdaptLastChange = 0; bcAdaptBadSince = 0; bcAdaptGoodSince = 0
   bcAdaptUpAt = 0; bcAdaptUpHold = 0
   bcQosMap.clear(); bcQosLogLast.clear()
+  bcForwardNotified = false
   broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, linkV4: prevV4, linkV6: prevV6, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder }
   bcPushState()   // LAN-Link sofort anzeigen
   bcPinholeIds = []
@@ -5089,6 +5144,8 @@ async function startBroadcast() {
     broadcastState.internet = !!(v4Reachable || (v6Ok && pubIp6))
     broadcastState.ipv6Only = !!(!v4Reachable && v6Ok && pubIp6)   // Link laeuft ueber IPv6 (Zuschauer braucht IPv6)
     broadcastState.needsForward = !!(pubIp && !v4Reachable && !(v6Ok && pubIp6))
+    broadcastState.forwardHint = broadcastState.needsForward ? routerUpnpHint() : null
+    if (broadcastState.needsForward) notifyForwardIssue()
     bcPushState()
     osdDbg('[stream] aktiv: ' + broadcastState.link + ' enc=' + enc.encoder + ' tcp=' + tcpOk + ' udp=' + udpOk + ' ip=' + pubIp + ' v6=' + v6Ok + ' ip6=' + pubIp6 + (v4OccupiedBy ? ' (IPv4 belegt von ' + v4OccupiedBy + ')' : ''))
     // IP-Wechsel-Watcher (s. bcIpWatchTick): raeumt sich nach Stream-Ende selbst weg.
@@ -5171,7 +5228,7 @@ function bcTeardownServer() {
   // blindes Unmap deren laufenden Stream von aussen kappen.
   if (bcV4Mapped) { upnpUnmapPort(BROADCAST_PORT, 'TCP'); upnpUnmapPort(MTX_ICE_UDP, 'UDP'); bcV4Mapped = false }
   bcPinholeIds.forEach((id) => upnpDeletePinhole(id)); bcPinholeIds = []       // IPv6-Firewall-Pinholes schliessen
-  broadcastState = { active: false, port: 0, link: '', linkV4: '', linkV6: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false }
+  broadcastState = { active: false, port: 0, link: '', linkV4: '', linkV6: '', lanLink: '', viewers: 0, quality: '', internet: false, opening: false, forwardHint: null }
   bcPushState()
 }
 // fullTeardown=true nur beim App-Ende: dann wird auch eine aktive Gruppe verlassen
@@ -5196,7 +5253,7 @@ async function stopBroadcast(fullTeardown) {
     // Nur die Pipeline ist aus; Server, Portfreigaben und oeffentliche Adressen
     // bleiben gueltig (der Server laeuft ja weiter). Zuschauerzaehler stoppen.
     if (bcViewerPoll) { clearInterval(bcViewerPoll); bcViewerPoll = null }
-    broadcastState = { active: false, port: BROADCAST_PORT, link: '', linkV4: broadcastState.linkV4 || '', linkV6: broadcastState.linkV6 || '', lanLink: '', viewers: 0, quality: '', internet: broadcastState.internet, opening: false }
+    broadcastState = { active: false, port: BROADCAST_PORT, link: '', linkV4: broadcastState.linkV4 || '', linkV6: broadcastState.linkV6 || '', lanLink: '', viewers: 0, quality: '', internet: broadcastState.internet, opening: false, forwardHint: null }
     bcPushState()
     groupPushState()                        // UI: Gruppe lebt weiter, eigener Stream pausiert
     groupTick().catch(() => {})             // streaming=false sofort an alle verteilen
@@ -5677,6 +5734,9 @@ if (process.argv.includes('--fps-broker')) {
   } catch {}
   app.on('second-instance', () => showMainWindow())
 
+  // AppUserModelID VOR der ersten Notification setzen - sonst zeigt Windows im
+  // Action Center ein generisches Electron-Icon statt des Lumora-Icons.
+  app.setAppUserModelId('com.lumora.app')
   app.whenReady().then(() => { setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupNvml(); setupAdl(); setupRtss(); setupMahm(); setupCpuClock(); setupVramCounter(); setupGpuName(); startExternalWatcher(); syncOsdVisibility() })
 
   // Encoder-Erkennung vorwaermen (PowerShell-GPU-Abfrage + ffmpeg -encoders kosten
