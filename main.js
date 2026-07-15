@@ -4221,7 +4221,22 @@ function bcWriteMtxConfig(hosts) {
     if (turn.username) lines.push('    username: ' + turn.username)
     if (turn.password) lines.push('    password: ' + turn.password)
   }
-  lines.push('paths:', '  ' + MTX_PATH + ':', '    source: publisher', '')
+  // alwaysAvailable: haelt die WebRTC/WHEP-Zuschauer-Sessions VERBUNDEN, waehrend
+  // FFmpeg beim Bitrate-Wechsel (Fast-Restart) ~80 ms neu verbindet. mediamtx
+  // ueberbrueckt die Luecke mit einem Offline-Segment im SELBEN Codec (H264+Opus,
+  // muss zur Live-Track-Struktur passen) -> der Pfad bleibt durchgehend 'ready',
+  // die PeerConnection reisst nicht ab. OHNE das trennt mediamtx die Reader bei
+  // Publisher-Verlust -> 4-5 s Player-Reconnect statt ~80 ms-Freeze (Log-belegt).
+  // Isoliert verifiziert (v1.19.2): Pfad bleibt ueber Publisher-Kill hinweg
+  // ready=true mit beiden Tracks; Bug #5559 hier NICHT vorhanden. alwaysAvailable
+  // MUSS statisch in der Config stehen (nicht per API) - hier erfuellt.
+  lines.push('paths:', '  ' + MTX_PATH + ':',
+    '    source: publisher',
+    '    alwaysAvailable: yes',
+    '    alwaysAvailableTracks:',
+    '      - codec: H264',
+    '      - codec: Opus',
+    '')
   const p = path.join(app.getPath('temp'), 'lumora-mediamtx.yml')
   require('fs').writeFileSync(p, lines.join('\n'), 'utf8')
   return p
