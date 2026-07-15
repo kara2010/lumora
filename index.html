@@ -496,6 +496,26 @@
               <summary>Puffer &amp; automatische Anpassung erklärt</summary>
               <p class="settings-hint" style="margin-top:8px">Für schnelle Spiele 1080p/1440p mit genug Bitrate; 4K ist am anspruchsvollsten. Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.</p>
             </details>
+            <details class="sgdb-guide stream-advanced" id="hdrTuneBox">
+              <summary>HDR-Feinabstimmung (nur bei HDR-Spielen)</summary>
+              <div style="margin-top:10px">
+                <div class="osd-field">
+                  <span class="osd-field-label">Kurve</span>
+                  <select id="setHdrMode" class="sort-select" style="flex:1" onchange="onHdrTuneChange()">
+                    <option value="0">ACES (Standard)</option>
+                    <option value="1">Hable / Filmic (sanfter)</option>
+                    <option value="2">Reinhard (natürlich)</option>
+                    <option value="3">Linear (am hellsten)</option>
+                  </select>
+                </div>
+                <div class="osd-field">
+                  <span class="osd-field-label">Helligkeit</span>
+                  <input type="range" id="setHdrExposure" min="0.15" max="1.2" step="0.01" value="0.3937" oninput="onHdrTuneChange()">
+                  <span class="osd-field-val" id="hdrExposureVal">0.39</span>
+                </div>
+                <p class="settings-hint" style="margin-top:8px">Wirkt live im laufenden Stream – nur wenn dein Bildschirm in HDR läuft. Zu dunkel? Helligkeit erhöhen oder eine sanftere Kurve wählen.</p>
+              </div>
+            </details>
           </div>
 
           <!-- Sektion 2: Stream (bei laufendem Stream via CSS nach oben – Vorschau als Highlight) -->
@@ -812,6 +832,14 @@
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
   'Wird geladen…': 'Loading…',
+  'HDR-Feinabstimmung (nur bei HDR-Spielen)': 'HDR fine-tuning (HDR games only)',
+  'Kurve': 'Curve',
+  'Helligkeit': 'Brightness',
+  'ACES (Standard)': 'ACES (default)',
+  'Hable / Filmic (sanfter)': 'Hable / Filmic (softer)',
+  'Reinhard (natürlich)': 'Reinhard (natural)',
+  'Linear (am hellsten)': 'Linear (brightest)',
+  'Wirkt live im laufenden Stream – nur wenn dein Bildschirm in HDR läuft. Zu dunkel? Helligkeit erhöhen oder eine sanftere Kurve wählen.': 'Applies live in the running stream – only when your display is in HDR. Too dark? Raise the brightness or pick a softer curve.',
   'HDR aus': 'HDR off',
   'Meine Spiele': 'My games',
   'Manuelle Reihenfolge': 'Manual order',
@@ -2381,6 +2409,11 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setStreamBuffer').value = String(sbuf)
       document.getElementById('streamBufferVal').textContent = sbuf + ' ms'
       document.getElementById('setStreamAdaptive').checked = s.streamAdaptive !== false
+      const hmode = Math.max(0, Math.min(3, parseInt(s.streamHdrMode, 10) || 0))
+      const hexp = Math.max(0.15, Math.min(1.2, Number(s.streamHdrExposure) || 0.3937))
+      document.getElementById('setHdrMode').value = String(hmode)
+      document.getElementById('setHdrExposure').value = String(hexp)
+      document.getElementById('hdrExposureVal').textContent = hexp.toFixed(2)
       document.getElementById('setLanguage').value = s.language || 'auto'
       document.getElementById('setTurnEnabled').checked = !!s.streamTurnEnabled
       document.getElementById('turnFields').style.display = s.streamTurnEnabled ? 'block' : 'none'
@@ -2759,6 +2792,21 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         const st = cur && cur.active ? await ipcRenderer.invoke('stop-broadcast') : await ipcRenderer.invoke('start-broadcast')
         if (st && st.noEncoder) streamToast(window.tr('⚠️ Streaming braucht eine GPU mit Video-Encoder (NVIDIA, AMD oder Intel).'))
         renderStreamState(st)
+        // Nach dem Livegehen die Stream-Sektion (rutscht per CSS order:-1 nach oben,
+        // Vorschau klappt auf) zuverlaessig in den Fokus holen. Zielposition SELBST
+        // berechnen (scrollIntoView bricht bei den gleichzeitigen Layout-Wechseln ab)
+        // und ERST nach zwei Frames stabilen Layouts scrollen - robust gegen die Hoehe
+        // der Qualitaets-Sektion darueber (Puffer, HDR-Feinabstimmung o.Ae.).
+        if (st && st.active) {
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+          const scroller = document.getElementById('settingsView')
+          const sec = document.querySelector('.settings-panel[data-panel="stream"] .stream-sec-stream')
+          if (scroller && sec) {
+            const secRect = sec.getBoundingClientRect(), scRect = scroller.getBoundingClientRect()
+            const target = scroller.scrollTop + (secRect.top - scRect.top) - 8
+            scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+          }
+        }
       } finally { btn.disabled = false }
     }
     function copyStreamLink() {
@@ -2803,6 +2851,14 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const ms = parseInt(document.getElementById('setStreamBuffer').value, 10)
       document.getElementById('streamBufferVal').textContent = ms + ' ms'
       ipcRenderer.invoke('set-app-settings', { streamBufferMs: ms })
+    }
+    // HDR-Tonemap live justieren (Kurve + Helligkeit): der Main schreibt die
+    // Steuerdatei, der Capture-Helfer zieht ohne Neustart nach (~0,25 s). Nur bei HDR wirksam.
+    function onHdrTuneChange() {
+      const mode = parseInt(document.getElementById('setHdrMode').value, 10) || 0
+      const exposure = Number(document.getElementById('setHdrExposure').value) || 0.3937
+      document.getElementById('hdrExposureVal').textContent = exposure.toFixed(2)
+      ipcRenderer.invoke('set-hdr-tonemap', { mode, exposure })
     }
     let _sources = []
     // _sources auf die UI anwenden: bestehende/gespeicherte Auswahl halten, sonst
