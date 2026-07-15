@@ -3134,7 +3134,8 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     let _pvFreezeTimer = null, _pvFreezeRvfcId = null, _pvFreezeGen = 0
     let _pvFreezeExpectW = 0, _pvFreezeExpectH = 0
     const PV_FREEZE_MIN_MS = { fast: 120, full: 300 }
-    const PV_FREEZE_MAX_MS = { fast: 900, full: 3400 }
+    const PV_FREEZE_MAX_MS = { fast: 2500, full: 7000 }   // grosszuegiges Sicherheitsnetz (s. player.html-Kommentar)
+    const PV_PLACEHOLDER_W = 1920, PV_PLACEHOLDER_H = 1080   // mediamtx-Standardplatzhalter, real gemessen
     function freezePreview(kind) {
       const gen = ++_pvFreezeGen
       const video = document.getElementById('streamPreview'), canvas = document.getElementById('streamPreviewFreeze')
@@ -3153,10 +3154,13 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const maxMs = PV_FREEZE_MAX_MS[kind] || PV_FREEZE_MAX_MS.full
       clearTimeout(_pvFreezeTimer)
       _pvFreezeTimer = setTimeout(unfreezePreview, maxMs)
-      if (kind === 'fast' && video.requestVideoFrameCallback) {
+      if (video.requestVideoFrameCallback) {
         const check = (now, meta) => {
           if (gen !== _pvFreezeGen) return
-          if (meta.width === _pvFreezeExpectW && meta.height === _pvFreezeExpectH && performance.now() - startedAt >= minMs) { unfreezePreview(); return }
+          const isReal = kind === 'fast'
+            ? (meta.width === _pvFreezeExpectW && meta.height === _pvFreezeExpectH)
+            : (meta.width !== PV_PLACEHOLDER_W || meta.height !== PV_PLACEHOLDER_H || meta.width === _pvFreezeExpectW)
+          if (isReal && performance.now() - startedAt >= minMs) { unfreezePreview(); return }
           _pvFreezeRvfcId = video.requestVideoFrameCallback(check)
         }
         _pvFreezeRvfcId = video.requestVideoFrameCallback(check)
