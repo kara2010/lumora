@@ -99,7 +99,7 @@
   </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root { --bg:#0a0a0f; --border:#1e1e2e; --accent:#8a6cff; --accent2:#7ab3ff; --text:#d8d8e8; --muted:#82829e; --card:#111118; }
+    :root { --bg:#0a0a0f; --border:#1e1e2e; --accent:#4f8ef7; --accent2:#7ab3ff; --text:#d8d8e8; --muted:#82829e; --card:#16161f; }
     html { scrollbar-width: thin; scrollbar-color: #2a2a3a transparent; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; padding: 48px 20px; }
     .wrap { max-width: 860px; margin: 0 auto; }
@@ -120,13 +120,107 @@
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px; margin: 14px 0; }
     footer { max-width: 860px; margin: 48px auto 0; padding-top: 18px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
     footer a { color: var(--muted); }
+  
+    /* ── NAV (vereinheitlicht mit index.html, 2026-07-15) ── */
+    nav { position: sticky; top: 0; background: rgba(10,10,15,0.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); padding: 14px 32px; display: flex; align-items: center; justify-content: space-between; z-index: 100; }
+    .nav-logo { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; color: var(--accent2); text-decoration: none; }
+    .nav-logo:hover { text-decoration: none; }
+    .nav-logo span { color: var(--text); }
+    .nav-logo-img { width: 26px; height: 26px; border-radius: 6px; display: block; }
+    .nav-right { display: flex; align-items: center; gap: 28px; }
+    nav ul { display: flex; gap: 28px; list-style: none; }
+    nav ul a { color: var(--muted); text-decoration: none; font-size: 14px; transition: color .2s; }
+    nav ul a:hover { color: var(--text); }
+    .nav-lang { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: var(--text); border: 1px solid var(--border); padding: 5px 12px; border-radius: 999px; white-space: nowrap; transition: border-color .2s, color .2s; text-decoration: none; }
+    .nav-lang:hover { border-color: var(--accent2); color: var(--accent2); text-decoration: none; }
+    .nav-burger { display: none; background: none; border: 1px solid var(--border); color: var(--text); font-size: 19px; line-height: 1; width: 42px; height: 38px; border-radius: 10px; cursor: pointer; align-items: center; justify-content: center; transition: border-color .2s, color .2s; }
+    .nav-burger:hover { border-color: var(--accent2); color: var(--accent2); }
+    .nav-drop { position: relative; }
+    .nav-drop-btn { background: none; border: none; color: var(--text); font: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; padding: 0; transition: color .2s; }
+    .nav-drop-btn:hover, .nav-drop:focus-within .nav-drop-btn { color: var(--accent2); }
+    .nav-drop-caret { font-size: 10px; transition: transform .2s; }
+    .nav-drop:hover .nav-drop-caret, .nav-drop:focus-within .nav-drop-caret { transform: rotate(180deg); }
+    .nav-drop-menu { position: absolute; top: calc(100% + 14px); left: 50%; transform: translateX(-50%) translateY(-8px); width: 300px; background: #14141e; border: 1px solid var(--border); border-radius: 16px; padding: 8px; box-shadow: 0 28px 70px rgba(0, 0, 0, .5); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .2s, transform .2s, visibility .2s; z-index: 120; }
+    .nav-drop-menu::before { content: ""; position: absolute; bottom: 100%; left: 0; right: 0; height: 14px; }
+    .nav-drop:hover .nav-drop-menu, .nav-drop:focus-within .nav-drop-menu { opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+    .nav-drop-label { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 8px 10px 6px; }
+    .nav-drop-menu a { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 11px; color: var(--text); text-decoration: none; font-size: 14px; font-weight: 500; transition: background .16s; }
+    .nav-drop-menu a:hover { background: rgba(122, 179, 255, .1); }
+    .nav-drop-menu a .di { width: 36px; height: 36px; flex: none; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 17px; background: rgba(122, 179, 255, .1); border: 1px solid rgba(122, 179, 255, .14); }
+    .nav-drop-menu a .dtxt { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+    .nav-drop-menu a .dsub { font-size: 11.5px; color: var(--muted); font-weight: 400; margin-top: 1px; white-space: normal; }
+    .page { transition: transform .34s cubic-bezier(.33, 1, .68, 1); }
+    .drawer { position: fixed; top: 0; right: 0; height: 100dvh; width: min(320px, 85vw); display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; background: #101017; border-left: 1px solid var(--border); box-shadow: -34px 0 80px rgba(0, 0, 0, .55); transform: translateX(100%); transition: transform .34s cubic-bezier(.33, 1, .68, 1); z-index: 200; }
+    .drawer-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: #101017; z-index: 1; }
+    .drawer-head img { width: 30px; height: 30px; border-radius: 8px; }
+    .drawer-brand { font-size: 17px; font-weight: 700; color: var(--text); letter-spacing: -.01em; }
+    .drawer-close { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--muted); width: 34px; height: 34px; border-radius: 9px; cursor: pointer; font-size: 15px; line-height: 1; display: flex; align-items: center; justify-content: center; transition: color .2s, border-color .2s; }
+    .drawer-close:hover { color: var(--text); border-color: var(--accent2); }
+    .drawer-nav { padding: 10px 10px 4px; }
+    .drawer-group-label { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 12px 12px 4px; }
+    .drawer-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; text-decoration: none; color: var(--text); font-size: 15.5px; font-weight: 500; transition: background .18s; }
+    .drawer-item:hover, .drawer-item:active { background: rgba(122, 179, 255, .1); }
+    .drawer-item .ico { width: 38px; height: 38px; flex: none; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; background: rgba(122, 179, 255, .1); border: 1px solid rgba(122, 179, 255, .14); }
+    .drawer-item .txt { flex: 1; display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+    .drawer-item .sub { font-size: 11.5px; color: var(--muted); font-weight: 400; margin-top: 1px; }
+    .drawer-item .chev { color: var(--muted); font-size: 20px; font-weight: 300; }
+    .drawer-foot { margin-top: auto; padding: 14px 18px calc(16px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+    .drawer-cta { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 13px 16px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #06080f; font-weight: 700; text-decoration: none; font-size: 15px; }
+    .drawer-cta:hover { filter: brightness(1.08); text-decoration: none; }
+    .drawer-lang { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; padding: 10px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 600; transition: color .2s, border-color .2s; }
+    .drawer-lang:hover { color: var(--accent2); border-color: var(--accent2); text-decoration: none; }
+    .drawer-backdrop { position: fixed; inset: 0; background: rgba(4, 5, 10, .55); opacity: 0; visibility: hidden; transition: opacity .34s, visibility .34s; z-index: 150; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+    body.menu-open .drawer { transform: translateX(0); }
+    body.menu-open .drawer-backdrop { opacity: 1; visibility: visible; }
+    body.menu-open .page { transform: translateX(calc(-1 * min(320px, 85vw))); }
+    body.menu-open { overflow: hidden; }
+    body.menu-open .drawer-nav > * { animation: drawerIn .45s cubic-bezier(.33, 1, .68, 1) backwards; }
+    body.menu-open .drawer-nav > *:nth-child(1) { animation-delay: .04s; }
+    body.menu-open .drawer-nav > *:nth-child(2) { animation-delay: .07s; }
+    body.menu-open .drawer-nav > *:nth-child(3) { animation-delay: .10s; }
+    body.menu-open .drawer-nav > *:nth-child(4) { animation-delay: .13s; }
+    body.menu-open .drawer-nav > *:nth-child(5) { animation-delay: .16s; }
+    body.menu-open .drawer-nav > *:nth-child(6) { animation-delay: .19s; }
+    body.menu-open .drawer-nav > *:nth-child(7) { animation-delay: .22s; }
+    body.menu-open .drawer-nav > *:nth-child(8) { animation-delay: .25s; }
+    @keyframes drawerIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { body.menu-open .drawer-nav > * { animation: none; } .page, .drawer, .drawer-backdrop { transition-duration: .01ms; } }
+    @media (max-width: 640px) {
+      nav { padding: 12px 16px; }
+      .nav-right { gap: 12px; }
+      .nav-burger { display: flex; }
+      nav ul { display: none; }
+    }
+
   </style>
 </head>
 <body>
-  <main class="wrap" id="main">
-    <span class="lang"><a href="../gamepad.html" onclick="try{localStorage.setItem(&#39;lumoraSiteLang&#39;,&#39;de&#39;)}catch(e){}">🇩🇪 Deutsch</a></span>
-    <a class="back" href="index.html">← Lumora – Home</a>
+<div class="page">
+<nav>
+  <a class="nav-logo" href="index.html"><img src="../icon.png" alt="" class="nav-logo-img"> <span>Lumora</span></a>
+  <div class="nav-right">
+    <ul>
+      <li><a href="index.html#features">Features</a></li>
+      <li><a href="index.html#changelog">What’s new</a></li>
+      <li class="nav-drop">
+        <button class="nav-drop-btn" aria-haspopup="true" aria-expanded="false">Topics <span class="nav-drop-caret" aria-hidden="true">▾</span></button>
+        <div class="nav-drop-menu">
+          <p class="nav-drop-label">Discover</p>
+          <a href="streaming.html"><span class="di" aria-hidden="true">📡</span><span class="dtxt">Game streaming<span class="dsub">Via link in 1080p60 – up to 4K</span></span></a>
+          <a href="gaming-osd.html"><span class="di" aria-hidden="true">📊</span><span class="dtxt">Gaming OSD<span class="dsub">FPS, GPU &amp; CPU without Afterburner</span></span></a>
+          <a href="gamepad.html"><span class="di" aria-hidden="true">🎮</span><span class="dtxt">Gamepad control<span class="dsub">Couch gaming on the TV</span></span></a>
+          <a href="discord-alternative.html"><span class="di" aria-hidden="true">💬</span><span class="dtxt">Discord comparison<span class="dsub">Streaming without Nitro</span></span></a>
+        </div>
+      </li>
+      <li><a href="index.html#install">Install</a></li>
+      <li><a href="index.html#transparency">Transparency</a></li>
+    </ul>
+    <a class="nav-lang" href="../gamepad.html" hreflang="de" title="Deutsche Version" onclick="try{localStorage.setItem('lumoraSiteLang','de')}catch(e){}">🌐 DE</a>
+    <button class="nav-burger" id="navBurger" aria-label="Menu" aria-expanded="false">☰</button>
+  </div>
+</nav>
 
+<main class="wrap" id="main">
     <h1>Couch PC gaming: one launcher, all your games, fully gamepad-controlled</h1>
     <p class="lead">Gaming PC hooked up to the TV – but you still grab mouse and keyboard just to launch a game? Not with Lumora: the entire interface is <strong>fully controllable with an Xbox gamepad</strong>, from the cover library down to every single setting.</p>
     <a class="cta" href="../download.php">⬇ Download Lumora for free</a>
@@ -156,9 +250,70 @@
       <a href="gaming-osd.html">Show FPS &amp; hardware stats in-game →</a>
     </p>
   </main>
-  <footer>
-    <p><a href="index.html">Lumora</a> · Free for Windows 10/11 · <a href="../impressum.html">Imprint</a> · <a href="../datenschutz.html">Privacy</a> · <a href="../gamepad.html">Deutsch</a></p>
-    <p style="margin-top:6px">All store and brand names are the property of their respective owners; Lumora is an independent tool.</p>
-  </footer>
+</div><!-- /.page -->
+
+<footer>
+  <p style="margin-bottom:10px">
+    <strong>Topics:</strong>
+    <a href="streaming.html">Stream your game to friends via a link</a> ·
+    <a href="gaming-osd.html">FPS &amp; hardware stats in-game</a> ·
+    <a href="discord-alternative.html">Streaming quality compared</a>
+  </p>
+  <p>
+    Lumora 2.2.17 · Free &amp; open-source based ·
+    HDR via <a href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">HDRTray</a> (Frank Richter, GPL v3) ·
+    FPS via <a href="https://github.com/GameTechDev/PresentMon" target="_blank" rel="noopener">PresentMon</a> (Intel, MIT) ·
+    CPU-Sensorik via <a href="https://pawnio.eu" target="_blank" rel="noopener">PawnIO</a> (namazso, GPL v2)
+  </p>
+  <p style="margin-top:10px; font-size:12px; opacity:0.7;">
+    Unofficial tool · not affiliated with Valve/Steam or Microsoft · all trademarks and cover images belong to their respective rights holders.
+  </p>
+  <p style="margin-top:14px;">
+    <a href="../impressum.html">Imprint</a> &nbsp;·&nbsp; <a href="../datenschutz.html">Privacy Policy</a>
+  </p>
+</footer>
+
+<aside class="drawer" id="navDrawer" aria-label="Menu" inert>
+  <div class="drawer-head">
+    <img src="../icon.png" alt="" width="30" height="30">
+    <span class="drawer-brand">Lumora</span>
+    <button class="drawer-close" id="drawerClose" aria-label="Close menu">✕</button>
+  </div>
+  <div class="drawer-nav" role="navigation" aria-label="Main menu">
+    <p class="drawer-group-label">Discover</p>
+    <a class="drawer-item" href="streaming.html"><span class="ico" aria-hidden="true">📡</span><span class="txt">Game streaming<span class="sub">Via link in 1080p60 – up to 4K</span></span><span class="chev" aria-hidden="true">›</span></a>
+    <a class="drawer-item" href="gaming-osd.html"><span class="ico" aria-hidden="true">📊</span><span class="txt">Gaming OSD<span class="sub">FPS, GPU &amp; CPU without Afterburner</span></span><span class="chev" aria-hidden="true">›</span></a>
+    <a class="drawer-item" href="gamepad.html"><span class="ico" aria-hidden="true">🎮</span><span class="txt">Gamepad control<span class="sub">Couch gaming on the TV</span></span><span class="chev" aria-hidden="true">›</span></a>
+    <a class="drawer-item" href="discord-alternative.html"><span class="ico" aria-hidden="true">💬</span><span class="txt">Discord comparison<span class="sub">Streaming without Nitro</span></span><span class="chev" aria-hidden="true">›</span></a>
+    <p class="drawer-group-label">Homepage</p>
+    <a class="drawer-item" href="index.html#features"><span class="ico" aria-hidden="true">✨</span><span class="txt">Features</span></a>
+    <a class="drawer-item" href="index.html#changelog"><span class="ico" aria-hidden="true">🆕</span><span class="txt">What’s new</span></a>
+    <a class="drawer-item" href="index.html#install"><span class="ico" aria-hidden="true">⬇️</span><span class="txt">Install</span></a>
+    <a class="drawer-item" href="index.html#transparency"><span class="ico" aria-hidden="true">🛡️</span><span class="txt">Transparency</span></a>
+  </div>
+  <div class="drawer-foot">
+    <a class="drawer-cta" href="index.html#install">⬇ Download for free</a>
+    <a class="drawer-lang" href="../gamepad.html" hreflang="de" title="Deutsche Version" onclick="try{localStorage.setItem('lumoraSiteLang','de')}catch(e){}">🌐 Deutsch</a>
+  </div>
+</aside>
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<script>
+  ;(function(){
+    var burger = document.getElementById('navBurger');
+    var drawer = document.getElementById('navDrawer');
+    var backdrop = document.getElementById('drawerBackdrop');
+    var drawerClose = document.getElementById('drawerClose');
+    if (!burger || !drawer) return;
+    function openMenu(){ document.body.classList.add('menu-open'); burger.setAttribute('aria-expanded', 'true'); drawer.removeAttribute('inert'); }
+    function closeMenu(){ document.body.classList.remove('menu-open'); burger.setAttribute('aria-expanded', 'false'); drawer.setAttribute('inert', ''); }
+    burger.addEventListener('click', function(){
+      if (document.body.classList.contains('menu-open')) closeMenu(); else openMenu();
+    });
+    if (drawerClose) drawerClose.addEventListener('click', closeMenu);
+    if (backdrop) backdrop.addEventListener('click', closeMenu);
+    Array.prototype.forEach.call(drawer.querySelectorAll('a'), function(a){ a.addEventListener('click', closeMenu); });
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeMenu(); });
+  })();
+</script>
 </body>
 </html>
