@@ -2344,6 +2344,25 @@ function cleanGameName(name) {
     .trim()
 }
 
+function normName(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '') }
+// Prüft, ob ein Suchergebnis-Name plausibel zum gesuchten Spiel passt: exakt
+// (normalisiert), ODER eine Seite ist vollständig in der anderen enthalten UND das
+// Längenverhältnis ist nicht zu unterschiedlich (fängt Editions-/Symbol-Varianten ab,
+// ohne bei einem kurzen Namen wahllos ein langes Fremd-Spiel zu akzeptieren).
+// VERWENDET von Steam- UND MS-Store-Auto-Cover (s.u.): bei einem Titel, der dort gar
+// nicht gelistet ist (z.B. ein deutscher/lokaler Fantasiename wie "Groschengrab"),
+// lieferte die Suche trotzdem IRGENDEIN thematisch unpassendes Spiel als Treffer Nr. 1
+// zurück - das wurde bisher blind als "das Spiel" behandelt und sein Cover/Hero/
+// Beschreibung übernommen (Bug: zufälliges Fremd-Artwork statt "kein Cover gefunden").
+function closeNameMatch(a, b) {
+  const x = normName(a), y = normName(b)
+  if (!x || !y) return false
+  if (x === y) return true
+  if (x.length < 4 || y.length < 4) return false
+  if (!x.includes(y) && !y.includes(x)) return false
+  return Math.min(x.length, y.length) / Math.max(x.length, y.length) >= 0.7
+}
+
 async function resolveSteamAppId(gameName) {
   const cleaned = cleanGameName(gameName)
   const query = encodeURIComponent(cleaned)
@@ -2352,11 +2371,14 @@ async function resolveSteamAppId(gameName) {
   const data = JSON.parse(res.body)
   const items = data?.items
   if (!items || items.length === 0) return null
-  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-  const target = norm(cleaned)
-  // Exakte Namensübereinstimmung bevorzugen, sonst erstes Ergebnis
-  const exact = items.find(i => norm(i.name) === target)
-  return (exact || items[0]).id
+  const target = normName(cleaned)
+  if (!target) return null
+  // NUR eine verlässliche Übereinstimmung akzeptieren - KEIN "sonst erstes Ergebnis"
+  // mehr (frühere Logik, s. closeNameMatch-Kommentar).
+  const exact = items.find(i => normName(i.name) === target)
+  if (exact) return exact.id
+  const close = items.find(i => closeNameMatch(i.name, cleaned))
+  return close ? close.id : null
 }
 
 // Versucht mehrere CDN-Pfade/Hosts und liefert das erste echte Bild als dataURL.
@@ -2481,11 +2503,16 @@ async function fetchMsImage(url) {
 }
 
 async function fetchCoverMSStore(gameName) {
-  const query = encodeURIComponent(cleanGameName(gameName))
+  const cleaned = cleanGameName(gameName)
+  const query = encodeURIComponent(cleaned)
   const res = await httpsGet(`https://storeedgefd.dsx.mp.microsoft.com/v9.0/search?query=${query}&market=US&locale=en-us&deviceFamily=Windows.Desktop`)
   if (res.status !== 200) return null
   const data = JSON.parse(res.body)
-  const result = data?.Payload?.SearchResults?.[0]
+  const results = data?.Payload?.SearchResults || []
+  // Frueher blind SearchResults[0] - der MS-Store-Suche fehlte JEDER Namensabgleich,
+  // das war die wahrscheinlichste tatsaechliche Quelle des "Blödsinn"-Cover-Bugs (Steam
+  // hat oben schon einen Match-Check; MS Store lief bisher als Fallback komplett ungeprueft).
+  const result = results.find(r => closeNameMatch(r.Title, cleaned))
   if (!result) return null
   const images = result.Images || []
   const img = images.find(i => i.ImageType === 'Poster') || images.find(i => i.ImageType === 'BoxArt') || images[0]
