@@ -183,87 +183,53 @@
   // der Luecke kurz mediamtx' Standard-Platzhalter ("STREAM IS OFFLINE") ueber
   // dieselbe, durchgehend offene WebRTC-Verbindung auf (s. alwaysAvailable in
   // main.js) - der Player bekommt dafuer KEIN eigenes Verbindungs-/Track-Event,
-  // es sind einfach andere Frames auf demselben Track. Eine Erkennung ueber
-  // Aufloesung/FPS des Platzhalters ist NICHT zuverlaessig moeglich: real
-  // gemessen laeuft er mit 1920x1080@30fps - exakt einer der haeufigsten
-  // Lumora-Einstellungen (Kollision belegt, kein Ratewert). Stattdessen schickt
-  // der Streamer per SSE (/switch-events) ein PUSH-Signal GENAU beim Start des
-  // Wechsels; wir legen sofort einen Snapshot des letzten echten Bildes ueber
-  // das Video und nehmen ihn erst wieder weg, wenn nachweislich echte Frames
-  // zurueck sind (oder spaetestens nach einer grosszuegigen Sicherheitsfrist).
+  // es sind einfach andere Frames auf demselben Track. Eine client-seitige
+  // Erkennung des Platzhalters ueber Aufloesung/FPS ist NICHT zuverlaessig: real
+  // gemessen laeuft er mit 1920x1080@30fps - exakt einer der haeufigsten Lumora-
+  // Einstellungen (im Log dieses Users 146x gesehen; Kollision belegt). Darum
+  // schickt der Streamer per SSE (/switch-events) ein PUSH-Signal GENAU beim Start
+  // des Wechsels; wir legen einen Snapshot des letzten echten Bildes ueber das
+  // Video und nehmen ihn nach einer festen Frist wieder weg.
   //
-  // Restfaelle, unabhaengig voneinander gehaertet:
-  //  (a) Ankunfts-Race (User-Befund 2026-07-15, "1 von 10 blitzt kurz auf"):
-  //      das SSE-Signal kann (Event-Loop-Last im Hauptprozess) knapp NACH dem
-  //      ersten Platzhalter-Frame ankommen - der wurde dann schon EINMAL sichtbar
-  //      gemalt, bevor unser Overlay steht. Gegenmittel: das echte <video>
-  //      zusaetzlich zum Overlay auf visibility:hidden schalten, solange
-  //      eingefroren ist (deckt jeden durchrutschenden Frame ab, nicht nur einen).
-  //  (b) Zu-frueh-aufgetaut (User-Befund 2026-07-15, "blitzt immer wieder auf",
-  //      vermutlich Mobilfunk mit hoher/variabler Latenz): die feste Sicherheits-
-  //      frist reicht auf einer langsamen/instabilen Leitung nicht - das Overlay
-  //      geht weg, obwohl der Platzhalter noch laeuft. Gegenmittel: FRAME-genaue
-  //      Erkennung statt Zeit-Raten, fuer BEIDE Wechsel-Arten:
-  //      - 'fast' (Bitrate, Aufloesung bleibt unveraendert): warten, bis wieder
-  //        ein Frame in der VOR dem Wechsel gemessenen Aufloesung ankommt.
-  //      - 'full' (Aufloesung/Encoder): die exakte NEUE Aufloesung ist client-
-  //        seitig nicht bekannt, aber die Platzhalter-Aufloesung ist es (real
-  //        gemessen 1920x1080@30fps, s.o.) - warten, bis ein Frame NICHT mehr
-  //        exakt 1920x1080 ist, ODER die alte Aufloesung wiederkehrt (Encoder
-  //        blieb am Ende gleich, nur fps/Fenster-Groesse aenderte sich).
-  //      Die feste Frist bleibt NUR als Sicherheitsnetz - jetzt deutlich
-  //      grosszuegiger (spielt kaum eine Rolle, wenn die Frame-Erkennung meist
-  //      vorher anschlaegt) fuer den Fall, dass sie NIE anschlaegt (kein
-  //      requestVideoFrameCallback, oder Kollision mit 1920x1080@30 - beides
-  //      selten, dann wie zuvor rein zeitbasiert).
+  // WICHTIG (Lehre aus 2026-07-15, mehrere Fehlversuche): der KRITISCHE Punkt ist
+  // NICHT die Auftau-Logik, sondern dass das SSE-Signal ueberhaupt ANKOMMT. Ueber
+  // Mobilfunk/NAT riss die SSE-Verbindung nach ~5 min Leerlauf ab (Log: sse-drop)
+  // -> Signal weg -> Platzhalter voll sichtbar. Behoben durch SSE-Heartbeat
+  // (main.js). Frame-genaue Auftau-Erkennung per requestVideoFrameCallback wurde
+  // VERWORFEN: bei variabler Fenster-Breite (1920/1800/1608/1926 x1080) + der
+  // 1920x1080-Kollision unzuverlaessig (2,5s-Fehl-Timeouts) und visibility:hidden
+  // auf dem Live-<video> stand im Verdacht, den Stream zu stoeren. Zurueck zum
+  // einfachen, bewaehrten festen Timer.
   var freeze = document.getElementById('freeze'), freezeCtx = freeze.getContext('2d')
-  var _freezeTimer = null, _freezeRvfcId = null, _freezeGen = 0
-  var _freezeExpectW = 0, _freezeExpectH = 0
-  var FREEZE_MIN_MS = { fast: 120, full: 300 }     // Mindestdauer, auch wenn ein Treffer frueher kaeme (Rauschen abfedern)
-  var FREEZE_MAX_MS = { fast: 2500, full: 7000 }   // Sicherheitsnetz, falls die Frame-Erkennung nie anschlaegt (grosszuegig fuer langsame/mobile Verbindungen)
-  var PLACEHOLDER_W = 1920, PLACEHOLDER_H = 1080   // mediamtx-Standardplatzhalter, real gemessen (s. seamless-bitrate-Memory)
-  // Diagnose: ein kompakter Bericht je Freeze-Zyklus an den Streamer (landet im
-  // gewohnten lumorastream.log) - klaert im Zweifel, OB/WARUM das Auftauen zu
-  // frueh/spaet war, statt beim naechsten Mal wieder zu raten.
-  function reportFreeze(kind, reason, elapsedMs) {
-    try { fetch('/freeze-log', { method: 'POST', body: JSON.stringify({ kind: kind, reason: reason, ms: Math.round(elapsedMs) }) }).catch(function () {}) } catch (e) {}
+  var _freezeTimer = null
+  // Feste Freeze-Dauer je Wechsel-Art - der bewaehrte, vom User als "nahezu perfekt"
+  // gelobte Ansatz. Bewusst KEINE requestVideoFrameCallback-Aufloesungs-Erkennung
+  // (war bei Fenster-Streams mit variabler Breite 1920/1800/1608/1926 x1080 + der
+  // 1920x1080-Kollision mit dem Platzhalter unzuverlaessig -> unnoetige 2,5s-
+  // Einfrierer, Log-belegt) und KEIN visibility:hidden auf dem echten <video>.
+  // 'fast' = Bitrate (~80ms Server-Luecke, s. fast-restart), 'full' = Aufloesung/
+  // Encoder-Neustart (laenger, Helfer startet neu).
+  var FREEZE_MS = { fast: 700, full: 3000 }
+  // Diagnose-Bericht (landet im lumorastream.log): 'freeze' pro Zyklus + die SSE-
+  // Verbindungsprobleme (s. onerror). Klaert im Zweifel mit Beweis statt Ratewert.
+  function reportFreeze(kind, reason, ms) {
+    try { fetch('/freeze-log', { method: 'POST', body: JSON.stringify({ kind: kind, reason: reason, ms: ms }) }).catch(function () {}) } catch (e) {}
   }
   function doFreeze(kind) {
-    var gen = ++_freezeGen
     try {
       if (v.videoWidth && v.videoHeight) {
         freeze.width = v.videoWidth; freeze.height = v.videoHeight
         freezeCtx.drawImage(v, 0, 0)
         freeze.style.transform = v.style.transform || ''   // Zoom/Pan-Zustand mitnehmen
         freeze.style.display = 'block'
-        v.style.visibility = 'hidden'   // Ankunfts-Race: nichts vom echten Video darf durchscheinen
-        _freezeExpectW = v.videoWidth; _freezeExpectH = v.videoHeight
       }
     } catch (e) {}
-    var startedAt = performance.now()
-    var minMs = FREEZE_MIN_MS[kind] || FREEZE_MIN_MS.full
-    var maxMs = FREEZE_MAX_MS[kind] || FREEZE_MAX_MS.full
+    var ms = FREEZE_MS[kind] || FREEZE_MS.full
+    reportFreeze(kind, 'freeze', ms)
     clearTimeout(_freezeTimer)
-    _freezeTimer = setTimeout(function () { reportFreeze(kind, 'timeout', performance.now() - startedAt); unfreeze() }, maxMs)
-    if (v.requestVideoFrameCallback) {
-      var check = function (now, meta) {
-        if (gen !== _freezeGen) return   // ueberholt von einem neueren Wechsel
-        var isReal = kind === 'fast'
-          ? (meta.width === _freezeExpectW && meta.height === _freezeExpectH)
-          : (meta.width !== PLACEHOLDER_W || meta.height !== PLACEHOLDER_H || meta.width === _freezeExpectW)
-        if (isReal && performance.now() - startedAt >= minMs) { reportFreeze(kind, 'match', performance.now() - startedAt); unfreeze(); return }
-        _freezeRvfcId = v.requestVideoFrameCallback(check)
-      }
-      _freezeRvfcId = v.requestVideoFrameCallback(check)
-    }
+    _freezeTimer = setTimeout(unfreeze, ms)
   }
-  function unfreeze() {
-    _freezeGen++
-    clearTimeout(_freezeTimer)
-    if (_freezeRvfcId != null && v.cancelVideoFrameCallback) { try { v.cancelVideoFrameCallback(_freezeRvfcId) } catch (e) {} ; _freezeRvfcId = null }
-    freeze.style.display = 'none'
-    v.style.visibility = 'visible'
-  }
+  function unfreeze() { clearTimeout(_freezeTimer); freeze.style.display = 'none' }
   try {
     var switchEvents = new EventSource('/switch-events')
     var _sseWasOpen = false
