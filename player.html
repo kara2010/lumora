@@ -192,29 +192,42 @@
   // das Video und nehmen ihn erst wieder weg, wenn nachweislich echte Frames
   // zurueck sind (oder spaetestens nach einer grosszuegigen Sicherheitsfrist).
   //
-  // ZWEI Restfaelle, unabhaengig voneinander gehaertet (User-Befund 2026-07-15,
-  // "1 von 10 Faellen blitzt der Platzhalter trotzdem kurz auf"):
-  //  (a) Ankunfts-Race: das SSE-Signal kann (Event-Loop-Last im Hauptprozess)
-  //      knapp NACH dem ersten Platzhalter-Frame ankommen - der wurde dann schon
-  //      EINMAL sichtbar gemalt, bevor unser Overlay steht. Gegenmittel: das
-  //      echte <video> zusaetzlich zum Overlay auf visibility:hidden schalten,
-  //      solange eingefroren ist (deckt jeden durchrutschenden Frame ab, nicht
-  //      nur einen einzelnen).
-  //  (b) Zu-frueh-aufgetaut: die feste Frist war fuer DIESEN Wechsel zu knapp
-  //      (System kurz ausgelastet o.ae.) - das Overlay geht weg, obwohl noch
-  //      der Platzhalter laeuft. Gegenmittel bei 'fast' (Bitrate, Aufloesung
-  //      bleibt unveraendert): per requestVideoFrameCallback WARTEN, bis wieder
-  //      ein Frame in der VOR dem Wechsel gemessenen Aufloesung ankommt, statt
-  //      blind eine feste Zeit abzuwarten - die feste Frist bleibt nur als
-  //      Sicherheitsnetz (grosszuegiger als vorher), falls die Erkennung nie
-  //      anschlaegt (z.B. Browser ohne requestVideoFrameCallback-Unterstuetzung,
-  //      oder der seltene Fall, dass die eigene Aufloesung zufaellig ebenfalls
-  //      1920x1080 ist - dann bleibt nur die Frist als Schutz, wie zuvor).
+  // Restfaelle, unabhaengig voneinander gehaertet:
+  //  (a) Ankunfts-Race (User-Befund 2026-07-15, "1 von 10 blitzt kurz auf"):
+  //      das SSE-Signal kann (Event-Loop-Last im Hauptprozess) knapp NACH dem
+  //      ersten Platzhalter-Frame ankommen - der wurde dann schon EINMAL sichtbar
+  //      gemalt, bevor unser Overlay steht. Gegenmittel: das echte <video>
+  //      zusaetzlich zum Overlay auf visibility:hidden schalten, solange
+  //      eingefroren ist (deckt jeden durchrutschenden Frame ab, nicht nur einen).
+  //  (b) Zu-frueh-aufgetaut (User-Befund 2026-07-15, "blitzt immer wieder auf",
+  //      vermutlich Mobilfunk mit hoher/variabler Latenz): die feste Sicherheits-
+  //      frist reicht auf einer langsamen/instabilen Leitung nicht - das Overlay
+  //      geht weg, obwohl der Platzhalter noch laeuft. Gegenmittel: FRAME-genaue
+  //      Erkennung statt Zeit-Raten, fuer BEIDE Wechsel-Arten:
+  //      - 'fast' (Bitrate, Aufloesung bleibt unveraendert): warten, bis wieder
+  //        ein Frame in der VOR dem Wechsel gemessenen Aufloesung ankommt.
+  //      - 'full' (Aufloesung/Encoder): die exakte NEUE Aufloesung ist client-
+  //        seitig nicht bekannt, aber die Platzhalter-Aufloesung ist es (real
+  //        gemessen 1920x1080@30fps, s.o.) - warten, bis ein Frame NICHT mehr
+  //        exakt 1920x1080 ist, ODER die alte Aufloesung wiederkehrt (Encoder
+  //        blieb am Ende gleich, nur fps/Fenster-Groesse aenderte sich).
+  //      Die feste Frist bleibt NUR als Sicherheitsnetz - jetzt deutlich
+  //      grosszuegiger (spielt kaum eine Rolle, wenn die Frame-Erkennung meist
+  //      vorher anschlaegt) fuer den Fall, dass sie NIE anschlaegt (kein
+  //      requestVideoFrameCallback, oder Kollision mit 1920x1080@30 - beides
+  //      selten, dann wie zuvor rein zeitbasiert).
   var freeze = document.getElementById('freeze'), freezeCtx = freeze.getContext('2d')
   var _freezeTimer = null, _freezeRvfcId = null, _freezeGen = 0
   var _freezeExpectW = 0, _freezeExpectH = 0
-  var FREEZE_MIN_MS = { fast: 120, full: 300 }    // Mindestdauer, auch wenn ein Treffer frueher kaeme (Rauschen abfedern)
-  var FREEZE_MAX_MS = { fast: 900, full: 3400 }   // Sicherheitsnetz, falls die Erkennung nie anschlaegt
+  var FREEZE_MIN_MS = { fast: 120, full: 300 }     // Mindestdauer, auch wenn ein Treffer frueher kaeme (Rauschen abfedern)
+  var FREEZE_MAX_MS = { fast: 2500, full: 7000 }   // Sicherheitsnetz, falls die Frame-Erkennung nie anschlaegt (grosszuegig fuer langsame/mobile Verbindungen)
+  var PLACEHOLDER_W = 1920, PLACEHOLDER_H = 1080   // mediamtx-Standardplatzhalter, real gemessen (s. seamless-bitrate-Memory)
+  // Diagnose: ein kompakter Bericht je Freeze-Zyklus an den Streamer (landet im
+  // gewohnten lumorastream.log) - klaert im Zweifel, OB/WARUM das Auftauen zu
+  // frueh/spaet war, statt beim naechsten Mal wieder zu raten.
+  function reportFreeze(kind, reason, elapsedMs) {
+    try { fetch('/freeze-log', { method: 'POST', body: JSON.stringify({ kind: kind, reason: reason, ms: Math.round(elapsedMs) }) }).catch(function () {}) } catch (e) {}
+  }
   function doFreeze(kind) {
     var gen = ++_freezeGen
     try {
@@ -231,11 +244,14 @@
     var minMs = FREEZE_MIN_MS[kind] || FREEZE_MIN_MS.full
     var maxMs = FREEZE_MAX_MS[kind] || FREEZE_MAX_MS.full
     clearTimeout(_freezeTimer)
-    _freezeTimer = setTimeout(unfreeze, maxMs)
-    if (kind === 'fast' && v.requestVideoFrameCallback) {
+    _freezeTimer = setTimeout(function () { reportFreeze(kind, 'timeout', performance.now() - startedAt); unfreeze() }, maxMs)
+    if (v.requestVideoFrameCallback) {
       var check = function (now, meta) {
         if (gen !== _freezeGen) return   // ueberholt von einem neueren Wechsel
-        if (meta.width === _freezeExpectW && meta.height === _freezeExpectH && performance.now() - startedAt >= minMs) { unfreeze(); return }
+        var isReal = kind === 'fast'
+          ? (meta.width === _freezeExpectW && meta.height === _freezeExpectH)
+          : (meta.width !== PLACEHOLDER_W || meta.height !== PLACEHOLDER_H || meta.width === _freezeExpectW)
+        if (isReal && performance.now() - startedAt >= minMs) { reportFreeze(kind, 'match', performance.now() - startedAt); unfreeze(); return }
         _freezeRvfcId = v.requestVideoFrameCallback(check)
       }
       _freezeRvfcId = v.requestVideoFrameCallback(check)
@@ -250,10 +266,16 @@
   }
   try {
     var switchEvents = new EventSource('/switch-events')
+    var _sseWasOpen = false
+    switchEvents.onopen = function () { _sseWasOpen = true }
     switchEvents.onmessage = function (e) {
       try { var d = JSON.parse(e.data); doFreeze(d.kind === 'fast' ? 'fast' : 'full') } catch (e2) {}
     }
-    switchEvents.onerror = function () {}   // EventSource verbindet bei Abbruch selbst neu
+    // EventSource verbindet bei Abbruch selbst neu - aber WAR sie ueberhaupt
+    // schon offen? Meldet, falls die SSE-Verbindung (z.B. ueber Mobilfunk-NAT)
+    // gar nicht erst zustande kommt oder abreisst - klaert, ob "Platzhalter
+    // blitzt trotzdem auf" am fehlenden Signal liegt statt am Freeze selbst.
+    switchEvents.onerror = function () { reportFreeze('-', _sseWasOpen ? 'sse-drop' : 'sse-never-opened', 0) }
   } catch (e) {}
 
   // --- Vollbild -------------------------------------------------------------

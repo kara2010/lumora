@@ -4491,6 +4491,23 @@ function bcStartServer(port) {
         req.on('close', () => bcSwitchSseClients.delete(res))
         return
       }
+      // Diagnose-Bericht des Freeze-Frame-Mechanismus (s. player.html reportFreeze):
+      // je Wechsel EIN kompakter Datensatz, ob das Auftauen per Frame-Erkennung
+      // ('match') oder erst per Sicherheitsfrist ('timeout') passierte, bzw. ob
+      // die SSE-Verbindung selbst nie zustande kam/abriss ('sse-never-opened'/
+      // 'sse-drop') - landet im gewohnten lumorastream.log statt geraten zu werden.
+      if (req.method === 'POST' && req.url === '/freeze-log') {
+        let body = ''
+        req.on('data', (c) => { body += c; if (body.length > 2048) req.destroy() })
+        req.on('end', () => {
+          try {
+            const d = JSON.parse(body)
+            bcLogStream('freeze-client: kind=' + d.kind + ' reason=' + d.reason + ' ms=' + d.ms + ' von=' + (req.socket.remoteAddress || '?'))
+          } catch {}
+          res.writeHead(204); res.end()
+        })
+        return
+      }
       // QoS-Bericht eines Players (adaptive Bitrate, s. bcQosReport).
       if (req.method === 'POST' && req.url === '/qos') {
         let body = ''
