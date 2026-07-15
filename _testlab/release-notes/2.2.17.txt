@@ -1,0 +1,5 @@
+Schnellerer Start + HDR-Feinabstimmung:
+
+• Oberfläche sofort bedienbar: Beim Start hat die Hardware-Erkennung kurz die Bedienung blockiert – die Tabs ließen sich erst nach einem Moment anklicken. Das läuft jetzt im Hintergrund, die Oberfläche reagiert sofort.
+• HDR-Streams justierbar: Wirkt ein HDR-Spiel im Stream zu dunkel oder detailarm, lässt es sich jetzt im Stream-Tab unter „HDR-Feinabstimmung" anpassen – mehrere Bildkurven und ein Helligkeitsregler, live im laufenden Stream umschaltbar.
+• Stream-Vorschau springt beim Livegehen wieder zuverlässig in den Blick.

@@ -1,3 +1,4 @@
+const _procT0 = Date.now()   // Start-Timing-Basis: ab main.js-Load (vor allen requires)
 const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage, globalShortcut, desktopCapturer, session, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
@@ -5,11 +6,25 @@ const os = require('os')
 const https = require('https')
 const { exec, spawn, execSync } = require('child_process')
 const crypto = require('crypto')
+// Start-Timing-Diagnose (schreibt Startphasen nach %TEMP%\lumora-start.log, jede
+// Zeile mit ms seit main.js-Load). Deckt jetzt AUCH die "unsichtbare" Phase VOR dem
+// Fenster ab (require-Kette, createWindow-Vorarbeit, ready-to-show = erster Frame) -
+// wichtig fuers langsamere AMD-System: "bis Lumora ueberhaupt erscheint". Der erste
+// Aufruf je Prozess ueberschreibt das Log (frischer Lauf), danach wird angehaengt.
+let _slInit = false
+const startLog = (m) => {
+  try {
+    const f = path.join(app.getPath('temp'), 'lumora-start.log')
+    const line = (Date.now() - _procT0) + 'ms ' + m + '\n'
+    if (_slInit) fs.appendFileSync(f, line); else { _slInit = true; fs.writeFileSync(f, line) }
+  } catch {}
+}
 // Ausfallsicher: fehlt das Modul (z.B. bei einem schnellen Dev-Deploy ohne
 // node_modules), bleibt autoUpdater null und die Update-Funktion ist einfach aus,
 // statt die ganze App am Start abstuerzen zu lassen.
 let autoUpdater = null
 try { autoUpdater = require('electron-updater').autoUpdater } catch (e) { console.warn('electron-updater nicht verfügbar:', e.message) }
+startLog('top-level requires fertig (inkl. electron-updater)')
 
 // Sicherheitsnetz: einen unerwarteten Fehler (typischerweise aus einem Kind-
 // prozess der Streaming-Pipeline – FFmpeg/mediamtx) protokollieren, statt die
@@ -2110,6 +2125,7 @@ function createWindow() {
   // -> die App oeffnet normal, auch wenn "Minimiert starten" aktiviert ist.
   const wantMin = process.argv.includes('--minimized')
 
+  startLog('createWindow: vorarbeit fertig (settings/migrate/windowstate)')
   mainWindow = new BrowserWindow({
     width: state.width || 900,
     height: state.height || 600,
@@ -2131,6 +2147,7 @@ function createWindow() {
     backgroundColor: '#0f0f0f'
   })
 
+  startLog('createWindow: BrowserWindow-Objekt erstellt')
   if (state.maximized) mainWindow.maximize()
 
   // Rechtsklick in Eingabefeldern: Electron bringt von Haus aus KEIN Kontextmenue
@@ -2153,6 +2170,7 @@ function createWindow() {
 
   // Nur beim minimierten Start (Autostart): nach dem ersten Rendern minimieren bzw. im Tray lassen.
   mainWindow.once('ready-to-show', () => {
+    startLog('ready-to-show = erster Frame gerendert, FENSTER SICHTBAR')
     if (!wantMin) return
     if (appSettings.minimizeToTray) return
     mainWindow.minimize()
@@ -4858,6 +4876,27 @@ function bcStartFfmpeg(cfg) {
 // Fenster-Aufnahme: WGC-Helfer starten, dessen gemeldete Groesse (SIZE auf
 // stderr) abwarten, dann FFmpeg mit rawvideo-Eingang starten und die Frames
 // hineinpipen. Stirbt der Helfer (Fenster zu), bekommt FFmpeg EOF -> Neustart.
+// HDR-Tonemap-Steuerdatei fuer den Capture-Helfer: er liest Kurve (mode) +
+// Helligkeit (exposure) LIVE daraus (Format "<mode> <exposure>") und justiert
+// den Shader ohne Stream-Neustart. mode: 0=ACES 1=Hable 2=Reinhard 3=Linear-Clip.
+function bcWriteHdrControl() {
+  try {
+    const mode = Math.max(0, Math.min(3, parseInt(appSettings.streamHdrMode, 10) || 0))
+    const exp = Math.max(0.05, Math.min(3, Number(appSettings.streamHdrExposure) || 0.3937))
+    fs.writeFileSync(path.join(app.getPath('temp'), 'lumora-hdr.txt'), mode + ' ' + exp.toFixed(4))
+  } catch {}
+}
+// Live-Justierung aus dem Stream-Tab: Steuerdatei sofort neu schreiben, der
+// laufende Helfer zieht binnen ~0,25 s nach (kein Neustart, kein Bildabriss).
+ipcMain.handle('set-hdr-tonemap', (e, v) => {
+  if (v && typeof v === 'object') {
+    if (v.mode != null) appSettings.streamHdrMode = Math.max(0, Math.min(3, parseInt(v.mode, 10) || 0))
+    if (v.exposure != null) appSettings.streamHdrExposure = Math.max(0.05, Math.min(3, Number(v.exposure) || 0.3937))
+    saveAppSettings()
+    bcWriteHdrControl()
+  }
+  return { mode: appSettings.streamHdrMode || 0, exposure: appSettings.streamHdrExposure || 0.3937 }
+})
 function bcStartWindowCapture(cfg) {
   // Video-Transport: Named Pipe mit grossem Puffer (Name pro Lauf eindeutig).
   // Die Standard-stdout-Pipe (64-KB-Puffer) war bei 4K-Rohframes der belegte
@@ -4877,6 +4916,7 @@ function bcStartWindowCapture(cfg) {
   // Vollneustart/Stop killt Lumora den Helfer direkt (bcKillCap), der Reconnect-
   // Timeout ist nur ein Sicherheitsnetz gegen haengende Helfer.
   if (!bcFastRestartBroken) capArgs.push('--reconnect', '4000')
+  bcWriteHdrControl()   // aktuelle HDR-Tonemap-Werte bereitstellen, bevor der Helfer startet
   let cap
   try { cap = spawn(streamBin('lumora-capture.exe'), capArgs, { windowsHide: true }) }
   catch (e) { osdDbg('[stream] capture-Start fehlgeschlagen: ' + (e && e.message)); return null }
@@ -5947,7 +5987,36 @@ if (process.argv.includes('--fps-broker')) {
   // in process.argv - nach dem Hochfahren die Ziel-Ansicht oeffnen.
   const bcColdLink = process.argv.find((a) => typeof a === 'string' && a.startsWith('lumora://'))
   if (bcColdLink) app.whenReady().then(() => setTimeout(() => bcHandleDeepLink(bcColdLink), 1200))
-  app.whenReady().then(() => { setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupNvml(); setupAdl(); setupRtss(); setupMahm(); setupCpuClock(); setupVramCounter(); setupGpuName(); startExternalWatcher(); syncOsdVisibility() })
+  // Start-Timing-Diagnose (schreibt die Startphasen nach %TEMP%\lumora-start.log):
+  // Die schweren, SYNCHRONEN Sensor-Inits (native Treiber-DLLs nvml/adl, PDH-GPU-
+  // Counter) liefen bisher in DIESER Kette direkt nach createWindow() und
+  // blockierten den Main-Event-Loop ~1-2 s. Weil der Renderer beim Start per
+  // sendSync(load-games/load-prefs) auf den Main-Loop wartet, war die UI (Tabs)
+  // genau so lange nicht bedienbar. Fix: nur die leichten Dinge bleiben synchron;
+  // die Sensor-Kette laeuft erst NACH dem Renderer-Load und GESTAFFELT (jeder Init
+  // in eigenem Tick, damit der Event-Loop zwischen ihnen atmet und wartende IPC
+  // sofort bedient werden). Die read*-Funktionen pruefen alle auf null -> bis die
+  // Setups durch sind, blendet das OSD die Werte kurz aus (unkritisch, kein Crash).
+  app.whenReady().then(() => {
+    startLog('whenReady (Electron bereit)')
+    setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupGpuName()
+    startLog('fenster+hotkeys erstellt (setupGpuName ist async, kein Blocker)')
+    // Reihenfolge wie bisher; jeder Eintrag [Name, fn] wird einzeln vermessen.
+    const deferred = [['nvml', setupNvml], ['adl', setupAdl], ['rtss', setupRtss], ['mahm', setupMahm],
+      ['cpuclock', setupCpuClock], ['vram', setupVramCounter], ['extwatch', startExternalWatcher], ['osdvis', syncOsdVisibility]]
+    const runDeferred = () => {
+      const e = deferred.shift()
+      if (!e) { startLog('sensor-setups fertig'); return }
+      const s = Date.now(); try { e[1]() } catch {}
+      startLog('setup:' + e[0] + ' ' + (Date.now() - s) + 'ms')
+      setImmediate(runDeferred)   // naechster Init erst im Folge-Tick -> Loop atmet
+    }
+    let started = false
+    const startDeferred = () => { if (started) return; started = true; setImmediate(runDeferred) }
+    const wc = mainWindow && mainWindow.webContents
+    if (wc) wc.once('did-finish-load', () => { startLog('renderer did-finish-load'); startDeferred() })
+    setTimeout(startDeferred, 2000)   // Fallback, falls did-finish-load ausbleibt
+  })
 
   // Encoder-Erkennung vorwaermen (PowerShell-GPU-Abfrage + ffmpeg -encoders kosten
   // beim allerersten Streamstart sonst 1-2 s auf dem kritischen Weg zum ersten Bild).

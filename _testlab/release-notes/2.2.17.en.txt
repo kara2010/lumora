@@ -1,0 +1,5 @@
+Faster startup + HDR fine-tuning:
+
+• Interface responsive immediately: on startup the hardware detection briefly blocked the UI – tabs were only clickable after a moment. It now runs in the background, so the interface reacts instantly.
+• Adjustable HDR streams: if an HDR game looks too dark or lacks detail in the stream, you can now tune it in the stream tab under “HDR fine-tuning” – several image curves and a brightness slider, switchable live in the running stream.
+• The stream preview reliably scrolls into view again when you go live.

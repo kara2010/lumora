@@ -86,6 +86,13 @@ static class Program
     static ID3D11SamplerState _sampler;
     static ID3D11RenderTargetView _rtv;
     static ID3D11Texture2D _srcCopy;   // FP16-Kopie der WGC-Textur (mit ShaderResource-Flag)
+    // HDR-Tonemap LIVE justierbar (mehrere Kurven + Helligkeit, per Steuerdatei ohne Neustart):
+    static ID3D11Buffer _psParams;     // Constant Buffer {mode, exposure} fuer den Tonemap-Shader
+    static int _tmMode = 0;            // 0=ACES 1=Hable 2=Reinhard 3=Linear-Clip
+    static float _tmExposure = 0.3937f; // Helligkeit/Weisspunkt (0.3937 = 1/2.54 = bisheriges Verhalten)
+    static string _tmCtlPath;          // %TEMP%\lumora-hdr.txt (Format: "<mode> <exposure>")
+    static long _tmCtlMtime = -1;      // letzte gelesene mtime (nur bei Aenderung neu einlesen)
+    static int _tmCtlCtr = 0;          // Frame-Drossel fuers Datei-Polling
     static int _width, _height;       // CLIENT-Groesse (sichtbarer Fensterinhalt)
     static int _outW, _outH;          // Ausgabe-Groesse (nach GPU-Downscale)
     // WGC liefert die FENSTER-Textur inkl. unsichtbarer Rahmenzonen (ein maximiertes
@@ -839,6 +846,7 @@ static class Program
     // HDR->SDR-Tonemapping + Skalierung per eigenem Pixel-Shader. Eingang ist
     // scRGB (linear, FP16); ACES-Kurve komprimiert die Highlights, Ausgang sRGB.
     const string SHADER_HLSL = @"
+cbuffer Params : register(b0) { int uMode; float uExposure; float uP1; float uP2; };
 Texture2D tex : register(t0);
 SamplerState samp : register(s0);
 void vsmain(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0)
@@ -846,12 +854,19 @@ void vsmain(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv :
     uv = float2((id << 1) & 2, id & 2);
     pos = float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
 }
+// Tonemap-Kurven (Eingang linear, bereits mit Exposure skaliert):
+float3 tmACES(float3 x)     { return saturate((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)); }
+float3 hableU(float3 x)     { float A=0.15,B=0.50,C=0.10,D=0.20,E=0.02,F=0.30; return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F; }
+float3 tmHable(float3 x)    { return saturate(hableU(x) / hableU(11.2)); }
+float3 tmReinhard(float3 x) { float L=4.0; return saturate(x * (1.0 + x/(L*L)) / (1.0 + x)); }
 float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
 {
-    float3 c = max(tex.Sample(samp, uv).rgb, 0.0);
-    float3 x = c / 2.54;
-    x = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-    x = saturate(x);
+    float3 c = max(tex.Sample(samp, uv).rgb, 0.0) * uExposure;
+    float3 x;
+    if (uMode == 1)      x = tmHable(c);
+    else if (uMode == 2) x = tmReinhard(c);
+    else if (uMode == 3) x = saturate(c);        // Linear + Clip (hellste Referenz)
+    else                 x = tmACES(c);          // 0 = ACES (Default, wie bisher)
     x = pow(x, 1.0 / 2.2);
     return float4(x, 1.0);
 }
@@ -880,20 +895,59 @@ float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
             Usage = ResourceUsage.Default, BindFlags = BindFlags.RenderTarget,
         });
         _rtv = _device.CreateRenderTargetView(_scaleTex);
+        _psParams = _device.CreateBuffer(new BufferDescription(16, BindFlags.ConstantBuffer, ResourceUsage.Dynamic, CpuAccessFlags.Write));
+        TmReadControl(true);   // Startwerte (Steuerdatei, falls vorhanden) -> Buffer initialisieren
     }
     static void RenderShaderTonemap(ID3D11Texture2D src)
     {
+        TmReadControl(false);   // Live-Justierung: Steuerdatei alle paar Frames pruefen
         _context.CopyResource(_srcCopy, src);   // WGC-Textur -> ShaderResource-faehige Kopie
         using var srv = _device.CreateShaderResourceView(_srcCopy);
         _context.VSSetShader(_vs);
         _context.PSSetShader(_ps);
         _context.PSSetShaderResource(0, srv);
         _context.PSSetSampler(0, _sampler);
+        _context.PSSetConstantBuffer(0, _psParams);
         _context.OMSetRenderTargets(_rtv);
         _context.RSSetViewport(0, 0, _outW, _outH);
         _context.IASetPrimitiveTopology(PrimitiveTopology.TriangleList);
         _context.Draw(3, 0);
         _context.OMSetRenderTargets((ID3D11RenderTargetView)null);   // RTV loesen fuer die Kopie danach
+    }
+    // Steuerdatei %TEMP%\lumora-hdr.txt (Format: "<mode> <exposure>") LIVE einlesen -
+    // so justiert der Nutzer Kurve + Helligkeit im laufenden Stream, ohne Neustart.
+    // Nur alle 15 Frames per mtime-Check (billig); force=true beim ersten Setup.
+    static void TmReadControl(bool force)
+    {
+        if (!force && (++_tmCtlCtr % 15) != 0) return;
+        if (_tmCtlPath == null) _tmCtlPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "lumora-hdr.txt");
+        try
+        {
+            long mt = System.IO.File.Exists(_tmCtlPath) ? System.IO.File.GetLastWriteTimeUtc(_tmCtlPath).ToFileTimeUtc() : 0;
+            if (mt == _tmCtlMtime) { if (force) TmUpdateBuffer(); return; }
+            _tmCtlMtime = mt;
+            if (mt != 0)
+            {
+                var parts = System.IO.File.ReadAllText(_tmCtlPath).Trim().Split(' ');
+                if (parts.Length >= 1) int.TryParse(parts[0], out _tmMode);
+                if (parts.Length >= 2) float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _tmExposure);
+                Console.Error.WriteLine("HDRTM mode=" + _tmMode + " exp=" + _tmExposure.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            TmUpdateBuffer();
+        }
+        catch { }
+    }
+    static void TmUpdateBuffer()
+    {
+        if (_psParams == null) return;
+        try
+        {
+            var m = _context.Map(_psParams, 0, Vortice.Direct3D11.MapMode.WriteDiscard, Vortice.Direct3D11.MapFlags.None);
+            System.Runtime.InteropServices.Marshal.WriteInt32(m.DataPointer, 0, _tmMode);
+            System.Runtime.InteropServices.Marshal.WriteInt32(m.DataPointer, 4, BitConverter.SingleToInt32Bits(_tmExposure));
+            _context.Unmap(_psParams, 0);
+        }
+        catch { }
     }
 
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT val, int size);
