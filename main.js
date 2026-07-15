@@ -3480,7 +3480,7 @@ ipcMain.handle('set-app-settings', (event, partial) => {
   // Puffer (Zuschauer-seitig live via /cfg), TURN (wirkt live via /cfg bzw.
   // erst beim naechsten Start), IPv6-Testschalter, Hosts-Cache, Hotkey,
   // Adaptiv-Schalter (Sonderfall direkt darunter).
-  const bcNoRestart = new Set(['streamBufferMs', 'streamAdaptive', 'streamTurnEnabled', 'streamTurnUrl', 'streamTurnUser', 'streamTurnPass', 'streamTurnForce', 'streamForceIPv6', 'streamLastHosts', 'streamHotkey'])
+  const bcNoRestart = new Set(['streamBufferMs', 'streamAdaptive', 'streamTurnEnabled', 'streamTurnUrl', 'streamTurnUser', 'streamTurnPass', 'streamTurnForce', 'streamForceIPv6', 'streamLastHosts', 'streamHotkey', 'streamFastRestart'])
   // Adaptiv ausgeschaltet, waehrend die Bitrate gerade abgesenkt ist: zurueck
   // zur vollen eingestellten Bitrate (dafuer ist EIN Neustart gerechtfertigt).
   if (partial && partial.streamAdaptive === false && bcAdaptLevel > 0 && broadcastState.active) {
@@ -4775,6 +4775,15 @@ let bcLastZeroCopy = false
 // bewaehrten BGRA-Modus - exakt das Verhalten von heute, keine Verschlechterung.
 let bcNv12Broken = false
 let bcLastCapFmt = 'bgra'
+// Fast-Restart (nahtloser Bitrate-Neustart, Fenster-Weg): Bei einer REINEN
+// Bitrate-Aenderung laufen Video- UND Audio-Helfer durch; nur FFmpeg wird neu an
+// die BESTEHENDE Named Pipe gehaengt (der Helfer haelt sie per --reconnect offen).
+// Spart den ~370ms-Helfer-Kaltstart. Nur wenn sich die Helfer-Parameter
+// (hwnd/fps/scaleH = bcCapKey) NICHT aendern - sonst muss der Helfer neu.
+let bcFastRestartBroken = false   // Sicherheitsnetz: einmal gescheitert -> dauerhaft Vollneustart
+let bcCapW = 0, bcCapH = 0        // Aufnahmegroesse des laufenden Helfers (fuer den Fast-Restart-FFmpeg)
+let bcVidPipe = null              // Named-Pipe-Name des laufenden Helfers
+let bcCapKey = ''                 // hwnd|fps|scaleH - aendert sich einer, MUSS der Helfer neu (kein Fast-Restart)
 function bcStartFfmpeg(cfg) {
   bcKillCap()   // evtl. verwaisten Helfer aufraeumen
   // Anzeige nachfuehren: die adaptive Bitrate aendert cfg.kbit bei Neustarts -
@@ -4798,6 +4807,8 @@ function bcStartWindowCapture(cfg) {
   // Die Standard-stdout-Pipe (64-KB-Puffer) war bei 4K-Rohframes der belegte
   // Engpass (13 statt 157 fps im Direktvergleich) - siehe Program.cs.
   cfg.vidPipe = 'lumora-vid-' + process.pid + '-' + Date.now()
+  bcVidPipe = cfg.vidPipe
+  bcCapKey = cfg.hwnd + '|' + cfg.fps + '|' + (cfg.scaleH || 0)   // aendert sich einer -> kein Fast-Restart
   // NV12-Modus anfordern, solange er nicht als kaputt markiert ist (Selbst-
   // heilung s. bcNv12Broken) und nicht per Setting abgeschaltet wurde. Der
   // Helfer entscheidet selbst, ob seine GPU das kann (FMT-Meldung) - ein
@@ -4805,6 +4816,11 @@ function bcStartWindowCapture(cfg) {
   // -> unten Default bgra, alles wie bisher).
   const capArgs = ['--hwnd', String(cfg.hwnd), '--fps', String(cfg.fps), '--max-height', String(cfg.scaleH || 0), '--pipe', cfg.vidPipe]
   if (appSettings.streamNv12 !== false && !bcNv12Broken) capArgs.push('--nv12')
+  // --reconnect: Helfer haelt die Pipe ueber einen FFmpeg-Wechsel offen, damit der
+  // Fast-Restart nur FFmpeg neu starten muss. Schadet sonst nie - bei einem
+  // Vollneustart/Stop killt Lumora den Helfer direkt (bcKillCap), der Reconnect-
+  // Timeout ist nur ein Sicherheitsnetz gegen haengende Helfer.
+  if (!bcFastRestartBroken) capArgs.push('--reconnect', '4000')
   let cap
   try { cap = spawn(streamBin('lumora-capture.exe'), capArgs, { windowsHide: true }) }
   catch (e) { osdDbg('[stream] capture-Start fehlgeschlagen: ' + (e && e.message)); return null }
@@ -4849,6 +4865,7 @@ function bcStartWindowCapture(cfg) {
     if (!m) return
     sized = true
     capW = parseInt(m[1], 10); capH = parseInt(m[2], 10)
+    bcCapW = capW; bcCapH = capH   // fuer den Fast-Restart-FFmpeg (gleiche Aufnahmegroesse)
     // Pixel-Format des Helfers (VOR SIZE gemeldet): nv12 = GPU-konvertiert,
     // sonst bgra (auch wenn die FMT-Zeile fehlt - alte Helfer-Version).
     const fm = /FMT (\w+)/.exec(errbuf)
@@ -4956,9 +4973,14 @@ function bcSpawnEncoder(args, capOfThis, stdinStream, audOfThis) {
       if (ffGpuTimer) { clearInterval(ffGpuTimer); ffGpuTimer = null }
       if (ffLagTimer) { clearInterval(ffLagTimer); ffLagTimer = null }
     }
-    // Zugehoerige Helfer (Bild + Ton) mit beenden (sonst schreiben sie in tote Pipes).
-    if (capOfThis) { if (capProc === capOfThis) capProc = null; try { capOfThis.kill() } catch {} }
-    if (audOfThis) { if (audProc === audOfThis) audProc = null; try { audOfThis.kill() } catch {} }
+    // Zugehoerige Helfer (Bild + Ton) mit beenden (sonst schreiben sie in tote
+    // Pipes). AUSNAHME _keepHelpers: beim Fast-Restart sollen Video- UND Audio-
+    // Helfer WEITERLAUFEN (das neue FFmpeg haengt sich an die bestehende Pipe) -
+    // dann hier NICHT killen, sonst waere der Sinn des Fast-Restarts zunichte.
+    if (!p._keepHelpers) {
+      if (capOfThis) { if (capProc === capOfThis) capProc = null; try { capOfThis.kill() } catch {} }
+      if (audOfThis) { if (audProc === audOfThis) audProc = null; try { audOfThis.kill() } catch {} }
+    }
     // _intentional: von bcRestartFfmpeg gewollt beendet -> KEIN eigener Neustart
     // (sonst konkurriert er mit dem geplanten neuen Prozess -> Doppel-Publisher).
     if (p._intentional || ffStopping || !broadcastState.active) return
@@ -4980,6 +5002,15 @@ function bcSpawnEncoder(args, capOfThis, stdinStream, audOfThis) {
     if (Date.now() - startedAt < 4000 && capOfThis && bcLastCapFmt === 'nv12' && !bcNv12Broken) {
       bcNv12Broken = true
       bcLogStream('nv12: Fenster-Stream starb sofort im NV12-Modus -> dauerhaft BGRA-Weg: ' + errbuf.replace(/\s+/g, ' ').slice(-160))
+    }
+    // Fast-Restart-Selbstheilung: Stirbt ein per Fast-Restart an die bestehende
+    // Pipe gehaengtes FFmpeg sofort (Reconnect klappte nicht o.ae.) -> dauerhaft
+    // Vollneustart. Der delay-Neustart unten setzt den Helfer ueber bcKillCap
+    // frisch auf (das sofort sterbende FFmpeg hat die Helfer bereits mitgekillt,
+    // da es KEIN _keepHelpers traegt).
+    if (Date.now() - startedAt < 4000 && p._fastRestart && !bcFastRestartBroken) {
+      bcFastRestartBroken = true
+      bcLogStream('fast-restart: FFmpeg starb sofort -> dauerhaft Vollneustart: ' + errbuf.replace(/\s+/g, ' ').slice(-160))
     }
     const delay = ffFastFails >= 3 ? 5000 : 1200
     // NVENC-Treiber zu alt (deterministisch – jeder Neuversuch scheitert gleich):
@@ -5009,6 +5040,16 @@ function bcDoRestartFfmpeg() {
   if (ffRestartTimer) { clearTimeout(ffRestartTimer); ffRestartTimer = null }
   const cfg = bcStreamCfg(bcEncoderCache || { encoder: 'h264_nvenc' })
   broadcastState.quality = bcQualityLabel(cfg)
+  // FAST-RESTART: Aendert sich NUR die Bitrate (Helfer-Parameter hwnd/fps/scaleH
+  // = bcCapKey unveraendert), laeuft im Fenster-Weg der Helfer per --reconnect
+  // weiter und nur FFmpeg wird an die bestehende Pipe neu gehaengt -> ~370ms
+  // Helfer-Kaltstart gespart. Voraussetzungen: Fenster-Modus, Helfer lebt, Pipe
+  // bekannt, nicht als kaputt markiert (Sicherheitsnetz bcFastRestartBroken).
+  const newCapKey = cfg.hwnd + '|' + cfg.fps + '|' + (cfg.scaleH || 0)
+  if (cfg.mode === 'window' && capProc && bcVidPipe && bcCapW && !bcFastRestartBroken
+      && appSettings.streamFastRestart !== false && newCapKey === bcCapKey) {
+    if (bcFastRestartFfmpeg(cfg)) return
+  }
   const old = ffProc
   ffProc = null
   let started = false
@@ -5024,6 +5065,40 @@ function bcDoRestartFfmpeg() {
   } else {
     startNew()
   }
+}
+// Fast-Restart: NUR FFmpeg neu, Video- UND Audio-Helfer laufen weiter (s.
+// bcFastRestartBroken). Gibt true zurueck, wenn der schnelle Weg eingeleitet
+// wurde. Der Helfer haelt seine Named Pipe per --reconnect offen; das neue
+// FFmpeg oeffnet dieselbe Pipe (cfg.vidPipe = bcVidPipe) und bekommt sofort
+// Frames, ohne dass der Helfer neu starten muss.
+function bcFastRestartFfmpeg(cfg) {
+  const cap = capProc, aud = audProc
+  if (!cap) return false
+  cfg.vidPipe = bcVidPipe       // bestehende Pipe des laufenden Helfers weiterverwenden
+  cfg.capFmt = bcLastCapFmt     // dessen Pixelformat (nv12/bgra) - bestimmt die FFmpeg-Args
+  const old = ffProc
+  ffProc = null
+  bcLogStream('fast-restart: Bitrate ' + Math.round(cfg.kbit / 1000) + ' Mbit (Helfer laeuft weiter)')
+  // Ton vom alten (sterbenden) FFmpeg-fd3 loesen und den Audio-Fluss ins Leere
+  // laufen lassen (resume verwirft ohne Consumer), bis das neue FFmpeg da ist -
+  // so staut der Audio-Helfer keine alten PCM-Reste an, die sonst als bleibender
+  // A/V-Versatz ins neue FFmpeg wanderten. bcSpawnEncoder pipet ihn frisch an fd3.
+  if (aud && aud.stdout) { try { aud.stdout.unpipe(); aud.stdout.resume() } catch {} }
+  let started = false
+  const startNew = () => {
+    if (started) return; started = true
+    if (!broadcastState.active || ffStopping) { try { cap.kill() } catch {}; try { aud && aud.kill() } catch {}; return }
+    const p = bcSpawnEncoder(bcBuildFfmpegArgs(cfg, bcCapW, bcCapH, !!aud), cap, null, aud)
+    if (p) p._fastRestart = true   // fuers Sicherheitsnetz: sofortiger Tod -> bcFastRestartBroken
+  }
+  if (old) {
+    old._intentional = true       // sein exit-Handler startet NICHT selbst neu
+    old._keepHelpers = true       // ... und killt NICHT die weiterlaufenden Helfer
+    old.once('exit', startNew)
+    try { old.kill() } catch {}
+    setTimeout(startNew, 2500)    // Sicherheitsnetz, falls kein exit-Event kommt
+  } else startNew()
+  return true
 }
 // Zuschauerzahl von der mediamtx-API pollen (Anzahl WHEP-Reader auf dem Pfad).
 function bcStartViewerPoll() {
