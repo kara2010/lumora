@@ -2566,8 +2566,16 @@ async function sgdbApi(pathQuery, key) {
 // kind: 'cover' → grids (Hochformat 600x900), 'hero' → heroes (Querformat 1920x620)
 async function sgdbArtwork(term, kind, key) {
   if (!key) return []
-  const games = await sgdbApi(`/search/autocomplete/${encodeURIComponent(cleanGameName(term))}`, key)
-  if (!games || !games.length) return []
+  const cleaned = cleanGameName(term)
+  const gamesRaw = await sgdbApi(`/search/autocomplete/${encodeURIComponent(cleaned)}`, key)
+  if (!gamesRaw || !gamesRaw.length) return []
+  // Auch in der manuellen Suche NICHT ungeprueft alles zeigen, was die Autocomplete-
+  // API zurueckgibt - bei einem dort nicht gelisteten Titel kamen sonst thematisch
+  // beliebige "Treffer" in die Auswahlliste (gleiche Ursache wie beim Auto-Cover-Bug,
+  // s. closeNameMatch-Kommentar). FILTER statt Einzelauswahl: mehrere plausible
+  // Kandidaten bleiben stehen, nur offensichtlich Irrelevantes faellt raus.
+  const games = gamesRaw.filter(g => closeNameMatch(g.name, cleaned))
+  if (!games.length) return []
   const out = []
   for (const g of games.slice(0, 2)) {            // bis zu 2 passende Spiele
     const ep = kind === 'hero'
@@ -2590,7 +2598,12 @@ async function sgdbArtwork(term, kind, key) {
 // alle PARALLEL anstößt und Treffer anzeigt, sobald die jeweilige Quelle fertig
 // ist (Steam/MS schnell, SteamGridDB langsamer). kind: 'cover' | 'hero'.
 async function searchSteamArt(term, wantHero) {
-  const steam = await steamCandidates(term)
+  const cleaned = cleanGameName(term)
+  const steamRaw = await steamCandidates(term)
+  // Wie bei sgdbArtwork: Steams eigene storesearch-API liefert bei einem dort nicht
+  // gelisteten Titel trotzdem IRGENDWELCHE Fuzzy-Treffer - ungefiltert landeten die
+  // als Auswahlkacheln in der manuellen Suche. Filtern statt blind uebernehmen.
+  const steam = steamRaw.filter(c => closeNameMatch(c.name, cleaned))
   const top = steam.slice(0, 12)
   const assets = top.length ? await steamGetItems(top.map(c => c.appId)) : {}
   const steamArt = await Promise.all(top.map(async c => {
@@ -2615,7 +2628,11 @@ async function searchSteamArt(term, wantHero) {
 }
 
 async function searchMsArt(term) {
-  const ms = await msStoreCandidates(term)
+  const cleaned = cleanGameName(term)
+  const msRaw = await msStoreCandidates(term)
+  // Gleicher Filter wie bei Steam/SGDB - MS-Store-Suche liefert sonst ebenso
+  // ungefragt themenfremde Treffer in die manuelle Auswahlliste.
+  const ms = msRaw.filter(c => closeNameMatch(c.name, cleaned))
   const msCovers = await Promise.all(ms.slice(0, 4).map(async c => {
     try {
       const cover = await fetchMsImage(c.imageUrl)
