@@ -500,12 +500,10 @@
 
           <!-- Sektion 2: Stream (bei laufendem Stream via CSS nach oben – Vorschau als Highlight) -->
           <div class="form-group stream-sec stream-sec-stream">
-            <label>Stream</label>
-            <div class="setting-toggle-row">
-              <span class="setting-toggle-label" id="streamStateLabel">Stream aus</span>
-              <button class="btn-browse" id="streamToggleBtn" onclick="toggleBroadcast()" style="min-width:120px">Stream starten</button>
-            </div>
-            <div id="streamInfo" style="display:none; margin-top:12px">
+            <button class="btn-stream-toggle" id="streamToggleBtn" onclick="toggleBroadcast()">
+              <span class="bst-ico" id="streamToggleIco">▶</span><span id="streamToggleLabel">Stream starten</span>
+            </button>
+            <div id="streamInfo" style="display:none; margin-top:14px">
               <div id="streamPreviewWrap" style="margin:0 0 12px; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:16/9; position:relative">
                 <video id="streamPreview" muted autoplay playsinline style="width:100%; height:100%; object-fit:contain; display:block; background:#000"></video>
                 <span style="position:absolute; top:8px; left:8px; background:rgba(240,90,90,.92); color:#fff; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:.5px; display:flex; align-items:center; gap:5px"><span style="width:7px; height:7px; border-radius:50%; background:#fff; animation:pulse 1.4s infinite"></span>LIVE</span>
@@ -2481,9 +2479,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         const v = st && st.viewers || 0
         document.getElementById('streamIndLabel').textContent = on ? (v > 0 ? 'LIVE · ' + v + ' 👁' : 'LIVE') : 'LIVE'
       }
-      document.getElementById('streamStateLabel').textContent = on ? window.tr('Stream läuft') : window.tr('Stream aus')
       const btn = document.getElementById('streamToggleBtn')
-      btn.textContent = on ? window.tr('Stream stoppen') : window.tr('Stream starten')
+      btn.classList.toggle('streaming', on)
+      document.getElementById('streamToggleIco').textContent = on ? '⏹' : '▶'
+      document.getElementById('streamToggleLabel').textContent = on ? window.tr('Stream stoppen') : window.tr('Stream starten')
       document.getElementById('streamInfo').style.display = on ? 'block' : 'none'
       document.getElementById('streamHint').style.display = on ? 'none' : 'block'
       if (on) {
