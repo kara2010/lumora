@@ -526,6 +526,7 @@
             <div id="streamInfo" style="display:none; margin-top:14px">
               <div id="streamPreviewWrap" style="margin:0 0 12px; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:16/9; position:relative">
                 <video id="streamPreview" muted autoplay playsinline style="width:100%; height:100%; object-fit:contain; display:block; background:#000"></video>
+                <canvas id="streamPreviewFreeze" style="display:none; position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000; pointer-events:none"></canvas>
                 <span style="position:absolute; top:8px; left:8px; background:rgba(240,90,90,.92); color:#fff; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:.5px; display:flex; align-items:center; gap:5px"><span style="width:7px; height:7px; border-radius:50%; background:#fff; animation:pulse 1.4s infinite"></span>LIVE</span>
                 <span id="streamPreviewWait" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#888; font-size:12px">Vorschau lädt…</span>
               </div>
@@ -3115,11 +3116,38 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function _previewRearm(gen, ms) {
       if (gen !== _previewGen || !_previewActive) return
+      unfreezePreview()   // Sicherheitsnetz: bei einem ECHTEN Reconnect nie ein eingefrorenes Bild stehen lassen
       if (_previewSession) { ipcRenderer.invoke('preview-whep-stop', _previewSession).catch(() => {}); _previewSession = null }
       if (_previewPc) { try { _previewPc.close() } catch (e) {} _previewPc = null }
       clearTimeout(_previewRetry)
       _previewRetry = setTimeout(() => { if (gen === _previewGen && _previewActive) _previewConnect(gen) }, ms)
     }
+    // Nahtloser Uebergang bei Bitrate-/Aufloesungswechsel: letztes echtes Bild
+    // einfrieren statt mediamtx' "STREAM IS OFFLINE"-Platzhalter kurz zu zeigen.
+    // Gleiche Technik wie player.html (dort per SSE), hier per IPC direkt vom
+    // Hauptprozess (bcDoRestartFfmpeg sendet 'switch-freeze' GENAU beim Start
+    // des Wechsels) - kein Netzwerk-Umweg noetig, selber Prozess.
+    let _pvFreezeTimer = null
+    const PV_FREEZE_MS = { fast: 600, full: 2800 }
+    function freezePreview(kind) {
+      const video = document.getElementById('streamPreview'), canvas = document.getElementById('streamPreviewFreeze')
+      if (!video || !canvas) return
+      try {
+        if (video.videoWidth && video.videoHeight) {
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight
+          canvas.getContext('2d').drawImage(video, 0, 0)
+          canvas.style.display = 'block'
+        }
+      } catch (e) {}
+      clearTimeout(_pvFreezeTimer)
+      _pvFreezeTimer = setTimeout(unfreezePreview, PV_FREEZE_MS[kind] || PV_FREEZE_MS.full)
+    }
+    function unfreezePreview() {
+      clearTimeout(_pvFreezeTimer)
+      const canvas = document.getElementById('streamPreviewFreeze')
+      if (canvas) canvas.style.display = 'none'
+    }
+    ipcRenderer.on('switch-freeze', (e, d) => freezePreview(d && d.kind === 'fast' ? 'fast' : 'full'))
     function startStreamPreview() {
       if (_previewActive) return
       _previewActive = true
@@ -3132,6 +3160,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       _previewActive = false
       _previewGen++
       clearTimeout(_previewRetry); _previewRetry = null
+      unfreezePreview()
       const video = document.getElementById('streamPreview'), wait = document.getElementById('streamPreviewWait')
       if (_previewSession) { ipcRenderer.invoke('preview-whep-stop', _previewSession).catch(() => {}); _previewSession = null }
       if (_previewPc) { try { _previewPc.close() } catch (e) {} _previewPc = null }

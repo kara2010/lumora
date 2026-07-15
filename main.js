@@ -4418,6 +4418,16 @@ function bcAdaptTick() {
   bcRestartFfmpeg()
 }
 
+// Offene SSE-Verbindungen der Player fuer das Freeze-Signal (s. bcDoRestartFfmpeg):
+// player.html haelt EINE Verbindung zu /switch-events offen und friert bei einer
+// Nachricht sofort das letzte Bild ein, statt mediamtx' Offline-Platzhalter zu
+// zeigen. Push statt Poll, weil das Zeitfenster (~80ms bei Fast-Restart) fuer
+// Polling zu knapp ist.
+const bcSwitchSseClients = new Set()
+function bcBroadcastSwitch(kind) {
+  const line = 'data: ' + JSON.stringify({ kind }) + '\n\n'
+  for (const res of bcSwitchSseClients) { try { res.write(line) } catch { bcSwitchSseClients.delete(res) } }
+}
 // HTTP-Server auf dem freigegebenen Port: liefert die Player-Seite und proxyt
 // die WHEP-Signalisierung an mediamtx (localhost). So braucht der Zuschauer nur
 // DIESEN einen TCP-Port fuer die Signalisierung; die Medien laufen per WebRTC
@@ -4471,6 +4481,16 @@ function bcStartServer(port) {
       // WHEP: POST = Offer->Answer, PATCH = ICE-Trickle, DELETE = Abmelden.
       // (Die Stream-Tab-Vorschau nutzt denselben /whep-Weg per localhost, ueber IPC.)
       if (req.url === '/whep' || req.url.startsWith('/whep')) return bcProxyWhep(req, res)
+      // Freeze-Signal fuer externe Zuschauer (s. bcBroadcastSwitch). Eine offene
+      // Server-Sent-Events-Verbindung je Player; wird beim Verbindungsende
+      // (Tab zu, Player-Reconnect) automatisch aus dem Set entfernt.
+      if (req.method === 'GET' && req.url === '/switch-events') {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'Connection': 'keep-alive' })
+        res.write(':ok\n\n')
+        bcSwitchSseClients.add(res)
+        req.on('close', () => bcSwitchSseClients.delete(res))
+        return
+      }
       // QoS-Bericht eines Players (adaptive Bitrate, s. bcQosReport).
       if (req.method === 'POST' && req.url === '/qos') {
         let body = ''
@@ -5186,8 +5206,16 @@ function bcDoRestartFfmpeg() {
   // Helfer-Kaltstart gespart. Voraussetzungen: Fenster-Modus, Helfer lebt, Pipe
   // bekannt, nicht als kaputt markiert (Sicherheitsnetz bcFastRestartBroken).
   const newCapKey = cfg.hwnd + '|' + cfg.fps + '|' + (cfg.scaleH || 0)
-  if (cfg.mode === 'window' && capProc && bcVidPipe && bcCapW && !bcFastRestartBroken
-      && appSettings.streamFastRestart !== false && newCapKey === bcCapKey) {
+  const canFast = cfg.mode === 'window' && capProc && bcVidPipe && bcCapW && !bcFastRestartBroken
+      && appSettings.streamFastRestart !== false && newCapKey === bcCapKey
+  // Letztes Bild einfrieren statt mediamtx' "STREAM IS OFFLINE"-Platzhalter zu
+  // zeigen (User-Wunsch 2026-07-15): GENAU jetzt, wo der sichtbare Wechsel
+  // beginnt, allen Playern (eigene Vorschau per IPC + externe Zuschauer per SSE)
+  // Bescheid geben, damit sie SOFORT einen Snapshot einfrieren. 'fast' = ~80ms
+  // gemessen, 'full' = Helfer-/Encoder-Neustart, braucht laenger (s. bcBroadcastSwitch).
+  sendToUi('switch-freeze', { kind: canFast ? 'fast' : 'full' })
+  bcBroadcastSwitch(canFast ? 'fast' : 'full')
+  if (canFast) {
     if (bcFastRestartFfmpeg(cfg)) return
   }
   const old = ffProc
