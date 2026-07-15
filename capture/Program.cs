@@ -151,7 +151,7 @@ static class Program
             if (Array.IndexOf(args, "--list") >= 0) return ListWindows(); // Fenster-Liste (zuverlaessiger als Electrons desktopCapturer)
             if (Array.IndexOf(args, "--hdr-check") >= 0) return HdrCheck(); // HDR-Status je Monitor (fuer den Farb-Hinweis im Monitor-Weg)
             IntPtr hwnd = IntPtr.Zero;
-            int fps = 60, maxHeight = 0;
+            int fps = 60, maxHeight = 0, reconnectMs = 0;
             string pipeName = null;
             bool wantNv12 = false;
             for (int i = 0; i < args.Length; i++)
@@ -162,6 +162,12 @@ static class Program
                 else if (args[i] == "--max-height" && i + 1 < args.Length) maxHeight = int.Parse(args[++i]);
                 else if (args[i] == "--pipe" && i + 1 < args.Length) pipeName = args[++i];
                 else if (args[i] == "--nv12") wantNv12 = true;
+                // --reconnect <ms>: nach FFmpeg-Ende die Pipe offen halten und bis
+                // zu <ms> auf einen NEUEN FFmpeg warten, statt sich zu beenden.
+                // Fuer den nahtlosen Bitrate-Neustart (Weg 1): der Helfer laeuft
+                // durch, nur FFmpeg wird neu gestartet -> spart den Helfer-Kaltstart.
+                // Ohne dieses Flag: Verhalten wie bisher (Pipe-Bruch = Ende).
+                else if (args[i] == "--reconnect" && i + 1 < args.Length) reconnectMs = int.Parse(args[++i]);
             }
             if (hwnd == IntPtr.Zero) { Console.Error.WriteLine("ERR kein Fenster gefunden"); return 2; }
             // Video-Ausgang als Named Pipe mit GROSSEM Puffer statt Prozess-stdout.
@@ -428,7 +434,27 @@ static class Program
                 if (frameBuf != null)
                 {
                     double w0 = sw.Elapsed.TotalMilliseconds;
-                    try { stdout.Write(frameBuf, 0, frameBuf.Length); stdout.Flush(); } catch { break; }
+                    bool wrote = true;
+                    try { stdout.Write(frameBuf, 0, frameBuf.Length); stdout.Flush(); }
+                    catch
+                    {
+                        wrote = false;
+                        // Pipe gebrochen. Ohne Reconnect-Modus (oder kein FFmpeg
+                        // in Sicht): beenden wie bisher. Mit Reconnect-Modus: auf
+                        // einen neuen FFmpeg warten und WEITERLAUFEN.
+                        if (vidPipe == null || reconnectMs <= 0 || !_running) break;
+                        Console.Error.WriteLine("PIPEDROP"); Console.Error.Flush();
+                        try { vidPipe.Disconnect(); } catch { }
+                        bool reconnected = false;
+                        try { reconnected = vidPipe.WaitForConnectionAsync().Wait(reconnectMs); } catch { reconnected = false; }
+                        if (!reconnected || !_running) { try { vidPipe.Dispose(); } catch { } break; }
+                        // Takt-Basis frisch setzen: der neue FFmpeg zaehlt Frames ab
+                        // 0, also ab JETZT takten (kein Burst-Nachholen der Wartezeit,
+                        // A/V-Sync beginnt sauber neu). Frame-Puffer NICHT neu bauen.
+                        next = sw.Elapsed.TotalMilliseconds; pace = 0;
+                        Console.Error.WriteLine("PIPERECON"); Console.Error.Flush();
+                    }
+                    if (!wrote) continue;   // dieses Frame ging verloren; naechster Tick schreibt frisch
                     double wDur = sw.Elapsed.TotalMilliseconds - w0;
                     statMaxWrite = Math.Max(statMaxWrite, wDur);
                     // Einzelereignis mit Zeitstempel (VSTAT zeigt nur das 10s-Maximum):
