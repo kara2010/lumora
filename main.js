@@ -3573,6 +3573,12 @@ function mainLang() {
 // irgendwo im UI: waehrend des Streamens ist meist ein Vollbild-Spiel im Fokus,
 // Lumora selbst sieht man gar nicht. Ein Klick holt Lumora nach vorne (auch aus
 // dem Vollbild-Spiel heraus, siehe showMainWindow) und zeigt die Router-Anleitung.
+// Deep-Link (lumora://...) behandeln: App nach vorne holen + Ziel-Ansicht oeffnen.
+function bcHandleDeepLink(url) {
+  if (!url) return
+  showMainWindow()
+  if (url.indexOf('forward-help') >= 0) sendToUi('show-forward-help', {})
+}
 let bcForwardNotified = false   // pro Stream-Start nur einmal nerven
 function notifyForwardIssue() {
   if (bcForwardNotified) return
@@ -3580,11 +3586,24 @@ function notifyForwardIssue() {
   try {
     if (!Notification.isSupported()) return
     const de = mainLang() === 'de'
+    const title = de ? 'Stream nur im lokalen Netz erreichbar' : 'Stream reachable on local network only'
+    const body = de ? 'Dein Router öffnet die Ports nicht automatisch.' : "Your router isn't opening the ports automatically."
+    const btn = de ? 'Anleitung öffnen' : 'Open help'
+    // toastXml mit PROTOKOLL-Aktivierung: sowohl der Body-Klick (launch am <toast>)
+    // als auch der sichtbare Button starten die App ueber lumora://forward-help ->
+    // landet per Single-Instance im second-instance-Handler (bcHandleDeepLink).
+    // Zuverlaessiger als der native 'click'-Event (Electron #32585, s. App-Start).
+    // Der Button ist der am besten unterstuetzte Weg; der Body-Klick der Komfort.
     const n = new Notification({
-      title: de ? '⚠️ Stream nur im lokalen Netz erreichbar' : '⚠️ Stream reachable on local network only',
-      body: de ? 'Dein Router öffnet die Ports nicht automatisch. Klicken für eine Schritt-für-Schritt-Anleitung.' : "Your router isn't opening the ports automatically. Click for step-by-step help.",
+      toastXml: '<toast launch="lumora://forward-help" activationType="protocol">'
+        + '<visual><binding template="ToastGeneric">'
+        + '<text>⚠️ ' + title + '</text>'
+        + '<text>' + body + '</text>'
+        + '</binding></visual>'
+        + '<actions><action content="' + btn + '" arguments="lumora://forward-help" activationType="protocol"/></actions>'
+        + '</toast>',
     })
-    n.on('click', () => { showMainWindow(); sendToUi('show-forward-help', {}) })
+    n.on('click', () => bcHandleDeepLink('lumora://forward-help'))   // Fallback, falls er doch feuert
     n.show()
   } catch {}
 }
@@ -5893,11 +5912,26 @@ if (process.argv.includes('--fps-broker')) {
     app.commandLine.appendSwitch('enable-native-gpu-memory-buffers')
     app.commandLine.appendSwitch('enable-gpu-memory-buffer-video-frames')
   } catch {}
-  app.on('second-instance', () => showMainWindow())
+  app.on('second-instance', (_e, argv) => {
+    // Ein Toast-Klick startet die App per lumora://-Protokoll neu; das Argument
+    // landet dank Single-Instance-Lock hier in der schon laufenden Instanz.
+    const url = argv.find((a) => typeof a === 'string' && a.startsWith('lumora://'))
+    if (url) bcHandleDeepLink(url); else showMainWindow()
+  })
 
   // AppUserModelID VOR der ersten Notification setzen - sonst zeigt Windows im
   // Action Center ein generisches Electron-Icon statt des Lumora-Icons.
   app.setAppUserModelId('com.lumora.app')
+  // lumora://-Protokoll registrieren (HKCU, kein Admin). Toast-Klicks/-Buttons
+  // aktivieren die App darueber - der direkte Notification-'click'-Event feuert
+  // auf Windows NICHT zuverlaessig (Electron #32585: kein COM-Toast-Aktivator,
+  // Body-Klick tot, wenn die AUMID zum Shortcut passt - unser Fall). Registrierung
+  // zur Laufzeit, damit sie auch ohne frischen Installer-Lauf greift.
+  try { app.setAsDefaultProtocolClient('lumora') } catch {}
+  // Kaltstart DURCH einen Toast-Klick (App war zu): das Protokoll-Argument steht
+  // in process.argv - nach dem Hochfahren die Ziel-Ansicht oeffnen.
+  const bcColdLink = process.argv.find((a) => typeof a === 'string' && a.startsWith('lumora://'))
+  if (bcColdLink) app.whenReady().then(() => setTimeout(() => bcHandleDeepLink(bcColdLink), 1200))
   app.whenReady().then(() => { setupAutoUpdate(); createWindow(); setupGamepadHotkey(); registerToggleHotkey(); setupNvml(); setupAdl(); setupRtss(); setupMahm(); setupCpuClock(); setupVramCounter(); setupGpuName(); startExternalWatcher(); syncOsdVisibility() })
 
   // Encoder-Erkennung vorwaermen (PowerShell-GPU-Abfrage + ffmpeg -encoders kosten
