@@ -94,6 +94,7 @@
 </head>
 <body>
 <video id="v" autoplay playsinline></video>
+<canvas id="freeze" style="display:none; position:fixed; inset:0; width:100%; height:100%; object-fit:contain; background:#000; pointer-events:none; z-index:2;"></canvas>
 <div id="stats">
   <span><span class="val fps" id="sFps">–</span><span class="unit">fps</span></span>
   <span><span class="val" id="sRes">–</span></span>
@@ -176,6 +177,45 @@
   }
   refreshBuffer()                 // initialen Wert holen (vor dem ersten Track)
   setInterval(refreshBuffer, 4000)
+
+  // --- Nahtloser Uebergang bei Bitrate-/Aufloesungswechsel ------------------
+  // Beim Fast-Restart (Bitrate) bzw. Vollneustart (Aufloesung/Encoder) blitzt in
+  // der Luecke kurz mediamtx' Standard-Platzhalter ("STREAM IS OFFLINE") ueber
+  // dieselbe, durchgehend offene WebRTC-Verbindung auf (s. alwaysAvailable in
+  // main.js) - der Player bekommt dafuer KEIN eigenes Verbindungs-/Track-Event,
+  // es sind einfach andere Frames auf demselben Track. Eine Erkennung ueber
+  // Aufloesung/FPS des Platzhalters ist NICHT zuverlaessig moeglich: real
+  // gemessen laeuft er mit 1920x1080@30fps - exakt einer der haeufigsten
+  // Lumora-Einstellungen (Kollision belegt, kein Ratewert). Stattdessen schickt
+  // der Streamer per SSE (/switch-events) ein PUSH-Signal GENAU beim Start des
+  // Wechsels; wir legen sofort einen Snapshot des letzten echten Bildes ueber
+  // das Video und nehmen ihn nach einer sicheren Frist wieder weg. 'fast' ~80ms
+  // gemessen (Fast-Restart), 'full' braucht laenger (Helfer-/Encoder-Neustart) -
+  // beide Fristen grosszuegig ueber dem gemessenen Wert, ein "etwas zu lang
+  // eingefroren" faellt kaum auf, ein "zu frueh aufgetaut" zeigt den Platzhalter.
+  var freeze = document.getElementById('freeze'), freezeCtx = freeze.getContext('2d')
+  var _freezeTimer = null
+  var FREEZE_MS = { fast: 600, full: 2800 }
+  function doFreeze(kind) {
+    try {
+      if (v.videoWidth && v.videoHeight) {
+        freeze.width = v.videoWidth; freeze.height = v.videoHeight
+        freezeCtx.drawImage(v, 0, 0)
+        freeze.style.transform = v.style.transform || ''   // Zoom/Pan-Zustand mitnehmen
+        freeze.style.display = 'block'
+      }
+    } catch (e) {}
+    clearTimeout(_freezeTimer)
+    _freezeTimer = setTimeout(unfreeze, FREEZE_MS[kind] || FREEZE_MS.full)
+  }
+  function unfreeze() { clearTimeout(_freezeTimer); freeze.style.display = 'none' }
+  try {
+    var switchEvents = new EventSource('/switch-events')
+    switchEvents.onmessage = function (e) {
+      try { var d = JSON.parse(e.data); doFreeze(d.kind === 'fast' ? 'fast' : 'full') } catch (e2) {}
+    }
+    switchEvents.onerror = function () {}   // EventSource verbindet bei Abbruch selbst neu
+  } catch (e) {}
 
   // --- Vollbild -------------------------------------------------------------
   function toggleFullscreen() {
@@ -387,6 +427,7 @@
   function retry() {
     if (retrying) return
     retrying = true
+    unfreeze()   // Sicherheitsnetz: bei einem ECHTEN Reconnect nie ein eingefrorenes Bild stehen lassen
     try { window._pc && window._pc.close() } catch (e) {}
     leave()   // alte WHEP-Session am Server abmelden, bevor eine neue entsteht (kein Zombie-Zuschauer)
     setTimeout(function () { retrying = false; connect() }, 800)
