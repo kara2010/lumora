@@ -4488,7 +4488,14 @@ function bcStartServer(port) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'Connection': 'keep-alive' })
         res.write(':ok\n\n')
         bcSwitchSseClients.add(res)
-        req.on('close', () => bcSwitchSseClients.delete(res))
+        // Heartbeat GEGEN Idle-Abriss: langlebige HTTP-Verbindungen reissen ueber
+        // Mobilfunk-/NAT-Idle-Timeouts ab, wenn keine Daten fliessen (Log-belegt:
+        // nach ~5 min Leerlauf tot -> das Freeze-Signal kam beim naechsten Wechsel
+        // nicht mehr an -> mediamtx-Platzhalter voll sichtbar = "schwarz/offline").
+        // Ein SSE-Kommentar (Zeile mit ':') alle 8 s haelt die Verbindung offen und
+        // loest beim Browser KEIN onmessage aus (reines Keepalive).
+        const hb = setInterval(() => { try { res.write(': hb\n\n') } catch { clearInterval(hb); bcSwitchSseClients.delete(res) } }, 8000)
+        req.on('close', () => { clearInterval(hb); bcSwitchSseClients.delete(res) })
         return
       }
       // Diagnose-Bericht des Freeze-Frame-Mechanismus (s. player.html reportFreeze):
