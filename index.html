@@ -3126,17 +3126,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // einfrieren statt mediamtx' "STREAM IS OFFLINE"-Platzhalter kurz zu zeigen.
     // Gleiche Technik wie player.html (dort per SSE), hier per IPC direkt vom
     // Hauptprozess (bcDoRestartFfmpeg sendet 'switch-freeze' GENAU beim Start
-    // des Wechsels) - kein Netzwerk-Umweg noetig, selber Prozess. Gleiche zwei
-    // Haertungen wie in player.html (User-Befund "1 von 10 blitzt kurz auf"):
-    // echtes Video zusaetzlich unsichtbar schalten (Ankunfts-Race) + bei 'fast'
-    // per requestVideoFrameCallback auf die VOR dem Wechsel gemessene Aufloesung
-    // warten statt blind eine feste Frist (die bleibt nur als Sicherheitsnetz).
-    let _pvFreezeTimer = null, _pvFreezeRvfcId = null, _pvFreezeGen = 0
-    let _pvFreezeExpectW = 0, _pvFreezeExpectH = 0
-    const PV_FREEZE_MIN_MS = { fast: 120, full: 300 }
-    const PV_FREEZE_MAX_MS = { fast: 900, full: 3400 }
+    // des Wechsels) - kein Netzwerk-Umweg noetig, selber Prozess.
+    let _pvFreezeTimer = null
+    const PV_FREEZE_MS = { fast: 600, full: 2800 }
     function freezePreview(kind) {
-      const gen = ++_pvFreezeGen
       const video = document.getElementById('streamPreview'), canvas = document.getElementById('streamPreviewFreeze')
       if (!video || !canvas) return
       try {
@@ -3144,31 +3137,15 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
           canvas.width = video.videoWidth; canvas.height = video.videoHeight
           canvas.getContext('2d').drawImage(video, 0, 0)
           canvas.style.display = 'block'
-          video.style.visibility = 'hidden'
-          _pvFreezeExpectW = video.videoWidth; _pvFreezeExpectH = video.videoHeight
         }
       } catch (e) {}
-      const startedAt = performance.now()
-      const minMs = PV_FREEZE_MIN_MS[kind] || PV_FREEZE_MIN_MS.full
-      const maxMs = PV_FREEZE_MAX_MS[kind] || PV_FREEZE_MAX_MS.full
       clearTimeout(_pvFreezeTimer)
-      _pvFreezeTimer = setTimeout(unfreezePreview, maxMs)
-      if (kind === 'fast' && video.requestVideoFrameCallback) {
-        const check = (now, meta) => {
-          if (gen !== _pvFreezeGen) return
-          if (meta.width === _pvFreezeExpectW && meta.height === _pvFreezeExpectH && performance.now() - startedAt >= minMs) { unfreezePreview(); return }
-          _pvFreezeRvfcId = video.requestVideoFrameCallback(check)
-        }
-        _pvFreezeRvfcId = video.requestVideoFrameCallback(check)
-      }
+      _pvFreezeTimer = setTimeout(unfreezePreview, PV_FREEZE_MS[kind] || PV_FREEZE_MS.full)
     }
     function unfreezePreview() {
-      _pvFreezeGen++
       clearTimeout(_pvFreezeTimer)
-      const video = document.getElementById('streamPreview'), canvas = document.getElementById('streamPreviewFreeze')
-      if (_pvFreezeRvfcId != null && video && video.cancelVideoFrameCallback) { try { video.cancelVideoFrameCallback(_pvFreezeRvfcId) } catch (e) {} ; _pvFreezeRvfcId = null }
+      const canvas = document.getElementById('streamPreviewFreeze')
       if (canvas) canvas.style.display = 'none'
-      if (video) video.style.visibility = 'visible'
     }
     ipcRenderer.on('switch-freeze', (e, d) => freezePreview(d && d.kind === 'fast' ? 'fast' : 'full'))
     function startStreamPreview() {
