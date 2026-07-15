@@ -1,0 +1,6 @@
+Nahtloser Qualitätswechsel + flüssigeres Streaming:
+
+• Bitrate und Auflösung live umschalten – ohne Abbruch: Änderst du während eines laufenden Streams die Qualität, läuft er jetzt praktisch nahtlos weiter. Zuschauer bleiben verbunden und sehen nur noch einen kurzen Ruckler statt einer mehrsekündigen Neuverbindung.
+• Flüssigeres Streaming, spürbar weniger Last: Die Bildverarbeitung läuft jetzt komplett auf der Grafikkarte – vor allem auf Laptops und schwächeren Systemen deutlich entlastet (rund 62 % weniger interne Datenlast, keine CPU-Farbumrechnung mehr).
+• Aktive Hilfe bei der Router-Freigabe: Klappt die automatische Portfreigabe (UPnP) beim Streamstart nicht, meldet sich Lumora jetzt mit einer Benachrichtigung – ein Klick öffnet eine auf deinen Router zugeschnittene Schritt-für-Schritt-Anleitung.
+• Auffälligerer „Stream starten“-Knopf und ein sofort befülltes Quellen-Feld im Stream-Tab.

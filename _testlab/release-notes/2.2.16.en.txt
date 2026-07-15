@@ -1,0 +1,6 @@
+Seamless quality switching + smoother streaming:
+
+• Change bitrate and resolution live – without interruption: Adjusting the quality during a running stream now continues practically seamlessly. Viewers stay connected and only see a brief hiccup instead of a multi-second reconnect.
+• Smoother streaming, noticeably less load: Frame processing now runs entirely on the GPU – a real relief especially on laptops and weaker systems (about 62 % less internal data load, no more CPU colour conversion).
+• Active help for router port forwarding: If automatic port forwarding (UPnP) fails at stream start, Lumora now shows a notification – one click opens step-by-step instructions tailored to your router.
+• A more prominent “Start stream” button and an instantly populated source field in the stream tab.
