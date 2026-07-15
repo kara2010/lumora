@@ -2806,22 +2806,27 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       ipcRenderer.invoke('set-app-settings', { streamBufferMs: ms })
     }
     let _sources = []
+    // _sources auf die UI anwenden: bestehende/gespeicherte Auswahl halten, sonst
+    // Fallback auf die erste Quelle (ganzer Bildschirm) + speichern. Gespeicherte
+    // Quelle (z. B. inzwischen geschlossenes Fenster) weg -> sonst zeigt das Dropdown
+    // „ganzer Bildschirm", der Stream nimmt aber das tote Fenster -> Helfer-Absturz.
+    function applySourceList(preferValue) {
+      let want = preferValue || document.getElementById('setStreamScreen').value
+      if (!want || !_sources.some(s => s.value === want)) {
+        want = _sources.length ? _sources[0].value : ''
+        if (want) ipcRenderer.invoke('set-app-settings', { streamSource: want })
+      }
+      renderSourceList(want)
+    }
     async function loadSources() {
       try {
+        // list-sources antwortet dank main.js-Cache sofort (beim App-Start
+        // vorgewaermt) -> das Feld ist beim Tab-Wechsel gleich befuellt; eine evtl.
+        // geaenderte Liste kommt danach per 'sources-updated'-Push nach.
         const list = await ipcRenderer.invoke('list-sources')
         _sources = Array.isArray(list) ? list : []
         const st = await ipcRenderer.invoke('get-app-settings')
-        const cur = document.getElementById('setStreamScreen').value
-        let want = st.streamSource || cur
-        if (!want || !_sources.some(s => s.value === want)) {
-          // Gespeicherte Quelle (z. B. ein inzwischen geschlossenes Fenster) gibt es
-          // nicht mehr -> auf die erste verfügbare (ganzer Bildschirm) zurück UND das
-          // speichern. Sonst zeigt das Dropdown „ganzer Bildschirm", der Stream nimmt
-          // aber weiter das tote Fenster -> Helfer-Absturz, kein Bild.
-          want = _sources.length ? _sources[0].value : ''
-          ipcRenderer.invoke('set-app-settings', { streamSource: want })
-        }
-        renderSourceList(want)
+        applySourceList(st.streamSource)
       } catch (e) {}
     }
     // Baut das eigene Dropdown (mit App-Icons) und markiert den gewählten Eintrag.
@@ -2960,6 +2965,12 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     ipcRenderer.on('group-status', (e, st) => { if (!_groupBusy) renderGroupState(st) })
     // Hotkey hat die Quelle auf das laufende Spiel gesetzt -> Dropdown nachziehen
     ipcRenderer.on('stream-source-changed', () => { if (settingsTab === 'stream') loadSources() })
+    // Frische Quellen-Liste aus dem Hintergrund-Refresh (main.js bcRefreshSources):
+    // uebernehmen und die bestehende Auswahl halten - nur wenn der Stream-Tab offen ist.
+    ipcRenderer.on('sources-updated', (e, list) => {
+      _sources = Array.isArray(list) ? list : []
+      if (settingsTab === 'stream') applySourceList()
+    })
     // Zweiter eigener PC im selben Netz hatte schon eine Gruppe laufen -> automatisch beigetreten
     ipcRenderer.on('group-autojoin', () => streamToast(window.tr('👥 Gruppe auf einem anderen PC in deinem Netzwerk gefunden – automatisch beigetreten.')))
     // Neuer Zuschauer: freundlicher Zwei-Ton + Hinweis-Toast (auch ausserhalb des Stream-Tabs)

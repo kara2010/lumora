@@ -3901,36 +3901,58 @@ ipcMain.handle('test-connectivity', () => runConnectivityTest())
 // Aufnahme-Quellen: ganze Monitore (ddagrab, output_idx) UND einzelne Fenster
 // (WGC-Helfer, per HWND). Die HWND steckt in Electrons Fenster-Source-ID
 // "window:<hwnd>:0" – so brauchen wir keine eigene Fenster-Enumeration.
-ipcMain.handle('list-sources', async () => {
+// Aufnahmequellen (Monitore + Fenster) enumerieren. Der Fenster-Teil startet den
+// WGC-Helfer (--list) - ein .NET-Prozessstart (erster Lauf ~2,3s Kaltstart, warm
+// ~130ms) plus je Fenster ein Icon-Abruf. Das darf den Tab-Wechsel NICHT
+// blockieren, daher Cache + Hintergrund-Refresh (s. list-sources).
+async function bcEnumSources() {
+  const out = []
+  const displays = screen.getAllDisplays()
+  const primaryId = String(screen.getPrimaryDisplay().id)
+  displays.forEach((d, i) => {
+    let label = 'Bildschirm ' + (i + 1) + ' – ' + Math.round(d.size.width * d.scaleFactor) + '×' + Math.round(d.size.height * d.scaleFactor)
+    if (String(d.id) === primaryId) label += ' · Haupt'
+    out.push({ value: 'screen:' + i, label, icon: '', kind: 'screen' })   // i = ddagrab output_idx
+  })
+  // Fenster per eigenem WGC-Helfer enumerieren (EnumWindows). Electrons
+  // desktopCapturer verschluckt viele Fenster (Explorer/Edge u.a.); der Helfer
+  // findet sie alle, und die HWND passt exakt zu dem, was er aufnehmen kann.
+  const raw = await new Promise((res) => {
+    try {
+      require('child_process').execFile(streamBin('lumora-capture.exe'), ['--list'],
+        { windowsHide: true, timeout: 6000, maxBuffer: 8 << 20 }, (e, so) => res(String(so || '')))
+    } catch { res('') }
+  })
+  const seen = new Set()
+  raw.split(/\r?\n/).forEach((line) => {
+    const parts = line.split('\t')
+    if (parts.length < 2) return
+    const hwnd = (parts[0] || '').trim(), n = (parts[1] || '').trim(), icon = (parts[2] || '').trim()
+    if (!hwnd || !n || /^lumora$/i.test(n) || /^Program Manager$/.test(n) || seen.has(hwnd)) return
+    seen.add(hwnd)
+    out.push({ value: 'window:' + hwnd, label: n, icon: icon ? 'data:image/png;base64,' + icon : '', kind: 'window' })
+  })
+  return out
+}
+let bcSourcesCache = null       // letzte Quellen-Liste (null = noch nie enumeriert)
+let bcSourcesEnumBusy = false
+async function bcRefreshSources() {
+  if (bcSourcesEnumBusy) return
+  bcSourcesEnumBusy = true
   try {
-    const out = []
-    const displays = screen.getAllDisplays()
-    const primaryId = String(screen.getPrimaryDisplay().id)
-    displays.forEach((d, i) => {
-      let label = 'Bildschirm ' + (i + 1) + ' – ' + Math.round(d.size.width * d.scaleFactor) + '×' + Math.round(d.size.height * d.scaleFactor)
-      if (String(d.id) === primaryId) label += ' · Haupt'
-      out.push({ value: 'screen:' + i, label, icon: '', kind: 'screen' })   // i = ddagrab output_idx
-    })
-    // Fenster per eigenem WGC-Helfer enumerieren (EnumWindows). Electrons
-    // desktopCapturer verschluckt viele Fenster (Explorer/Edge u.a.); der Helfer
-    // findet sie alle, und die HWND passt exakt zu dem, was er aufnehmen kann.
-    const raw = await new Promise((res) => {
-      try {
-        require('child_process').execFile(streamBin('lumora-capture.exe'), ['--list'],
-          { windowsHide: true, timeout: 6000, maxBuffer: 8 << 20 }, (e, so) => res(String(so || '')))
-      } catch { res('') }
-    })
-    const seen = new Set()
-    raw.split(/\r?\n/).forEach((line) => {
-      const parts = line.split('\t')
-      if (parts.length < 2) return
-      const hwnd = (parts[0] || '').trim(), n = (parts[1] || '').trim(), icon = (parts[2] || '').trim()
-      if (!hwnd || !n || /^lumora$/i.test(n) || /^Program Manager$/.test(n) || seen.has(hwnd)) return
-      seen.add(hwnd)
-      out.push({ value: 'window:' + hwnd, label: n, icon: icon ? 'data:image/png;base64,' + icon : '', kind: 'window' })
-    })
-    return out
-  } catch { return [] }
+    const list = await bcEnumSources()
+    const changed = JSON.stringify(list) !== JSON.stringify(bcSourcesCache)
+    bcSourcesCache = list
+    if (changed) sendToUi('sources-updated', list)   // frische Liste an die (offene) UI pushen
+  } catch {} finally { bcSourcesEnumBusy = false }
+}
+ipcMain.handle('list-sources', async () => {
+  // Ist ein Cache da (beim App-Start vorgewaermt), SOFORT zurueckgeben - das Feld
+  // ist beim Tab-Wechsel nie leer. Parallel frisch enumerieren; kam ein Fenster
+  // dazu/weg, pusht bcRefreshSources die aktualisierte Liste per 'sources-updated'.
+  if (bcSourcesCache) { bcRefreshSources(); return bcSourcesCache }
+  await bcRefreshSources()   // allererster Aufruf ohne Cache: einmal warten
+  return bcSourcesCache || []
 })
 
 // Pfad zu einer gebuendelten Binary (bin/ neben der App bzw. in resources/bin).
@@ -5880,7 +5902,9 @@ if (process.argv.includes('--fps-broker')) {
 
   // Encoder-Erkennung vorwaermen (PowerShell-GPU-Abfrage + ffmpeg -encoders kosten
   // beim allerersten Streamstart sonst 1-2 s auf dem kritischen Weg zum ersten Bild).
-  app.whenReady().then(() => setTimeout(() => { bcDetectEncoder().catch(() => {}) }, 2500))
+  // Ebenso die Aufnahmequellen-Liste (WGC-Helfer-Kaltstart ~2,3s) - so ist der
+  // Quellen-Cache gefuellt, bevor der Nutzer den Stream-Tab oeffnet.
+  app.whenReady().then(() => setTimeout(() => { bcDetectEncoder().catch(() => {}); bcRefreshSources().catch(() => {}) }, 2500))
 
   // HDR beim Beenden nur abschalten, wenn KEIN getracktes Spiel mehr laeuft.
   // Sonst wuerde das Schliessen von Lumora ein laufendes Spiel mitten im Betrieb
