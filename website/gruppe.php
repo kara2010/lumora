@@ -314,6 +314,24 @@ echo <<<'HTMLHEAD'
   .tile.stats-on .stats { display: block; }
   .tile .stats b { color: #74e857; font-weight: 600; }
   .tile .wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #888; font-size: 13px; text-align: center; padding: 16px; }
+  /* Bild-in-Bild: loest die Kachel als schwebendes Mini-Fenster ueber allen Apps -
+     ideal, um nebenbei selbst zu zocken. Nur sichtbar, wenn der Browser es kann. */
+  .tile .pipIco { position: absolute; top: 8px; right: 84px; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border-radius: 50%; width: 30px; height: 30px; display: none; align-items: center; justify-content: center; font-size: 14px; opacity: .55; }
+  .tile .pipIco:hover { opacity: 1; }
+  /* Lautstaerke-Slider: erscheint nur an der Kachel, deren Ton gerade aktiv ist. */
+  .tile .volCtl { position: absolute; bottom: 8px; right: 8px; display: none; align-items: center; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border-radius: 20px; padding: 7px 12px; }
+  .tile.active-audio .volCtl { display: flex; }
+  .tile .volCtl input { width: 92px; height: 4px; accent-color: #4ade80; cursor: pointer; }
+  @media (max-width: 640px), (pointer: coarse) { .tile .volCtl input { width: 110px; height: 6px; } }
+  /* Spotlight-Ansicht: EINE grosse Hauptkachel, die uebrigen als Leiste darunter
+     (Klick auf ein Thumbnail macht es zur Hauptkachel). Rein per Klassen - das
+     Raster bleibt der Standard, der Zustand wird im Browser gemerkt. */
+  #grid.spotlight { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); grid-template-rows: minmax(0, 1fr) 118px; }
+  #grid.spotlight .tile.spot { grid-row: 1; grid-column: 1 / -1; }
+  #grid.spotlight .tile:not(.spot) { grid-row: 2; }
+  #grid.spotlight .tile:not(.spot) .statsIco, #grid.spotlight .tile:not(.spot) .pipIco,
+  #grid.spotlight .tile:not(.spot) .volCtl, #grid.spotlight .tile:not(.spot) .stats { display: none; }
+  #grid.spotlight .tile:not(.spot) .label { font-size: 11px; padding: 3px 8px; max-width: calc(100% - 16px); }
   #empty { display: none; align-items: center; justify-content: center; height: 100%; flex-direction: column; gap: 8px; color: #777; text-align: center; padding: 24px; }
   #empty .big { font-size: 16px; color: #ccc; }
   #soundHint { position: fixed; left: 50%; bottom: 10%; transform: translateX(-50%); display: none; align-items: center; gap: 12px; cursor: pointer; z-index: 20; white-space: nowrap; background: rgba(18,20,28,.9); color: #fff; border: 1px solid rgba(255,255,255,.26); border-radius: 999px; padding: 15px 26px; font-size: 17px; font-weight: 600; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 10px 34px rgba(0,0,0,.55); animation: soundPulse 1.9s ease-in-out infinite; -webkit-tap-highlight-color: transparent; }
@@ -345,6 +363,10 @@ echo <<<'HTMLHEAD'
      title="Öffnet deine installierte Lumora-App und tritt der Gruppe bei – dein Stream startet automatisch mit. Noch kein Lumora? Kostenlos auf lumora.kara-webdesign.de" href="#">
     🎮 <span>Mit Lumora mitstreamen</span>
   </a>
+  <button class="ctl" id="layoutBtn" style="display:none" title="Ansicht umschalten: Raster (alle gleich groß) / Spotlight (einer groß, Rest als Leiste)">
+    <svg viewBox="0 0 24 24" id="layoutIcon"><path d="M3 3h18v12H3V3zm2 2v8h14V5H5zM3 17h5v4H3v-4zm6.5 0h5v4h-5v-4zM16 17h5v4h-5v-4z"/></svg>
+    <span id="layoutLabel">Spotlight</span>
+  </button>
   <button class="ctl" id="fsBtn" title="Vollbild (F) – Doppelklick auf eine Kachel für Einzelbild">
     <svg viewBox="0 0 24 24"><path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/></svg>
     <span id="fsLabel">Vollbild</span>
@@ -364,6 +386,62 @@ echo <<<'HTMLJS'
   var tiles = new Map()
   var everInteracted = false
   var soundHintTimer = null, soundHintDone = false
+  // Gemerkte Nutzer-Einstellungen (localStorage): Ton-Wahl je RAUM (kommt nach
+  // Reload/Reconnect wieder), Lautstaerke + Ansicht geraeteweit.
+  var AUDIO_KEY = 'lumoraGridAudio-' + ROOM
+  var pendingAudioId = null
+  try { pendingAudioId = localStorage.getItem(AUDIO_KEY) || null } catch (e) {}
+  var savedVol = 1
+  try { savedVol = Math.min(1, Math.max(0, parseFloat(localStorage.getItem('lumoraGridVol') || '1'))) } catch (e) {}
+  if (isNaN(savedVol)) savedVol = 1
+  var spotlightOn = false
+  try { spotlightOn = localStorage.getItem('lumoraGridSpot') === '1' } catch (e) {}
+  var spotId = null
+  // Ton-Restore POLICY-FEST: Browser blockieren unmuted-Autoplay ohne Geste -
+  // darum wird die gemerkte Ton-Wahl erst bei der ERSTEN Beruehrung der Seite
+  // scharf geschaltet (irgendein Klick/Tipp genuegt), nicht schon beim Laden.
+  document.addEventListener('pointerdown', function () {
+    if (!activeAudioId && pendingAudioId && tiles.has(pendingAudioId)) {
+      activeAudioId = pendingAudioId
+      tiles.forEach(function (t) { applyMute(t) })
+    }
+    pendingAudioId = null
+  }, { once: true, capture: true })
+  // Spotlight-Ansicht anwenden: grosse Hauptkachel + Thumbnail-Leiste. Faellt
+  // automatisch aufs Raster zurueck, solange weniger als 2 Kacheln da sind.
+  function applySpotlight() {
+    var grid = document.getElementById('grid')
+    if (spotId && !tiles.has(spotId)) spotId = null
+    if (!spotId || (tiles.get(spotId) && tiles.get(spotId).streaming === false)) {
+      spotId = null
+      tiles.forEach(function (t, id) { if (!spotId && t.streaming !== false) spotId = id })
+      if (!spotId) tiles.forEach(function (t, id) { if (!spotId) spotId = id })
+    }
+    var on = spotlightOn && tiles.size >= 2
+    grid.classList.toggle('spotlight', on)
+    tiles.forEach(function (t, id) { t.el.classList.toggle('spot', on && id === spotId) })
+    var btn = document.getElementById('layoutBtn')
+    btn.style.display = tiles.size >= 2 ? 'flex' : 'none'
+    document.getElementById('layoutLabel').textContent = spotlightOn ? 'Raster' : 'Spotlight'
+  }
+  function setSpot(id) { spotId = id; applySpotlight() }
+  document.getElementById('layoutBtn').onclick = function () {
+    spotlightOn = !spotlightOn
+    try { localStorage.setItem('lumoraGridSpot', spotlightOn ? '1' : '0') } catch (e) {}
+    applySpotlight()
+  }
+  // Bildschirm wachhalten (Handy/Tablet): ohne Wake Lock geht das Display nach
+  // ~30 s aus, waehrend man zuschaut. Re-Acquire bei Rueckkehr aus dem Hintergrund.
+  var wakeLock = null
+  function acquireWakeLock() {
+    try {
+      if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+        navigator.wakeLock.request('screen').then(function (l) { wakeLock = l }).catch(function () {})
+      }
+    } catch (e) {}
+  }
+  acquireWakeLock()
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') acquireWakeLock() })
 
   async function pollList() {
     try {
@@ -400,6 +478,7 @@ echo <<<'HTMLJS'
       if (isNew || wasStreaming === false) connectTile(t)
     })
     tiles.forEach(function (t, id) { if (!seen.has(id)) { closeTile(t); tiles.delete(id) } })
+    applySpotlight()   // Spotlight-Zuordnung nach jeder Roster-Aenderung nachfuehren
     var has = tiles.size > 0
     document.getElementById('empty').style.display = has ? 'none' : 'flex'
     var show = has && !everInteracted && !soundHintDone
@@ -418,9 +497,16 @@ echo <<<'HTMLJS'
       '<span class="wait">Verbindet…</span>' +
       '<span class="label"><span class="dot"></span><span class="nm"></span></span>' +
       '<span class="stats"></span>' +
+      '<span class="pipIco" title="Bild-in-Bild: schwebendes Mini-Fenster über allen Programmen – ideal, um nebenbei selbst zu zocken">⧉</span>' +
       '<span class="statsIco" title="Infoanzeige ein/aus">📊</span>' +
-      '<span class="muteIco">🔇</span>'
-    el.onclick = function () { setActiveAudio(id) }
+      '<span class="muteIco">🔇</span>' +
+      '<span class="volCtl"><input type="range" min="0" max="100" title="Lautstärke"></span>'
+    // Klick: im Spotlight-Modus macht ein Klick aufs THUMBNAIL es zur Hauptkachel;
+    // sonst (Raster bzw. Klick auf die grosse Kachel) schaltet er wie gehabt den Ton.
+    el.onclick = function () {
+      var isThumb = document.getElementById('grid').classList.contains('spotlight') && !el.classList.contains('spot')
+      if (isThumb) { everInteracted = true; setSpot(id) } else setActiveAudio(id)
+    }
     el.ondblclick = function () { focusTile(id) }
     // iOS-Safari feuert bei Touch KEIN dblclick-Event - Doppel-Tipp selbst
     // erkennen (2 Taps < 350 ms auf derselben Kachel = Fokus-Vollbild).
@@ -442,6 +528,40 @@ echo <<<'HTMLJS'
     var ico = el.querySelector('.statsIco')
     ico.onclick = function (e) { e.stopPropagation(); t.statsOn = !t.statsOn; el.classList.toggle('stats-on', t.statsOn) }
     ico.ondblclick = function (e) { e.stopPropagation() }
+    // Bild-in-Bild: nur anzeigen, wenn der Browser es kann (Chromium/Safari; auf
+    // iPhone via webkitSetPresentationMode). Klick toggelt rein/raus.
+    var pip = el.querySelector('.pipIco')
+    var pipStd = 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled
+    var pipWebkit = t.video.webkitSupportsPresentationMode && typeof t.video.webkitSetPresentationMode === 'function'
+    if (pipStd || pipWebkit) pip.style.display = 'flex'
+    pip.onclick = function (e) {
+      e.stopPropagation()
+      everInteracted = true
+      try {
+        if (pipStd) {
+          if (document.pictureInPictureElement === t.video) document.exitPictureInPicture().catch(function () {})
+          else t.video.requestPictureInPicture().catch(function () {})
+        } else if (pipWebkit) {
+          t.video.webkitSetPresentationMode(t.video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture')
+        }
+      } catch (e2) {}
+    }
+    pip.ondblclick = function (e) { e.stopPropagation() }
+    pip.addEventListener('touchend', function (e) { e.stopPropagation() })
+    // Lautstaerke-Slider (nur an der aktiven Ton-Kachel sichtbar): Wert gilt
+    // geraeteweit fuer alle Kacheln und wird gemerkt. Alle Events stoppen, damit
+    // das Ziehen weder den Ton umschaltet noch als Doppel-Tipp (Vollbild) zaehlt.
+    var vol = el.querySelector('.volCtl'), volInput = vol.querySelector('input')
+    volInput.value = Math.round(savedVol * 100)
+    volInput.oninput = function () {
+      savedVol = Math.min(1, Math.max(0, volInput.value / 100))
+      try { localStorage.setItem('lumoraGridVol', String(savedVol)) } catch (e2) {}
+      tiles.forEach(function (o) { try { o.video.volume = savedVol; if (o !== t) o.el.querySelector('.volCtl input').value = volInput.value } catch (e3) {} })
+    }
+    ;['click', 'dblclick', 'pointerdown', 'touchend', 'touchstart'].forEach(function (ev) {
+      vol.addEventListener(ev, function (e) { e.stopPropagation() })
+    })
+    try { t.video.volume = savedVol } catch (e2) {}
     document.getElementById('grid').appendChild(el)
     return t
   }
@@ -637,11 +757,18 @@ echo <<<'HTMLJS'
     everInteracted = true
     document.getElementById('soundHint').classList.remove('show')
     activeAudioId = (activeAudioId === id) ? null : id
+    // Wahl je Raum merken: nach Reload/Reconnect kommt der Ton (nach der ersten
+    // Beruehrung, s. Policy-Restore oben) automatisch von derselben Person zurueck.
+    try {
+      if (activeAudioId) localStorage.setItem(AUDIO_KEY, activeAudioId)
+      else localStorage.removeItem(AUDIO_KEY)
+    } catch (e) {}
     tiles.forEach(function (t) { applyMute(t) })
   }
   function applyMute(t) {
     var on = t.id === activeAudioId
     t.video.muted = !on
+    try { t.video.volume = savedVol } catch (e) {}
     t.el.classList.toggle('active-audio', on)
     t.muteIco.textContent = on ? '🔊' : '🔇'
   }
