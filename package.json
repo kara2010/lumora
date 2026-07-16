@@ -109,6 +109,10 @@
       {
         "from": "NAudio-LICENSE.txt",
         "to": "NAudio-LICENSE.txt"
+      },
+      {
+        "from": "LICENSE",
+        "to": "Lumora-LICENSE.txt"
       }
     ]
   },
