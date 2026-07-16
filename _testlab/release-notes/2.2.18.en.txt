@@ -1,7 +1,7 @@
 Effortless groups + a big grid update:
 
 • Invite friends with one click: on a running stream, "Invite friends" creates the group and copies the invite link. Anyone opening the link joins with a single click ("Join with Lumora") – no more typing codes. Your own PCs on the same network even detect a running group by themselves and offer to join.
-• Share a clean web address instead of an IP: the stream link is now a short URL – it finally works on iPhone too, no longer reveals your IP address, and even survives an IP change.
+• Share a clean web address instead of an IP: the stream link is now a short URL – it finally works on iPhone too, keeps your IP address out of the viewers' address bar, and even survives an IP change.
 • Grid player overhauled: much faster connection setup, picture-in-picture (a single tile OR the whole grid as a floating mini window above your game), spotlight view (one large, the rest as a strip), volume slider, remembered sound selection, phone display stays awake, sleeker design, controls fade out when idle – all in German and English.
 • Bitrate stays stable: stutters in a viewer's browser (e.g. from their GPU load) no longer falsely throttle the stream quality for everyone.
 • Honest cover search: if Lumora can't find a matching cover, it no longer shows random third-party artwork – neither automatically nor in the search results.

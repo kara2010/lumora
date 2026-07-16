@@ -120,6 +120,29 @@
   // (ein POST mit dem SDP-Offer, Antwort = SDP-Answer) eine WebRTC-Verbindung
   // zu mediamtx (ueber den Lumora-Proxy auf demselben Port). Qualitaet/Helligkeit
   // bestimmt der Sender (FFmpeg) – ein Stream fuer alle Zuschauer.
+  //
+  // ZWEI BETRIEBSARTEN (eine Datei, damit nichts doppelt gepflegt wird):
+  // 1) Direkt (window.RELAY fehlt): Auslieferung vom Streamer-PC (Port 8787),
+  //    alle Pfade relativ (/cfg, /whep, ...) - exakt das bisherige Verhalten.
+  // 2) Relay (gruppe.php?p=<CODE> injiziert window.RELAY): Auslieferung von der
+  //    Domain, die Signalisierung (cfg/whep/qos) laeuft ueber den Vermittlungs-
+  //    server - so steht NIE eine IP in der Adresszeile des Zuschauers. Das
+  //    VIDEO bleibt in beiden Faellen direkt P2P (WebRTC). Kein SSE-Freeze im
+  //    Relay-Modus (PHP kann kein dauerhaftes SSE; gleiche Semantik wie der
+  //    Grid-Player: die WebRTC-Session uebersteht Qualitaetswechsel serverseitig).
+  var RELAY = window.RELAY || null
+  function relayUrl(action) {
+    return RELAY.api + '&a=' + action + (RELAY.id ? '&id=' + encodeURIComponent(RELAY.id) : '')
+  }
+  // Streamendes Mitglied im Schattenraum frisch aufloesen (App-Neustart vergibt
+  // eine NEUE Member-ID; die beim Seitenaufbau injizierte waere dann veraltet).
+  async function relayResolveId() {
+    var j = await fetch(RELAY.api + '&a=list', { cache: 'no-store' }).then(function (r) { return r.json() })
+    if (!j || !j.ok) throw new Error(j && j.error === 'no-room' ? 'no-room' : 'list-failed')
+    var m = (j.members || []).filter(function (x) { return x.streaming !== false })[0] || (j.members || [])[0]
+    if (!m) throw new Error('no-member')
+    RELAY.id = m.id
+  }
   var v = document.getElementById('v'), overlay = document.getElementById('overlay')
   var dot = document.getElementById('dot'), msg = document.getElementById('msg')
   var sFps = document.getElementById('sFps'), sRes = document.getElementById('sRes'), sBitrate = document.getElementById('sBitrate')
@@ -167,7 +190,8 @@
     try { receiver.jitterBufferTarget = _bufMs } catch (err) {}
   }
   function refreshBuffer() {
-    fetch('/cfg', { cache: 'no-store' }).then(function (r) { return r.json() }).then(function (c) {
+    if (RELAY && !RELAY.id) return   // Mitglied noch nicht aufgeloest (macht connect())
+    fetch(RELAY ? relayUrl('cfg') : '/cfg', { cache: 'no-store' }).then(function (r) { return r.json() }).then(function (c) {
       if (!c || typeof c.buffer !== 'number' || c.buffer === _bufMs) return
       _bufMs = c.buffer
       if (window._pc) window._pc.getReceivers().forEach(function (rc) {
@@ -213,6 +237,7 @@
   // Diagnose-Bericht (landet im lumorastream.log): 'freeze' pro Zyklus + die SSE-
   // Verbindungsprobleme (s. onerror). Klaert im Zweifel mit Beweis statt Ratewert.
   function reportFreeze(kind, reason, ms) {
+    if (RELAY) return   // Diagnose-Kanal existiert nur beim direkten Streamer-Server
     try { fetch('/freeze-log', { method: 'POST', body: JSON.stringify({ kind: kind, reason: reason, ms: ms }) }).catch(function () {}) } catch (e) {}
   }
   function doFreeze(kind) {
@@ -230,7 +255,7 @@
     _freezeTimer = setTimeout(unfreeze, ms)
   }
   function unfreeze() { clearTimeout(_freezeTimer); freeze.style.display = 'none' }
-  try {
+  if (!RELAY) try {
     var switchEvents = new EventSource('/switch-events')
     var _sseWasOpen = false
     switchEvents.onopen = function () { _sseWasOpen = true }
@@ -423,7 +448,7 @@
       if (!inb) return
       var cur = { recv: inb.packetsReceived || 0, lost: inb.packetsLost || 0, drop: inb.framesDropped || 0, frz: inb.freezeCount || 0 }
       if (_qosPrev) {
-        fetch('/qos', { method: 'POST', body: JSON.stringify({
+        fetch(RELAY ? relayUrl('qos') : '/qos', { method: 'POST', body: JSON.stringify({
           id: _qosId,
           recv: cur.recv - _qosPrev.recv, lost: cur.lost - _qosPrev.lost,
           drop: cur.drop - _qosPrev.drop, frz: cur.frz - _qosPrev.frz,
@@ -467,9 +492,22 @@
     // ICE-Server frisch vom Streamer holen: enthaelt STUN und – falls eingetragen –
     // den TURN-Relay. forceRelay=true (Testschalter) zwingt die Verbindung NUR
     // ueber TURN, damit sich das Relay ueberhaupt pruefen laesst.
+    // Relay-Modus: erst das streamende Mitglied im Schattenraum aufloesen.
+    // Raum weg (Stream beendet / App zu) -> zurueck zur ?s=-Seite, die eine
+    // Offline-Ansicht zeigt und selbststaendig weiterprobiert (meta-refresh).
+    if (RELAY) {
+      try { await relayResolveId() } catch (e) {
+        if (gen !== _gen) return
+        if (String(e && e.message) === 'no-room' && RELAY.watch) { location.replace(RELAY.watch); return }
+        status('Stream nicht erreichbar – neuer Versuch…', 'err')
+        setTimeout(retry, 3000)
+        return
+      }
+      if (gen !== _gen) return
+    }
     var ice = ICE_SERVERS, relay = false
     try {
-      var cfg = await fetch('/cfg', { cache: 'no-store' }).then(function (r) { return r.json() })
+      var cfg = await fetch(RELAY ? relayUrl('cfg') : '/cfg', { cache: 'no-store' }).then(function (r) { return r.json() })
       if (cfg && Array.isArray(cfg.iceServers) && cfg.iceServers.length) ice = cfg.iceServers
       relay = !!(cfg && cfg.forceRelay)
     } catch (e) {}
@@ -519,18 +557,40 @@
       await iceComplete(pc)
       if (gen !== _gen) { try { pc.close() } catch (e) {}; return }
       // WHEP: das komplette Offer als application/sdp posten -> Answer im Body.
-      var resp = await fetch('/whep', { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp })
-      if (gen !== _gen) {
-        // Veraltet: die soeben angelegte Session direkt wieder abmelden, damit
-        // kein Zombie-Zuschauer Bandbreite zieht, und still aussteigen.
-        try { var l0 = resp.headers.get('location'); if (l0) fetch(l0, { method: 'DELETE', keepalive: true }) } catch (e) {}
-        try { pc.close() } catch (e) {}
-        return
+      // Relay-Modus: gruppe.php reicht das Offer an den Streamer durch und
+      // antwortet als JSON {ok, sdp, session}; direkt: SDP-Body + Location-Header.
+      var answer, sessionUrl
+      if (RELAY) {
+        var resp = await fetch(relayUrl('whep'), { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp })
+        var rj = null
+        try { rj = await resp.json() } catch (e) {}
+        if (gen !== _gen) {
+          // Veraltet: die soeben angelegte Session direkt wieder abmelden.
+          if (rj && rj.ok && rj.session) relayUnwhep(rj.session)
+          try { pc.close() } catch (e) {}
+          return
+        }
+        if (!rj || !rj.ok) {
+          if (rj && rj.error === 'no-room' && RELAY.watch) { location.replace(RELAY.watch); return }
+          status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return
+        }
+        answer = rj.sdp
+        sessionUrl = rj.session
+      } else {
+        var resp = await fetch('/whep', { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp })
+        if (gen !== _gen) {
+          // Veraltet: die soeben angelegte Session direkt wieder abmelden, damit
+          // kein Zombie-Zuschauer Bandbreite zieht, und still aussteigen.
+          try { var l0 = resp.headers.get('location'); if (l0) fetch(l0, { method: 'DELETE', keepalive: true }) } catch (e) {}
+          try { pc.close() } catch (e) {}
+          return
+        }
+        if (resp.status !== 201 && !resp.ok) { status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return }
+        sessionUrl = resp.headers.get('location')
+        answer = await resp.text()
       }
-      if (resp.status !== 201 && !resp.ok) { status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return }
-      // Session-URL fuer sauberes Abmelden (DELETE) merken.
-      var loc = resp.headers.get('location'); if (loc) window._whepSession = loc
-      var answer = await resp.text()
+      // Session-URL fuer sauberes Abmelden (DELETE bzw. a=unwhep) merken.
+      if (sessionUrl) window._whepSession = sessionUrl
       await pc.setRemoteDescription({ type: 'answer', sdp: answer })
       if (gen !== _gen) { try { pc.close() } catch (e) {}; return }
     } catch (e) {
@@ -556,9 +616,15 @@
   v.addEventListener('volumechange', applyVol)
   // Sauberes Abmelden beim Schliessen: WHEP-Session per DELETE beenden (keepalive
   // laesst den Request noch waehrend des Schliessens raus) -> Zuschauerzahl stimmt.
+  // Relay-Modus: Abmelden laeuft ueber a=unwhep (gruppe.php prueft die Session-URL
+  // gegen das Roster und reicht das DELETE durch - kein offenes Relay).
+  function relayUnwhep(session) {
+    try { fetch(RELAY.api + '&a=unwhep', { method: 'POST', keepalive: true, body: JSON.stringify({ session: session }) }).catch(function () {}) } catch (e) {}
+  }
   function leave() {
     if (window._whepSession) {
-      try { fetch(window._whepSession, { method: 'DELETE', keepalive: true }) } catch (e) {}
+      if (RELAY) relayUnwhep(window._whepSession)
+      else try { fetch(window._whepSession, { method: 'DELETE', keepalive: true }) } catch (e) {}
       window._whepSession = null
     }
   }

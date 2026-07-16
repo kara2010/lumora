@@ -308,6 +308,10 @@ if ($s !== '' && code_ok($s)) {
     exit;
   }
   $T4 = json_encode($t4); $T6 = json_encode($t6); $SC = json_encode($s);
+  // Desktop-Ziel: der Domain-Player (?p=..., IP bleibt aus der Adresszeile) -
+  // nur wenn player.html neben diesem Skript deployt ist; sonst wie frueher
+  // die direkte IP-Weiterleitung (Sicherheitsnetz, kein Redirect-Kreis moeglich).
+  $desktopTarget = is_file(__DIR__ . '/player.html') ? '("?p=" + encodeURIComponent(code))' : '(v4 || v6)';
   echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Lumora Stream</title></head>'
      . '<body style="background:#0b0d12;color:#e8e8ea;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">'
      . '<div style="text-align:center"><div style="font-size:16px;color:#888" id="msg">Stream wird geöffnet…</div>'
@@ -318,12 +322,45 @@ if ($s !== '' && code_ok($s)) {
      . 'if(!de){document.documentElement.lang="en";document.getElementById("msg").textContent="Opening stream…"}'
      . 'var ua = navigator.userAgent;'
      . 'var ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && "ontouchend" in document);'
-     . 'var target = ios ? ("?code=" + encodeURIComponent(code)) : (v4 || v6);'
+     . 'var target = ios ? ("?code=" + encodeURIComponent(code)) : ' . $desktopTarget . ';'
      . 'var fb = document.getElementById("fallback");'
      . 'fb.href = target; fb.textContent = de ? "Falls nichts passiert: hier tippen" : "If nothing happens: tap here";'
      . 'location.replace(target);'
      . "</script></body></html>";
   exit;
+}
+
+// ---- Einzelstream-Player von der Domain (?p=<CODE>) ---------------------------
+// Liefert den vollwertigen Einzelplayer (player.html - DIESELBE Datei, die auch
+// die App an lokale Zuschauer ausliefert) ueber HTTPS aus und injiziert
+// window.RELAY: Die Signalisierung (cfg/whep/qos/unwhep) laeuft dann ueber diesen
+// Vermittlungsserver, das Video bleibt direkt P2P. Ergebnis: In der Adresszeile
+// des Zuschauers steht nie die IP des Streamers. Die Member-ID ist nur ein
+// Startwert - der Player loest sie bei jedem Verbindungsaufbau frisch per a=list
+// auf (App-Neustart vergibt eine neue ID).
+$p = isset($_GET['p']) ? strtoupper(trim($_GET['p'])) : '';
+if ($p !== '' && code_ok($p)) {
+  $j = room_load($p);
+  $mid = null; $midAny = null;
+  if ($j !== null) {
+    foreach ($j['members'] as $id => $m) {
+      if ($id === '_') continue;
+      if ($midAny === null) $midAny = $id;
+      if (!isset($m['streaming']) || $m['streaming'] !== false) { $mid = $id; break; }
+    }
+  }
+  if ($mid === null) $mid = $midAny;
+  $html = ($mid !== null) ? @file_get_contents(__DIR__ . '/player.html') : false;
+  // Raum weg oder player.html fehlt: zurueck zur ?s=-Seite (zeigt die Offline-
+  // Ansicht mit Auto-Retry bzw. faellt ohne player.html auf die IP-Weiterleitung
+  // zurueck - kein Kreis, weil ?s= nur bei vorhandener Datei auf ?p= zeigt).
+  if ($html === false) { header('Location: ?s=' . $p); exit; }
+  $cfg = '<script>window.RELAY = { api: ' . json_encode('?code=' . $p) . ', id: ' . json_encode($mid) . ', watch: ' . json_encode('?s=' . $p) . ' }</script>';
+  $pos = strpos($html, '<head>');
+  if ($pos !== false) $html = substr_replace($html, '<head>' . $cfg, $pos, strlen('<head>'));
+  header('Content-Type: text/html; charset=utf-8');
+  header('Cache-Control: no-store');
+  echo $html; exit;
 }
 
 // ---- Grid-Player (Browser-Zuschauer) ------------------------------------------

@@ -134,7 +134,7 @@ if ($Verify) {
   $dep = "$env:LOCALAPPDATA\Programs\lumora\resources\app.asar"
   $found = $false
   Push-Location $tmp
-  foreach ($f in 'main.js','index.html','styles.css') {
+  foreach ($f in 'main.js','index.html','styles.css','player.html','osd.html') {
     & "$src\node_modules\.bin\asar.cmd" extract-file $dep $f | Out-Null
     if (Select-String -Path (Join-Path $tmp $f) -Pattern $Verify -SimpleMatch -Quiet) { $found = $true }
   }
