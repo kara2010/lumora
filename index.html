@@ -542,6 +542,15 @@
                 <button class="btn-browse" onclick="shareStream('discord')">Discord</button>
                 <button class="btn-browse" onclick="shareStream('email')">E-Mail</button>
               </div>
+              <!-- Aus dem laufenden Stream wird mit EINEM Klick eine Gruppe: erstellt
+                   den Raum und kopiert den Einladungslink. Freunde mit Lumora sind
+                   ueber den Link mit einem Klick dabei (lumora://join), alle anderen
+                   schauen im Browser zu. Sichtbar nur, solange KEINE Gruppe laeuft. -->
+              <div class="osd-field" id="streamGroupInvite" style="display:none">
+                <span class="osd-field-label">Gruppe</span>
+                <button class="btn-browse" id="inviteFriendsBtn" onclick="inviteFriendsClick()">👥 Freunde dazuholen</button>
+                <span class="settings-hint" style="margin:0; flex:1">Erstellt eine Gruppe und kopiert den Einladungslink.</span>
+              </div>
               <div id="streamQr" style="text-align:center; margin:14px 0"></div>
               <p class="settings-hint" id="streamStats">Zuschauer: 0</p>
               <div id="viewerListBox" style="display:none; margin:6px 0 4px">
@@ -559,21 +568,24 @@
           <!-- Sektion 3: Gruppe (mehrere Streams gemeinsam im Grid ansehen) -->
           <div class="form-group stream-sec">
             <label>Gruppe</label>
-            <p class="settings-hint">Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Dein Stream startet automatisch mit, ein Klick genügt.</p>
+            <p class="settings-hint" id="groupSectionHint">Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Eine Gruppe erstellst du mit „Freunde dazuholen" am laufenden Stream.</p>
 
             <div id="groupIdleBox">
-              <!-- Waehrend der Einrichtung wird der GEKLICKTE KNOPF selbst zum
-                   Ladezustand (Spinner im Knopf, fester Text) - kein Element wird
-                   ersetzt oder verschoben, nichts springt unterm Mauszeiger weg. -->
-              <div class="setting-toggle-row">
-                <span class="setting-toggle-label">Neue Gruppe</span>
-                <button class="btn-browse" id="groupStartBtn" onclick="groupStartClick()">Gruppe starten</button>
-              </div>
-              <div class="osd-field">
-                <span class="osd-field-label">Beitreten</span>
-                <input type="text" id="groupJoinInput" class="sort-select" style="flex:1" placeholder="Gruppen-Code oder Link einfügen" onkeydown="if(event.key==='Enter')groupJoinClick()">
-                <button class="btn-browse" id="groupJoinBtn" onclick="groupJoinClick()">Beitreten</button>
-              </div>
+              <!-- LAN-Erkennung: laeuft auf einem anderen eigenen Rechner im selben
+                   Netz bereits eine Gruppe, erscheint sie hier PROAKTIV - Beitritt
+                   ist EIN Klick, kein Code-Abtippen zwischen den eigenen Geraeten. -->
+              <div id="lanGroupHint" style="display:none"></div>
+              <!-- Beitreten per Code/Link: der Fallback-Weg (z. B. Code aus dem
+                   Discord-Chat). Der Normalweg ist der Einladungslink (ein Klick
+                   im Browser oeffnet Lumora) bzw. die LAN-Erkennung oben. -->
+              <details class="sgdb-guide" id="groupJoinDetails" style="margin-top:6px">
+                <summary>Einer Gruppe beitreten (Code oder Link)</summary>
+                <div class="osd-field" style="margin-top:8px">
+                  <span class="osd-field-label">Beitreten</span>
+                  <input type="text" id="groupJoinInput" class="sort-select" style="flex:1" placeholder="Gruppen-Code oder Link einfügen" onkeydown="if(event.key==='Enter')groupJoinClick()">
+                  <button class="btn-browse" id="groupJoinBtn" onclick="groupJoinClick()">Beitreten</button>
+                </div>
+              </details>
               <!-- Einrichtungs-Schritte: fuellen sich ADDITIV unter dem Klickpunkt
                    (fertige Zeilen bleiben stehen, neue kommen dazu) - zeigt sichtbar,
                    was Lumora gerade alles prueft und einrichtet. -->
@@ -987,7 +999,13 @@ const I18N_EN = {
   'Wer schaut zu': 'Who is watching',
   'Beim Start öffnet Lumora automatisch den nötigen Port am Router (UPnP) und schließt ihn beim Stoppen wieder.': 'On start, Lumora opens the required router port automatically (UPnP) and closes it again when you stop.',
   'Gruppe': 'Group',
-  'Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Dein Stream startet automatisch mit, ein Klick genügt.': 'Watch each other in a grid – perfect for playing together on a voice call. Your own stream starts along automatically, one click is all it takes.',
+  'Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Eine Gruppe erstellst du mit „Freunde dazuholen" am laufenden Stream.': 'Watch each other in a grid – perfect for playing together on a voice call. Create a group with "Invite friends" on your running stream.',
+  'Einer Gruppe beitreten (Code oder Link)': 'Join a group (code or link)',
+  '👥 Freunde dazuholen': '👥 Invite friends',
+  'Erstellt eine Gruppe und kopiert den Einladungslink.': 'Creates a group and copies the invite link.',
+  '✅ Gruppe erstellt – Einladungslink kopiert! Schick ihn deinen Freunden.': '✅ Group created – invite link copied! Send it to your friends.',
+  'ℹ️ Du bist bereits in einer Gruppe – erst die aktuelle verlassen.': 'ℹ️ You are already in a group – leave the current one first.',
+  'Auf {name} läuft die Gruppe {code} – gleich beitreten?': 'A group {code} is running on {name} – join now?',
   'Neue Gruppe': 'New group',
   'Gruppe starten': 'Start group',
   'Beitreten': 'Join',
@@ -2563,6 +2581,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       // der Router noch geprueft wird -> das erste Bild soll sofort kommen.
       _streamPort = st.port || _streamPort
       _streamActive = on
+      updateInviteRow()   // "Freunde dazuholen" nur am laufenden Stream (und ohne aktive Gruppe)
       refreshStreamPreview()
       // Gesamt-Ausgleich (siehe Funktionsanfang): Anker exakt dorthin zurueck-
       // scrollen, wo er vor SAEMTLICHEN Layout-Aenderungen dieses Renderings war.
@@ -2599,7 +2618,12 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // die aktuell die Mitgliederliste fuehrt (siehe main.js groupTick). Faellt
     // sie aus, uebernimmt automatisch ein anderes Mitglied - die Oberflaeche
     // hier zeigt davon nur das Endergebnis (wer gerade Host ist).
+    let _groupActive = false            // laeuft gerade eine Gruppe? (fuer Invite-Row + LAN-Hinweis)
+    let _lanGroups = []                 // im LAN entdeckte fremde Gruppen [{code, name}]
     function renderGroupState(st) {
+      _groupActive = !!(st && st.active)
+      updateInviteRow()
+      renderLanGroups()
       const idle = document.getElementById('groupIdleBox'), active = document.getElementById('groupActiveBox')
       if (!idle || !active) return
       if (!st || !st.active) {
@@ -2674,11 +2698,13 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function groupSetBusy(busy, which) {
       _groupBusy = busy
-      const bStart = document.getElementById('groupStartBtn')
+      const bStart = document.getElementById('groupStartBtn')   // existiert seit dem Umbau nicht mehr (defensiv belassen)
       const bJoin = document.getElementById('groupJoinBtn')
+      const bInvite = document.getElementById('inviteFriendsBtn')
       const inp = document.getElementById('groupJoinInput')
       const steps = document.getElementById('groupSetupSteps')
       if (bStart) { bStart.disabled = busy; if (!busy) bStart.textContent = window.tr('Gruppe starten') }
+      if (bInvite) bInvite.disabled = busy
       if (bJoin) { bJoin.disabled = busy; if (!busy) bJoin.textContent = window.tr('Beitreten') }
       if (inp) inp.disabled = busy
       clearInterval(_groupStepTimer); _groupStepTimer = null
@@ -2743,17 +2769,63 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       else if (e === 'stream-start-failed') streamToast(window.tr('❌ Dein Stream konnte nicht gestartet werden – prüfe den Stream-Bereich oben.'))
       else if (e === 'bad-code') streamToast(window.tr('❌ Das sieht nicht wie ein Gruppen-Code oder -Link aus (Code: 6 Zeichen, z. B. TG7KP2).'))
       else if (e === 'no-room') streamToast(window.tr('❌ Diese Gruppe gibt es nicht (mehr) – Code prüfen oder eine neue starten.'))
+      else if (e === 'already-in-group') streamToast(window.tr('ℹ️ Du bist bereits in einer Gruppe – erst die aktuelle verlassen.'))
       else if (e === 'relay-unreachable') streamToast(window.tr('❌ Vermittlungs-Server nicht erreichbar – Internet prüfen (oder die Skript-URL unter „Eigener Vermittlungs-Server").'))
       else streamToast(window.tr('❌ Das hat nicht geklappt – bitte nochmal versuchen.'))
     }
-    async function groupStartClick() {
-      if (_groupBusy) return
-      groupSetBusy(true, 'start')
-      const st = await ipcRenderer.invoke('group-start').catch(() => null)
-      await groupBusyMinTime()
-      if (!st || !st.active) { await groupFailSequence(st); return }
-      await groupFinishSequence(st)
+    // "Freunde dazuholen" am LAUFENDEN Stream: erstellt die Gruppe (der Stream
+    // laeuft schon -> geht in Sekunden, kein Schritte-Flow noetig) und kopiert
+    // sofort den Einladungslink - ein Klick, fertig zum Verschicken.
+    function updateInviteRow() {
+      const row = document.getElementById('streamGroupInvite')
+      if (row) row.style.display = (_streamActive && !_groupActive) ? 'flex' : 'none'
     }
+    async function inviteFriendsClick() {
+      if (_groupBusy) return
+      const btn = document.getElementById('inviteFriendsBtn')
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="group-spinner" style="width:12px; height:12px; border-width:2px"></span> ' + window.tr('Wird eingerichtet…') }
+      const st = await ipcRenderer.invoke('group-start').catch(() => null)
+      if (btn) { btn.disabled = false; btn.innerHTML = window.tr('👥 Freunde dazuholen') }
+      if (!st || !st.active) { groupErrorToast(st); return }
+      renderGroupState(st)
+      if (st.link) navigator.clipboard.writeText(st.link).catch(() => {})
+      streamToast(window.tr('✅ Gruppe erstellt – Einladungslink kopiert! Schick ihn deinen Freunden.'))
+    }
+    // LAN-Erkennung: main.js meldet fremde Gruppen im eigenen Netz (UDP-Beacon).
+    // Solange man selbst in keiner Gruppe ist, erscheint ein proaktiver Hinweis
+    // mit Ein-Klick-Beitritt - kein Code-Abtippen zwischen den eigenen Rechnern.
+    function renderLanGroups() {
+      const box = document.getElementById('lanGroupHint')
+      if (!box) return
+      if (_groupActive || !_lanGroups.length) { box.style.display = 'none'; box.innerHTML = ''; return }
+      box.style.display = 'block'
+      box.innerHTML = _lanGroups.map((g) => {
+        const label = window.tr('Auf {name} läuft die Gruppe {code} – gleich beitreten?')
+          .replace('{name}', '<b>' + escHtml(g.name) + '</b>').replace('{code}', '<b style="font-family:monospace">' + escHtml(g.code) + '</b>')
+        return '<div style="display:flex; align-items:center; gap:10px; padding:10px 12px; background:rgba(79,142,247,.10); border:1px solid rgba(79,142,247,.30); border-radius:10px; margin-bottom:6px; font-size:13px">'
+          + '<span style="flex:1">🖥️ ' + label + '</span>'
+          + '<button class="btn-browse" onclick="lanJoinClick(\'' + escHtml(g.code) + '\')">' + window.tr('Beitreten') + '</button></div>'
+      }).join('')
+    }
+    function lanJoinClick(code) {
+      const input = document.getElementById('groupJoinInput')
+      if (input) input.value = code
+      groupJoinClick()
+    }
+    ipcRenderer.on('lan-groups', (e, list) => { _lanGroups = Array.isArray(list) ? list : []; renderLanGroups() })
+    // Beitritt per lumora://join/<CODE> (Grid-Button "Mit Lumora mitstreamen" oder
+    // geteilter Link): Stream-Tab oeffnen und den normalen, sichtbaren Beitritts-
+    // Flow fahren - exakt dasselbe Feedback wie beim manuellen Beitreten.
+    ipcRenderer.on('deep-join', (e, d) => {
+      if (!d || !d.code) return
+      showSettings('stream')
+      if (_groupActive) { streamToast(window.tr('ℹ️ Du bist bereits in einer Gruppe – erst die aktuelle verlassen.')); return }
+      const det = document.getElementById('groupJoinDetails')
+      if (det) det.open = true
+      const input = document.getElementById('groupJoinInput')
+      if (input) input.value = d.code
+      groupJoinClick()
+    })
     async function groupJoinClick() {
       if (_groupBusy) return
       const input = document.getElementById('groupJoinInput')

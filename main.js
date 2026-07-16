@@ -3639,7 +3639,14 @@ function mainLang() {
 function bcHandleDeepLink(url) {
   if (!url) return
   showMainWindow()
-  if (url.indexOf('forward-help') >= 0) sendToUi('show-forward-help', {})
+  if (url.indexOf('forward-help') >= 0) { sendToUi('show-forward-help', {}); return }
+  // lumora://join/<CODE> - der "Mit Lumora mitstreamen"-Button im Gruppen-Grid
+  // (gruppe.php) und geteilte Beitritts-Links. Der Renderer uebernimmt (oeffnet
+  // den Stream-Tab und faehrt den sichtbaren Beitritts-Flow mit Schritten) -
+  // main-seitig wird hier bewusst NICHT direkt beigetreten, damit der Nutzer
+  // dasselbe visuelle Feedback bekommt wie beim manuellen Beitreten.
+  const m = /^lumora:\/\/join\/?\??(?:code=)?([A-Za-z2-9]{6})\/?$/i.exec(String(url).trim())
+  if (m) sendToUi('deep-join', { code: m[1].toUpperCase() })
 }
 let bcForwardNotified = false   // pro Stream-Start nur einmal nerven
 function notifyForwardIssue() {
@@ -4655,12 +4662,92 @@ async function groupTick() {
   if (bcGroup.relayFails === 1 || bcGroup.relayFails % 5 === 0) osdDbg('[gruppe] Vermittlung nicht erreichbar (' + bcGroup.relayFails + 'x): ' + groupRelayUrl())
   groupPushState()
 }
+// --- LAN-Erkennung: eigene Rechner finden die Gruppe von selbst -------------
+// Laeuft eine Gruppe, sendet diese Instanz alle 4 s ein kleines UDP-Beacon ins
+// lokale Netz (Raumcode + Rechnername). Jede andere Lumora-Instanz lauscht und
+// zeigt dann PROAKTIV im Stream-Tab: "Gruppe X laeuft auf RECHNER - Beitreten".
+// Ersetzt fuer den Alltag den fragilen Hairpin-Trick ueber die oeffentliche IP
+// (der als Zusatzweg bestehen bleibt): keine Reihenfolge, kein Code-Abtippen,
+// kein Router-Glueck. EIN Socket sendet UND empfaengt (reuseAddr, Broadcast).
+const GROUP_LAN_PORT = 8788
+let groupLanSock = null
+let groupLanBeaconTimer = null
+let groupLanCleanTimer = null
+const bcLanGroups = new Map()   // code -> { name, ts } (fremde Gruppen im LAN)
+function groupLanEnsureSock() {
+  if (groupLanSock) return groupLanSock
+  try {
+    const dgram = require('dgram')
+    const s = dgram.createSocket({ type: 'udp4', reuseAddr: true })
+    s.on('error', (e) => { osdDbg('[gruppe] LAN-Socket-Fehler: ' + (e && e.message)); try { s.close() } catch {}; if (groupLanSock === s) groupLanSock = null })
+    s.on('message', (buf) => {
+      try {
+        if (buf.length > 500) return
+        const d = JSON.parse(buf.toString('utf8'))
+        if (!d || d.lumora !== 1 || !d.group) return
+        if (String(d.id || '') === groupMemberId()) return   // eigenes Echo ignorieren
+        const code = String(d.group).toUpperCase()
+        if (!/^[A-Z2-9]{6}$/.test(code)) return
+        const known = bcLanGroups.get(code)
+        bcLanGroups.set(code, { name: String(d.name || '').slice(0, 24) || 'PC', ts: Date.now() })
+        if (!known) osdDbg('[gruppe] LAN-Beacon entdeckt: ' + code + ' auf ' + (d.name || '?'))
+        groupLanPush()
+      } catch {}
+    })
+    s.bind(GROUP_LAN_PORT, () => { try { s.setBroadcast(true) } catch {} })
+    groupLanSock = s
+  } catch (e) { osdDbg('[gruppe] LAN-Socket nicht verfuegbar: ' + (e && e.message)); groupLanSock = null }
+  return groupLanSock
+}
+// Ziel-Adressen: globaler Broadcast + je IPv4-Interface der Subnetz-Broadcast
+// (manche Netze/Treiber filtern 255.255.255.255, der gerichtete kommt durch).
+function groupLanBroadcastAddrs() {
+  const out = new Set(['255.255.255.255'])
+  try {
+    const ifs = require('os').networkInterfaces()
+    for (const k in ifs) for (const i of (ifs[k] || [])) {
+      if (i.family === 'IPv4' && !i.internal && i.address && i.netmask) {
+        const a = i.address.split('.').map(Number), m = i.netmask.split('.').map(Number)
+        if (a.length === 4 && m.length === 4) out.add(a.map((x, j) => (x | (~m[j] & 255))).join('.'))
+      }
+    }
+  } catch {}
+  return [...out]
+}
+function groupLanBeaconStart() {
+  groupLanBeaconStop()
+  const send = () => {
+    if (!bcGroup) return
+    const sock = groupLanEnsureSock()
+    if (!sock) return
+    try {
+      const msg = Buffer.from(JSON.stringify({ lumora: 1, group: bcGroup.code, name: groupDisplayName(), id: groupMemberId() }))
+      for (const addr of groupLanBroadcastAddrs()) { try { sock.send(msg, 0, msg.length, GROUP_LAN_PORT, addr) } catch {} }
+    } catch {}
+  }
+  groupLanBeaconTimer = setInterval(send, 4000)
+  send()
+}
+function groupLanBeaconStop() { if (groupLanBeaconTimer) { clearInterval(groupLanBeaconTimer); groupLanBeaconTimer = null } }
+// Liste der im LAN sichtbaren fremden Gruppen an die UI (veraltete raus).
+function groupLanPush() {
+  const now = Date.now()
+  for (const [c, v] of bcLanGroups) if (now - v.ts > 12000) bcLanGroups.delete(c)
+  sendToUi('lan-groups', [...bcLanGroups].map(([code, v]) => ({ code, name: v.name })))
+}
+// Empfaenger + Aufraeum-Takt ab App-Start (wird in der gestaffelten Setup-Kette
+// gerufen). Der UDP-Bind kann EINMALIG die Windows-Firewall-Nachfrage ausloesen.
+function groupLanListenStart() {
+  groupLanEnsureSock()
+  if (!groupLanCleanTimer) groupLanCleanTimer = setInterval(groupLanPush, 5000)
+}
 function groupStartHeartbeat() {
   osdDbg('[gruppe] groupStartHeartbeat: Eintritt, bcGroupTimer=' + !!bcGroupTimer)
   if (!bcGroupTimer) bcGroupTimer = setInterval(() => { osdDbg('[gruppe] Heartbeat-Timer ausgeloest'); groupTick().catch((e) => osdDbg('[gruppe] groupTick warf: ' + (e && e.message))) }, GROUP_HEARTBEAT_MS)
+  groupLanBeaconStart()   // eigene Rechner im LAN sehen die Gruppe von selbst
   osdDbg('[gruppe] groupStartHeartbeat: fertig')
 }
-function groupStopHeartbeat() { if (bcGroupTimer) { clearInterval(bcGroupTimer); bcGroupTimer = null } }
+function groupStopHeartbeat() { if (bcGroupTimer) { clearInterval(bcGroupTimer); bcGroupTimer = null }; groupLanBeaconStop() }
 // Aus Anwendersicht ist die Gruppe EIN Klick: "Gruppe starten" bzw. "Beitreten"
 // zieht den eigenen Stream automatisch mit hoch, statt den Nutzer mit einem
 // "erst Stream starten"-Toast in einen zweiten, unverstaendlichen Pflichtschritt
@@ -6099,7 +6186,8 @@ if (process.argv.includes('--fps-broker')) {
     startLog('fenster+hotkeys erstellt (setupGpuName ist async, kein Blocker)')
     // Reihenfolge wie bisher; jeder Eintrag [Name, fn] wird einzeln vermessen.
     const deferred = [['nvml', setupNvml], ['adl', setupAdl], ['rtss', setupRtss], ['mahm', setupMahm],
-      ['cpuclock', setupCpuClock], ['vram', setupVramCounter], ['extwatch', startExternalWatcher], ['osdvis', syncOsdVisibility]]
+      ['cpuclock', setupCpuClock], ['vram', setupVramCounter], ['extwatch', startExternalWatcher], ['osdvis', syncOsdVisibility],
+      ['langroup', groupLanListenStart]]
     const runDeferred = () => {
       const e = deferred.shift()
       if (!e) { startLog('sensor-setups fertig'); return }
