@@ -63,7 +63,9 @@ function relay($url, $method, $body, $contentType) {
     CURLOPT_CUSTOMREQUEST => $method,
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_HEADER => true,
-    CURLOPT_CONNECTTIMEOUT => 4,
+    // 2 s statt 4 s: ein toter Adress-Kandidat (DS-Lite: IPv4 gesetzt, aber von
+    // aussen zu) soll den Verbindungsaufbau nicht laenger als noetig aufhalten.
+    CURLOPT_CONNECTTIMEOUT => 2,
     CURLOPT_TIMEOUT => 8,
     CURLOPT_FOLLOWLOCATION => false,
   ));
@@ -81,13 +83,62 @@ function relay($url, $method, $body, $contentType) {
   if (preg_match('/^location:\s*(\S+)/mi', $headers, $mm)) $loc = trim($mm[1]);
   return array('status' => $status, 'body' => substr($resp, $hlen), 'location' => $loc);
 }
-// Adress-Kandidaten eines Mitglieds (IPv4 zuerst) - NUR Adressen aus dem Roster,
-// dieses Skript ist bewusst KEIN offener Proxy.
+// Adress-Kandidaten eines Mitglieds - NUR Adressen aus dem Roster, dieses Skript
+// ist bewusst KEIN offener Proxy. Die zuletzt FUNKTIONIERENDE Adresse (goodAddr,
+// vom cfg-Parallel-Check gelernt) kommt zuerst: der WHEP-Handshake zahlt dann im
+// Normalfall nie den Connect-Timeout eines toten Kandidaten (DS-Lite-Falle).
 function member_addrs($m) {
   $a = array();
   if (!empty($m['linkV4'])) $a[] = rtrim($m['linkV4'], '/');
   if (!empty($m['linkV6'])) $a[] = rtrim($m['linkV6'], '/');
+  if (!empty($m['goodAddr']) && in_array($m['goodAddr'], $a, true)) {
+    array_splice($a, array_search($m['goodAddr'], $a, true), 1);
+    array_unshift($a, $m['goodAddr']);
+  }
   return $a;
+}
+// Mehrere Adress-Kandidaten PARALLEL anfragen (curl_multi), der erste Erfolg
+// gewinnt - statt sequenziell je Kandidat bis zum Connect-Timeout zu warten.
+// NUR fuer nebenwirkungsfreie Anfragen (cfg = GET) - ein paralleler WHEP-POST
+// wuerde beim Streamer verwaiste Sessions anlegen. $pairs: array([url, base]).
+// Rueckgabe: array(status, body, base) des Gewinners oder null.
+function relay_multi($pairs, $okStatus) {
+  if (!$pairs) return null;
+  $mh = curl_multi_init();
+  $map = array();
+  foreach ($pairs as $p) {
+    $ch = curl_init($p[0]);
+    curl_setopt_array($ch, array(
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_CONNECTTIMEOUT => 2,
+      CURLOPT_TIMEOUT => 6,
+      CURLOPT_FOLLOWLOCATION => false,
+    ));
+    curl_multi_add_handle($mh, $ch);
+    $map[(int)$ch] = array($ch, $p[1]);
+  }
+  $best = null;
+  do {
+    $mrc = curl_multi_exec($mh, $running);
+    if ($running) curl_multi_select($mh, 0.2);
+    while ($info = curl_multi_info_read($mh)) {
+      $ch = $info['handle'];
+      $entry = isset($map[(int)$ch]) ? $map[(int)$ch] : null;
+      $body = curl_multi_getcontent($ch);
+      $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+      curl_multi_remove_handle($mh, $ch);
+      curl_close($ch);
+      unset($map[(int)$ch]);
+      if ($entry && $body !== false && $code === $okStatus) {
+        $best = array('status' => $code, 'body' => $body, 'base' => $entry[1]);
+        $running = 0;
+        break;
+      }
+    }
+  } while ($running && $mrc === CURLM_OK);
+  foreach ($map as $entry) { @curl_multi_remove_handle($mh, $entry[0]); @curl_close($entry[0]); }
+  curl_multi_close($mh);
+  return $best;
 }
 
 $a = isset($_GET['a']) ? $_GET['a'] : '';
@@ -124,6 +175,9 @@ if ($a === 'update') {
     'streaming' => !isset($m['streaming']) || $m['streaming'] !== false,
     'joinedAt' => $prev ? $prev['joinedAt'] : time(),
     'lastSeen' => time(),
+    // gelernten "funktionierenden Weg" ueber Heartbeats hinweg behalten
+    // (member_addrs validiert ihn ohnehin gegen die aktuellen Links).
+    'goodAddr' => ($prev && !empty($prev['goodAddr'])) ? $prev['goodAddr'] : null,
   );
   room_save($code, $j);
   jout(array('ok' => true, 'members' => members_out($j)));
@@ -196,14 +250,23 @@ if ($a === 'qos') {
   jout(array('ok' => true));
 }
 // ICE-Konfiguration (STUN/TURN) des jeweiligen Streamers durchreichen.
+// PARALLEL an alle Adress-Kandidaten (nebenwirkungsfrei, GET) - der Gewinner wird
+// als goodAddr im Raum gemerkt, damit der direkt folgende WHEP-Handshake sofort
+// den funktionierenden Weg nimmt statt am toten Kandidaten zu haengen.
 if ($a === 'cfg') {
   if (!code_ok($code)) jout(array('ok' => false, 'error' => 'bad-code'));
   $mid = isset($_GET['id']) ? $_GET['id'] : '';
   $j = room_load($code);
   if ($j !== null && isset($j['members'][$mid])) {
-    foreach (member_addrs($j['members'][$mid]) as $base) {
-      $r = relay($base . '/cfg', 'GET', null, null);
-      if ($r && $r['status'] === 200) { header('Content-Type: application/json'); echo $r['body']; exit; }
+    $pairs = array();
+    foreach (member_addrs($j['members'][$mid]) as $base) $pairs[] = array($base . '/cfg', $base);
+    $r = relay_multi($pairs, 200);
+    if ($r) {
+      if (empty($j['members'][$mid]['goodAddr']) || $j['members'][$mid]['goodAddr'] !== $r['base']) {
+        $j['members'][$mid]['goodAddr'] = $r['base'];
+        room_save($code, $j);
+      }
+      header('Content-Type: application/json'); echo $r['body']; exit;
     }
   }
   jout(array('ok' => false));
@@ -317,8 +380,10 @@ echo <<<'HTMLJS'
       seen.add(m.id)
       if (!m.linkV4 && !m.linkV6) return
       var t = tiles.get(m.id)
+      var isNew = !t
       if (!t) { t = createTile(m.id); tiles.set(m.id, t) }
       t.nm.textContent = m.name || 'Spieler'
+      var wasStreaming = t.streaming
       t.streaming = m.streaming !== false
       if (!t.streaming) {
         killPc(t)
@@ -327,9 +392,12 @@ echo <<<'HTMLJS'
         t.wait.style.display = 'flex'
         return
       }
-      // Kein direkter Verbindungsaufbau hier - das erledigt der Watchdog (unten),
-      // der ALLE Kacheln laufend prueft. Ein einziger Heil-Pfad statt mehrerer
-      // fragiler Ereignis-Ketten, die abreissen koennen.
+      // ERSTAUFBAU SOFORT anstossen (neue Kachel bzw. pausiert -> streamt wieder):
+      // vorher uebernahm das ausschliesslich der 4s-Watchdog - jede Kachel wartete
+      // dadurch bis zu 4 s VOR dem ersten Verbindungsversuch (Hauptposten der
+      // "dauert lange"-Wahrnehmung). Der Watchdog bleibt der einzige HEIL-Pfad
+      // fuer alles Weitere; der connecting-Guard verhindert Doppelaufbauten.
+      if (isNew || wasStreaming === false) connectTile(t)
     })
     tiles.forEach(function (t, id) { if (!seen.has(id)) { closeTile(t); tiles.delete(id) } })
     var has = tiles.size > 0
@@ -456,7 +524,14 @@ echo <<<'HTMLJS'
       var ice = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }], relay = false
       var bufMs = 300
       try {
-        var cfg = await fetch(API + '&a=cfg&id=' + encodeURIComponent(t.id), { cache: 'no-store' }).then(function (r) { return r.json() })
+        // cfg je Kachel 60 s cachen: Reconnects (Watchdog-Heilung, Qualitaets-
+        // wechsel des Streamers) sparen die komplette Relay-Runde Browser->PHP->
+        // Streamer. Nebeneffekt des frischen cfg-Aufrufs beim ERSTaufbau: der
+        // PHP-Relay lernt dabei den funktionierenden Adress-Weg (goodAddr) fuer
+        // den direkt folgenden WHEP-Handshake.
+        var cfg = (t.cfgCache && (Date.now() - t.cfgCacheAt < 60000)) ? t.cfgCache
+          : await fetch(API + '&a=cfg&id=' + encodeURIComponent(t.id), { cache: 'no-store' }).then(function (r) { return r.json() })
+        if (cfg && cfg.ok !== false) { t.cfgCache = cfg; t.cfgCacheAt = Date.now() }
         if (cfg && Array.isArray(cfg.iceServers) && cfg.iceServers.length) ice = cfg.iceServers
         relay = !!(cfg && cfg.forceRelay)
         if (cfg && typeof cfg.buffer === 'number') bufMs = cfg.buffer
@@ -493,7 +568,11 @@ echo <<<'HTMLJS'
       await pc.setLocalDescription(offer)
       await new Promise(function (res) {
         if (pc.iceGatheringState === 'complete') return res()
-        var to = setTimeout(res, 2500)
+        // 1,5 s statt 2,5 s Sicherheits-Deckel: STUN antwortet normal in <300 ms
+        // und 'complete' feuert vorher - der Deckel greift nur, wenn ein Adapter
+        // (VPN o.ae.) das Sammeln aufhaelt. Dann reichen die bis dahin gesammelten
+        // Kandidaten fast immer; im Zweifel heilt der Watchdog.
+        var to = setTimeout(res, 1500)
         pc.addEventListener('icegatheringstatechange', function () { if (pc.iceGatheringState === 'complete') { clearTimeout(to); res() } })
       })
       if (gen !== t.gen) { try { pc.close() } catch (e) {}; return }
