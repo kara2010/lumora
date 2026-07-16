@@ -54,6 +54,12 @@ im Repo – Bezugsquellen stehen in der [`.gitignore`](.gitignore).
 Der Ordner [`website/`](website/) enthält die Downloadseite
 (lumora.kara-webdesign.de/).
 
+## Autor
+
+Lumora wird entwickelt und gepflegt von **Karsten Henning Radermacher**
+(GitHub: [kara2010](https://github.com/kara2010)).
+Copyright © 2026 Karsten Henning Radermacher.
+
 ## Lizenz
 
 Lumora ist freie Software unter der **GNU Affero General Public License v3.0**
