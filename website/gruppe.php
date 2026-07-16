@@ -601,6 +601,10 @@ echo <<<'HTMLJS'
     tiles.forEach(function (t) { applyMute(t) })
     var t = tiles.get(id)
     if (!t) return
+    // Doppelklick/Doppel-Tipp auf die BEREITS bildschirmfuellende Kachel fuehrt
+    // wieder HERAUS (vorher lief erneutes requestFullscreen ins Leere - man kam
+    // per Doppelklick rein, aber nicht mehr raus).
+    if (fsActive() === t.el) { fsExit(); return }
     if (fsRequest(t.el)) return
     if (t.video && t.video.webkitEnterFullscreen) { try { t.video.webkitEnterFullscreen() } catch (e) {} }   // iPhone: natives Video-Vollbild
   }
