@@ -258,7 +258,7 @@ echo <<<'HTMLHEAD'
   #soundHint .ico { font-size: 22px; }
   @keyframes soundPulse { 0%,100% { transform: translateX(-50%) scale(1); } 50% { transform: translateX(-50%) scale(1.045); } }
   @media (max-width: 640px), (pointer: coarse) { #soundHint { font-size: 15px; padding: 13px 20px; white-space: normal; max-width: 88vw; text-align: left; bottom: 14%; } }
-  #bar { position: fixed; bottom: 0; right: 0; display: flex; justify-content: flex-end; padding: 14px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) 16px; z-index: 15; }
+  #bar { position: fixed; bottom: 0; right: 0; display: flex; justify-content: flex-end; gap: 10px; padding: 14px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) 16px; z-index: 15; }
   button.ctl { display: flex; align-items: center; gap: 7px; background: rgba(20,22,30,.8); color: #e8e8ea; border: 1px solid rgba(255,255,255,.12); border-radius: 9px; padding: 10px 15px; font-size: 14px; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; user-select: none; }
   button.ctl:hover { background: rgba(40,44,58,.9) }
   button.ctl svg { width: 17px; height: 17px; fill: currentColor }
@@ -274,6 +274,14 @@ echo <<<'HTMLHEAD'
 </div>
 <div id="soundHint"><span class="ico">🔊</span><span>Auf eine Kachel tippen, um deren Ton zu hören</span></div>
 <div id="bar">
+  <!-- "Mit Lumora mitstreamen": oeffnet die installierte App per lumora://join/<CODE>
+       (Protokoll registriert die App selbst). Nur auf Windows-Desktops eingeblendet
+       (Lumora gibt es nur fuer Windows); ohne installierte App passiert beim Klick
+       nichts - der Tooltip nennt die Download-Adresse. -->
+  <a class="ctl" id="lumoraJoinBtn" style="display:none; text-decoration:none; color:inherit"
+     title="Öffnet deine installierte Lumora-App und tritt der Gruppe bei – dein Stream startet automatisch mit. Noch kein Lumora? Kostenlos auf lumora.kara-webdesign.de" href="#">
+    🎮 <span>Mit Lumora mitstreamen</span>
+  </a>
   <button class="ctl" id="fsBtn" title="Vollbild (F) – Doppelklick auf eine Kachel für Einzelbild">
     <svg viewBox="0 0 24 24"><path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/></svg>
     <span id="fsLabel">Vollbild</span>
@@ -597,6 +605,12 @@ echo <<<'HTMLJS'
     if (t.video && t.video.webkitEnterFullscreen) { try { t.video.webkitEnterFullscreen() } catch (e) {} }   // iPhone: natives Video-Vollbild
   }
   document.getElementById('fsBtn').onclick = toggleFullscreen
+  // "Mit Lumora mitstreamen" nur auf Windows-Desktops zeigen (Lumora ist Windows-
+  // only; auf iPhone/Android waere der Protokoll-Link eine Sackgasse).
+  if (/Windows NT/.test(navigator.userAgent) && !/Mobile/.test(navigator.userAgent)) {
+    var jb = document.getElementById('lumoraJoinBtn')
+    if (jb) { jb.href = 'lumora://join/' + encodeURIComponent(ROOM); jb.style.display = 'flex' }
+  }
   document.getElementById('soundHint').onclick = function () { everInteracted = true; document.getElementById('soundHint').classList.remove('show') }
   function fsLabelSync() { document.getElementById('fsLabel').textContent = fsActive() ? 'Beenden' : 'Vollbild' }
   document.addEventListener('fullscreenchange', fsLabelSync)
