@@ -4343,9 +4343,14 @@ function bcQosReport(ip, q) {
   const recv = Math.max(0, q.recv | 0), lost = Math.max(0, q.lost | 0)
   const drop = Math.max(0, q.drop | 0), frz = Math.max(0, q.frz | 0)
   const lossRate = (lost + recv) > 0 ? lost / (lost + recv) : 0
-  // "leidet": spuerbarer Paketverlust ODER eingefrorene Wiedergabe ODER viele
-  // verworfene Frames im 5-s-Fenster.
-  const bad = lossRate > 0.02 || frz > 0 || drop > 15
+  // "leidet" NUR bei echtem NETZ-Signal. freezeCount/framesDropped sind RENDER-
+  // Metriken des Zuschauer-Browsers (GPU-Last, Tab-/Layout-Wechsel, PiP) - Log-
+  // belegt meldete der Grid frz=1-3 bei lost=0/jit<25ms im DAUERTAKT und die
+  // Drossel regelte einen makellosen 25-Mbit-Stream auf 3-4 Mbit herunter
+  // ("egal welche Bitrate ich einstelle"). Freeze/Drop zaehlen jetzt nur noch,
+  // wenn zeitgleich Paketverlust anliegt (>0,5%) - reine Render-Ruckler beim
+  // Zuschauer drosseln den Stream fuer alle NICHT mehr.
+  const bad = lossRate > 0.02 || ((frz > 0 || drop > 15) && lossRate > 0.005)
   const key = String(q.id || ip).slice(0, 40)
   // badStreak: erst ZWEI schlechte Reports in Folge zaehlen als "leidet" -
   // ein einzelner Freeze (Tab-Wechsel am Handy, kurzer Funk-Blip) drosselt
