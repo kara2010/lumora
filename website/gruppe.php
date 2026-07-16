@@ -296,35 +296,55 @@ echo <<<'HTMLHEAD'
   html, body { height: 100%; background: #0b0d12; color: #e8e8ea; font-family: system-ui, -apple-system, Segoe UI, sans-serif; overflow: hidden; }
   body { height: 100dvh; }
   #grid { display: grid; gap: 8px; padding: 8px; height: 100%; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); grid-auto-rows: 1fr; }
-  .tile { position: relative; background: #000; border-radius: 10px; overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: border-color .15s; touch-action: manipulation; }
+  /* ── Lumora-Designsprache (wie App + Website): Akzentblau, Glas-Optik mit
+     Licht-Kante, weiche Radien, Hover-Leben. Ein wiederverwendbarer Glas-Look
+     fuer ALLE Overlays (Pills, Icons, Slider, Leisten-Knoepfe). ── */
+  .tile { position: relative; background: #000; border-radius: 12px; overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: border-color .18s, box-shadow .18s; touch-action: manipulation; }
+  .tile:hover { border-color: rgba(255,255,255,.09); }
   .tile:fullscreen { border-radius: 0; border: none; background: #000; }
   .tile:-webkit-full-screen { border-radius: 0; border: none; background: #000; }
-  .tile.active-audio { border-color: #4ade80; }
+  .tile.active-audio { border-color: rgba(74,222,128,.75); box-shadow: 0 0 0 1px rgba(74,222,128,.25), 0 0 22px rgba(74,222,128,.18); }
   .tile video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
-  .tile .label { position: absolute; left: 8px; bottom: 8px; max-width: calc(100% - 56px); background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); padding: 5px 11px; border-radius: 20px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .glass, .tile .label, .tile .stats, .tile .muteIco, .tile .statsIco, .tile .pipIco, .tile .volCtl {
+    background: linear-gradient(180deg, rgba(30,34,48,.72), rgba(13,15,23,.78));
+    -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
+    border: 1px solid rgba(255,255,255,.13);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 4px 16px rgba(0,0,0,.35);
+  }
+  .tile .label { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 60px); padding: 6px 13px; border-radius: 999px; font-size: 13px; font-weight: 600; letter-spacing: .01em; display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .tile .dot { width: 8px; height: 8px; border-radius: 50%; background: #f5b942; animation: pulse 1.2s infinite; flex-shrink: 0; }
-  .tile .dot.live { background: #4ade80; animation: none; }
-  .tile .dot.err { background: #f05a5a; animation: none; }
+  .tile .dot.live { background: #4ade80; box-shadow: 0 0 7px rgba(74,222,128,.9); animation: none; }
+  .tile .dot.err { background: #f05a5a; box-shadow: 0 0 7px rgba(240,90,90,.8); animation: none; }
   .tile .dot.off { background: #777; animation: none; }
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
-  .tile .muteIco { position: absolute; top: 8px; right: 8px; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 15px; }
-  .tile .statsIco { position: absolute; top: 8px; right: 46px; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 14px; opacity: .55; }
-  .tile.stats-on .statsIco { opacity: 1; }
-  .tile .stats { position: absolute; top: 8px; left: 8px; display: none; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); padding: 5px 11px; border-radius: 8px; font-size: 11.5px; font-variant-numeric: tabular-nums; color: #ddd; }
+  /* Kachel-Icons: einheitliche runde Glas-Knoepfe mit Hover-Pop */
+  .tile .muteIco, .tile .statsIco, .tile .pipIco { position: absolute; top: 10px; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 14px; opacity: .6; transition: opacity .16s, transform .16s, border-color .16s; }
+  .tile .muteIco { right: 10px; font-size: 15px; opacity: .85; }
+  .tile .statsIco { right: 50px; }
+  .tile .pipIco { right: 90px; display: none; }
+  .tile .muteIco:hover, .tile .statsIco:hover, .tile .pipIco:hover { opacity: 1; transform: scale(1.12); border-color: rgba(122,179,255,.55); }
+  .tile.stats-on .statsIco { opacity: 1; border-color: rgba(122,179,255,.55); color: #7ab3ff; }
+  .tile.active-audio .muteIco { border-color: rgba(74,222,128,.55); }
+  .tile .stats { position: absolute; top: 10px; left: 10px; display: none; padding: 6px 12px; border-radius: 10px; font-size: 11.5px; font-variant-numeric: tabular-nums; color: #ddd; }
   .tile.stats-on .stats { display: block; }
   .tile .stats b { color: #74e857; font-weight: 600; }
-  .tile .wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #888; font-size: 13px; text-align: center; padding: 16px; }
-  /* Bild-in-Bild: loest die Kachel als schwebendes Mini-Fenster ueber allen Apps -
-     ideal, um nebenbei selbst zu zocken. Nur sichtbar, wenn der Browser es kann. */
-  .tile .pipIco { position: absolute; top: 8px; right: 84px; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border-radius: 50%; width: 30px; height: 30px; display: none; align-items: center; justify-content: center; font-size: 14px; opacity: .55; }
-  .tile .pipIco:hover { opacity: 1; }
-  /* Lautstaerke-Slider: erscheint nur an der Kachel, deren Ton gerade aktiv ist.
-     Unten ZENTRIERT statt rechts - unten rechts liegt die fixe Knopf-Leiste (#bar)
-     des Fensters, die den Slider auf der dortigen Kachel ueberlagerte. */
-  .tile .volCtl { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); display: none; align-items: center; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border-radius: 20px; padding: 7px 12px; }
+  /* Verbindet-Zustand: Glas-Pill mit Spinner statt nacktem Grau-Text */
+  .tile .wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; text-align: center; padding: 16px; pointer-events: none; }
+  .tile .wait > span, .tile .wait { color: #b6b9c6; }
+  .tile .wait::before { content: ""; width: 0; height: 0; margin-right: 0; transition: none; }
+  .tile .wait.connecting::before { content: ""; width: 15px; height: 15px; margin-right: 10px; border: 2px solid rgba(122,179,255,.25); border-top-color: #7ab3ff; border-radius: 50%; animation: spin 0.9s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  /* Bild-in-Bild-Knopf (nur sichtbar, wenn der Browser es kann - JS blendet ein) */
+  /* Lautstaerke-Slider: nur an der aktiven Ton-Kachel; unten ZENTRIERT, damit die
+     fixe Fenster-Knopfleiste (#bar) ihn nie ueberlagert. Eigene Thumb/Track-Optik. */
+  .tile .volCtl { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: none; align-items: center; border-radius: 999px; padding: 9px 14px; }
   .tile.active-audio .volCtl { display: flex; }
-  .tile .volCtl input { width: 92px; height: 4px; accent-color: #4ade80; cursor: pointer; }
-  @media (max-width: 640px), (pointer: coarse) { .tile .volCtl input { width: 110px; height: 6px; } }
+  .tile .volCtl input { -webkit-appearance: none; appearance: none; width: 96px; height: 4px; border-radius: 4px; background: rgba(255,255,255,.22); cursor: pointer; outline: none; }
+  .tile .volCtl input::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: #fff; border: none; box-shadow: 0 1px 5px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.12); transition: transform .14s; }
+  .tile .volCtl input::-webkit-slider-thumb:hover { transform: scale(1.2); }
+  .tile .volCtl input::-moz-range-thumb { width: 15px; height: 15px; border-radius: 50%; background: #fff; border: none; box-shadow: 0 1px 5px rgba(0,0,0,.55); }
+  .tile .volCtl input::-moz-range-track { height: 4px; border-radius: 4px; background: rgba(255,255,255,.22); }
+  @media (max-width: 640px), (pointer: coarse) { .tile .volCtl input { width: 116px; height: 6px; } }
   /* Spotlight-Ansicht: EINE grosse Hauptkachel, die uebrigen als Leiste darunter
      (Klick auf ein Thumbnail macht es zur Hauptkachel). Rein per Klassen - das
      Raster bleibt der Standard, der Zustand wird im Browser gemerkt. */
@@ -336,17 +356,32 @@ echo <<<'HTMLHEAD'
   #grid.spotlight .tile:not(.spot) .label { font-size: 11px; padding: 3px 8px; max-width: calc(100% - 16px); }
   #empty { display: none; align-items: center; justify-content: center; height: 100%; flex-direction: column; gap: 8px; color: #777; text-align: center; padding: 24px; }
   #empty .big { font-size: 16px; color: #ccc; }
-  #soundHint { position: fixed; left: 50%; bottom: 10%; transform: translateX(-50%); display: none; align-items: center; gap: 12px; cursor: pointer; z-index: 20; white-space: nowrap; background: rgba(18,20,28,.9); color: #fff; border: 1px solid rgba(255,255,255,.26); border-radius: 999px; padding: 15px 26px; font-size: 17px; font-weight: 600; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: 0 10px 34px rgba(0,0,0,.55); animation: soundPulse 1.9s ease-in-out infinite; -webkit-tap-highlight-color: transparent; }
+  #soundHint { position: fixed; left: 50%; bottom: 10%; transform: translateX(-50%); display: none; align-items: center; gap: 12px; cursor: pointer; z-index: 20; white-space: nowrap; background: linear-gradient(180deg, rgba(32,38,56,.92), rgba(15,18,30,.94)); color: #fff; border: 1px solid rgba(122,179,255,.45); border-radius: 999px; padding: 15px 26px; font-size: 17px; font-weight: 600; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: inset 0 1px 0 rgba(255,255,255,.10), 0 10px 34px rgba(0,0,0,.55), 0 0 26px rgba(79,142,247,.22); animation: soundPulse 1.9s ease-in-out infinite; -webkit-tap-highlight-color: transparent; }
   #soundHint.show { display: flex; }
   #soundHint .ico { font-size: 22px; }
   @keyframes soundPulse { 0%,100% { transform: translateX(-50%) scale(1); } 50% { transform: translateX(-50%) scale(1.045); } }
   @media (max-width: 640px), (pointer: coarse) { #soundHint { font-size: 15px; padding: 13px 20px; white-space: normal; max-width: 88vw; text-align: left; bottom: 14%; } }
-  #bar { position: fixed; bottom: 0; right: 0; display: flex; justify-content: flex-end; gap: 10px; padding: 14px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) 16px; z-index: 15; }
-  button.ctl { display: flex; align-items: center; gap: 7px; background: rgba(20,22,30,.8); color: #e8e8ea; border: 1px solid rgba(255,255,255,.12); border-radius: 9px; padding: 10px 15px; font-size: 14px; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; user-select: none; }
-  button.ctl:hover { background: rgba(40,44,58,.9) }
-  button.ctl svg { width: 17px; height: 17px; fill: currentColor }
+  /* Fenster-Knopfleiste: Glas-Pillen mit Licht-Kante, Hover hebt an + Akzent-Rand.
+     Der Lumora-Beitritts-Knopf ist der Primaer-CTA im Marken-Gradient. */
+  #bar { position: fixed; bottom: 0; right: 0; display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 14px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) 16px; z-index: 15; }
+  button.ctl, a.ctl {
+    display: flex; align-items: center; gap: 8px;
+    background: linear-gradient(180deg, rgba(30,34,48,.82), rgba(13,15,23,.88));
+    color: #e8e8ea; border: 1px solid rgba(255,255,255,.13); border-radius: 12px;
+    padding: 10px 16px; font-size: 13.5px; font-weight: 600; letter-spacing: .01em; cursor: pointer;
+    -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 4px 16px rgba(0,0,0,.35);
+    transition: transform .15s, border-color .15s, box-shadow .15s, background .15s;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation; user-select: none;
+  }
+  button.ctl:hover, a.ctl:hover { border-color: rgba(122,179,255,.55); transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 8px 22px rgba(0,0,0,.45), 0 0 16px rgba(79,142,247,.15); }
+  button.ctl:active, a.ctl:active { transform: translateY(0) scale(.97); }
+  button.ctl svg { width: 17px; height: 17px; fill: currentColor; opacity: .9 }
+  #lumoraJoinBtn { background: linear-gradient(135deg, #4f8ef7, #7ab3ff); color: #06080f; font-weight: 700; border-color: rgba(255,255,255,.22); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 20px rgba(79,142,247,.35); }
+  #lumoraJoinBtn:hover { border-color: rgba(255,255,255,.45); box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 8px 26px rgba(79,142,247,.5); filter: brightness(1.06); }
+  button.ctl:focus-visible, a.ctl:focus-visible { outline: 2px solid #7ab3ff; outline-offset: 2px; }
   @media (max-width: 560px) { #fsLabel { display: none; } }
-  @media (max-width: 640px), (pointer: coarse) { button.ctl { padding: 12px 18px; font-size: 15px; min-height: 46px; border-radius: 11px; } }
+  @media (max-width: 640px), (pointer: coarse) { button.ctl, a.ctl { padding: 12px 18px; font-size: 15px; min-height: 46px; border-radius: 13px; } }
 </style>
 </head>
 <body>
@@ -365,7 +400,7 @@ echo <<<'HTMLHEAD'
        (Protokoll registriert die App selbst). Nur auf Windows-Desktops eingeblendet
        (Lumora gibt es nur fuer Windows); ohne installierte App passiert beim Klick
        nichts - der Tooltip nennt die Download-Adresse. -->
-  <a class="ctl" id="lumoraJoinBtn" style="display:none; text-decoration:none; color:inherit"
+  <a class="ctl" id="lumoraJoinBtn" style="display:none; text-decoration:none"
      title="Öffnet deine installierte Lumora-App und tritt der Gruppe bei – dein Stream startet automatisch mit. Noch kein Lumora? Kostenlos auf lumora.kara-webdesign.de" href="#">
     🎮 <span>Mit Lumora mitstreamen</span>
   </a>
@@ -527,7 +562,7 @@ echo <<<'HTMLJS'
       if (!t.streaming) {
         killPc(t)
         t.dot.className = 'dot off'
-        t.wait.textContent = '⏸ Streamt gerade nicht'
+        t.wait.textContent = '⏸ Streamt gerade nicht'; t.wait.classList.remove('connecting')
         t.wait.style.display = 'flex'
         return
       }
@@ -700,7 +735,7 @@ echo <<<'HTMLJS'
     var gen = t.gen
     t.startedAt = Date.now()
     t.lastFrames = -1; t.stallCount = 0
-    t.wait.textContent = 'Verbindet…'; t.wait.style.display = 'flex'; t.dot.className = 'dot'
+    t.wait.textContent = 'Verbindet…'; t.wait.classList.add('connecting'); t.wait.style.display = 'flex'; t.dot.className = 'dot'
     try {
       var ice = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }], relay = false
       var bufMs = 300
@@ -742,7 +777,7 @@ echo <<<'HTMLJS'
         if (pc.connectionState === 'connected') {
           t.dot.className = 'dot live'; t.wait.style.display = 'none'; applyMute(t)
         } else if (pc.connectionState === 'failed') {
-          t.dot.className = 'dot err'; t.wait.textContent = 'Verbindung unterbrochen…'; t.wait.style.display = 'flex'
+          t.dot.className = 'dot err'; t.wait.textContent = 'Verbindung unterbrochen…'; t.wait.classList.remove('connecting'); t.wait.style.display = 'flex'
         }
       })
       var offer = await pc.createOffer()
@@ -765,7 +800,7 @@ echo <<<'HTMLJS'
         // Watchdog es weiter versucht - eine liegengebliebene pc-Leiche blockierte
         // frueher jeden weiteren Aufbau ("kommt nie wieder auf die Beine").
         killPc(t)
-        t.dot.className = 'dot err'; t.wait.textContent = 'Verbindung unterbrochen…'; t.wait.style.display = 'flex'
+        t.dot.className = 'dot err'; t.wait.textContent = 'Verbindung unterbrochen…'; t.wait.classList.remove('connecting'); t.wait.style.display = 'flex'
         return
       }
       t.session = j.session || null
