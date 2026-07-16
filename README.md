@@ -56,9 +56,9 @@ Der Ordner [`website/`](website/) enthält die Downloadseite
 
 ## Autor
 
-Lumora wird entwickelt und gepflegt von **Karsten Henning Radermacher**
+Lumora wird entwickelt und gepflegt von **Karsten Radermacher**
 (GitHub: [kara2010](https://github.com/kara2010)).
-Copyright © 2026 Karsten Henning Radermacher.
+Copyright © 2026 Karsten Radermacher.
 
 ## Lizenz
 
