@@ -46,7 +46,10 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  /* rechts KEIN Innenabstand: die Fenster-Knoepfe (.win-controls) docken buendig
+     an die Ecke, damit "Maus ganz nach rechts oben + Klick" das Fenster schliesst
+     (Fitts's Law) - wie bei nativen Windows-Anwendungen im maximierten Zustand. */
+  padding: 0 0 0 16px;
   height: 44px;
   background: #141414;
   border-bottom: 1px solid #222;
@@ -77,8 +80,17 @@ body::before {
 .titlebar-controls {
   display: flex;
   align-items: center;
+  align-self: stretch;   /* volle Titelleisten-Hoehe, damit .win-controls bis an den oberen Rand reicht */
   gap: 8px;
   -webkit-app-region: no-drag;
+}
+
+/* Fenster-Knoepfe: eigene Gruppe ohne Zwischenraeume, volle Leisten-Hoehe,
+   buendig bis in die Ecke - jeder Pixel bis zum Rand ist Klickflaeche. */
+.win-controls {
+  display: flex;
+  align-self: stretch;
+  margin-left: 4px;
 }
 
 .hdr-indicator {
@@ -114,13 +126,13 @@ body::before {
 }
 
 .btn-icon {
-  width: 28px;
-  height: 28px;
+  width: 46px;            /* Windows-uebliche Breite der Fenster-Knoepfe */
+  height: 100%;           /* volle Titelleisten-Hoehe -> bis zum oberen Rand klickbar */
   border: none;
   background: transparent;
   color: #888;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 0;       /* eckig bis in die Fenster-Ecke - keine toten Pixel */
   font-size: 13px;
   display: flex;
   align-items: center;
