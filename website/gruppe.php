@@ -382,6 +382,15 @@ echo <<<'HTMLHEAD'
   button.ctl:focus-visible, a.ctl:focus-visible { outline: 2px solid #7ab3ff; outline-offset: 2px; }
   @media (max-width: 560px) { #fsLabel { display: none; } }
   @media (max-width: 640px), (pointer: coarse) { button.ctl, a.ctl { padding: 12px 18px; font-size: 15px; min-height: 46px; border-radius: 13px; } }
+  /* Steuerelemente bei Inaktivitaet ausblenden (wie im Einzel-Player): nach ein
+     paar Sekunden ohne Maus/Tipp verschwinden Leiste, Kachel-Icons und Slider -
+     nur Namens-Label und (angepinnte) Stats bleiben. Bewegung holt alles zurueck. */
+  #bar { transition: opacity .3s; }
+  .tile .volCtl { transition: opacity .3s; }
+  body.idle #bar,
+  body.idle .tile .muteIco, body.idle .tile .statsIco, body.idle .tile .pipIco,
+  body.idle .tile .volCtl { opacity: 0; pointer-events: none; }
+  body.idle { cursor: none; }
 </style>
 </head>
 <body>
@@ -434,6 +443,57 @@ echo <<<'HTMLJS'
   // Document-PiP in ein anderes Fenster/Dokument verschoben wird (getElementById
   // im Haupt-document faende es dann nicht mehr).
   var gridEl = document.getElementById('grid')
+  // --- Sprache: folgt der BROWSER-Sprache des Zuschauers (nicht der App-Einstellung
+  // des Streamers) - Zuschauer koennen irgendwo sitzen. de* -> Deutsch, sonst Englisch.
+  var IS_DE = String(navigator.language || '').toLowerCase().indexOf('de') === 0
+  var T = IS_DE ? {
+    connecting: 'Verbindet…', lost: 'Verbindung unterbrochen…', paused: '⏸ Streamt gerade nicht',
+    player: 'Spieler', fs: 'Vollbild', fsExit: 'Beenden', spot: 'Spotlight', grid: 'Raster',
+    dock: 'Abdocken', undock: 'Zurückholen',
+    emptyBig: 'Noch niemand im Grid…', emptySub: 'Wartet auf Mitglieder der Gruppe.',
+    pipBig: '⧉ Das Grid läuft als Mini-Fenster', pipSub: 'Hier klicken, um es zurückzuholen.',
+    soundHint: 'Auf eine Kachel tippen, um deren Ton zu hören',
+    join: 'Mit Lumora mitstreamen',
+    joinTitle: 'Öffnet deine installierte Lumora-App und tritt der Gruppe bei – dein Stream startet automatisch mit. Noch kein Lumora? Kostenlos auf lumora.kara-webdesign.de',
+    dockTitle: 'Das GANZE Grid als schwebendes Mini-Fenster über allen Programmen – ideal, um nebenbei selbst zu zocken. Ton und Klick-Bedienung funktionieren auch im Mini-Fenster.',
+    layoutTitle: 'Ansicht umschalten: Raster (alle gleich groß) / Spotlight (einer groß, Rest als Leiste)',
+    fsTitle: 'Vollbild (F) – Doppelklick auf eine Kachel für Einzelbild',
+    statsTitle: 'Infoanzeige ein/aus', volTitle: 'Lautstärke',
+    pipTitle: 'Bild-in-Bild: schwebendes Mini-Fenster über allen Programmen – ideal, um nebenbei selbst zu zocken'
+  } : {
+    connecting: 'Connecting…', lost: 'Connection lost…', paused: '⏸ Not streaming right now',
+    player: 'Player', fs: 'Fullscreen', fsExit: 'Exit', spot: 'Spotlight', grid: 'Grid',
+    dock: 'Pop out', undock: 'Bring back',
+    emptyBig: 'Nobody in the grid yet…', emptySub: 'Waiting for group members.',
+    pipBig: '⧉ The grid is running as a mini window', pipSub: 'Click here to bring it back.',
+    soundHint: 'Tap a tile to hear its sound',
+    join: 'Join with Lumora',
+    joinTitle: 'Opens your installed Lumora app and joins the group – your own stream starts along automatically. No Lumora yet? Free at lumora.kara-webdesign.de',
+    dockTitle: 'Pops the WHOLE grid out as a floating always-on-top mini window – perfect for gaming on the side. Sound and click controls keep working in the mini window.',
+    layoutTitle: 'Switch the view: grid (all equal) / spotlight (one large, the rest as a strip)',
+    fsTitle: 'Fullscreen (F) – double-click a tile for single view',
+    statsTitle: 'Toggle stats overlay', volTitle: 'Volume',
+    pipTitle: 'Picture-in-picture: floating mini window above all programs – perfect for gaming on the side'
+  }
+  // Statische Texte des Grundgeruests einmalig auf die Zuschauer-Sprache setzen.
+  ;(function applyLang() {
+    try { document.documentElement.lang = IS_DE ? 'de' : 'en' } catch (e) {}
+    document.querySelector('#empty .big').textContent = T.emptyBig
+    document.querySelector('#empty div:last-child').textContent = T.emptySub
+    var pn = document.getElementById('pipNote')
+    pn.children[0].textContent = T.pipBig
+    pn.children[1].textContent = T.pipSub
+    document.querySelector('#soundHint span:last-child').textContent = T.soundHint
+    var jb = document.getElementById('lumoraJoinBtn')
+    jb.querySelector('span').textContent = T.join
+    jb.title = T.joinTitle
+    var gp = document.getElementById('gridPipBtn')
+    gp.querySelector('span').textContent = T.dock
+    gp.title = T.dockTitle
+    document.getElementById('layoutBtn').title = T.layoutTitle
+    document.getElementById('fsBtn').title = T.fsTitle
+    document.getElementById('fsLabel').textContent = T.fs
+  })()
   // Gemerkte Nutzer-Einstellungen (localStorage): Ton-Wahl je RAUM (kommt nach
   // Reload/Reconnect wieder), Lautstaerke + Ansicht geraeteweit.
   var AUDIO_KEY = 'lumoraGridAudio-' + ROOM
@@ -470,7 +530,7 @@ echo <<<'HTMLJS'
     tiles.forEach(function (t, id) { t.el.classList.toggle('spot', on && id === spotId) })
     var btn = document.getElementById('layoutBtn')
     btn.style.display = tiles.size >= 2 ? 'flex' : 'none'
-    document.getElementById('layoutLabel').textContent = spotlightOn ? 'Raster' : 'Spotlight'
+    document.getElementById('layoutLabel').textContent = spotlightOn ? T.grid : T.spot
   }
   function setSpot(id) { spotId = id; applySpotlight() }
   document.getElementById('layoutBtn').onclick = function () {
@@ -485,7 +545,7 @@ echo <<<'HTMLJS'
   // der Knopf erscheint nur, wenn der Browser sie kann.
   var pipWin = null
   function setGridDocked(docked) {
-    document.getElementById('gridPipBtn').querySelector('span').textContent = docked ? 'Abdocken' : 'Zurückholen'
+    document.getElementById('gridPipBtn').querySelector('span').textContent = docked ? T.dock : T.undock
     document.getElementById('pipNote').style.display = docked ? 'none' : 'flex'
   }
   document.getElementById('pipNote').onclick = function () { toggleGridPip() }
@@ -538,6 +598,23 @@ echo <<<'HTMLJS'
   }
   acquireWakeLock()
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') acquireWakeLock() })
+  // --- Steuerelemente bei Inaktivitaet ausblenden ------------------------------
+  // Nur ECHTE Mausbewegung (pointerType 'mouse') blendet ein - mobile Browser
+  // feuern nach jedem Tipp simulierte Maus-Events (gleiche Falle wie im Einzel-
+  // Player). Touch: jeder Tipp zeigt die Elemente und startet den Timer neu.
+  var idleTimer = null
+  function activity() {
+    document.body.classList.remove('idle')
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(function () { document.body.classList.add('idle') }, 2600)
+  }
+  if (window.PointerEvent) {
+    document.addEventListener('pointermove', function (e) { if (e.pointerType === 'mouse') activity() })
+  } else {
+    document.addEventListener('mousemove', activity)
+  }
+  document.addEventListener('touchstart', activity, { passive: true })
+  activity()
 
   async function pollList() {
     try {
@@ -556,13 +633,13 @@ echo <<<'HTMLJS'
       var t = tiles.get(m.id)
       var isNew = !t
       if (!t) { t = createTile(m.id); tiles.set(m.id, t) }
-      t.nm.textContent = m.name || 'Spieler'
+      t.nm.textContent = m.name || T.player
       var wasStreaming = t.streaming
       t.streaming = m.streaming !== false
       if (!t.streaming) {
         killPc(t)
         t.dot.className = 'dot off'
-        t.wait.textContent = '⏸ Streamt gerade nicht'; t.wait.classList.remove('connecting')
+        t.wait.textContent = T.paused; t.wait.classList.remove('connecting')
         t.wait.style.display = 'flex'
         return
       }
@@ -590,13 +667,13 @@ echo <<<'HTMLJS'
     el.className = 'tile'
     el.innerHTML =
       '<video muted autoplay playsinline></video>' +
-      '<span class="wait">Verbindet…</span>' +
+      '<span class="wait">' + T.connecting + '</span>' +
       '<span class="label"><span class="dot"></span><span class="nm"></span></span>' +
       '<span class="stats"></span>' +
-      '<span class="pipIco" title="Bild-in-Bild: schwebendes Mini-Fenster über allen Programmen – ideal, um nebenbei selbst zu zocken">⧉</span>' +
-      '<span class="statsIco" title="Infoanzeige ein/aus">📊</span>' +
+      '<span class="pipIco" title="' + T.pipTitle + '">⧉</span>' +
+      '<span class="statsIco" title="' + T.statsTitle + '">📊</span>' +
       '<span class="muteIco">🔇</span>' +
-      '<span class="volCtl"><input type="range" min="0" max="100" title="Lautstärke"></span>'
+      '<span class="volCtl"><input type="range" min="0" max="100" title="' + T.volTitle + '"></span>'
     // Klick: im Spotlight-Modus macht ein Klick aufs THUMBNAIL es zur Hauptkachel;
     // sonst (Raster bzw. Klick auf die grosse Kachel) schaltet er wie gehabt den Ton.
     el.onclick = function () {
@@ -735,7 +812,7 @@ echo <<<'HTMLJS'
     var gen = t.gen
     t.startedAt = Date.now()
     t.lastFrames = -1; t.stallCount = 0
-    t.wait.textContent = 'Verbindet…'; t.wait.classList.add('connecting'); t.wait.style.display = 'flex'; t.dot.className = 'dot'
+    t.wait.textContent = T.connecting; t.wait.classList.add('connecting'); t.wait.style.display = 'flex'; t.dot.className = 'dot'
     try {
       var ice = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }], relay = false
       var bufMs = 300
@@ -777,7 +854,7 @@ echo <<<'HTMLJS'
         if (pc.connectionState === 'connected') {
           t.dot.className = 'dot live'; t.wait.style.display = 'none'; applyMute(t)
         } else if (pc.connectionState === 'failed') {
-          t.dot.className = 'dot err'; t.wait.textContent = 'Verbindung unterbrochen…'; t.wait.classList.remove('connecting'); t.wait.style.display = 'flex'
+          t.dot.className = 'dot err'; t.wait.textContent = T.lost; t.wait.classList.remove('connecting'); t.wait.style.display = 'flex'
         }
       })
       var offer = await pc.createOffer()
@@ -800,7 +877,7 @@ echo <<<'HTMLJS'
         // Watchdog es weiter versucht - eine liegengebliebene pc-Leiche blockierte
         // frueher jeden weiteren Aufbau ("kommt nie wieder auf die Beine").
         killPc(t)
-        t.dot.className = 'dot err'; t.wait.textContent = 'Verbindung unterbrochen…'; t.wait.classList.remove('connecting'); t.wait.style.display = 'flex'
+        t.dot.className = 'dot err'; t.wait.textContent = T.lost; t.wait.classList.remove('connecting'); t.wait.style.display = 'flex'
         return
       }
       t.session = j.session || null
@@ -918,7 +995,7 @@ echo <<<'HTMLJS'
     if (jb) { jb.href = 'lumora://join/' + encodeURIComponent(ROOM); jb.style.display = 'flex' }
   }
   document.getElementById('soundHint').onclick = function () { everInteracted = true; document.getElementById('soundHint').classList.remove('show') }
-  function fsLabelSync() { document.getElementById('fsLabel').textContent = fsActive() ? 'Beenden' : 'Vollbild' }
+  function fsLabelSync() { document.getElementById('fsLabel').textContent = fsActive() ? T.fsExit : T.fs }
   document.addEventListener('fullscreenchange', fsLabelSync)
   document.addEventListener('webkitfullscreenchange', fsLabelSync)
   document.addEventListener('keydown', function (e) { if (e.key === 'f' || e.key === 'F') toggleFullscreen() })
