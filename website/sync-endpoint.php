@@ -1,9 +1,16 @@
 <?php
 // ===========================================================================
-// deploy.php  -  abgesicherter Deployment-Endpunkt fuer Lumora
+// sync-endpoint.php  -  abgesicherter Deployment-Endpunkt fuer Lumora
 // ---------------------------------------------------------------------------
 // Nimmt per HTTPS token-authentifizierte, gechunkte Datei-Uploads entgegen und
 // schreibt AUSSCHLIESSLICH innerhalb des eigenen Verzeichnisbaums (__DIR__).
+//
+// DEPLOY-HINWEIS: Diese Datei wird auf dem Server unter einem ZUFAELLIGEN,
+// geheimen Namen abgelegt (sync-<random>.php), und der lib-Platzhalter unten
+// (LIB_PLACEHOLDER) wird beim Hochladen durch den ebenfalls zufaelligen, echten
+// Namen der Geheimnis-Datei ersetzt. Beide echten Namen stehen NIE im Repo -
+// der Zufallsname ist defense in depth fuer den Fall, dass der Hoster PHP je
+// als Klartext ausliefert (dann waere das Token in einer erratbaren Datei lesbar).
 //
 // Sicherheits-Prinzipien (defense in depth):
 //   - Nur HTTPS (nicht-faelschbar), nur POST.
@@ -45,7 +52,7 @@ if (!$https) bail(403, 'https required');
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') bail(405, 'post only');
 
 // --- 1) Geheimnis + optionale Allowlist laden (separat, gitignored) ---------
-$secretFile = __DIR__ . '/lib-46e31f11e28b.php';
+$secretFile = __DIR__ . '/LIB_PLACEHOLDER';   // wird beim Deploy durch den echten lib-<random>.php-Namen ersetzt
 if (!is_file($secretFile)) bail(503, 'disabled');
 $cfg = require $secretFile;
 // deploy.secret.php gibt entweder das Token (String) ODER ein Array zurueck:
