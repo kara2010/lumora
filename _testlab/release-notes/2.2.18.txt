@@ -1,0 +1,8 @@
+Gruppen kinderleicht + großes Grid-Update:
+
+• Freunde dazuholen mit einem Klick: Am laufenden Stream erstellt „Freunde dazuholen" die Gruppe und kopiert den Einladungslink. Wer den Link öffnet, tritt mit einem Klick bei („Mit Lumora mitstreamen") – kein Code-Abtippen mehr. Eigene Rechner im selben Netz erkennen eine laufende Gruppe sogar von selbst und bieten den Beitritt direkt an.
+• Teilen per schöner Web-Adresse statt IP: Der Stream-Link ist jetzt eine kurze URL – funktioniert damit erstmals auch auf dem iPhone, verrät deine IP-Adresse nicht mehr und bleibt sogar bei einem IP-Wechsel gültig.
+• Grid-Player rundum erneuert: deutlich schnellerer Verbindungsaufbau, Bild-in-Bild (einzelne Kachel ODER das ganze Grid als schwebendes Mini-Fenster über dem Spiel), Spotlight-Ansicht (einer groß, Rest als Leiste), Lautstärkeregler, gemerkte Ton-Wahl, Display bleibt auf dem Handy an, edleres Design, Bedienelemente blenden bei Inaktivität aus – und alles auf Deutsch und Englisch.
+• Bitrate bleibt stabil: Ruckler im Browser eines Zuschauers (z. B. durch dessen GPU-Last) drosseln die Stream-Qualität für alle nicht mehr fälschlich.
+• Cover-Suche ehrlich: Findet Lumora kein passendes Cover, erscheint kein zufälliges Fremd-Artwork mehr – weder automatisch noch in der Suchliste.
+• Feinschliff: Fenster-Knöpfe (minimieren/schließen) sind bis in die Bildschirmecke klickbar; Qualitätswechsel im Stream nochmals zuverlässiger.
