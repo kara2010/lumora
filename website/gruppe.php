@@ -318,8 +318,10 @@ echo <<<'HTMLHEAD'
      ideal, um nebenbei selbst zu zocken. Nur sichtbar, wenn der Browser es kann. */
   .tile .pipIco { position: absolute; top: 8px; right: 84px; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border-radius: 50%; width: 30px; height: 30px; display: none; align-items: center; justify-content: center; font-size: 14px; opacity: .55; }
   .tile .pipIco:hover { opacity: 1; }
-  /* Lautstaerke-Slider: erscheint nur an der Kachel, deren Ton gerade aktiv ist. */
-  .tile .volCtl { position: absolute; bottom: 8px; right: 8px; display: none; align-items: center; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border-radius: 20px; padding: 7px 12px; }
+  /* Lautstaerke-Slider: erscheint nur an der Kachel, deren Ton gerade aktiv ist.
+     Unten ZENTRIERT statt rechts - unten rechts liegt die fixe Knopf-Leiste (#bar)
+     des Fensters, die den Slider auf der dortigen Kachel ueberlagerte. */
+  .tile .volCtl { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); display: none; align-items: center; background: rgba(10,12,18,.72); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); border-radius: 20px; padding: 7px 12px; }
   .tile.active-audio .volCtl { display: flex; }
   .tile .volCtl input { width: 92px; height: 4px; accent-color: #4ade80; cursor: pointer; }
   @media (max-width: 640px), (pointer: coarse) { .tile .volCtl input { width: 110px; height: 6px; } }
@@ -353,6 +355,10 @@ echo <<<'HTMLHEAD'
   <div class="big">Noch niemand im Grid…</div>
   <div>Wartet auf Mitglieder der Gruppe.</div>
 </div>
+<div id="pipNote" style="display:none; align-items:center; justify-content:center; height:100%; flex-direction:column; gap:8px; color:#777; text-align:center; padding:24px; cursor:pointer">
+  <div style="font-size:16px; color:#ccc">⧉ Das Grid läuft als Mini-Fenster</div>
+  <div>Hier klicken, um es zurückzuholen.</div>
+</div>
 <div id="soundHint"><span class="ico">🔊</span><span>Auf eine Kachel tippen, um deren Ton zu hören</span></div>
 <div id="bar">
   <!-- "Mit Lumora mitstreamen": oeffnet die installierte App per lumora://join/<CODE>
@@ -363,6 +369,9 @@ echo <<<'HTMLHEAD'
      title="Öffnet deine installierte Lumora-App und tritt der Gruppe bei – dein Stream startet automatisch mit. Noch kein Lumora? Kostenlos auf lumora.kara-webdesign.de" href="#">
     🎮 <span>Mit Lumora mitstreamen</span>
   </a>
+  <button class="ctl" id="gridPipBtn" style="display:none" title="Das GANZE Grid als schwebendes Mini-Fenster über allen Programmen – ideal, um nebenbei selbst zu zocken. Ton und Klick-Bedienung funktionieren auch im Mini-Fenster.">
+    ⧉ <span>Abdocken</span>
+  </button>
   <button class="ctl" id="layoutBtn" style="display:none" title="Ansicht umschalten: Raster (alle gleich groß) / Spotlight (einer groß, Rest als Leiste)">
     <svg viewBox="0 0 24 24" id="layoutIcon"><path d="M3 3h18v12H3V3zm2 2v8h14V5H5zM3 17h5v4H3v-4zm6.5 0h5v4h-5v-4zM16 17h5v4h-5v-4z"/></svg>
     <span id="layoutLabel">Spotlight</span>
@@ -386,6 +395,10 @@ echo <<<'HTMLJS'
   var tiles = new Map()
   var everInteracted = false
   var soundHintTimer = null, soundHintDone = false
+  // EINE feste Element-Referenz aufs Grid: bleibt auch gueltig, wenn das Grid per
+  // Document-PiP in ein anderes Fenster/Dokument verschoben wird (getElementById
+  // im Haupt-document faende es dann nicht mehr).
+  var gridEl = document.getElementById('grid')
   // Gemerkte Nutzer-Einstellungen (localStorage): Ton-Wahl je RAUM (kommt nach
   // Reload/Reconnect wieder), Lautstaerke + Ansicht geraeteweit.
   var AUDIO_KEY = 'lumoraGridAudio-' + ROOM
@@ -410,7 +423,7 @@ echo <<<'HTMLJS'
   // Spotlight-Ansicht anwenden: grosse Hauptkachel + Thumbnail-Leiste. Faellt
   // automatisch aufs Raster zurueck, solange weniger als 2 Kacheln da sind.
   function applySpotlight() {
-    var grid = document.getElementById('grid')
+    var grid = gridEl
     if (spotId && !tiles.has(spotId)) spotId = null
     if (!spotId || (tiles.get(spotId) && tiles.get(spotId).streaming === false)) {
       spotId = null
@@ -429,6 +442,54 @@ echo <<<'HTMLJS'
     spotlightOn = !spotlightOn
     try { localStorage.setItem('lumoraGridSpot', spotlightOn ? '1' : '0') } catch (e) {}
     applySpotlight()
+  }
+  // --- Das GANZE Grid als schwebendes Mini-Fenster (Document-PiP) --------------
+  // Anders als das Kachel-PiP (nur EIN Video) dockt dies das komplette Grid ab:
+  // alle Streams, Ton und Klick-Bedienung in einem Always-on-top-Fenster - man
+  // sieht die ganze Runde, waehrend man selbst zockt. Chromium-API (Chrome/Edge);
+  // der Knopf erscheint nur, wenn der Browser sie kann.
+  var pipWin = null
+  function setGridDocked(docked) {
+    document.getElementById('gridPipBtn').querySelector('span').textContent = docked ? 'Abdocken' : 'Zurückholen'
+    document.getElementById('pipNote').style.display = docked ? 'none' : 'flex'
+  }
+  document.getElementById('pipNote').onclick = function () { toggleGridPip() }
+  async function toggleGridPip() {
+    everInteracted = true
+    if (pipWin) { try { pipWin.close() } catch (e) {} ; return }   // pagehide holt das Grid zurueck
+    try {
+      pipWin = await documentPictureInPicture.requestWindow({ width: 520, height: 320 })
+    } catch (e) { pipWin = null; return }
+    // Styles des Hauptfensters ins PiP-Fenster kopieren (sonst nacktes Layout).
+    try {
+      var css = ''
+      for (var i = 0; i < document.styleSheets.length; i++) {
+        try { var rules = document.styleSheets[i].cssRules; for (var k = 0; k < rules.length; k++) css += rules[k].cssText + '\n' } catch (e2) {}
+      }
+      var st = pipWin.document.createElement('style')
+      st.textContent = css
+      pipWin.document.head.appendChild(st)
+      pipWin.document.body.style.margin = '0'
+      pipWin.document.body.style.background = '#0b0d12'
+      pipWin.document.body.style.height = '100vh'
+    } catch (e3) {}
+    pipWin.document.body.appendChild(gridEl)
+    // Videos pausieren beim Verschieben zwischen Dokumenten -> alle neu anwerfen
+    // (zusaetzlich heilt der Watchdog haengende von selbst).
+    tiles.forEach(function (t) { try { t.video.play().catch(function () {}) } catch (e4) {} })
+    setGridDocked(false)
+    // Fenster zu (X oder erneuter Klick): Grid an seinen Platz zurueckholen.
+    pipWin.addEventListener('pagehide', function () {
+      try { document.body.insertBefore(gridEl, document.getElementById('empty')) } catch (e5) {}
+      tiles.forEach(function (t) { try { t.video.play().catch(function () {}) } catch (e6) {} })
+      pipWin = null
+      setGridDocked(true)
+    })
+  }
+  if (typeof window.documentPictureInPicture !== 'undefined') {
+    var gpb = document.getElementById('gridPipBtn')
+    gpb.style.display = 'flex'
+    gpb.onclick = toggleGridPip
   }
   // Bildschirm wachhalten (Handy/Tablet): ohne Wake Lock geht das Display nach
   // ~30 s aus, waehrend man zuschaut. Re-Acquire bei Rueckkehr aus dem Hintergrund.
@@ -504,7 +565,7 @@ echo <<<'HTMLJS'
     // Klick: im Spotlight-Modus macht ein Klick aufs THUMBNAIL es zur Hauptkachel;
     // sonst (Raster bzw. Klick auf die grosse Kachel) schaltet er wie gehabt den Ton.
     el.onclick = function () {
-      var isThumb = document.getElementById('grid').classList.contains('spotlight') && !el.classList.contains('spot')
+      var isThumb = gridEl.classList.contains('spotlight') && !el.classList.contains('spot')
       if (isThumb) { everInteracted = true; setSpot(id) } else setActiveAudio(id)
     }
     el.ondblclick = function () { focusTile(id) }
@@ -562,7 +623,7 @@ echo <<<'HTMLJS'
       vol.addEventListener(ev, function (e) { e.stopPropagation() })
     })
     try { t.video.volume = savedVol } catch (e2) {}
-    document.getElementById('grid').appendChild(el)
+    gridEl.appendChild(el)   // gridEl statt getElementById: funktioniert auch im abgedockten PiP-Fenster
     return t
   }
   setInterval(function () {
