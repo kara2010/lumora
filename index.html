@@ -758,6 +758,54 @@
     </div>
   </div>
 
+  <!-- Gruppenbeitritt: Quelle + Qualitaet VOR dem automatischen Stream-Start
+       waehlen. Ohne diesen Dialog ging beim Beitritt (Grid-Button, LAN-Hinweis,
+       Code) ungefragt die Bildschirm-Freigabe live - das darf nicht passieren. -->
+  <div class="overlay" id="joinStreamOverlay" style="display:none">
+    <div class="dialog">
+      <h2>Gruppe beitreten &amp; mitstreamen</h2>
+      <div class="about-body">
+        <p class="about-text">Mit dem Beitritt geht dein eigener Stream für die Gruppe live. Wähle vorher, was übertragen wird:</p>
+        <div class="osd-field">
+          <span class="osd-field-label">Quelle</span>
+          <select id="joinSource" class="sort-select" style="flex:1"></select>
+          <button class="btn-browse" onclick="joinReloadSources()" title="Liste aktualisieren (z. B. nach Spielstart)">↻</button>
+        </div>
+        <div class="osd-field">
+          <span class="osd-field-label">Auflösung</span>
+          <select id="joinQuality" class="sort-select" style="flex:1">
+            <option value="auto">Nativ (volle Aufnahme)</option>
+            <option value="1440">1440p</option>
+            <option value="1080">1080p</option>
+            <option value="720">720p</option>
+          </select>
+        </div>
+        <div class="osd-field">
+          <span class="osd-field-label">Bildrate</span>
+          <select id="joinFps" class="sort-select" style="flex:1">
+            <option value="120">120 fps (nur bei 120-Hz-Displays)</option>
+            <option value="60">60 fps</option>
+            <option value="30">30 fps</option>
+          </select>
+        </div>
+        <div class="osd-field">
+          <span class="osd-field-label">Bitrate</span>
+          <select id="joinBitrate" class="sort-select" style="flex:1">
+            <option value="6000">6 Mbit – sparsam (Mobilfunk)</option>
+            <option value="8000">8 Mbit – Full HD (empfohlen)</option>
+            <option value="12000">12 Mbit – Full HD hoch</option>
+            <option value="16000">16 Mbit – 1440p</option>
+            <option value="25000">25 Mbit – 4K</option>
+          </select>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-browse" onclick="joinStreamCancel()">Abbrechen</button>
+        <button class="btn-primary" onclick="joinStreamConfirm()">Beitreten &amp; mitstreamen</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Erweiterte Cover-Suche -->
   <div class="overlay" id="coverSearchOverlay" style="display:none">
     <div class="dialog cover-dialog">
@@ -1049,6 +1097,9 @@ const I18N_EN = {
   'Startargumente': 'Launch arguments',
   'Als Administrator starten': 'Run as administrator',
   'Speichern': 'Save',
+  'Gruppe beitreten & mitstreamen': 'Join the group & stream along',
+  'Mit dem Beitritt geht dein eigener Stream für die Gruppe live. Wähle vorher, was übertragen wird:': 'Joining takes your own stream live for the group. Choose what to share first:',
+  'Beitreten & mitstreamen': 'Join & stream along',
   'Über Lumora': 'About Lumora',
   'kostenlos': 'free',
   'Artwork suchen': 'Find artwork',
@@ -2840,11 +2891,68 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (input) input.value = d.code
       groupJoinClick()
     })
+    // Beitritt startet den EIGENEN Stream automatisch mit (groupEnsureBroadcast in
+    // main.js). Laeuft noch kein Stream, MUSS der Nutzer vorher Quelle + Qualitaet
+    // bestaetigen - sonst geht ungefragt die Bildschirm-Freigabe live (egal ob der
+    // Beitritt vom Grid-Button, LAN-Hinweis oder manuellen Code kommt).
+    let _joinDialogResolve = null
+    function joinFillSources(selectedValue) {
+      const src = document.getElementById('joinSource')
+      src.innerHTML = ''
+      _sources.forEach((s) => {
+        const o = document.createElement('option')
+        o.value = s.value
+        o.textContent = (s.kind === 'window' ? '🪟 ' : '🖥 ') + s.label
+        src.appendChild(o)
+      })
+      if (selectedValue && _sources.some((s) => s.value === selectedValue)) src.value = selectedValue
+    }
+    async function joinReloadSources() {
+      const keep = document.getElementById('joinSource').value
+      await loadSources()   // aktualisiert _sources + haelt das Stream-Tab-Dropdown synchron
+      joinFillSources(keep)
+    }
+    async function ensureJoinStreamChoice() {
+      const cur = await ipcRenderer.invoke('broadcast-status').catch(() => null)
+      if (cur && cur.active) return true   // Stream laeuft schon - es startet nichts Neues
+      const st = await ipcRenderer.invoke('get-app-settings').catch(() => ({}))
+      if (!_sources.length) await loadSources().catch(() => {})
+      joinFillSources(st.streamSource)
+      document.getElementById('joinQuality').value = ['auto', '1440', '1080', '720'].includes(String(st.streamQuality)) ? String(st.streamQuality) : 'auto'
+      document.getElementById('joinFps').value = ['120', '60', '30'].includes(String(st.streamFps)) ? String(st.streamFps) : '60'
+      document.getElementById('joinBitrate').value = ['6000', '8000', '12000', '16000', '25000'].includes(String(st.streamUploadKbit)) ? String(st.streamUploadKbit) : '8000'
+      // Ein evtl. bereits offener Dialog (zweiter Deep-Link) wird als Abbruch
+      // aufgeloest, damit kein groupJoinClick-Aufruf ewig auf sein await wartet.
+      if (_joinDialogResolve) { const r = _joinDialogResolve; _joinDialogResolve = null; r(false) }
+      document.getElementById('joinStreamOverlay').style.display = 'flex'
+      return new Promise((res) => { _joinDialogResolve = res })
+    }
+    function joinStreamClose(result) {
+      document.getElementById('joinStreamOverlay').style.display = 'none'
+      const r = _joinDialogResolve
+      _joinDialogResolve = null
+      if (r) r(result)
+    }
+    function joinStreamCancel() { joinStreamClose(false) }
+    async function joinStreamConfirm() {
+      const source = document.getElementById('joinSource').value || ''
+      const quality = document.getElementById('joinQuality').value
+      const fps = parseInt(document.getElementById('joinFps').value, 10)
+      const kbit = parseInt(document.getElementById('joinBitrate').value, 10)
+      await ipcRenderer.invoke('set-app-settings', { streamSource: source, streamQuality: quality, streamFps: fps, streamUploadKbit: kbit }).catch(() => {})
+      // Stream-Tab-Kontrollen nachziehen, damit Dialog-Wahl und Tab nicht auseinanderlaufen.
+      document.getElementById('setStreamQuality').value = quality
+      document.getElementById('setStreamFps').value = String(fps)
+      document.getElementById('setStreamBitrate').value = String(kbit)
+      if (source) renderSourceList(source)
+      joinStreamClose(true)
+    }
     async function groupJoinClick() {
       if (_groupBusy) return
       const input = document.getElementById('groupJoinInput')
       const link = input.value.trim()
       if (!link) { streamToast(window.tr('ℹ️ Füge zuerst den Gruppen-Code oder -Link eines Freundes ein.')); input.focus(); return }
+      if (!(await ensureJoinStreamChoice())) return
       groupSetBusy(true, 'join')
       const st = await ipcRenderer.invoke('group-join', link).catch(() => null)
       await groupBusyMinTime()
