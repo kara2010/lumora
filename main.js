@@ -4828,6 +4828,43 @@ async function groupLeave() {
   osdDbg('[gruppe] groupLeave: fertig')
   return { active: false }
 }
+// --- Einzelstream-Teilen per URL statt IP-Adresse ----------------------------
+// Beim Streamstart registriert Lumora den Stream als Ein-Personen-"Schattenraum"
+// bei der Vermittlung (gruppe.php - dieselbe URL wie "Eigener Vermittlungs-
+// Server", damit KONFIGURIERBAR) und teilt eine schoene URL: <vermittlung>?s=<CODE>.
+// Die Seite leitet Desktop/Android auf den direkten IP-Player weiter (voller
+// Funktionsumfang inkl. Freeze-Frame) und liefert iPhone-Zuschauern das Grid
+// ueber HTTPS (Relay-Handshake) - der Einzelstream-Link funktioniert damit
+// erstmals auch auf iOS. Bonus: die oeffentliche IP steht nicht mehr im
+// geteilten Link (Privatsphaere), und der Link UEBERLEBT einen IP-Wechsel
+// (Heartbeat traegt neue Adressen ins Roster, der Code bleibt gleich).
+// Faellt die Vermittlung aus, bleibt der klassische IP-Link als Fallback.
+let bcWatchCode = null
+let bcWatchTimer = null
+async function bcRegisterWatchLink() {
+  if (bcWatchCode) return
+  if (!broadcastState.linkV4 && !broadcastState.linkV6) return   // nur LAN -> URL-Weg zwecklos
+  const c = await groupRelay('create', {}, {})
+  if (!c || !c.ok || !c.code) { bcLogStream('watch-link: Vermittlung nicht erreichbar -> IP-Link bleibt'); return }
+  const r = await groupRelay('update', { code: c.code }, groupSelfEntry())
+  if (!r || !r.ok) { bcLogStream('watch-link: Registrierung fehlgeschlagen -> IP-Link bleibt'); return }
+  if (!broadcastState.active) { groupRelay('leave', { code: c.code }, { id: groupMemberId() }); return }   // Stream inzwischen gestoppt
+  bcWatchCode = c.code
+  broadcastState.link = groupRelayUrl() + '?s=' + c.code
+  bcLogStream('watch-link: ' + broadcastState.link)
+  if (!bcWatchTimer) bcWatchTimer = setInterval(() => {
+    if (bcWatchCode) groupRelay('update', { code: bcWatchCode }, groupSelfEntry())
+  }, 20000)
+  bcPushState()
+}
+function bcUnregisterWatchLink() {
+  if (bcWatchTimer) { clearInterval(bcWatchTimer); bcWatchTimer = null }
+  if (bcWatchCode) {
+    const code = bcWatchCode
+    bcWatchCode = null
+    groupRelay('leave', { code }, { id: groupMemberId() })
+  }
+}
 // --- Zuschauer-Tracking: IP + Browser je WHEP-Session ----------------------
 // mediamtx kennt die IP (webrtcsessions-API); den Browser (User-Agent) sieht
 // nur unser Proxy. Beides zusammen ergibt die Zuschauer-Liste; Kick + IP-Sperre
@@ -5565,6 +5602,9 @@ async function startBroadcast() {
     broadcastState.linkV4 = v4Reachable ? ('http://' + pubIp + ':' + BROADCAST_PORT + '/') : ''
     broadcastState.linkV6 = (v6Ok && pubIp6) ? ('http://[' + pubIp6 + ']:' + BROADCAST_PORT + '/') : ''
     broadcastState.internet = !!(v4Reachable || (v6Ok && pubIp6))
+    // Schoene Teilen-URL statt IP-Link registrieren (async; bis dahin zeigt die
+    // UI kurz den IP-Link, bei Relay-Ausfall bleibt er als Fallback stehen).
+    if (broadcastState.internet) bcRegisterWatchLink().catch(() => {})
     broadcastState.ipv6Only = !!(!v4Reachable && v6Ok && pubIp6)   // Link laeuft ueber IPv6 (Zuschauer braucht IPv6)
     broadcastState.needsForward = !!(pubIp && !v4Reachable && !(v6Ok && pubIp6))
     broadcastState.forwardHint = broadcastState.needsForward ? routerUpnpHint() : null
@@ -5622,7 +5662,11 @@ async function bcIpWatchTick() {
     if (!forceV6 && ip) { try { await Promise.all([upnpMapPort(BROADCAST_PORT, 'TCP', 'Lumora Stream'), upnpMapPort(MTX_ICE_UDP, 'UDP', 'Lumora Stream Medien')]) } catch {} }
     if (ip) broadcastState.linkV4 = 'http://' + ip + ':' + BROADCAST_PORT + '/'
     if (ip6) broadcastState.linkV6 = 'http://[' + ip6 + ']:' + BROADCAST_PORT + '/'
-    broadcastState.link = broadcastState.linkV4 || broadcastState.linkV6 || broadcastState.link
+    // Watch-URL BEWAHREN: der geteilte Link haengt am Code, nicht an der IP -
+    // ein IP-Wechsel wird nur ins Schattenraum-Roster getragen, der Link bleibt.
+    broadcastState.link = bcWatchCode ? (groupRelayUrl() + '?s=' + bcWatchCode) : (broadcastState.linkV4 || broadcastState.linkV6 || broadcastState.link)
+    if (bcWatchCode) groupRelay('update', { code: bcWatchCode }, groupSelfEntry())
+    else if (broadcastState.internet) bcRegisterWatchLink().catch(() => {})   // Relay war beim Start evtl. nicht erreichbar
     bcPushState()
     if (bcGroup) { groupPushState(); groupTick().catch(() => {}) }   // neue Adressen ins Gruppen-Roster
   }
@@ -5663,6 +5707,7 @@ function bcTeardownServer() {
 async function stopBroadcast(fullTeardown) {
   const wasActive = broadcastState.active
   ffStopping = true
+  bcUnregisterWatchLink()   // Einzelstream-Teilen-URL abmelden (Stream endet - in JEDEM Zweig)
   const keepGroup = !!bcGroup && !fullTeardown
   // Beim echten Abbau die Gruppe sauber verlassen - ABWARTEN, damit ein sofortiger
   // Wiederbeitritt die Austrittsmeldung nicht ueberholen kann (Race, siehe groupLeave).

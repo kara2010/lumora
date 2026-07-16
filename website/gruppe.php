@@ -272,6 +272,60 @@ if ($a === 'cfg') {
   jout(array('ok' => false));
 }
 
+// ---- Einzelstream-Zuschauerlink (?s=<CODE>) ------------------------------------
+// Lumora registriert jeden Einzelstream als Ein-Personen-"Schattenraum" und teilt
+// DIESE URL statt der nackten IP (Privatsphaere + iPhone-tauglich + ueberlebt
+// IP-Wechsel). Die Seite entscheidet CLIENTSEITIG (robuster als Server-UA, iPads
+// melden sich als Macintosh): iOS -> Grid ueber HTTPS (Relay-Handshake, laeuft
+// nachweislich auf dem iPhone); alle anderen -> Weiterleitung auf den direkten
+// IP-Player des Streamers (voller Funktionsumfang, Video bleibt P2P).
+$s = isset($_GET['s']) ? strtoupper(trim($_GET['s'])) : '';
+if ($s !== '' && code_ok($s)) {
+  $j = room_load($s);
+  $t4 = null; $t6 = null; $found = false;
+  if ($j !== null) {
+    foreach ($j['members'] as $mid => $m) {
+      if ($mid === '_') continue;
+      if ((!empty($m['linkV4']) || !empty($m['linkV6'])) && (!isset($m['streaming']) || $m['streaming'] !== false)) {
+        $found = true;
+        $t4 = !empty($m['linkV4']) ? (string)$m['linkV4'] : null;
+        $t6 = !empty($m['linkV6']) ? (string)$m['linkV6'] : null;
+        break;
+      }
+    }
+  }
+  header('Content-Type: text/html; charset=utf-8');
+  header('Cache-Control: no-store');
+  if (!$found) {
+    // Stream (noch) nicht da: freundliche Offline-Seite, die alle 6 s selbst
+    // nachschaut - wer den Link kurz vor dem Streamstart oeffnet, landet automatisch.
+    echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="6"><title>Lumora Stream</title></head>'
+       . '<body style="background:#0b0d12;color:#e8e8ea;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">'
+       . '<div style="text-align:center"><div style="font-size:20px;font-weight:600" id="t1">Der Stream ist gerade offline</div>'
+       . '<div style="color:#888;margin-top:8px" id="t2">Diese Seite prüft alle paar Sekunden automatisch neu.</div></div>'
+       . '<script>if((navigator.language||"").toLowerCase().indexOf("de")!==0){document.documentElement.lang="en";document.getElementById("t1").textContent="The stream is currently offline";document.getElementById("t2").textContent="This page automatically re-checks every few seconds."}</script>'
+       . '</body></html>';
+    exit;
+  }
+  $T4 = json_encode($t4); $T6 = json_encode($t6); $SC = json_encode($s);
+  echo '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Lumora Stream</title></head>'
+     . '<body style="background:#0b0d12;color:#e8e8ea;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">'
+     . '<div style="text-align:center"><div style="font-size:16px;color:#888" id="msg">Stream wird geöffnet…</div>'
+     . '<div style="margin-top:14px"><a id="fallback" style="color:#7ab3ff" href="#"></a></div></div>'
+     . "<script>\n"
+     . "var v4 = $T4, v6 = $T6, code = $SC;\n"
+     . 'var de = (navigator.language||"").toLowerCase().indexOf("de")===0;'
+     . 'if(!de){document.documentElement.lang="en";document.getElementById("msg").textContent="Opening stream…"}'
+     . 'var ua = navigator.userAgent;'
+     . 'var ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && "ontouchend" in document);'
+     . 'var target = ios ? ("?code=" + encodeURIComponent(code)) : (v4 || v6);'
+     . 'var fb = document.getElementById("fallback");'
+     . 'fb.href = target; fb.textContent = de ? "Falls nichts passiert: hier tippen" : "If nothing happens: tap here";'
+     . 'location.replace(target);'
+     . "</script></body></html>";
+  exit;
+}
+
 // ---- Grid-Player (Browser-Zuschauer) ------------------------------------------
 if (!code_ok($code)) {
   header('Content-Type: text/html; charset=utf-8');
