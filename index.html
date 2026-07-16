@@ -48,9 +48,14 @@
         <span class="hdr-dot" id="hdrDot"></span>
         <span id="hdrLabel">HDR aus</span>
       </div>
-      <button class="btn-icon" onclick="minimize()">─</button>
-      <button class="btn-icon" id="btnMaximize" onclick="toggleMaximize()">□</button>
-      <button class="btn-icon btn-close" onclick="closeApp()">✕</button>
+      <!-- Fenster-Knoepfe docken BUENDIG an die obere rechte Ecke (Fitts's Law):
+           volle Titelleisten-Hoehe, kein Rand-Abstand - im maximierten Fenster ist
+           Schliessen damit wie bei nativen Apps mit "Maus in die Ecke" klickbar. -->
+      <div class="win-controls">
+        <button class="btn-icon" onclick="minimize()" title="Minimieren">─</button>
+        <button class="btn-icon" id="btnMaximize" onclick="toggleMaximize()" title="Maximieren">□</button>
+        <button class="btn-icon btn-close" onclick="closeApp()" title="Schließen">✕</button>
+      </div>
     </div>
   </div>
 
