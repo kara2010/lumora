@@ -40,7 +40,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://[Hosting-Domain]/updates/"
+        "url": "https://lumora-streaming.de/updates/"
       }
     ],
     "win": {
