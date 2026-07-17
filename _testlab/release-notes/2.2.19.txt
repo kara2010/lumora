@@ -1,0 +1,7 @@
+Neue Heimat & rundum sicherer:
+
+• Eigene Adresse lumora-streaming.de: Lumora ist umgezogen – Website, Update-Funktion und geteilte Stream-Links laufen jetzt über die eigene Domain. Bereits geteilte Links funktionieren weiterhin.
+• Sicherer in Gruppen: Trittst du am Grid einer Gruppe bei, fragt Lumora jetzt zuerst, was übertragen werden soll (Quelle, Auflösung, Bildrate, Bitrate) – dein Bildschirm geht nicht mehr ungefragt live.
+• Mehr Überblick beim Streamen: Der Stopp-Knopf zeigt die Laufzeit, nach dem Beenden erscheint eine kleine Statistik (Dauer, Zuschauer, übertragene Daten), und beim Start landet der Teilen-Link automatisch in der Zwischenablage.
+• Cover für alle Spiel-Editionen: Titel mit „Standard/Deluxe/…-Edition" im Namen bekommen wieder zuverlässig ihr Cover – vor allem bei Spielen aus dem Microsoft Store.
+• Feinschliff: „Freunde dazuholen" ist deutlicher hervorgehoben; der Beitritts-Dialog zeigt die Fenster mit App-Symbolen und hält die Liste automatisch aktuell.

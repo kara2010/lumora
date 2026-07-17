@@ -1,0 +1,7 @@
+A new home & safer all around:
+
+• Own address lumora-streaming.de: Lumora has moved – the website, the update feature and shared stream links now run on its own domain. Links you already shared keep working.
+• Safer in groups: when you join a group from the grid, Lumora now asks first what to share (source, resolution, frame rate, bitrate) – your screen no longer goes live unannounced.
+• More overview while streaming: the stop button shows the elapsed time, a small summary appears after you finish (duration, viewers, data transferred), and the share link is copied to your clipboard automatically on start.
+• Covers for every game edition: titles with "Standard/Deluxe/… Edition" in their name reliably get their cover again – especially games from the Microsoft Store.
+• Polish: "Invite friends" is more prominent; the join dialog shows windows with their app icons and keeps the list up to date automatically.

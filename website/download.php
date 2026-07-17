@@ -1,6 +1,6 @@
 <?php
 define('COUNTER_FILE', __DIR__ . '/data/count.txt');
-define('DOWNLOAD_FILE', __DIR__ . '/updates/Lumora Setup 2.2.18.exe');
+define('DOWNLOAD_FILE', __DIR__ . '/updates/Lumora Setup 2.2.19.exe');
 
 // ?count – nur Zählerstand zurückgeben (wird per JS beim Laden abgerufen)
 if (isset($_GET['count'])) {
