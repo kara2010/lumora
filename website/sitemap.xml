@@ -62,13 +62,25 @@
   </url>
   <url>
     <loc>https://lumora-streaming.de/impressum.html</loc>
-    <lastmod>2026-06-30</lastmod>
+    <lastmod>2026-07-17</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://lumora-streaming.de/datenschutz.html</loc>
-    <lastmod>2026-06-30</lastmod>
+    <lastmod>2026-07-17</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://lumora-streaming.de/en/impressum.html</loc>
+    <lastmod>2026-07-17</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://lumora-streaming.de/en/datenschutz.html</loc>
+    <lastmod>2026-07-17</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
