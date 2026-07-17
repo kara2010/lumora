@@ -4437,6 +4437,7 @@ function bcAdaptTick() {
 // Polling zu knapp ist.
 const bcSwitchSseClients = new Set()
 function bcBroadcastSwitch(kind) {
+  if (bcStats) bcStats.switches++   // Qualitaets-/Bitratenwechsel fuer die Abschluss-Statistik
   const line = 'data: ' + JSON.stringify({ kind }) + '\n\n'
   for (const res of bcSwitchSseClients) { try { res.write(line) } catch { bcSwitchSseClients.delete(res) } }
 }
@@ -5430,6 +5431,15 @@ function bcFastRestartFfmpeg(cfg) {
   } else startNew()
   return true
 }
+// Stream-Statistik fuer die einmalige Zusammenfassung nach dem Beenden:
+// laeuft nebenher im Viewer-Poll mit (Peak, verschiedene Zuschauer, encodierte
+// Datenmenge, Qualitaetswechsel). bytesReceived der mediamtx-API zaehlt je
+// Publisher-Session - ein FFmpeg-Neustart (Qualitaetswechsel) setzt sie zurueck,
+// darum Delta-Akkumulation statt Endwert.
+let bcStats = null
+function bcStatsStart() {
+  bcStats = { startedAt: Date.now(), peakViewers: 0, sessionIds: new Set(), bytesAcc: 0, bytesLast: 0, switches: 0 }
+}
 // Zuschauerzahl von der mediamtx-API pollen (Anzahl WHEP-Reader auf dem Pfad).
 function bcStartViewerPoll() {
   if (bcViewerPoll) return
@@ -5439,7 +5449,15 @@ function bcStartViewerPoll() {
     // eigene lokale Vorschau (127.0.0.1) nicht als Zuschauer mitgezaehlt wird.
     upnpHttpGet('http://127.0.0.1:' + MTX_API_PORT + '/v3/webrtcsessions/list').then((r) => {
       let n = 0
-      try { const j = JSON.parse(r.body); n = (Array.isArray(j.items) ? j.items : []).filter((s) => s.path === MTX_PATH && s.state === 'read' && !bcIsPreviewSession(s)).length } catch { return }
+      try {
+        const j = JSON.parse(r.body)
+        const readers = (Array.isArray(j.items) ? j.items : []).filter((s) => s.path === MTX_PATH && s.state === 'read' && !bcIsPreviewSession(s))
+        n = readers.length
+        if (bcStats) {
+          if (n > bcStats.peakViewers) bcStats.peakViewers = n
+          for (const s of readers) if (s.id) bcStats.sessionIds.add(s.id)
+        }
+      } catch { return }
       if (n !== broadcastState.viewers) {
         const prev = broadcastState.viewers
         broadcastState.viewers = n
@@ -5450,6 +5468,14 @@ function bcStartViewerPoll() {
         bcPushState()
         if (n > prev) sendToUi('viewer-joined', n)
       }
+    }).catch(() => {})
+    // Encodierte Datenmenge (Publisher-Bytes) fuer die Abschluss-Statistik.
+    if (bcStats) upnpHttpGet('http://127.0.0.1:' + MTX_API_PORT + '/v3/paths/get/' + MTX_PATH).then((r) => {
+      try {
+        const cur = Number(JSON.parse(r.body).bytesReceived) || 0
+        if (cur < bcStats.bytesLast) bcStats.bytesAcc += bcStats.bytesLast   // Publisher-Neustart -> Zaehler resettet
+        bcStats.bytesLast = cur
+      } catch {}
     }).catch(() => {})
   }, 2000)
 }
@@ -5478,7 +5504,8 @@ async function startBroadcast() {
   bcAdaptUpAt = 0; bcAdaptUpHold = 0
   bcQosMap.clear(); bcQosLogLast.clear()
   bcForwardNotified = false
-  broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, linkV4: prevV4, linkV6: prevV6, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder }
+  broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, linkV4: prevV4, linkV6: prevV6, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder, since: Date.now() }
+  bcStatsStart()   // Abschluss-Statistik: Zaehler fuer diese Stream-Sitzung frisch
   bcPushState()   // LAN-Link sofort anzeigen
   bcPinholeIds = []
   // Test-Schalter: IPv4-Weg bewusst auslassen, damit sich der IPv6-Direktweg
@@ -5715,6 +5742,26 @@ function bcTeardownServer() {
 // den Einstiegspunkt der ganzen Gruppe mit um (geteilter Link sofort tot).
 async function stopBroadcast(fullTeardown) {
   const wasActive = broadcastState.active
+  // Einmalige Abschluss-Statistik an die UI - nur fuer echte Sitzungen (>=10s),
+  // Fehlstarts und Sofort-Stopps bekommen kein Popup. VOR dem Abbau gebaut,
+  // solange die Zaehler noch da sind.
+  if (wasActive && bcStats && Date.now() - bcStats.startedAt >= 10000) {
+    const durMs = Date.now() - bcStats.startedAt
+    const bytes = bcStats.bytesAcc + bcStats.bytesLast
+    sendToUi('stream-summary', {
+      durMs,
+      peakViewers: bcStats.peakViewers,
+      totalViewers: bcStats.sessionIds.size,
+      bytes,
+      avgMbit: durMs > 1000 ? Math.round((bytes * 8 / (durMs / 1000)) / 1e5) / 10 : 0,
+      switches: bcStats.switches,
+      // Rohwerte - der Renderer formatiert und uebersetzt (window.tr)
+      quality: appSettings.streamQuality || 'auto',
+      fps: appSettings.streamFps || 60,
+      kbit: appSettings.streamUploadKbit || 8000,
+    })
+  }
+  bcStats = null
   ffStopping = true
   bcUnregisterWatchLink()   // Einzelstream-Teilen-URL abmelden (Stream endet - in JEDEM Zweig)
   const keepGroup = !!bcGroup && !fullTeardown
