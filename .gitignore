@@ -46,3 +46,5 @@ auto.crt
 website/lib-*.php
 _testlab/deploy.local.json
 _testlab/deploy-plan*.json
+# signtool aus dem Windows-SDK-BuildTools-NuGet (~21 MB) - lokales Werkzeug, nicht ins Repo
+_testlab/tools/

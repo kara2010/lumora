@@ -1,6 +1,6 @@
 {
   "name": "lumora",
-  "version": "2.2.19",
+  "version": "2.2.20",
   "license": "AGPL-3.0-only",
   "author": "Karsten Radermacher",
   "description": "Lumora – Game Launcher mit automatischem HDR",
@@ -45,7 +45,11 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "icon.ico"
+      "icon": "icon.ico",
+      "signtoolOptions": {
+        "sign": "./sign.js",
+        "signingHashAlgorithms": ["sha256"]
+      }
     },
     "nsis": {
       "oneClick": false,
