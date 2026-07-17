@@ -2377,7 +2377,11 @@ async function resolveSteamAppId(gameName) {
   // mehr (frühere Logik, s. closeNameMatch-Kommentar).
   const exact = items.find(i => normName(i.name) === target)
   if (exact) return exact.id
-  const close = items.find(i => closeNameMatch(i.name, cleaned))
+  // closeNameMatch braucht den Store-Titel OHNE Editions-Suffix - Steam listet
+  // viele Spiele als "<Name> Deluxe/Complete/... Edition", das Laengenverhaeltnis
+  // (0.7-Schwelle) faellt sonst durch, obwohl es dasselbe Spiel ist (Befund
+  // 2026-07-17: identischer Bug bei MS Store, s. fetchCoverMSStore).
+  const close = items.find(i => closeNameMatch(cleanGameName(i.name), cleaned))
   return close ? close.id : null
 }
 
@@ -2512,7 +2516,12 @@ async function fetchCoverMSStore(gameName) {
   // Frueher blind SearchResults[0] - der MS-Store-Suche fehlte JEDER Namensabgleich,
   // das war die wahrscheinlichste tatsaechliche Quelle des "Blödsinn"-Cover-Bugs (Steam
   // hat oben schon einen Match-Check; MS Store lief bisher als Fallback komplett ungeprueft).
-  const result = results.find(r => closeNameMatch(r.Title, cleaned))
+  // r.Title muss VOR dem Vergleich ebenso bereinigt werden wie "cleaned" - der MS
+  // Store listet praktisch jedes Spiel mit Editions-Suffix ("... Standard Edition"),
+  // das liess die 0.7-Laengenverhaeltnis-Schwelle sonst durchfallen (Befund 2026-07-17,
+  // Live-Test: "Forza Horizon 5" vs. "Forza Horizon 5 Standard Edition" -> 0.464, kein
+  // Match) - erklaert reale Faelle von "kein Cover" bei MS-Store-exklusiven Spielen.
+  const result = results.find(r => closeNameMatch(cleanGameName(r.Title), cleaned))
   if (!result) return null
   const images = result.Images || []
   const img = images.find(i => i.ImageType === 'Poster') || images.find(i => i.ImageType === 'BoxArt') || images[0]
@@ -2574,7 +2583,9 @@ async function sgdbArtwork(term, kind, key) {
   // beliebige "Treffer" in die Auswahlliste (gleiche Ursache wie beim Auto-Cover-Bug,
   // s. closeNameMatch-Kommentar). FILTER statt Einzelauswahl: mehrere plausible
   // Kandidaten bleiben stehen, nur offensichtlich Irrelevantes faellt raus.
-  const games = gamesRaw.filter(g => closeNameMatch(g.name, cleaned))
+  // g.name muss wie unten bei Steam/MS Store bereinigt werden, sonst faellt ein
+  // Editions-Titel ("... Deluxe Edition") durch den Laengenvergleich (Befund 2026-07-17).
+  const games = gamesRaw.filter(g => closeNameMatch(cleanGameName(g.name), cleaned))
   if (!games.length) return []
   const out = []
   for (const g of games.slice(0, 2)) {            // bis zu 2 passende Spiele
@@ -2603,7 +2614,8 @@ async function searchSteamArt(term, wantHero) {
   // Wie bei sgdbArtwork: Steams eigene storesearch-API liefert bei einem dort nicht
   // gelisteten Titel trotzdem IRGENDWELCHE Fuzzy-Treffer - ungefiltert landeten die
   // als Auswahlkacheln in der manuellen Suche. Filtern statt blind uebernehmen.
-  const steam = steamRaw.filter(c => closeNameMatch(c.name, cleaned))
+  // Editions-Suffix bereinigen (Befund 2026-07-17, s. resolveSteamAppId).
+  const steam = steamRaw.filter(c => closeNameMatch(cleanGameName(c.name), cleaned))
   const top = steam.slice(0, 12)
   const assets = top.length ? await steamGetItems(top.map(c => c.appId)) : {}
   const steamArt = await Promise.all(top.map(async c => {
@@ -2632,7 +2644,8 @@ async function searchMsArt(term) {
   const msRaw = await msStoreCandidates(term)
   // Gleicher Filter wie bei Steam/SGDB - MS-Store-Suche liefert sonst ebenso
   // ungefragt themenfremde Treffer in die manuelle Auswahlliste.
-  const ms = msRaw.filter(c => closeNameMatch(c.name, cleaned))
+  // Editions-Suffix bereinigen (Befund 2026-07-17, s. fetchCoverMSStore).
+  const ms = msRaw.filter(c => closeNameMatch(cleanGameName(c.name), cleaned))
   const msCovers = await Promise.all(ms.slice(0, 4).map(async c => {
     try {
       const cover = await fetchMsImage(c.imageUrl)
