@@ -1,7 +1,26 @@
-# lumora.kara-webdesign.de/
+# Web-Root von lumora-streaming.de UND lumora.kara-webdesign.de (gleiches Verzeichnis)
 
 # Verzeichnis-Listing (autoindex) deaktivieren – kein Auflisten von Dateien/Ordnern
 Options -Indexes
+
+# ==== Domain-Umzug (2026-07-17): lumora-streaming.de ist primär =====
+# Website-Aufrufe der alten Subdomain werden dauerhaft (301) zur neuen Domain
+# umgeleitet. AUSGENOMMEN sind alle Pfade, die in installierten Clients fest
+# eingebettet sind (Update-Feed, Vermittlung, Domain-Player, Download, Deploy):
+# ein Redirect würde deren POST-Aufrufe brechen. Für diese Pfade bleibt die
+# alte Domain dauerhaft die stille Brücke – NIEMALS abschalten!
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP_HOST} ^lumora\.kara-webdesign\.de$ [NC]
+  RewriteCond %{REQUEST_URI} !^/updates/ [NC]
+  RewriteCond %{REQUEST_URI} !^/gruppe\.php [NC]
+  RewriteCond %{REQUEST_URI} !^/download\.php [NC]
+  RewriteCond %{REQUEST_URI} !^/player\.html [NC]
+  RewriteCond %{REQUEST_URI} !^/sync- [NC]
+  RewriteCond %{REQUEST_URI} !^/lib- [NC]
+  RewriteCond %{REQUEST_URI} !^/data/ [NC]
+  RewriteRule ^(.*)$ https://lumora-streaming.de/$1 [R=301,L]
+</IfModule>
 
 # Beim Aufruf des Ordners immer index.html ausliefern
 DirectoryIndex index.html

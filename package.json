@@ -40,7 +40,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://lumora.kara-webdesign.de/updates/"
+        "url": "https://lumora-streaming.de/updates/"
       }
     ],
     "win": {

@@ -4554,7 +4554,10 @@ function bcStartServer(port) {
 // der Installation bei (resources/gruppe.php) - jeder kann es auf den eigenen
 // Webspace legen und bleibt damit unabhaengig.
 const GROUP_HEARTBEAT_MS = 8000     // Intervall fuer den Anwesenheits-Heartbeat
-const GROUP_RELAY_DEFAULT = 'https://lumora.kara-webdesign.de/gruppe.php'
+// Seit dem Domain-Umzug (2026-07-17) ist lumora-streaming.de primaer; die alte
+// Subdomain bleibt dauerhaft als Bruecke fuer Bestandsclients (gleiches
+// Server-Verzeichnis), neue Builds betten die neue Domain ein.
+const GROUP_RELAY_DEFAULT = 'https://lumora-streaming.de/gruppe.php'
 let bcGroup = null                  // null = nicht in einer Gruppe, sonst { code, members: [], relayFails }
 let bcGroupTimer = null
 
@@ -5965,6 +5968,12 @@ function fuSha512(file) {
   })
 }
 async function fuCheck() {
+  // ENDGUELTIG DEAKTIVIERT (Nutzer-Entscheidung 2026-07-15): der Datei-Update-
+  // Weg hat einmal saemtliche installierten Clients zerstoert - Updates laufen
+  // AUSSCHLIESSLICH als voller Installer ueber electron-updater (latest.yml).
+  // Der Code darunter bleibt nur als Referenz und wird nie mehr erreicht;
+  // das Server-Manifest (updates/app/manifest.json) ist ein 0.0.0-Tombstone.
+  return false
   if (!app.isPackaged) return false
   let mf
   try { mf = JSON.parse(await fuHttpsGet(FU_MANIFEST_URL)) } catch (e) { osdDbg('[update] Manifest nicht ladbar: ' + (e && e.message)); return false }

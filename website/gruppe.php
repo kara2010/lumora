@@ -501,7 +501,7 @@ echo <<<'HTMLHEAD'
        (Lumora gibt es nur fuer Windows); ohne installierte App passiert beim Klick
        nichts - der Tooltip nennt die Download-Adresse. -->
   <a class="ctl" id="lumoraJoinBtn" style="display:none; text-decoration:none"
-     title="Öffnet deine installierte Lumora-App und tritt der Gruppe bei – dein Stream startet automatisch mit. Noch kein Lumora? Kostenlos auf lumora.kara-webdesign.de" href="#">
+     title="Öffnet deine installierte Lumora-App und tritt der Gruppe bei – dein Stream startet automatisch mit. Noch kein Lumora? Kostenlos auf lumora-streaming.de" href="#">
     🎮 <span>Mit Lumora mitstreamen</span>
   </a>
   <button class="ctl" id="gridPipBtn" style="display:none" title="Das GANZE Grid als schwebendes Mini-Fenster über allen Programmen – ideal, um nebenbei selbst zu zocken. Ton und Klick-Bedienung funktionieren auch im Mini-Fenster.">
@@ -545,7 +545,7 @@ echo <<<'HTMLJS'
     pipBig: '⧉ Das Grid läuft als Mini-Fenster', pipSub: 'Hier klicken, um es zurückzuholen.',
     soundHint: 'Auf eine Kachel tippen, um deren Ton zu hören',
     join: 'Mit Lumora mitstreamen',
-    joinTitle: 'Öffnet deine installierte Lumora-App und tritt der Gruppe bei – dein Stream startet automatisch mit. Noch kein Lumora? Kostenlos auf lumora.kara-webdesign.de',
+    joinTitle: 'Öffnet deine installierte Lumora-App und tritt der Gruppe bei – dein Stream startet automatisch mit. Noch kein Lumora? Kostenlos auf lumora-streaming.de',
     dockTitle: 'Das GANZE Grid als schwebendes Mini-Fenster über allen Programmen – ideal, um nebenbei selbst zu zocken. Ton und Klick-Bedienung funktionieren auch im Mini-Fenster.',
     layoutTitle: 'Ansicht umschalten: Raster (alle gleich groß) / Spotlight (einer groß, Rest als Leiste)',
     fsTitle: 'Vollbild (F) – Doppelklick auf eine Kachel für Einzelbild',
@@ -559,7 +559,7 @@ echo <<<'HTMLJS'
     pipBig: '⧉ The grid is running as a mini window', pipSub: 'Click here to bring it back.',
     soundHint: 'Tap a tile to hear its sound',
     join: 'Join with Lumora',
-    joinTitle: 'Opens your installed Lumora app and joins the group – your own stream starts along automatically. No Lumora yet? Free at lumora.kara-webdesign.de',
+    joinTitle: 'Opens your installed Lumora app and joins the group – your own stream starts along automatically. No Lumora yet? Free at lumora-streaming.de',
     dockTitle: 'Pops the WHOLE grid out as a floating always-on-top mini window – perfect for gaming on the side. Sound and click controls keep working in the mini window.',
     layoutTitle: 'Switch the view: grid (all equal) / spotlight (one large, the rest as a strip)',
     fsTitle: 'Fullscreen (F) – double-click a tile for single view',

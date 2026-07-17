@@ -5,7 +5,7 @@ Game-Streaming und Gaming-OSD. Lumora findet installierte Spiele aus mehreren
 Stores, zeigt sie in einer einheitlichen, schön kuratierten Bibliothek und
 schaltet beim Spielstart automatisch HDR ein.
 
-Download & Infos: <https://lumora.kara-webdesign.de/>
+Download & Infos: <https://lumora-streaming.de/>
 
 ## Features
 
@@ -52,7 +52,7 @@ im Repo – Bezugsquellen stehen in der [`.gitignore`](.gitignore).
 ## Website
 
 Der Ordner [`website/`](website/) enthält die Downloadseite
-(lumora.kara-webdesign.de/).
+(lumora-streaming.de/).
 
 ## Autor
 
