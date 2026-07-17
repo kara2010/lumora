@@ -48,3 +48,9 @@ _testlab/deploy.local.json
 _testlab/deploy-plan*.json
 # signtool aus dem Windows-SDK-BuildTools-NuGet (~21 MB) - lokales Werkzeug, nicht ins Repo
 _testlab/tools/
+
+# Rohe Screenshot-Originale (nur lokal, optimierte .webp/.jpg sind versioniert)
+/1.png
+/2.png
+website/stream-neu.png
+website/stream-stats.png
