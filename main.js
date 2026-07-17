@@ -1,5 +1,5 @@
 const _procT0 = Date.now()   // Start-Timing-Basis: ab main.js-Load (vor allen requires)
-const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage, globalShortcut, desktopCapturer, session, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, screen, Tray, Menu, nativeImage, globalShortcut, desktopCapturer, session, Notification, clipboard } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -4870,10 +4870,32 @@ function streamShareUrl() { return groupRelayUrl().replace(/gruppe\.php$/, 'stre
 // stream.php-Link (Vermittlungs-Registrierung) - darum erst kopieren, wenn
 // bcRegisterWatchLink() seinen Versuch abgeschlossen hat (Erfolg ODER
 // Fehlschlag/kein Internet), sonst laesst sich sonst genau die rohe IP kopieren.
-let bcCopyLinkPending = false
+let bcCopyLinkPending = false   // false | 'ui' (Button-Klick) | 'hotkey'
 function bcMaybeCopyLink() {
   if (!bcCopyLinkPending) return
+  const mode = bcCopyLinkPending
   bcCopyLinkPending = false
+  if (mode === 'hotkey') {
+    // Hotkey-Start: Der Nutzer ist im Spiel, die Lumora-UI ist unsichtbar ->
+    // direkt im Main-Prozess kopieren (fokus-unabhaengig) + Windows-Toast als
+    // Rueckmeldung. VOLLAUTOMATISCHES Posten in den Discord-Channel ist bewusst
+    // NICHT drin (recherchiert 2026-07-17): Nachrichten im Namen des Nutzer-
+    // Accounts zu senden ist ein Self-Bot und laut Discord-ToS verboten
+    // (Kontosperrung); die lokale RPC-API ist nur fuer von Discord freigegebene
+    // Apps UND hat ohnehin keinen Sende-Befehl. Strg+V ist der regelkonforme Rest.
+    try { clipboard.writeText(broadcastState.link || '') } catch {}
+    try {
+      if (Notification.isSupported()) {
+        const de = mainLang() === 'de'
+        new Notification({
+          title: de ? '📋 Stream-Link kopiert' : '📋 Stream link copied',
+          body: de ? 'Einfach im Chat einfügen (Strg+V) – z. B. in deinem Discord-Channel.' : 'Just paste it into your chat (Ctrl+V) – e.g. your Discord channel.',
+          silent: true,   // der Hotkey spielt schon einen eigenen Bestaetigungston
+        }).show()
+      }
+    } catch {}
+    return
+  }
   sendToUi('copy-stream-link', broadcastState.link)
 }
 async function bcRegisterWatchLink() {
@@ -5510,7 +5532,7 @@ function bcStartViewerPoll() {
 }
 async function startBroadcast(opts) {
   if (broadcastState.active) return broadcastState
-  bcCopyLinkPending = !!(opts && opts.copyLink)
+  bcCopyLinkPending = (opts && opts.copyLink) ? (opts.copyLink === 'hotkey' ? 'hotkey' : 'ui') : false
   ffStopping = false
   const enc = await bcDetectEncoder()
   if (!enc.encoder) {
@@ -5843,7 +5865,9 @@ function toggleBroadcastHotkey() {
       saveAppSettings()
       sendToUi('stream-source-changed', {})   // Renderer aktualisiert die Quellen-Anzeige
     }
-    startBroadcast()
+    // 'hotkey': Link nach Fertigstellung in die Zwischenablage + Windows-Toast
+    // (s. bcMaybeCopyLink) - man ist im Spiel und sieht die Lumora-UI nicht.
+    startBroadcast({ copyLink: 'hotkey' })
   }
   // Akustische Rueckmeldung – man drueckt den Hotkey im Spiel und sieht die UI nicht.
   sendToUi('stream-toggle-sound', { on: !wasActive })
