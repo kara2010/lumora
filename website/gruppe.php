@@ -146,30 +146,11 @@ $code = isset($_GET['code']) ? strtoupper(trim($_GET['code'])) : '';
 
 // ---- API ---------------------------------------------------------------------
 if ($a === 'create') {
-  // owner = geheimes Token der App-Instanz (hex, von der App erzeugt). Wird beim
-  // Anlegen im Raum gespeichert; solange der Raum lebt, kann NUR derselbe owner
-  // den Code erneut beanspruchen (Schutz gegen Uebernahme, z.B. App-Neustart
-  // waehrend ein Fremder den Code abgreifen will).
-  $owner = isset($_GET['owner']) ? substr(preg_replace('/[^a-f0-9]/', '', strtolower($_GET['owner'])), 0, 64) : '';
-  // Wunsch-Code (FESTER Stream-Link): Die App darf ihren einmal vergebenen Code
-  // bei jedem Streamstart wiederverwenden -> der geteilte Link bleibt dauerhaft
-  // gleich (einmal im Discord-Kanal anpinnen, Freunde kommen von selbst rein).
-  // Frei ist ein Code, wenn kein Raum existiert ODER der Raum verwaist ist
-  // (alle Mitglieder ueber TTL) ODER der owner uebereinstimmt.
-  $want = isset($_GET['code']) ? strtoupper(trim($_GET['code'])) : '';
-  if ($want !== '' && code_ok($want)) {
-    $j = room_load($want);
-    $free = ($j === null) || (count($j['members']) === 0)
-      || ($owner !== '' && !empty($j['owner']) && hash_equals((string)$j['owner'], $owner));
-    if (!$free) jout(array('ok' => false, 'error' => 'taken'));
-    room_save($want, array('code' => $want, 'created' => time(), 'owner' => ($owner !== '' ? $owner : null), 'members' => array('_' => array('id' => '_', 'lastSeen' => time(), 'joinedAt' => time()))));
-    jout(array('ok' => true, 'code' => $want));
-  }
   for ($i = 0; $i < 50; $i++) {
     $c = '';
     for ($k = 0; $k < 6; $k++) $c .= CODE_CHARS[random_int(0, strlen(CODE_CHARS) - 1)];
     if (!is_file(room_path($c))) {
-      room_save($c, array('code' => $c, 'created' => time(), 'owner' => ($owner !== '' ? $owner : null), 'members' => array('_' => array('id' => '_', 'lastSeen' => time(), 'joinedAt' => time()))));
+      room_save($c, array('code' => $c, 'created' => time(), 'members' => array('_' => array('id' => '_', 'lastSeen' => time(), 'joinedAt' => time()))));
       // Platzhalter-Mitglied haelt den Raum bis zum ersten echten update am Leben.
       jout(array('ok' => true, 'code' => $c));
     }
