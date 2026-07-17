@@ -4851,8 +4851,24 @@ let bcWatchTimer = null
 // Dateiname analog ersetzt; endet die konfigurierte URL nicht auf gruppe.php,
 // bleibt sie unveraendert (der ?s=-Zweig liegt dann dort).
 function streamShareUrl() { return groupRelayUrl().replace(/gruppe\.php$/, 'stream.php') }
+// Merkt einen Wunsch "Link automatisch kopieren, SOBALD er feststeht" (nur beim
+// manuellen Start-Klick gesetzt, s. ipcMain 'start-broadcast'). Der Link
+// durchlaeuft zwei Stufen - sofort der nackte IP-Link, dann ASYNC der schoene
+// stream.php-Link (Vermittlungs-Registrierung) - darum erst kopieren, wenn
+// bcRegisterWatchLink() seinen Versuch abgeschlossen hat (Erfolg ODER
+// Fehlschlag/kein Internet), sonst laesst sich sonst genau die rohe IP kopieren.
+let bcCopyLinkPending = false
+function bcMaybeCopyLink() {
+  if (!bcCopyLinkPending) return
+  bcCopyLinkPending = false
+  sendToUi('copy-stream-link', broadcastState.link)
+}
 async function bcRegisterWatchLink() {
-  if (bcWatchCode) return
+  // Bereits registriert (z.B. Gruppe pausiert -> Stream neu gestartet): die
+  // Router-Phase hat broadcastState.link zwischenzeitlich auf den IP-Link
+  // zurueckgesetzt (s. startBroadcast) - hier korrigieren + der UI mitteilen,
+  // sonst bliebe faelschlich dauerhaft der IP-Link sichtbar.
+  if (bcWatchCode) { broadcastState.link = streamShareUrl() + '?s=' + bcWatchCode; bcPushState(); return }
   if (!broadcastState.linkV4 && !broadcastState.linkV6) return   // nur LAN -> URL-Weg zwecklos
   const c = await groupRelay('create', {}, {})
   if (!c || !c.ok || !c.code) { bcLogStream('watch-link: Vermittlung nicht erreichbar -> IP-Link bleibt'); return }
@@ -5479,11 +5495,13 @@ function bcStartViewerPoll() {
     }).catch(() => {})
   }, 2000)
 }
-async function startBroadcast() {
+async function startBroadcast(opts) {
   if (broadcastState.active) return broadcastState
+  bcCopyLinkPending = !!(opts && opts.copyLink)
   ffStopping = false
   const enc = await bcDetectEncoder()
   if (!enc.encoder) {
+    bcCopyLinkPending = false   // Start fehlgeschlagen - nichts zu kopieren
     // Kein Hardware-Video-Encoder (NVENC/AMF/QSV) verfuegbar. Der LGPL-FFmpeg-Build
     // hat bewusst keinen Software-Encoder (libx264 = GPL) -> hier kein Streaming.
     // Klarer Hinweis statt einer FFmpeg-"Unknown encoder"-Fehlerschleife.
@@ -5640,7 +5658,11 @@ async function startBroadcast() {
     broadcastState.internet = !!(v4Reachable || (v6Ok && pubIp6))
     // Schoene Teilen-URL statt IP-Link registrieren (async; bis dahin zeigt die
     // UI kurz den IP-Link, bei Relay-Ausfall bleibt er als Fallback stehen).
-    if (broadcastState.internet) bcRegisterWatchLink().catch(() => {})
+    // .finally(bcMaybeCopyLink): ein evtl. gewuenschtes Auto-Kopieren wartet auf
+    // GENAU diesen Abschluss (Erfolg oder Fehlschlag), statt den Zwischenstand
+    // (nackte IP) zu erwischen. Kein Internet -> Link ist sofort final.
+    if (broadcastState.internet) bcRegisterWatchLink().catch(() => {}).finally(bcMaybeCopyLink)
+    else bcMaybeCopyLink()
     broadcastState.ipv6Only = !!(!v4Reachable && v6Ok && pubIp6)   // Link laeuft ueber IPv6 (Zuschauer braucht IPv6)
     broadcastState.needsForward = !!(pubIp && !v4Reachable && !(v6Ok && pubIp6))
     broadcastState.forwardHint = broadcastState.needsForward ? routerUpnpHint() : null
@@ -5762,6 +5784,7 @@ async function stopBroadcast(fullTeardown) {
     })
   }
   bcStats = null
+  bcCopyLinkPending = false   // Sicherheitsnetz: Stopp mitten in der Router-Phase soll nichts mehr kopieren
   ffStopping = true
   bcUnregisterWatchLink()   // Einzelstream-Teilen-URL abmelden (Stream endet - in JEDEM Zweig)
   const keepGroup = !!bcGroup && !fullTeardown
@@ -5839,7 +5862,7 @@ ipcMain.handle('preview-whep-stop', (e, session) => {
     r.on('error', () => {}); r.end()
   } catch {}
 })
-ipcMain.handle('start-broadcast', () => startBroadcast())
+ipcMain.handle('start-broadcast', (e, opts) => startBroadcast(opts))
 ipcMain.handle('stop-broadcast', async () => { await stopBroadcast(); return broadcastState })
 ipcMain.handle('broadcast-status', () => broadcastState)
 ipcMain.handle('group-start', () => { osdDbg('[gruppe] IPC group-start empfangen'); const r = groupStart(); osdDbg('[gruppe] IPC group-start liefert zurueck'); return r })

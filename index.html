@@ -2618,13 +2618,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // --- Live-Stream (WebRTC-Broadcast) ---------------------------------------
     let _streamOpening = false
     let _lastStreamState = null   // letzter Status (fuer die Detailzeile der Gruppen-Einrichtung: IPv4/IPv6/lokal)
-    // Nach einem manuellen Start-Klick den Teilen-Link automatisch kopieren,
-    // SOBALD er bereitsteht (die Router-Pruefung braucht ~2 s - beim Klick selbst
-    // gaebe es nur den LAN-Link). Timestamp statt Flag: nach 30 s verfaellt der
-    // Wunsch, damit ein haengender Router-Check nicht irgendwann ueberraschend
-    // die Zwischenablage ueberschreibt. Nur der Button-Klick loest das aus -
-    // beim Gruppenbeitritt wird bereits der Einladungslink kopiert.
-    let _copyLinkOnReady = 0
     // Laufzeit-Anzeige am Stopp-Knopf: " · h:mm:ss" neben "Stream stoppen".
     let _streamTimerInt = null, _streamSince = 0
     function fmtDur(ms) {
@@ -2681,14 +2674,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         const linkEl = document.getElementById('streamLink')
         if (st.opening) { linkEl.value = ''; linkEl.placeholder = window.tr('⏳ Öffentlicher Link wird vorbereitet…') }
         else { linkEl.value = st.link || ''; linkEl.placeholder = '' }
-        if (_copyLinkOnReady && !st.opening && st.link) {
-          if (Date.now() - _copyLinkOnReady < 30000) {
-            navigator.clipboard.writeText(st.link)
-              .then(() => streamToast(window.tr('📋 Stream-Link kopiert – einfach an Freunde schicken.')))
-              .catch(() => {})
-          }
-          _copyLinkOnReady = 0
-        }
         let net = ''
         if (st.opening) net = window.tr('  ·  ⏳ Router wird geprüft…')
         else if (st.ipv6Only) net = window.tr('  ·  🌐 über IPv6 erreichbar (Zuschauer braucht IPv6, z. B. Mobilfunk)')
@@ -3125,8 +3110,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       try {
         const cur = await ipcRenderer.invoke('broadcast-status')
         const starting = !(cur && cur.active)
-        _copyLinkOnReady = starting ? Date.now() : 0
-        const st = starting ? await ipcRenderer.invoke('start-broadcast') : await ipcRenderer.invoke('stop-broadcast')
+        const st = starting ? await ipcRenderer.invoke('start-broadcast', { copyLink: true }) : await ipcRenderer.invoke('stop-broadcast')
         if (st && st.noEncoder) streamToast(window.tr('⚠️ Streaming braucht eine GPU mit Video-Encoder (NVIDIA, AMD oder Intel).'))
         renderStreamState(st)
         // Nach dem Livegehen die Stream-Sektion (rutscht per CSS order:-1 nach oben,
@@ -3344,6 +3328,13 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       } finally { btn.disabled = false; btn.textContent = window.tr('Erneut testen') }
     }
     ipcRenderer.on('broadcast-status', (e, st) => renderStreamState(st))
+    // main.js signalisiert HIER (nicht im Renderer geraten), sobald der Teilen-
+    // Link nach einem Start-Klick seinen finalen Zustand erreicht hat (die
+    // Vermittlungs-Registrierung fuer den schoenen Link ist async).
+    ipcRenderer.on('copy-stream-link', (e, link) => {
+      if (!link) return
+      navigator.clipboard.writeText(link).then(() => streamToast(window.tr('📋 Stream-Link kopiert – einfach an Freunde schicken.'))).catch(() => {})
+    })
     // Einmalige Stream-Statistik nach dem Beenden (main.js sammelt waehrend des
     // Streams: Dauer, Zuschauer-Spitze/-Gesamt, encodierte Datenmenge, Wechsel).
     ipcRenderer.on('stream-summary', (e, d) => {
