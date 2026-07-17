@@ -526,7 +526,7 @@
           <!-- Sektion 2: Stream (bei laufendem Stream via CSS nach oben – Vorschau als Highlight) -->
           <div class="form-group stream-sec stream-sec-stream">
             <button class="btn-stream-toggle" id="streamToggleBtn" onclick="toggleBroadcast()">
-              <span class="bst-ico" id="streamToggleIco">▶</span><span id="streamToggleLabel">Stream starten</span>
+              <span class="bst-ico" id="streamToggleIco">▶</span><span id="streamToggleLabel">Stream starten</span><span id="streamTimer" style="font-variant-numeric:tabular-nums; opacity:.75; font-weight:600"></span>
             </button>
             <div id="streamInfo" style="display:none; margin-top:14px">
               <div id="streamPreviewWrap" style="margin:0 0 12px; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:16/9; position:relative">
@@ -551,10 +551,9 @@
                    den Raum und kopiert den Einladungslink. Freunde mit Lumora sind
                    ueber den Link mit einem Klick dabei (lumora://join), alle anderen
                    schauen im Browser zu. Sichtbar nur, solange KEINE Gruppe laeuft. -->
-              <div class="osd-field" id="streamGroupInvite" style="display:none">
-                <span class="osd-field-label">Gruppe</span>
-                <button class="btn-browse" id="inviteFriendsBtn" onclick="inviteFriendsClick()">👥 Freunde dazuholen</button>
-                <span class="settings-hint" style="margin:0; flex:1">Erstellt eine Gruppe und kopiert den Einladungslink.</span>
+              <div class="invite-row" id="streamGroupInvite" style="display:none">
+                <button class="btn-invite" id="inviteFriendsBtn" onclick="inviteFriendsClick()">👥 Freunde dazuholen</button>
+                <span class="invite-hint">Macht aus deinem Stream eine Gruppe: Der Einladungslink wird kopiert – Freunde streamen mit einem Klick mit, alle anderen schauen im Browser zu.</span>
               </div>
               <div id="streamQr" style="text-align:center; margin:14px 0"></div>
               <p class="settings-hint" id="streamStats">Zuschauer: 0</p>
@@ -768,7 +767,16 @@
         <p class="about-text">Mit dem Beitritt geht dein eigener Stream für die Gruppe live. Wähle vorher, was übertragen wird:</p>
         <div class="osd-field">
           <span class="osd-field-label">Quelle</span>
-          <select id="joinSource" class="sort-select" style="flex:1"></select>
+          <div class="src-dd" style="flex:1; min-width:0">
+            <input type="hidden" id="joinSourceValue">
+            <button type="button" id="joinSrcTrigger" class="src-dd-trigger" onclick="toggleJoinSourceList(event)" aria-haspopup="listbox" aria-expanded="false">
+              <img class="src-dd-ico" alt="" hidden>
+              <span class="src-dd-emoji" hidden></span>
+              <span class="src-dd-text">–</span>
+              <span class="src-dd-caret">▾</span>
+            </button>
+            <div id="joinSrcList" class="src-dd-list" hidden role="listbox"></div>
+          </div>
           <button class="btn-browse" onclick="joinReloadSources()" title="Liste aktualisieren (z. B. nach Spielstart)">↻</button>
         </div>
         <div class="osd-field">
@@ -802,6 +810,27 @@
       <div class="dialog-actions">
         <button class="btn-browse" onclick="joinStreamCancel()">Abbrechen</button>
         <button class="btn-primary" onclick="joinStreamConfirm()">Beitreten &amp; mitstreamen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Einmalige Stream-Statistik nach dem Beenden (main.js: stream-summary) -->
+  <div class="overlay" id="streamSummaryOverlay" style="display:none">
+    <div class="dialog">
+      <h2>📊 Dein Stream in Zahlen</h2>
+      <div class="about-body">
+        <div class="sum-grid">
+          <div class="sum-item"><div class="sum-val" id="sumDur">–</div><div class="sum-lbl">Dauer</div></div>
+          <div class="sum-item"><div class="sum-val" id="sumPeak">–</div><div class="sum-lbl">Zuschauer gleichzeitig</div></div>
+          <div class="sum-item"><div class="sum-val" id="sumTotal">–</div><div class="sum-lbl">Zuschauer gesamt</div></div>
+          <div class="sum-item"><div class="sum-val" id="sumData">–</div><div class="sum-lbl">Videodaten</div></div>
+          <div class="sum-item"><div class="sum-val" id="sumMbit">–</div><div class="sum-lbl">Ø Bitrate</div></div>
+          <div class="sum-item"><div class="sum-val" id="sumQuality">–</div><div class="sum-lbl">Qualität</div></div>
+        </div>
+        <p class="settings-hint" id="sumSwitches" style="text-align:center; margin:10px 0 0"></p>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-primary" onclick="hideStreamSummary()">Schließen</button>
       </div>
     </div>
   </div>
@@ -1097,6 +1126,16 @@ const I18N_EN = {
   'Startargumente': 'Launch arguments',
   'Als Administrator starten': 'Run as administrator',
   'Speichern': 'Save',
+  '📊 Dein Stream in Zahlen': '📊 Your stream in numbers',
+  'Dauer': 'Duration',
+  'Zuschauer gleichzeitig': 'Peak viewers',
+  'Zuschauer gesamt': 'Total viewers',
+  'Videodaten': 'Video data',
+  'Ø Bitrate': 'Avg. bitrate',
+  'Qualität': 'Quality',
+  'Nativ': 'Native',
+  'Qualitätswechsel während des Streams: ': 'Quality switches during the stream: ',
+  'Macht aus deinem Stream eine Gruppe: Der Einladungslink wird kopiert – Freunde streamen mit einem Klick mit, alle anderen schauen im Browser zu.': 'Turns your stream into a group: the invite link is copied – friends stream along with one click, everyone else watches in the browser.',
   'Gruppe beitreten & mitstreamen': 'Join the group & stream along',
   'Mit dem Beitritt geht dein eigener Stream für die Gruppe live. Wähle vorher, was übertragen wird:': 'Joining takes your own stream live for the group. Choose what to share first:',
   'Beitreten & mitstreamen': 'Join & stream along',
@@ -2578,6 +2617,22 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // --- Live-Stream (WebRTC-Broadcast) ---------------------------------------
     let _streamOpening = false
     let _lastStreamState = null   // letzter Status (fuer die Detailzeile der Gruppen-Einrichtung: IPv4/IPv6/lokal)
+    // Laufzeit-Anzeige am Stopp-Knopf: " · h:mm:ss" neben "Stream stoppen".
+    let _streamTimerInt = null, _streamSince = 0
+    function fmtDur(ms) {
+      const s = Math.max(0, Math.floor(ms / 1000))
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60
+      return (h ? h + ':' : '') + String(m).padStart(h ? 2 : 1, '0') + ':' + String(x).padStart(2, '0')
+    }
+    function updateStreamTimer() {
+      const el = document.getElementById('streamTimer')
+      if (el) el.textContent = _streamSince ? ' · ' + fmtDur(Date.now() - _streamSince) : ''
+    }
+    function fmtBytes(b) {
+      if (b >= 1e9) return (Math.round(b / 1e8) / 10).toLocaleString() + ' GB'
+      if (b >= 1e6) return Math.round(b / 1e6) + ' MB'
+      return Math.round(b / 1024) + ' KB'
+    }
     function renderStreamState(st) {
       const on = !!(st && st.active)
       _lastStreamState = st || null
@@ -2600,6 +2655,15 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       btn.classList.toggle('streaming', on)
       document.getElementById('streamToggleIco').textContent = on ? '⏹' : '▶'
       document.getElementById('streamToggleLabel').textContent = on ? window.tr('Stream stoppen') : window.tr('Stream starten')
+      // Laufzeit-Timer am Stopp-Knopf (Startzeit liefert main.js als st.since)
+      _streamSince = (on && st.since) ? st.since : 0
+      if (_streamSince) {
+        if (!_streamTimerInt) _streamTimerInt = setInterval(updateStreamTimer, 1000)
+        updateStreamTimer()
+      } else {
+        if (_streamTimerInt) { clearInterval(_streamTimerInt); _streamTimerInt = null }
+        document.getElementById('streamTimer').textContent = ''
+      }
       document.getElementById('streamInfo').style.display = on ? 'block' : 'none'
       document.getElementById('streamHint').style.display = on ? 'none' : 'block'
       if (on) {
@@ -2896,19 +2960,74 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // bestaetigen - sonst geht ungefragt die Bildschirm-Freigabe live (egal ob der
     // Beitritt vom Grid-Button, LAN-Hinweis oder manuellen Code kommt).
     let _joinDialogResolve = null
+    // Quellen-Dropdown im Dialog: dasselbe Icon-Dropdown-Muster (src-dd) wie im
+    // Stream-Tab - mit App-Icons und Ellipsis bei langen Fenstertiteln (ein
+    // natives <select> kann beides nicht und machte den Dialog seitlich scrollbar).
     function joinFillSources(selectedValue) {
-      const src = document.getElementById('joinSource')
-      src.innerHTML = ''
+      const listEl = document.getElementById('joinSrcList')
+      listEl.innerHTML = ''
+      const sel = (selectedValue && _sources.some((s) => s.value === selectedValue)) ? selectedValue : (_sources.length ? _sources[0].value : '')
       _sources.forEach((s) => {
-        const o = document.createElement('option')
-        o.value = s.value
-        o.textContent = (s.kind === 'window' ? '🪟 ' : '🖥 ') + s.label
-        src.appendChild(o)
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'src-dd-opt' + (s.value === sel ? ' sel' : '')
+        b.dataset.value = s.value
+        b.setAttribute('role', 'option')
+        if (s.icon) {
+          const img = document.createElement('img'); img.src = s.icon; img.alt = ''
+          b.appendChild(img)
+        } else {
+          const em = document.createElement('span'); em.className = 'em'
+          em.textContent = s.kind === 'window' ? '🪟' : '🖥'
+          b.appendChild(em)
+        }
+        const t = document.createElement('span'); t.className = 't'; t.textContent = s.label
+        b.appendChild(t)
+        b.onclick = () => selectJoinSource(s.value)
+        listEl.appendChild(b)
       })
-      if (selectedValue && _sources.some((s) => s.value === selectedValue)) src.value = selectedValue
+      document.getElementById('joinSourceValue').value = sel
+      updateJoinSrcTrigger(sel)
     }
+    function updateJoinSrcTrigger(value) {
+      const s = _sources.find((x) => x.value === value)
+      const img = document.querySelector('#joinSrcTrigger .src-dd-ico')
+      const em = document.querySelector('#joinSrcTrigger .src-dd-emoji')
+      const txt = document.querySelector('#joinSrcTrigger .src-dd-text')
+      if (!txt) return
+      if (s && s.icon) { img.src = s.icon; img.hidden = false; em.hidden = true }
+      else { img.hidden = true; em.hidden = false; em.textContent = s ? (s.kind === 'window' ? '🪟' : '🖥') : '' }
+      txt.textContent = s ? s.label : '–'
+    }
+    function selectJoinSource(value) {
+      document.getElementById('joinSourceValue').value = value
+      document.querySelectorAll('#joinSrcList .src-dd-opt').forEach((o) => o.classList.toggle('sel', o.dataset.value === value))
+      updateJoinSrcTrigger(value)
+      closeJoinSourceList()
+    }
+    function toggleJoinSourceList(ev) {
+      if (ev) ev.stopPropagation()
+      const dd = document.getElementById('joinSrcTrigger').parentElement
+      if (dd.classList.contains('open')) closeJoinSourceList()
+      else {
+        dd.classList.add('open')
+        document.getElementById('joinSrcList').hidden = false
+        document.getElementById('joinSrcTrigger').setAttribute('aria-expanded', 'true')
+        const sel = document.querySelector('#joinSrcList .src-dd-opt.sel'); if (sel) sel.scrollIntoView({ block: 'nearest' })
+      }
+    }
+    function closeJoinSourceList() {
+      const t = document.getElementById('joinSrcTrigger'); if (!t) return
+      t.parentElement.classList.remove('open')
+      document.getElementById('joinSrcList').hidden = true
+      t.setAttribute('aria-expanded', 'false')
+    }
+    document.addEventListener('click', (e) => {
+      const dd = document.getElementById('joinSrcTrigger')
+      if (dd && dd.parentElement.classList.contains('open') && !dd.parentElement.contains(e.target)) closeJoinSourceList()
+    })
     async function joinReloadSources() {
-      const keep = document.getElementById('joinSource').value
+      const keep = document.getElementById('joinSourceValue').value
       await loadSources()   // aktualisiert _sources + haelt das Stream-Tab-Dropdown synchron
       joinFillSources(keep)
     }
@@ -2916,7 +3035,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const cur = await ipcRenderer.invoke('broadcast-status').catch(() => null)
       if (cur && cur.active) return true   // Stream laeuft schon - es startet nichts Neues
       const st = await ipcRenderer.invoke('get-app-settings').catch(() => ({}))
-      if (!_sources.length) await loadSources().catch(() => {})
+      // Fensterliste IMMER frisch laden - ein inzwischen gestartetes Spiel muss
+      // ohne manuelles ↻ in der Liste stehen.
+      await loadSources().catch(() => {})
       joinFillSources(st.streamSource)
       document.getElementById('joinQuality').value = ['auto', '1440', '1080', '720'].includes(String(st.streamQuality)) ? String(st.streamQuality) : 'auto'
       document.getElementById('joinFps').value = ['120', '60', '30'].includes(String(st.streamFps)) ? String(st.streamFps) : '60'
@@ -2935,7 +3056,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function joinStreamCancel() { joinStreamClose(false) }
     async function joinStreamConfirm() {
-      const source = document.getElementById('joinSource').value || ''
+      const source = document.getElementById('joinSourceValue').value || ''
       const quality = document.getElementById('joinQuality').value
       const fps = parseInt(document.getElementById('joinFps').value, 10)
       const kbit = parseInt(document.getElementById('joinBitrate').value, 10)
@@ -2960,6 +3081,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       // Die Eingabe bewusst NICHT leeren: nach einem Stream-Stopp ist der
       // Wiederbeitritt damit ein einziger Klick (Code merkt sich main.js zusaetzlich).
       await groupFinishSequence(st)
+      // Der Beitritt hat den eigenen Stream mitgestartet - die Vorschau in den
+      // Blick holen, damit man sofort sieht, was live geht.
+      scrollToStreamSection()
     }
     async function groupLeaveClick() {
       const st = await ipcRenderer.invoke('group-leave')
@@ -2992,17 +3116,23 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         // berechnen (scrollIntoView bricht bei den gleichzeitigen Layout-Wechseln ab)
         // und ERST nach zwei Frames stabilen Layouts scrollen - robust gegen die Hoehe
         // der Qualitaets-Sektion darueber (Puffer, HDR-Feinabstimmung o.Ae.).
-        if (st && st.active) {
-          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-          const scroller = document.getElementById('settingsView')
-          const sec = document.querySelector('.settings-panel[data-panel="stream"] .stream-sec-stream')
-          if (scroller && sec) {
-            const secRect = sec.getBoundingClientRect(), scRect = scroller.getBoundingClientRect()
-            const target = scroller.scrollTop + (secRect.top - scRect.top) - 8
-            scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
-          }
-        }
+        if (st && st.active) await scrollToStreamSection()
       } finally { btn.disabled = false }
+    }
+    // Stream-Sektion (mit der Vorschau) in den Blick holen - nach dem Streamstart
+    // UND nach einem Gruppenbeitritt mit Auto-Streamstart. Zielposition SELBST
+    // berechnen (scrollIntoView bricht bei den gleichzeitigen Layout-Wechseln ab)
+    // und ERST nach zwei Frames stabilen Layouts scrollen - robust gegen die Hoehe
+    // der Qualitaets-Sektion darueber (Puffer, HDR-Feinabstimmung o.Ae.).
+    async function scrollToStreamSection() {
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      const scroller = document.getElementById('settingsView')
+      const sec = document.querySelector('.settings-panel[data-panel="stream"] .stream-sec-stream')
+      if (scroller && sec) {
+        const secRect = sec.getBoundingClientRect(), scRect = scroller.getBoundingClientRect()
+        const target = scroller.scrollTop + (secRect.top - scRect.top) - 8
+        scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+      }
     }
     function copyStreamLink() {
       const el = document.getElementById('streamLink')
@@ -3196,6 +3326,22 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       } finally { btn.disabled = false; btn.textContent = window.tr('Erneut testen') }
     }
     ipcRenderer.on('broadcast-status', (e, st) => renderStreamState(st))
+    // Einmalige Stream-Statistik nach dem Beenden (main.js sammelt waehrend des
+    // Streams: Dauer, Zuschauer-Spitze/-Gesamt, encodierte Datenmenge, Wechsel).
+    ipcRenderer.on('stream-summary', (e, d) => {
+      if (!d) return
+      document.getElementById('sumDur').textContent = fmtDur(d.durMs || 0)
+      document.getElementById('sumPeak').textContent = String(d.peakViewers || 0)
+      document.getElementById('sumTotal').textContent = String(d.totalViewers || 0)
+      document.getElementById('sumData').textContent = fmtBytes(d.bytes || 0)
+      document.getElementById('sumMbit').textContent = (d.avgMbit || 0) + ' Mbit/s'
+      document.getElementById('sumQuality').textContent =
+        (d.quality === 'auto' ? window.tr('Nativ') : d.quality + 'p') + ' · ' + (d.fps || 60) + ' fps'
+      const sw = document.getElementById('sumSwitches')
+      sw.textContent = d.switches > 0 ? window.tr('Qualitätswechsel während des Streams: ') + d.switches : ''
+      document.getElementById('streamSummaryOverlay').style.display = 'flex'
+    })
+    function hideStreamSummary() { document.getElementById('streamSummaryOverlay').style.display = 'none' }
     // Startfehler (Port belegt, mediamtx-Problem) sichtbar machen statt stumm
     // auf "Stream aus" zurueckzuspringen (Audit-Befund).
     ipcRenderer.on('stream-error', (e, msg) => streamToast('⚠️ ' + msg))
