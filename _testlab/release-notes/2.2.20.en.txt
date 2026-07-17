@@ -1,0 +1,3 @@
+Signed & trusted:
+
+• Digital signature: from this version on, Lumora is digitally signed (Certum Code Signing). Instead of "Unknown publisher", Windows now shows the verified publisher name, and the hard Smart App Control block is gone. Any initial SmartScreen notice fades as the signature builds reputation.

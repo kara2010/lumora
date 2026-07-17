@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "2.2.19",
+        "softwareVersion": "2.2.20",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1107,7 +1107,7 @@
   <details class="ss-hint">
     <summary>🛡️ Windows shows a security warning? Here’s what to do</summary>
     <div class="ss-body">
-      Because the launcher does not (yet) have a paid code-signing certificate, Windows may show the SmartScreen message <strong>“Windows protected your PC”</strong> on first launch. This is neither an error nor a virus – and you don’t have to take our word for it: Lumora is open source, the complete source code is publicly available on <a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">GitHub</a>. Here’s how to continue normally:
+      Lumora is <strong>digitally signed</strong> (Certum Code Signing) – Windows shows the verified publisher instead of “Unknown publisher”. For a brand-new release, SmartScreen may still briefly show a message like <strong>“Windows protected your PC”</strong> until the signature builds reputation – this is neither an error nor a virus (and the complete source code is open on <a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">GitHub</a>). Here’s how to continue normally:
       <ol>
         <li>Click <strong>“More info”</strong>.</li>
         <li>Then click <strong>“Run anyway”</strong>.</li>
@@ -1358,8 +1358,16 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">2.2.19</span>
+          <span class="release-ver">2.2.20</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>Signed &amp; trusted</strong>: Lumora is now digitally signed (Certum Code Signing). Windows shows the verified publisher instead of “Unknown publisher”, and the hard Smart App Control block is gone. Any initial SmartScreen notice fades as the signature builds reputation.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">2.2.19</span>
         </div>
         <ul>
           <li><strong>Own address lumora-streaming.de</strong>: Lumora has moved – the website, the update feature and shared stream links now run on its own domain. Links you already shared keep working.</li>
@@ -1605,13 +1613,12 @@
     <div class="install-steps">
       <div class="install-step">
         <div class="num">1</div>
-        <p>Download the setup file <strong>Lumora Setup 2.2.19.exe</strong>.</p>
+        <p>Download the setup file <strong>Lumora Setup 2.2.20.exe</strong>.</p>
       </div>
       <div class="install-step">
         <div class="num">2</div>
         <p>
-          <strong>Windows SmartScreen notice:</strong> Since the app has no paid code-signing certificate, Windows may show a warning.
-          Click <strong>“More info”</strong> → <strong>“Run anyway”</strong> to continue.
+          <strong>Windows SmartScreen notice:</strong> Lumora is digitally signed (Certum Code Signing), so Windows shows the verified publisher. For a brand-new release a message may still appear briefly until the signature builds reputation – just click <strong>“More info”</strong> → <strong>“Run anyway”</strong> to continue.
           The complete source code is openly available on <a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">GitHub</a>; all components used are documented below under “Transparency”.
         </p>
       </div>
@@ -1820,7 +1827,7 @@
     <a href="gamepad.html">Gamepad control</a>
   </p>
   <p>
-    Lumora 2.2.19 · Free &amp; open source (<a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">source code on GitHub</a>, AGPL v3) ·
+    Lumora 2.2.20 · Free &amp; open source (<a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">source code on GitHub</a>, AGPL v3) ·
     HDR via <a href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">HDRTray</a> (Frank Richter, GPL v3) ·
     FPS via <a href="https://github.com/GameTechDev/PresentMon" target="_blank" rel="noopener">PresentMon</a> (Intel, MIT) ·
     CPU-Sensorik via <a href="https://pawnio.eu" target="_blank" rel="noopener">PawnIO</a> (namazso, GPL v2)

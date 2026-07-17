@@ -1,0 +1,3 @@
+Signiert & vertrauenswürdig:
+
+• Digitale Signatur: Lumora wird ab dieser Version digital signiert (Certum Code Signing). Statt „Unbekannter Herausgeber" zeigt Windows nun den geprüften Namen des Herausgebers, und die harte Blockade durch Smart App Control entfällt. Eine mögliche SmartScreen-Erstmeldung baut sich ab, sobald die Signatur Reputation gesammelt hat.
