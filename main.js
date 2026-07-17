@@ -4905,8 +4905,29 @@ async function bcRegisterWatchLink() {
   // sonst bliebe faelschlich dauerhaft der IP-Link sichtbar.
   if (bcWatchCode) { broadcastState.link = streamShareUrl() + '?s=' + bcWatchCode; bcPushState(); return }
   if (!broadcastState.linkV4 && !broadcastState.linkV6) return   // nur LAN -> URL-Weg zwecklos
-  const c = await groupRelay('create', {}, {})
+  // FESTER Stream-Link (Discord-Komfort): Der einmal vergebene Code wird bei
+  // jedem Streamstart wiederbeansprucht -> der geteilte Link bleibt dauerhaft
+  // gleich. Einmal im Discord-Kanal anpinnen, ab dann kommen Freunde bei jedem
+  // Stream OHNE weiteres Zutun rein (die Offline-Seite prueft alle 6 s selbst).
+  // owner = geheimes Token dieser Installation (schuetzt den Code, solange der
+  // Raum lebt). Ist der Code wider Erwarten belegt ('taken'), faellt die App auf
+  // einen frischen Code zurueck und merkt sich den (Link aendert sich dann einmal).
+  if (!appSettings.streamWatchOwner) {
+    appSettings.streamWatchOwner = require('crypto').randomBytes(16).toString('hex')
+    saveAppSettings()
+  }
+  const owner = appSettings.streamWatchOwner
+  const wantCode = appSettings.streamWatchCode || null
+  let c = await groupRelay('create', wantCode ? { code: wantCode, owner } : { owner }, {})
+  if (c && !c.ok && c.error === 'taken') {
+    bcLogStream('watch-link: fester Code ' + wantCode + ' belegt -> neuer Code')
+    c = await groupRelay('create', { owner }, {})
+  }
   if (!c || !c.ok || !c.code) { bcLogStream('watch-link: Vermittlung nicht erreichbar -> IP-Link bleibt'); return }
+  if (appSettings.streamWatchCode !== c.code) {
+    appSettings.streamWatchCode = c.code
+    saveAppSettings()
+  }
   const r = await groupRelay('update', { code: c.code }, groupSelfEntry())
   if (!r || !r.ok) { bcLogStream('watch-link: Registrierung fehlgeschlagen -> IP-Link bleibt'); return }
   if (!broadcastState.active) { groupRelay('leave', { code: c.code }, { id: groupMemberId() }); return }   // Stream inzwischen gestoppt
