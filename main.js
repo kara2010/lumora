@@ -4844,6 +4844,12 @@ async function groupLeave() {
 // Faellt die Vermittlung aus, bleibt der klassische IP-Link als Fallback.
 let bcWatchCode = null
 let bcWatchTimer = null
+// Teilen-URL fuer den EINZELSTREAM: eigener Endpunkt stream.php (inkludiert
+// serverseitig nur gruppe.php) - der geteilte Link soll nach "Stream" aussehen,
+// nicht nach "Gruppe". Bei selbst gehostetem Vermittlungsserver wird der
+// Dateiname analog ersetzt; endet die konfigurierte URL nicht auf gruppe.php,
+// bleibt sie unveraendert (der ?s=-Zweig liegt dann dort).
+function streamShareUrl() { return groupRelayUrl().replace(/gruppe\.php$/, 'stream.php') }
 async function bcRegisterWatchLink() {
   if (bcWatchCode) return
   if (!broadcastState.linkV4 && !broadcastState.linkV6) return   // nur LAN -> URL-Weg zwecklos
@@ -4853,7 +4859,7 @@ async function bcRegisterWatchLink() {
   if (!r || !r.ok) { bcLogStream('watch-link: Registrierung fehlgeschlagen -> IP-Link bleibt'); return }
   if (!broadcastState.active) { groupRelay('leave', { code: c.code }, { id: groupMemberId() }); return }   // Stream inzwischen gestoppt
   bcWatchCode = c.code
-  broadcastState.link = groupRelayUrl() + '?s=' + c.code
+  broadcastState.link = streamShareUrl() + '?s=' + c.code
   bcLogStream('watch-link: ' + broadcastState.link)
   if (!bcWatchTimer) bcWatchTimer = setInterval(() => {
     if (bcWatchCode) groupRelay('update', { code: bcWatchCode }, groupSelfEntry())
@@ -5667,7 +5673,7 @@ async function bcIpWatchTick() {
     if (ip6) broadcastState.linkV6 = 'http://[' + ip6 + ']:' + BROADCAST_PORT + '/'
     // Watch-URL BEWAHREN: der geteilte Link haengt am Code, nicht an der IP -
     // ein IP-Wechsel wird nur ins Schattenraum-Roster getragen, der Link bleibt.
-    broadcastState.link = bcWatchCode ? (groupRelayUrl() + '?s=' + bcWatchCode) : (broadcastState.linkV4 || broadcastState.linkV6 || broadcastState.link)
+    broadcastState.link = bcWatchCode ? (streamShareUrl() + '?s=' + bcWatchCode) : (broadcastState.linkV4 || broadcastState.linkV6 || broadcastState.link)
     if (bcWatchCode) groupRelay('update', { code: bcWatchCode }, groupSelfEntry())
     else if (broadcastState.internet) bcRegisterWatchLink().catch(() => {})   // Relay war beim Start evtl. nicht erreichbar
     bcPushState()
