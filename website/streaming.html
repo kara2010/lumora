@@ -146,7 +146,16 @@
     ul.feat li { padding: 7px 0 7px 30px; position: relative; }
     ul.feat li::before { content: "✔"; position: absolute; left: 4px; color: #6ee7a0; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px; margin: 14px 0; }
-    .shot { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--border); margin: 22px 0; }
+    .shot { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--border); margin: 22px 0; cursor: zoom-in; }
+    /* Lightbox: Bild bei Klick gross (viewportfuellend) anzeigen, damit Details erkennbar sind */
+    .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.96); z-index: 9999; align-items: center; justify-content: center; padding: 12px; cursor: zoom-out; }
+    .lightbox.open { display: flex; }
+    .lightbox img { max-width: 100%; max-height: 100vh; border-radius: 8px; object-fit: contain; box-shadow: 0 8px 40px rgba(0,0,0,0.8); }
+    .lb-close { position: absolute; top: 14px; right: 20px; font-size: 26px; line-height: 1; color: #fff; opacity: 0.75; cursor: pointer; z-index: 2; }
+    .lb-close:hover { opacity: 1; }
+    .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; background: rgba(22,22,31,0.62); border: 1px solid rgba(255,255,255,0.14); border-radius: 50%; color: #fff; font-size: 30px; line-height: 1; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background .15s; }
+    .lb-nav:hover { background: rgba(40,44,58,0.9); }
+    .lb-prev { left: 18px; } .lb-next { right: 18px; }
     .steps { counter-reset: s; list-style: none; margin: 12px 0; }
     .steps li { counter-increment: s; padding: 8px 0 8px 44px; position: relative; }
     .steps li::before { content: counter(s); position: absolute; left: 0; top: 8px; width: 28px; height: 28px; border-radius: 50%; background: rgba(138,108,255,.18); color: var(--accent2); font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 14px; }
@@ -368,6 +377,34 @@
     if (backdrop) backdrop.addEventListener('click', closeMenu);
     Array.prototype.forEach.call(drawer.querySelectorAll('a'), function(a){ a.addEventListener('click', closeMenu); });
     document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeMenu(); });
+  })();
+</script>
+<div class="lightbox" id="lightbox" onclick="lbClose(event)">
+  <span class="lb-close" onclick="lbClose(event)" role="button" aria-label="Schließen">✕</span>
+  <button class="lb-nav lb-prev" onclick="lbGo(-1, event)" aria-label="Vorheriges Bild">‹</button>
+  <img id="lbImg" src="" alt="">
+  <button class="lb-nav lb-next" onclick="lbGo(1, event)" aria-label="Nächstes Bild">›</button>
+</div>
+<script>
+  (function () {
+    var shots = Array.prototype.slice.call(document.querySelectorAll('img.shot'));
+    if (!shots.length) return;
+    var lb = document.getElementById('lightbox'), lbImg = document.getElementById('lbImg');
+    var idx = 0, single = shots.length < 2;
+    if (single) { document.querySelector('.lb-prev').style.display = 'none'; document.querySelector('.lb-next').style.display = 'none'; }
+    function show(i) { idx = (i + shots.length) % shots.length; var s = shots[idx]; lbImg.src = s.currentSrc || s.src; lbImg.alt = s.alt || ''; }
+    window.lbGo = function (dir, ev) { if (ev) ev.stopPropagation(); show(idx + dir); };
+    window.lbClose = function (ev) { if (ev) ev.stopPropagation(); lb.classList.remove('open'); };
+    shots.forEach(function (s, i) { s.addEventListener('click', function () { show(i); lb.classList.add('open'); }); });
+    document.addEventListener('keydown', function (e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') lbClose();
+      else if (!single && e.key === 'ArrowLeft') lbGo(-1);
+      else if (!single && e.key === 'ArrowRight') lbGo(1);
+    });
+    var x0 = null;
+    lb.addEventListener('touchstart', function (e) { x0 = e.changedTouches[0].clientX; }, { passive: true });
+    lb.addEventListener('touchend', function (e) { if (x0 === null || single) return; var dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 45) lbGo(dx < 0 ? 1 : -1); x0 = null; }, { passive: true });
   })();
 </script>
 </body>
