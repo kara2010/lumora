@@ -496,57 +496,38 @@
                 <option value="amf">AMD (AMF)</option>
               </select>
             </div>
-            <div class="osd-field">
-              <span class="osd-field-label">Puffer</span>
-              <input type="range" id="setStreamBuffer" min="120" max="1000" step="20" value="120" oninput="onStreamBufferInput()">
-              <span class="osd-field-val" id="streamBufferVal">120 ms</span>
-            </div>
-            <div class="setting-toggle-row" style="margin-top:6px">
-              <span class="setting-toggle-label">Bitrate automatisch anpassen</span>
-              <input type="checkbox" id="setStreamAdaptive" onchange="onStreamSettingChange()">
-            </div>
             <p class="settings-hint">Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum.</p>
-            <div class="doorman-card">
-              <div class="doorman-head">
-                <span class="doorman-ico">🔒</span>
-                <span class="doorman-title">Zugriffsschutz</span>
-                <label class="switch" style="margin-left:auto"><input type="checkbox" id="setStreamDoorman" onchange="onStreamSettingChange()"><span class="switch-slider"></span></label>
-              </div>
-              <p class="doorman-desc">Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein.</p>
-              <p class="doorman-note">Ist der Schutz an, lässt du jeden neuen Zuschauer einzeln zu (Fenster überm Spiel). Ein Ablehnen gilt nur kurz – wer dauerhaft rein oder raus soll, kommt in die Listen unten.</p>
-              <div id="doormanLists" style="display:none">
-                <div class="dl-group" id="dlRegularsGroup" style="display:none">
-                  <div class="dl-head"><span>★ Stammgäste</span></div>
-                  <div id="dlRegulars"></div>
-                </div>
-                <div class="dl-group" id="dlBannedGroup" style="display:none">
-                  <div class="dl-head"><span>🚫 Gesperrt</span></div>
-                  <div id="dlBanned"></div>
-                </div>
-              </div>
-            </div>
             <details class="sgdb-guide stream-advanced">
-              <summary>Puffer &amp; automatische Anpassung erklärt</summary>
-              <p class="settings-hint" style="margin-top:8px">Für schnelle Spiele 1080p/1440p mit genug Bitrate; 4K ist am anspruchsvollsten. Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.</p>
-            </details>
-            <details class="sgdb-guide stream-advanced" id="hdrTuneBox">
-              <summary>HDR-Feinabstimmung (nur bei HDR-Spielen)</summary>
-              <div style="margin-top:10px">
+              <summary>Feineinstellung (Puffer, adaptive Bitrate, HDR)</summary>
+              <div class="sgdb-guide-body">
                 <div class="osd-field">
-                  <span class="osd-field-label">Kurve</span>
-                  <select id="setHdrMode" class="sort-select" style="flex:1" onchange="onHdrTuneChange()">
-                    <option value="0">ACES (Standard)</option>
-                    <option value="1">Hable / Filmic (sanfter)</option>
-                    <option value="2">Reinhard (natürlich)</option>
-                    <option value="3">Linear (am hellsten)</option>
-                  </select>
+                  <span class="osd-field-label">Puffer</span>
+                  <input type="range" id="setStreamBuffer" min="120" max="1000" step="20" value="120" oninput="onStreamBufferInput()">
+                  <span class="osd-field-val" id="streamBufferVal">120 ms</span>
                 </div>
-                <div class="osd-field">
-                  <span class="osd-field-label">Helligkeit</span>
-                  <input type="range" id="setHdrExposure" min="0.15" max="1.2" step="0.01" value="0.3937" oninput="onHdrTuneChange()">
-                  <span class="osd-field-val" id="hdrExposureVal">0.39</span>
+                <div class="setting-toggle-row" style="margin-top:6px">
+                  <span class="setting-toggle-label">Bitrate automatisch anpassen</span>
+                  <input type="checkbox" id="setStreamAdaptive" onchange="onStreamSettingChange()">
                 </div>
-                <p class="settings-hint" style="margin-top:8px">Wirkt live im laufenden Stream – nur wenn dein Bildschirm in HDR läuft. Zu dunkel? Helligkeit erhöhen oder eine sanftere Kurve wählen.</p>
+                <p class="settings-hint" style="margin-top:8px">Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.</p>
+                <div id="hdrTuneBox" style="margin-top:16px">
+                  <div class="dl-head" style="margin-bottom:7px">HDR-Feinabstimmung <span style="opacity:.7; font-weight:400">(nur bei HDR-Spielen)</span></div>
+                  <div class="osd-field">
+                    <span class="osd-field-label">Kurve</span>
+                    <select id="setHdrMode" class="sort-select" style="flex:1" onchange="onHdrTuneChange()">
+                      <option value="0">ACES (Standard)</option>
+                      <option value="1">Hable / Filmic (sanfter)</option>
+                      <option value="2">Reinhard (natürlich)</option>
+                      <option value="3">Linear (am hellsten)</option>
+                    </select>
+                  </div>
+                  <div class="osd-field">
+                    <span class="osd-field-label">Helligkeit</span>
+                    <input type="range" id="setHdrExposure" min="0.15" max="1.2" step="0.01" value="0.3937" oninput="onHdrTuneChange()">
+                    <span class="osd-field-val" id="hdrExposureVal">0.39</span>
+                  </div>
+                  <p class="settings-hint" style="margin-top:8px">Wirkt live im laufenden Stream – nur wenn dein Bildschirm in HDR läuft. Zu dunkel? Helligkeit erhöhen oder eine sanftere Kurve wählen.</p>
+                </div>
               </div>
             </details>
           </div>
@@ -598,7 +579,27 @@
             <p class="settings-hint" id="streamHint" style="margin-top:8px">Beim Start öffnet Lumora automatisch den nötigen Port am Router (UPnP) und schließt ihn beim Stoppen wieder.</p>
           </div>
 
-          <!-- Sektion 3: Gruppe (mehrere Streams gemeinsam im Grid ansehen) -->
+          <!-- Sektion 3: Zugriffsschutz (wer den Stream sehen darf) -->
+          <div class="form-group stream-sec">
+            <label>Zugriffsschutz</label>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label">🔒 Nur freigegebene Zuschauer</span>
+              <label class="switch"><input type="checkbox" id="setStreamDoorman" onchange="onStreamSettingChange()"><span class="switch-slider"></span></label>
+            </div>
+            <p class="settings-hint">Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein. Jeder neue Zuschauer wird dir einzeln zur Freigabe angezeigt (Fenster überm Spiel); ein Ablehnen gilt nur kurz.</p>
+            <div id="doormanLists" style="display:none">
+              <div class="dl-group" id="dlRegularsGroup" style="display:none">
+                <div class="dl-head"><span>★ Stammgäste</span></div>
+                <div id="dlRegulars"></div>
+              </div>
+              <div class="dl-group" id="dlBannedGroup" style="display:none">
+                <div class="dl-head"><span>🚫 Gesperrt</span></div>
+                <div id="dlBanned"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sektion 4: Gruppe (mehrere Streams gemeinsam im Grid ansehen) -->
           <div class="form-group stream-sec">
             <label>Gruppe</label>
             <p class="settings-hint" id="groupSectionHint">Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Eine Gruppe erstellst du mit „Freunde dazuholen" am laufenden Stream.</p>
@@ -663,7 +664,7 @@
             </details>
           </div>
 
-          <!-- Sektion 4: Schnellstart-Hotkey (auf Nutzerwunsch UNTER der Gruppe) -->
+          <!-- Sektion 5: Schnellstart-Hotkey (auf Nutzerwunsch UNTER der Gruppe) -->
           <div class="form-group stream-sec">
             <label>Schnellstart</label>
             <div class="hotkey-row">
@@ -676,7 +677,7 @@
             <p class="settings-hint" style="margin:4px 0 0">Startet/stoppt die Freigabe von überall – <b>auch mitten im Spiel</b>. Beim Start wird das <b>aktuelle Fenster</b> (dein laufendes Spiel) freigegeben.</p>
           </div>
 
-          <!-- Sektion 5: Verbindung & Diagnose -->
+          <!-- Sektion 6: Verbindung & Diagnose -->
           <div class="form-group stream-sec">
             <label>Verbindung</label>
             <div class="setting-toggle-row">
