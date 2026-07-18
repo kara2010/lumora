@@ -5247,6 +5247,7 @@ function bcApiPost(apiPath) {
 const bcKnocks = new Map()   // vid -> { vid, name, at, status: 'pending'|'granted'|'denied' }
 const bcPrevGrants = new Map()   // vid -> Zeit der letzten Freigabe (Karenz ueber Stream-Neustarts)
 const bcSessionNames = new Map()   // mediamtx-sessionId -> eingegebener Zuschauer-Name (fuer die Liste)
+let bcViewerDbgAt = 0              // TEMP-Diagnose: Drosselung des viewers-raw-Logs
 const BC_GRANT_KARENZ = 15 * 60 * 1000   // 15 Min: kurzer Stop+Neustart fragt Zugelassene nicht erneut
 let doormanWindow = null
 function bcApproveGate(vid, name) {
@@ -5412,7 +5413,17 @@ ipcMain.handle('list-viewers', async () => {
   try {
     const r = await upnpHttpGet('http://127.0.0.1:' + MTX_API_PORT + '/v3/webrtcsessions/list')
     const j = JSON.parse(r.body)
-    const sessions = (Array.isArray(j.items) ? j.items : []).filter((s) => s.path === MTX_PATH && s.state === 'read' && !bcIsPreviewSession(s))
+    const all = (Array.isArray(j.items) ? j.items : []).filter((s) => s.path === MTX_PATH && !bcIsPreviewSession(s))
+    // TEMP-Diagnose (gedrosselt ~7 s) -> lumora-stream.log: rohe Session-Felder +
+    // die per Location-Header gemerkten Namens-Keys. Klaert faktenbasiert: (a) warum
+    // der Name nicht matcht (locParse-id vs. s.id), (b) warum tote Sessions als
+    // Zombie haengen (state/peerConnection/bytes), (c) die Statistik-Doppelzaehlung.
+    if (Date.now() - bcViewerDbgAt > 7000) {
+      bcViewerDbgAt = Date.now()
+      bcLogStream('viewers-raw: ' + all.map((s) => 'id=' + String(s.id).slice(0, 8) + ' st=' + s.state + ' pc=' + (s.peerConnectionEstablished ? 1 : 0) + ' by=' + (s.bytesSent || 0) + ' ip=' + (bcExtractIp(s.remoteCandidate) || '?') + ' q=' + (s.query || '')).join('  ||  '))
+      bcLogStream('name-keys(locParse): ' + [...bcSessionNames.keys()].map((k) => String(k).slice(0, 8)).join(','))
+    }
+    const sessions = all.filter((s) => s.state === 'read')
     return sessions.map((s) => {
       // IP + Browser direkt aus mediamtx: IP aus dem ICE-Kandidaten (remoteAddr
       // ist nur unser Proxy = 127.0.0.1), den User-Agent reichen wir durch. Solange

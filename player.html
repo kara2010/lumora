@@ -709,7 +709,13 @@
   // Relay-Modus: Abmelden laeuft ueber a=unwhep (gruppe.php prueft die Session-URL
   // gegen das Roster und reicht das DELETE durch - kein offenes Relay).
   function relayUnwhep(session) {
-    try { fetch(RELAY.api + '&a=unwhep', { method: 'POST', keepalive: true, body: JSON.stringify({ session: session }) }).catch(function () {}) } catch (e) {}
+    var url = RELAY.api + '&a=unwhep', payload = JSON.stringify({ session: session })
+    // sendBeacon zuerst: der Browser garantiert den Versand SELBST beim Schliessen
+    // (fetch keepalive wird auf Mobilbrowsern beim Tab-Schliessen oft verworfen ->
+    // die Session blieb als "Zombie"-Zuschauer haengen, bis mediamtx sie per ICE-
+    // Timeout aufraeumte). Fallback fetch, falls sendBeacon nicht verfuegbar/abgelehnt.
+    try { if (navigator.sendBeacon && navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }))) return } catch (e) {}
+    try { fetch(url, { method: 'POST', keepalive: true, body: payload }).catch(function () {}) } catch (e) {}
   }
   function leave() {
     if (window._whepSession) {
