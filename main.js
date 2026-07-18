@@ -5237,6 +5237,83 @@ function bcApiPost(apiPath) {
     rq.end()
   })
 }
+// --- Individuelle Freigabe (Tuersteher Stufe 2): Zuschauer einzeln zulassen -----
+// Bei aktivem Zugriffsschutz muss der Streamer JEDEN neuen Zuschauer einzeln zulassen
+// (nicht mehr „wer den Link hat, ist drin"). Die whep-Anfrage traegt Name + viewerId
+// (vid – zufaellig, dauerhaft im Browser des Zuschauers). Unbekannte vid -> landet als
+// „wartend" im Freigabe-Fenster, die Anfrage bekommt 403 „pending" (der Player fragt
+// alle paar Sekunden neu). Zulassen -> vid gilt als granted, der naechste Versuch kommt
+// durch. Ablehnen -> 403 „denied". Die HMAC-Schicht (nur ueber den Relay) bleibt darunter.
+const bcKnocks = new Map()   // vid -> { vid, name, at, status: 'pending'|'granted'|'denied' }
+let doormanWindow = null
+function bcApproveGate(vid, name) {
+  if (!vid) return 'denied'
+  const k = bcKnocks.get(vid)
+  if (k && (k.status === 'granted' || k.status === 'denied')) return k.status
+  if (!k) {
+    const nm = String(name || 'Gast').slice(0, 24)
+    bcKnocks.set(vid, { vid, name: nm, at: Date.now(), status: 'pending' })
+    bcShowDoorman(nm)
+  } else if (name) {
+    const nm = String(name).slice(0, 24)
+    if (nm && nm !== k.name) { k.name = nm; bcSyncDoorman() }   // Name nachgereicht (Player fragt erst bei 'pending')
+  }
+  return 'pending'
+}
+function bcPendingKnocks() {
+  return [...bcKnocks.values()].filter((k) => k.status === 'pending').map((k) => ({ vid: k.vid, name: k.name, at: k.at }))
+}
+function bcSyncDoorman() {
+  const pend = bcPendingKnocks()
+  if (doormanWindow && !doormanWindow.isDestroyed()) {
+    try { doormanWindow.webContents.send('doorman-list', pend, mainLang() === 'de') } catch {}
+    if (pend.length === 0) { try { doormanWindow.hide() } catch {} }
+    else if (!doormanWindow.isVisible()) { try { doormanWindow.showInactive() } catch {} }   // zeigen OHNE dem Spiel den Fokus zu stehlen
+  }
+}
+function bcShowDoorman(name) {
+  createDoormanWindow()
+  try {
+    if (Notification.isSupported()) {
+      const de = mainLang() === 'de'
+      new Notification({
+        title: de ? '🔔 Zuschauer möchte beitreten' : '🔔 A viewer wants to join',
+        body: (name || 'Gast') + (de ? ' wartet auf deine Freigabe.' : ' is waiting for your approval.'),
+      }).show()
+    }
+  } catch {}
+  bcSyncDoorman()
+}
+function createDoormanWindow() {
+  if (doormanWindow && !doormanWindow.isDestroyed()) { if (!doormanWindow.isVisible()) { try { doormanWindow.showInactive() } catch {} } return doormanWindow }
+  const b = screen.getPrimaryDisplay().bounds
+  const W = 400, H = 168
+  doormanWindow = new BrowserWindow({
+    x: Math.round(b.x + (b.width - W) / 2), y: b.y + 28, width: W, height: H,
+    frame: false, transparent: true, resizable: false, movable: false,
+    minimizable: false, maximizable: false, skipTaskbar: true, focusable: true,
+    show: false, hasShadow: false, alwaysOnTop: true,
+    webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false },
+  })
+  doormanWindow.setAlwaysOnTop(true, 'screen-saver')           // ueber laufendem Vollbild-Spiel (Borderless)
+  doormanWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  doormanWindow.loadFile('doorman.html')
+  doormanWindow.webContents.once('did-finish-load', () => bcSyncDoorman())
+  doormanWindow.on('closed', () => { doormanWindow = null })
+  return doormanWindow
+}
+function bcCloseDoorman() {
+  bcKnocks.clear()
+  if (doormanWindow && !doormanWindow.isDestroyed()) { try { doormanWindow.close() } catch {} }
+  doormanWindow = null
+}
+// Freigabe-Fenster entscheidet: ok=true -> zulassen, false -> ablehnen.
+ipcMain.handle('doorman-decide', (e, vid, ok) => {
+  const k = bcKnocks.get(vid)
+  if (k && k.status === 'pending') k.status = ok ? 'granted' : 'denied'
+  bcSyncDoorman()
+  return true
+})
 // Tuersteher-Nachweis pruefen: HMAC-SHA256 ueber (SDP-Body + '|' + Zeitstempel) mit
 // dem Session-Token als Schluessel. Der Server bildet dieselbe Signatur (gruppe.php
 // a=whep) – stimmt sie ueberein UND ist der Zeitstempel frisch (<=60 s, gegen Replay),
@@ -5272,9 +5349,15 @@ function bcProxyWhep(req, res) {
     // gueltige Signatur -> 401. Ausgenommen: eigene Vorschau (127.0.0.1). PATCH/DELETE frei.
     if (req.method === 'POST' && appSettings.streamDoorman) {
       const local = ip === '127.0.0.1' || ip === '::1' || ip === ''
-      let sig = '', ts = ''
-      try { const u = new URL(req.url, 'http://x'); sig = u.searchParams.get('sig') || ''; ts = u.searchParams.get('ts') || '' } catch {}
-      if (!(local || bcVerifyDoormanSig(body, sig, ts))) { try { res.writeHead(401, { 'Content-Type': 'text/plain' }); res.end('unauthorized') } catch {}; return }
+      let sig = '', ts = '', vid = '', name = ''
+      try { const u = new URL(req.url, 'http://x'); sig = u.searchParams.get('sig') || ''; ts = u.searchParams.get('ts') || ''; vid = u.searchParams.get('vid') || ''; name = u.searchParams.get('name') || '' } catch {}
+      if (!local) {
+        // 1) Transport-Nachweis (nur ueber den Relay -> HMAC gueltig), sonst 401.
+        if (!bcVerifyDoormanSig(body, sig, ts)) { try { res.writeHead(401, { 'Content-Type': 'text/plain' }); res.end('unauthorized') } catch {}; return }
+        // 2) Individuelle Freigabe: granted -> durch, sonst 403 mit 'pending'/'denied'.
+        const gate = bcApproveGate(vid, name)
+        if (gate !== 'granted') { try { res.writeHead(403, { 'Content-Type': 'text/plain' }); res.end(gate) } catch {}; return }
+      }
     }
     const rest = req.url.replace(/^\/whep/, '').replace(/\?.*$/, '')   // '' oder '/<session>' (Query wie ?sig= nicht an mediamtx durchreichen)
     const target = '/' + MTX_PATH + '/whep' + rest
@@ -6107,6 +6190,7 @@ function bcTeardownServer() {
   if (broadcastServer) { try { broadcastServer.close() } catch {}; broadcastServer = null }
   if (bcViewerPoll) { clearInterval(bcViewerPoll); bcViewerPoll = null }
   bcBlockedIps.clear()
+  bcCloseDoorman()   // Freigabe-Fenster schliessen + Warteliste leeren (frischer Zustand je Stream)
   // IPv4-Freigaben NUR schliessen, wenn wir sie selbst gesetzt haben: gehoert das
   // Mapping einer anderen Lumora-Instanz (zweiter PC im selben Netz), wuerde ein
   // blindes Unmap deren laufenden Stream von aussen kappen.

@@ -225,12 +225,25 @@ if ($a === 'whep') {
   $sig_qs = '';
   $mvk = isset($j['members'][$mid]['vk']) ? $j['members'][$mid]['vk'] : '';
   if ($mvk) { $ts = time(); $sig = hash_hmac('sha256', $sdp . '|' . $ts, $mvk); $sig_qs = '?sig=' . $sig . '&ts=' . $ts; }
+  // Individuelle Freigabe: Zuschauer-Name + wiedererkennbare vid mit durchreichen
+  // (der Streamer sieht den Namen im Freigabe-Fenster und laesst pro Person zu).
+  $vid = isset($_GET['vid']) ? preg_replace('/[^a-zA-Z0-9]/', '', $_GET['vid']) : '';
+  $nm  = isset($_GET['name']) ? mb_substr((string)$_GET['name'], 0, 24) : '';
+  if ($vid !== '' || $nm !== '') {
+    $sig_qs .= ($sig_qs === '' ? '?' : '&') . 'vid=' . rawurlencode($vid) . '&name=' . rawurlencode($nm);
+  }
   foreach (member_addrs($j['members'][$mid]) as $base) {
     $r = relay($base . '/whep' . $sig_qs, 'POST', $sdp, 'application/sdp');
     if ($r && ($r['status'] === 201 || $r['status'] === 200)) {
       $session = null;
       if ($r['location']) $session = preg_match('#^https?://#', $r['location']) ? $r['location'] : $base . $r['location'];
       jout(array('ok' => true, 'sdp' => $r['body'], 'session' => $session));
+    }
+    // Tuersteher: Lumora hat BEWUSST abgewiesen (401 = kein gueltiger Nachweis,
+    // 403 = pending/denied) -> Grund an den Player durchreichen, nicht als
+    // "unreachable" verschleiern.
+    if ($r && ($r['status'] === 401 || $r['status'] === 403)) {
+      jout(array('ok' => false, 'error' => trim((string)$r['body'])));
     }
   }
   jout(array('ok' => false, 'error' => 'unreachable'));
