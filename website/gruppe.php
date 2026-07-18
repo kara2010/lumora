@@ -50,7 +50,7 @@ function room_save($c, $j) {
 }
 function members_out($j) {
   $out = array();
-  foreach ($j['members'] as $m) $out[] = $m;
+  foreach ($j['members'] as $m) { unset($m['vk']); $out[] = $m; }   // Tuersteher-Schluessel NIE nach aussen geben
   usort($out, function ($a, $b) { return ($a['joinedAt'] ?? 0) <=> ($b['joinedAt'] ?? 0); });
   return $out;
 }
@@ -186,6 +186,9 @@ if ($a === 'update') {
     // gelernten "funktionierenden Weg" ueber Heartbeats hinweg behalten
     // (member_addrs validiert ihn ohnehin gegen die aktuellen Links).
     'goodAddr' => ($prev && !empty($prev['goodAddr'])) ? $prev['goodAddr'] : null,
+    // Tuersteher-Schluessel des Streamers: server-seitig behalten, aber NIE oeffentlich
+    // ausgeben (members_out strippt ihn). Der Client sendet ihn bei jedem Heartbeat mit.
+    'vk' => (isset($m['vk']) && $m['vk']) ? substr(preg_replace('/[^a-zA-Z0-9]/', '', (string)$m['vk']), 0, 64) : ($prev['vk'] ?? null),
   );
   room_save($code, $j);
   jout(array('ok' => true, 'members' => members_out($j)));
@@ -215,8 +218,11 @@ if ($a === 'whep') {
   if ($j === null || !isset($j['members'][$mid])) jout(array('ok' => false, 'error' => 'no-member'));
   $sdp = read_body();
   if (!$sdp) jout(array('ok' => false, 'error' => 'no-sdp'));
+  // Tuersteher-Schluessel des Streamers unsichtbar mit durchreichen (nur der Server
+  // kennt ihn aus dem Roster; der direkte IP-Zugriff hat ihn nicht -> Lumora weist ab).
+  $vk = (isset($j['members'][$mid]['vk']) && $j['members'][$mid]['vk']) ? '?vk=' . rawurlencode($j['members'][$mid]['vk']) : '';
   foreach (member_addrs($j['members'][$mid]) as $base) {
-    $r = relay($base . '/whep', 'POST', $sdp, 'application/sdp');
+    $r = relay($base . '/whep' . $vk, 'POST', $sdp, 'application/sdp');
     if ($r && ($r['status'] === 201 || $r['status'] === 200)) {
       $session = null;
       if ($r['location']) $session = preg_match('#^https?://#', $r['location']) ? $r['location'] : $base . $r['location'];
