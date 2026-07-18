@@ -488,6 +488,15 @@
               </select>
             </div>
             <div class="osd-field">
+              <span class="osd-field-label">Encoder</span>
+              <select id="setStreamEncoder" class="sort-select" style="flex:1" onchange="onStreamSettingChange()">
+                <option value="auto">Automatisch (empfohlen)</option>
+                <option value="nvenc">NVIDIA (NVENC)</option>
+                <option value="qsv">Intel (QSV)</option>
+                <option value="amf">AMD (AMF)</option>
+              </select>
+            </div>
+            <div class="osd-field">
               <span class="osd-field-label">Puffer</span>
               <input type="range" id="setStreamBuffer" min="120" max="1000" step="20" value="120" oninput="onStreamBufferInput()">
               <span class="osd-field-val" id="streamBufferVal">120 ms</span>
@@ -1194,6 +1203,8 @@ const I18N_EN = {
   // --- Router-Portfreigabe-Anleitungen (dynamisch aus main.js, siehe routerUpnpHint) ---
   'Router öffnet die Ports nicht automatisch': 'Router isn’t opening the ports automatically',
   '📖 Ausführliche Web-Anleitung mit allen Routern ↗': '📖 Detailed web guide for every router ↗',
+  'Encoder': 'Encoder',
+  'Automatisch (empfohlen)': 'Automatic (recommended)',
   '⏳ Öffentlicher Link wird vorbereitet…': '⏳ Preparing public link…',
   '  ·  ⏳ Router wird geprüft…': '  ·  ⏳ Checking router…',
   '  ·  🌐 über IPv6 erreichbar (Zuschauer braucht IPv6, z. B. Mobilfunk)': '  ·  🌐 reachable via IPv6 (viewer needs IPv6, e.g. mobile data)',
@@ -2493,6 +2504,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       refreshGpHotkeyDisplay('osd')
       document.getElementById('setStreamQuality').value = s.streamQuality || '1080'
       document.getElementById('setStreamFps').value = String(s.streamFps || 60)
+      document.getElementById('setStreamEncoder').value = s.streamEncoder || 'auto'
       // Bitrate: alter 35-Mbit-Wert (fuers fruehere adaptive System) passt nicht
       // zu CBR -> auf tauglichen Standard migrieren, wenn er keine Option trifft.
       let skbit = s.streamUploadKbit || 8000
@@ -3138,6 +3150,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         streamQuality: document.getElementById('setStreamQuality').value,
         streamFps: parseInt(document.getElementById('setStreamFps').value, 10),
         streamUploadKbit: parseInt(document.getElementById('setStreamBitrate').value, 10),
+        streamEncoder: document.getElementById('setStreamEncoder').value,
         streamAdaptive: document.getElementById('setStreamAdaptive').checked,
       })
     }

@@ -146,6 +146,14 @@ $code = isset($_GET['code']) ? strtoupper(trim($_GET['code'])) : '';
 
 // ---- API ---------------------------------------------------------------------
 if ($a === 'create') {
+  // Wunsch-Code: der Client (5-Min-Karenz beim kurzen Stream-Neustart) will seinen
+  // zuletzt genutzten Code wiederbekommen. NUR wenn er gerade frei ist -> KEIN
+  // dauerhafter Anspruch, keine Reservierung. Ist er belegt/abgelaufen -> Zufallscode.
+  $want = isset($_GET['want']) ? strtoupper(trim($_GET['want'])) : '';
+  if (code_ok($want) && !is_file(room_path($want))) {
+    room_save($want, array('code' => $want, 'created' => time(), 'members' => array('_' => array('id' => '_', 'lastSeen' => time(), 'joinedAt' => time()))));
+    jout(array('ok' => true, 'code' => $want));
+  }
   for ($i = 0; $i < 50; $i++) {
     $c = '';
     for ($k = 0; $k < 6; $k++) $c .= CODE_CHARS[random_int(0, strlen(CODE_CHARS) - 1)];

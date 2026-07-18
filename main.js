@@ -92,7 +92,7 @@ const appSettings = { autostart: false, startMinimized: false, minimizeToTray: f
   // streamBufferMs: Empfangspuffer der Zuschauer. 120 ms war fuer Internet-Streams
   // zu knapp - jede kleine Sende-/Netz-Schwankung schlug direkt als Ruckler durch.
   // 300 ms ist weiterhin "live" (unter einer halben Sekunde), schluckt aber Jitter.
-  streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 300, streamHotkey: '',
+  streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 300, streamHotkey: '', streamEncoder: 'auto',
   streamTurnEnabled: false, streamTurnUrl: '', streamTurnUser: '', streamTurnPass: '', streamTurnForce: false,
   streamForceIPv6: false,
   language: 'auto',    // UI-Sprache: 'auto' (Systemsprache), 'de', 'en' - Uebersetzung im Renderer (i18n-Block)
@@ -1775,7 +1775,7 @@ function createOverlayWindow() {
     hasShadow: false,
     webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false },
   })
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true })   // Klicks gehen ans Spiel
+  overlayWindow.setIgnoreMouseEvents(true)   // Klicks gehen ans Spiel
   overlayWindow.setAlwaysOnTop(true, 'screen-saver')           // hoechste Ebene – liegt auch ueber einem bereits im Vordergrund laufenden Vollbild-Spiel
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   overlayWindow.loadFile('osd.html')
@@ -1822,7 +1822,7 @@ function showOverlay() {
   // Beim (Wieder-)Einblenden ALLE Overlay-Eigenschaften neu setzen: ein zuvor
   // verstecktes Fenster verliert ueber einem Vollbild-Spiel sonst Klick-
   // Durchlaessigkeit / oberste Lage und erscheint gar nicht bzw. hinter dem Spiel.
-  w.setIgnoreMouseEvents(true, { forward: true })
+  w.setIgnoreMouseEvents(true)
   w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   w.showInactive()                                 // anzeigen, ohne zu fokussieren
   w.setAlwaysOnTop(true, 'screen-saver')           // hoechste Ebene – auch ueber laufendem Vollbild-Spiel
@@ -1891,7 +1891,7 @@ function setOsdEditMode(on) {
     w.setIgnoreMouseEvents(false)             // Maus wird jetzt gefangen
     w.focus()
   } else {
-    w.setIgnoreMouseEvents(true, { forward: true })   // wieder klick-durchlaessig
+    w.setIgnoreMouseEvents(true)   // wieder klick-durchlaessig
     w.setFocusable(false)
   }
   osdEditActive = on
@@ -3562,6 +3562,11 @@ ipcMain.handle('set-app-settings', (event, partial) => {
     bcAdaptLevel = 0; bcAdaptUpAt = 0; bcAdaptUpHold = 0
     bcRestartFfmpeg()
   }
+  // Encoder-Override umgestellt -> Cache verwerfen (der Neustart waehlt neu) und die
+  // Selbstheilungs-Flags zuruecksetzen, sonst blieben sie vom letzten Versuch haengen.
+  if (partial && Object.prototype.hasOwnProperty.call(partial, 'streamEncoder')) {
+    bcEncoderCache = null; bcZeroCopyBroken = false; bcQsvBroken = false
+  }
   if (partial && Object.keys(partial).some(k => k.startsWith('stream') && !bcNoRestart.has(k)) && broadcastState.active) {
     bcRestartFfmpeg()
     bcPushState()
@@ -4330,22 +4335,28 @@ async function bcDetectEncoder() {
     else if (/radeon|\bamd\b/.test(s)) vendor = 'amd'
     else if (/intel|\barc\b|iris|uhd/.test(s)) vendor = 'intel'
   } catch {}
-  let enc = null, hw = false
+  let enc = null, hw = false, hasQsv = false
   try {
     const encs = await new Promise((res) => {
       require('child_process').execFile(streamBin('ffmpeg.exe'), ['-hide_banner', '-encoders'],
         { windowsHide: true, timeout: 8000 }, (e, so) => res(String(so || '')))
     })
     const has = (n) => encs.includes(n)
-    if (vendor === 'nvidia' && has('h264_nvenc')) { enc = 'h264_nvenc'; hw = true }
+    hasQsv = has('h264_qsv')   // fuer die Intel-Hybrid-QSV-Kaskade (s. Selbstheilung)
+    // Manueller Encoder-Override (Einstellung "Encoder"): erzwingt einen HW-Encoder.
+    // Auf Hybrid-Laptops erwischt die Auto-Wahl NVENC (dGPU) -> teurer GPU-Transfer vom
+    // iGPU-Bild; dort ist Intel-QSV (nvenc/qsv/amf) besser. 'auto' = Vendor-Logik unten.
+    const ov = appSettings.streamEncoder || 'auto'
+    if (ov !== 'auto' && has('h264_' + ov)) { enc = 'h264_' + ov; hw = true }
+    else if (vendor === 'nvidia' && has('h264_nvenc')) { enc = 'h264_nvenc'; hw = true }
     else if (vendor === 'amd' && has('h264_amf')) { enc = 'h264_amf'; hw = true }
     else if (vendor === 'intel' && has('h264_qsv')) { enc = 'h264_qsv'; hw = true }
     else if (has('h264_nvenc')) { enc = 'h264_nvenc'; hw = true }   // GPU unklar: NVENC zuerst
     else if (has('h264_amf')) { enc = 'h264_amf'; hw = true }
     else if (has('h264_qsv')) { enc = 'h264_qsv'; hw = true }
   } catch {}
-  bcEncoderCache = { vendor, encoder: enc, hw }
-  osdDbg('[stream] Encoder: ' + enc + ' (GPU: ' + (vendor || '?') + ', hw=' + hw + ')')
+  bcEncoderCache = { vendor, encoder: enc, hw, hasQsv }
+  osdDbg('[stream] Encoder: ' + enc + ' (GPU: ' + (vendor || '?') + ', hw=' + hw + ', qsv=' + hasQsv + ')')
   return bcEncoderCache
 }
 // Encoder-spezifische CBR-/Low-Latency-Parameter. Konstante Bitrate (CBR) ist
@@ -4470,14 +4481,22 @@ function bcBuildFfmpegArgs(cfg, capW, capH, withAudio) {
   //   hwmap=derive_device=qsv,vpp_qsv=...->h264_qsv) auf echter Hardware
   //   verifiziert sind (Testskript _testlab/amf-gpu-test.cmd).
   const zeroCopy = cfg.encoder === 'h264_nvenc' && !cfg.scaleH && !bcZeroCopyBroken
+  // Intel-QSV-GPU-direkt: ddagrabs D3D11-Textur auf ein QSV-Device mappen und per
+  // vpp_qsv GPU-seitig nach NV12 wandeln (statt hwdownload auf die CPU = Flaschenhals).
+  // Greift nur, wenn der Encoder h264_qsv ist (per Selbstheilung nach NVENC-Fehler auf
+  // Hybrid-Laptops gesetzt). vpp_qsv kann zugleich skalieren -> kein CPU-Umweg noetig.
+  const qsvZeroCopy = cfg.encoder === 'h264_qsv' && !bcQsvBroken
   bcLastZeroCopy = zeroCopy
+  bcLastQsvZeroCopy = qsvZeroCopy
   const vf = ['ddagrab=output_idx=' + cfg.outputIdx + ':framerate=' + cfg.fps]
-  if (!zeroCopy) {
+  if (qsvZeroCopy) {
+    vf.push('hwmap=derive_device=qsv', 'vpp_qsv=' + (cfg.scaleH ? 'w=-1:h=' + cfg.scaleH + ':' : '') + 'format=nv12')
+  } else if (!zeroCopy) {
     vf.push('hwdownload', 'format=bgra')
     if (cfg.scaleH) vf.push('scale=-2:' + cfg.scaleH + ':flags=bicubic')
     vf.push('format=yuv420p')
   }
-  bcLogStream('video: ddagrab ' + (zeroCopy ? 'GPU-direkt (zero-copy)' : 'CPU-Kette' + (cfg.scaleH ? ', scale ' + cfg.scaleH + 'p' : '')))
+  bcLogStream('video: ddagrab ' + (zeroCopy ? 'GPU-direkt (zero-copy)' : qsvZeroCopy ? 'Intel-QSV-GPU-direkt (zero-copy)' : 'CPU-Kette' + (cfg.scaleH ? ', scale ' + cfg.scaleH + 'p' : '')))
   const mMap = withAudio ? ['-map', '[v]', '-map', '0:a:0', '-c:a', 'libopus', '-b:a', '128k', '-max_interleave_delta', '0'] : []
   return ['-hide_banner', '-loglevel', 'warning', '-progress', 'pipe:2', '-stats_period', '5',
     ...aIn,
@@ -5082,6 +5101,12 @@ async function groupLeave() {
 // (Heartbeat traegt neue Adressen ins Roster, der Code bleibt gleich).
 // Faellt die Vermittlung aus, bleibt der klassische IP-Link als Fallback.
 let bcWatchCode = null
+// 5-Min-Karenz: stoppt der User den Stream nur kurz (z.B. zum Testen) und startet
+// wieder, soll der Beitritts-Code/Watch-Link derselbe bleiben (nicht bei jedem
+// Neustart ein neuer). Nach dem Stop wird der Code + Zeit gemerkt und beim naechsten
+// Start via ?want= wieder angefragt; der Server gibt ihn nur, wenn noch frei.
+// Kein dauerhafter Code (waere Server-Philosophie-Verstoss) - nach 5 Min neuer Code.
+let bcPrevWatchCode = null, bcPrevWatchAt = 0
 let bcWatchTimer = null
 // Teilen-URL fuer den EINZELSTREAM: eigener Endpunkt stream.php (inkludiert
 // serverseitig nur gruppe.php) - der geteilte Link soll nach "Stream" aussehen,
@@ -5130,7 +5155,9 @@ async function bcRegisterWatchLink() {
   // sonst bliebe faelschlich dauerhaft der IP-Link sichtbar.
   if (bcWatchCode) { broadcastState.link = streamShareUrl() + '?s=' + bcWatchCode; bcPushState(); return }
   if (!broadcastState.linkV4 && !broadcastState.linkV6) return   // nur LAN -> URL-Weg zwecklos
-  const c = await groupRelay('create', {}, {})
+  // 5-Min-Karenz: zuletzt genutzten Code wieder anfragen, wenn der Stop <5 Min her ist.
+  const want = (bcPrevWatchCode && (Date.now() - bcPrevWatchAt) < 300000) ? bcPrevWatchCode : null
+  const c = await groupRelay('create', want ? { want } : {}, {})
   if (!c || !c.ok || !c.code) { bcLogStream('watch-link: Vermittlung nicht erreichbar -> IP-Link bleibt'); return }
   const r = await groupRelay('update', { code: c.code }, groupSelfEntry())
   if (!r || !r.ok) { bcLogStream('watch-link: Registrierung fehlgeschlagen -> IP-Link bleibt'); return }
@@ -5146,6 +5173,8 @@ async function bcRegisterWatchLink() {
 function bcUnregisterWatchLink() {
   if (bcWatchTimer) { clearInterval(bcWatchTimer); bcWatchTimer = null }
   if (bcWatchCode) {
+    bcPrevWatchCode = bcWatchCode   // 5-Min-Karenz: Code merken fuer schnellen Neustart
+    bcPrevWatchAt = Date.now()
     const code = bcWatchCode
     bcWatchCode = null
     groupRelay('leave', { code }, { id: groupMemberId() })
@@ -5345,6 +5374,13 @@ let ffLagTimer = null // Event-Loop-Messung (Diagnose): haengt NODE, stockt die 
 // GPU-Direktpfad mangels Testhardware ungetestet ist (s. bcBuildFfmpegArgs).
 let bcZeroCopyBroken = false
 let bcLastZeroCopy = false
+// Intel-Hybrid-QSV-Zero-Copy (Kaskade nach NVENC-GPU-direkt-Fehler, s. bcBuildFfmpegArgs
+// + Selbstheilung): Scheitert NVENC-zero-copy auf einem Hybrid-Laptop (die Intel-iGPU
+// rendert den Desktop -> ddagrab-Textur liegt auf der iGPU -> NVENC bekommt "no encode
+// device"), wird zuerst die Intel-iGPU-Kette (hwmap->vpp_qsv->h264_qsv) versucht, bevor
+// die langsame CPU-Kette greift. UNGETESTET mangels Intel-Hardware -> mit CPU-Fallback.
+let bcQsvBroken = false
+let bcLastQsvZeroCopy = false
 // NV12-Selbstheilung (Fenster-Weg, analog bcZeroCopyBroken): Der Capture-Helfer
 // liefert mit --nv12 GPU-konvertierte NV12-Frames (-62 % Pipe-Daten, keine CPU-
 // Farbkonvertierung in FFmpeg). Meldet er NV12ERR (Init- oder Laufzeit-Fehler)
@@ -5590,9 +5626,32 @@ function bcSpawnEncoder(args, capOfThis, stdinStream, audOfThis) {
     // Zero-Copy-Selbstheilung (s. Deklaration bei bcZeroCopyBroken): Sofort-
     // Absturz im GPU-Direktmodus OHNE Vollbild-Signatur (ACCESS_LOST waere die
     // ddagrab-Meldung fuer exklusives Vollbild) -> ab jetzt CPU-Kette.
-    if (Date.now() - startedAt < 4000 && bcLastZeroCopy && !bcZeroCopyBroken && !/ACCESS_LOST|887a0026/i.test(errbuf)) {
-      bcZeroCopyBroken = true
-      bcLogStream('video: GPU-direkt fehlgeschlagen -> Rueckfall auf CPU-Kette (Hybrid-GPU?): ' + errbuf.replace(/\s+/g, ' ').slice(-160))
+    // Kaskade bei Sofort-Absturz im GPU-Direktmodus (kein exklusives Vollbild):
+    // 1) NVENC-zero-copy tot -> auf Intel-Hybrid ZUERST die QSV-iGPU-Kette versuchen
+    //    (Intel-iGPU rendert den Desktop, kann ihn also zero-copy encoden), sonst
+    //    gleich CPU-Kette. 2) QSV-zero-copy tot -> zurueck auf die bewaehrte CPU-Kette.
+    if (Date.now() - startedAt < 4000 && !/ACCESS_LOST|887a0026/i.test(errbuf)) {
+      const tail = errbuf.replace(/\s+/g, ' ').slice(-160)
+      if (bcLastZeroCopy && !bcZeroCopyBroken) {
+        if (bcEncoderCache && bcEncoderCache.hasQsv && !bcQsvBroken) {
+          bcEncoderCache.encoder = 'h264_qsv'   // naechster Start: Intel-iGPU-Kette
+          bcLogStream('video: NVENC-GPU-direkt gescheitert -> versuche Intel-QSV-GPU-direkt (Hybrid-GPU?): ' + tail)
+        } else {
+          bcZeroCopyBroken = true
+          bcLogStream('video: GPU-direkt fehlgeschlagen -> Rueckfall auf CPU-Kette (Hybrid-GPU?): ' + tail)
+        }
+      } else if (bcLastQsvZeroCopy && !bcQsvBroken) {
+        bcQsvBroken = true
+        if (bcEncoderCache) bcEncoderCache.encoder = 'h264_nvenc'   // bewaehrte CPU-Kette
+        bcZeroCopyBroken = true
+        bcLogStream('video: Intel-QSV-GPU-direkt gescheitert -> Rueckfall auf CPU-Kette: ' + tail)
+      } else if (bcEncoderCache && bcEncoderCache.encoder === 'h264_qsv' && !bcQsvBroken) {
+        // QSV-Encode ohne zero-copy (z.B. Fenster-Weg oder erzwungenes QSV) starb sofort
+        // -> zurueck auf NVENC, damit der Stream ueberhaupt laeuft.
+        bcQsvBroken = true
+        bcEncoderCache.encoder = 'h264_nvenc'
+        bcLogStream('video: QSV-Encode gescheitert -> Rueckfall auf NVENC: ' + tail)
+      }
     }
     // NV12-Selbstheilung, zweites Standbein (s. bcNv12Broken): Stirbt der
     // Fenster-Stream im NV12-Modus sofort, OHNE dass der Helfer NV12ERR
