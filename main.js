@@ -93,6 +93,7 @@ const appSettings = { autostart: false, startMinimized: false, minimizeToTray: f
   // zu knapp - jede kleine Sende-/Netz-Schwankung schlug direkt als Ruckler durch.
   // 300 ms ist weiterhin "live" (unter einer halben Sekunde), schluckt aber Jitter.
   streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 300, streamHotkey: '', streamEncoder: 'auto', streamDoorman: false,
+  streamRegulars: {}, streamBanned: {},   // Tuersteher: dauerhaft akzeptierte / gesperrte Zuschauer (vid -> {name, since})
   streamTurnEnabled: false, streamTurnUrl: '', streamTurnUser: '', streamTurnPass: '', streamTurnForce: false,
   streamForceIPv6: false,
   language: 'auto',    // UI-Sprache: 'auto' (Systemsprache), 'de', 'en' - Uebersetzung im Renderer (i18n-Block)
@@ -5250,10 +5251,17 @@ const bcSessionNames = new Map()   // mediamtx-sessionId -> eingegebener Zuschau
 let bcViewerDbgAt = 0              // TEMP-Diagnose: Drosselung des viewers-raw-Logs
 const BC_GRANT_KARENZ = 15 * 60 * 1000   // 15 Min: kurzer Stop+Neustart fragt Zugelassene nicht erneut
 let doormanWindow = null
+const BC_DENY_COOLDOWN = 60 * 1000   // 60 s: nach dem Ablehnen darf der Zuschauer EINMAL erneut anfragen
+function bcRegulars() { return appSettings.streamRegulars || (appSettings.streamRegulars = {}) }
+function bcBanned() { return appSettings.streamBanned || (appSettings.streamBanned = {}) }
 function bcApproveGate(vid, name) {
   if (!vid) return 'denied'
-  const k = bcKnocks.get(vid)
-  if (k && (k.status === 'granted' || k.status === 'denied')) return k.status
+  // Dauerhaft gesperrt -> immer raus (kein Cooldown, kein erneutes Anfragen).
+  if (bcBanned()[vid]) return 'banned'
+  // Dauerhaft akzeptiert (Stammgast) -> immer rein, ohne Popup.
+  if (bcRegulars()[vid]) return 'granted'
+  let k = bcKnocks.get(vid)
+  if (k && k.status === 'granted') return 'granted'
   // Karenz: kuerzlich (< 15 Min) schon freigegeben -> nach einem Stream-Neustart
   // OHNE erneutes Fragen wieder rein (der User pausiert oft nur kurz zum Testen).
   const prev = bcPrevGrants.get(vid)
@@ -5261,13 +5269,23 @@ function bcApproveGate(vid, name) {
     bcKnocks.set(vid, { vid, name: String(name || 'Gast').slice(0, 24), at: Date.now(), status: 'granted' })
     return 'granted'
   }
+  // Ablehnung mit COOLDOWN (goldene Mitte): waehrend 60 s bleibt es 'denied', danach
+  // faellt die Ablehnung weg -> ein versehentliches Ablehnen ist kein Dauer-Aus, der
+  // Zuschauer kann erneut anfragen. Wer WIRKLICH weg soll, wird gesperrt (Sperrliste).
+  if (k && k.status === 'denied') {
+    if (Date.now() - (k.deniedAt || 0) < BC_DENY_COOLDOWN) return 'denied'
+    bcKnocks.delete(vid); k = null
+  }
+  // OHNE Namen NICHT registrieren -> es erscheint KEIN Freigabe-Popup, solange der
+  // Zuschauer nur den Link geoeffnet hat. Erst wenn er einen Namen eingegeben UND
+  // angefragt hat, entsteht eine Anfrage (sonst poppte schon "Gast" beim Link-Klick auf).
+  const nm = String(name || '').trim().slice(0, 24)
+  if (!nm) return 'pending'
   if (!k) {
-    const nm = String(name || 'Gast').slice(0, 24)
     bcKnocks.set(vid, { vid, name: nm, at: Date.now(), status: 'pending' })
     bcShowDoorman(nm)
-  } else if (name) {
-    const nm = String(name).slice(0, 24)
-    if (nm && nm !== k.name) { k.name = nm; bcSyncDoorman() }   // Name nachgereicht (Player fragt erst bei 'pending')
+  } else if (k.status === 'pending' && nm !== k.name) {
+    k.name = nm; bcSyncDoorman()   // Name nachgereicht/geaendert -> Fenster aktualisieren
   }
   return 'pending'
 }
@@ -5298,7 +5316,7 @@ function bcShowDoorman(name) {
 function createDoormanWindow() {
   if (doormanWindow && !doormanWindow.isDestroyed()) { if (!doormanWindow.isVisible()) { try { doormanWindow.showInactive() } catch {} } return doormanWindow }
   const b = screen.getPrimaryDisplay().bounds
-  const W = 400, H = 168
+  const W = 400, H = 196
   doormanWindow = new BrowserWindow({
     x: Math.round(b.x + (b.width - W) / 2), y: b.y + 28, width: W, height: H,
     frame: false, transparent: true, resizable: false, movable: false,
@@ -5324,11 +5342,28 @@ function bcCloseDoorman() {
   if (doormanWindow && !doormanWindow.isDestroyed()) { try { doormanWindow.close() } catch {} }
   doormanWindow = null
 }
-// Freigabe-Fenster entscheidet: ok=true -> zulassen, false -> ablehnen.
-ipcMain.handle('doorman-decide', (e, vid, ok) => {
+// Freigabe-Fenster entscheidet. mode: 'allow' (nur jetzt) | 'deny' (60-s-Cooldown,
+// danach erneut moeglich) | 'always' (dauerhaft = Stammgast) | 'ban' (dauerhaft gesperrt).
+ipcMain.handle('doorman-decide', (e, vid, mode) => {
+  if (!vid) return false
   const k = bcKnocks.get(vid)
-  if (k && k.status === 'pending') k.status = ok ? 'granted' : 'denied'
+  const nm = (k && k.name) || 'Gast'
+  if (mode === 'allow') { if (k) k.status = 'granted' }
+  else if (mode === 'deny') { if (k) { k.status = 'denied'; k.deniedAt = Date.now() } }
+  else if (mode === 'always') { bcRegulars()[vid] = { name: nm, since: Date.now() }; delete bcBanned()[vid]; if (k) k.status = 'granted'; saveAppSettings() }
+  else if (mode === 'ban') { bcBanned()[vid] = { name: nm, since: Date.now() }; delete bcRegulars()[vid]; if (k) { k.status = 'denied'; k.deniedAt = Date.now() }; saveAppSettings() }
   bcSyncDoorman()
+  return true
+})
+// Verwaltungslisten (Stream-Tab): dauerhaft akzeptierte / gesperrte Zuschauer.
+ipcMain.handle('doorman-lists', () => {
+  const toArr = (o) => Object.keys(o || {}).map((vid) => ({ vid, name: (o[vid] && o[vid].name) || 'Gast', since: (o[vid] && o[vid].since) || 0 }))
+  return { regulars: toArr(bcRegulars()), banned: toArr(bcBanned()) }
+})
+ipcMain.handle('doorman-remove', (e, kind, vid) => {
+  if (kind === 'regular') delete bcRegulars()[vid]
+  else if (kind === 'banned') delete bcBanned()[vid]
+  saveAppSettings()
   return true
 })
 // Tuersteher-Nachweis pruefen: HMAC-SHA256 ueber (SDP-Body + '|' + Zeitstempel) mit
@@ -5371,7 +5406,7 @@ function bcProxyWhep(req, res) {
       if (!local) {
         // 1) Transport-Nachweis (nur ueber den Relay -> HMAC gueltig), sonst 401.
         if (!bcVerifyDoormanSig(body, sig, ts)) { try { res.writeHead(401, { 'Content-Type': 'text/plain' }); res.end('unauthorized') } catch {}; return }
-        // 2) Individuelle Freigabe: granted -> durch, sonst 403 mit 'pending'/'denied'.
+        // 2) Individuelle Freigabe: granted -> durch, sonst 403 mit 'pending'/'denied'/'banned'.
         const gate = bcApproveGate(vid, name)
         if (gate !== 'granted') { try { res.writeHead(403, { 'Content-Type': 'text/plain' }); res.end(gate) } catch {}; return }
       }

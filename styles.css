@@ -390,6 +390,13 @@ body::before {
 .doorman-desc { font-size: 12.5px; color: #b7b7b7; line-height: 1.55; margin: 9px 0 0; }
 .doorman-note { font-size: 12px; color: color-mix(in srgb, var(--accent-light) 78%, #999); line-height: 1.5; margin: 7px 0 0; }
 .doorman-note b { color: var(--accent-light); font-weight: 600; }
+#doormanLists { margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.07); padding-top: 11px; }
+.dl-group { margin-top: 9px; }
+.dl-head { font-size: 11.5px; font-weight: 600; color: #9aa4b2; letter-spacing: .2px; margin-bottom: 5px; }
+.dl-row { display: flex; align-items: center; gap: 8px; padding: 6px 9px; background: rgba(255,255,255,0.04); border-radius: 8px; margin-bottom: 5px; font-size: 12.5px; }
+.dl-name { flex: 1; color: #dde3ec; }
+.dl-x { padding: 3px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.14); background: transparent; color: #b7c0cd; font-size: 11.5px; cursor: pointer; }
+.dl-x:hover { border-color: var(--accent); color: var(--accent-light); }
 .settings-hint {
   font-size: 12px;
   color: #666;
