@@ -137,6 +137,7 @@ static class Program
     static ID3D11RenderTargetView _finalRtv;  // fuers Schwarz-Clearen (Letterbox-Raender)
     static ID3D11Texture2D _nv12Tex;          // NV12-Ziel des Konvertier-Blts
     static ID3D11Texture2D _nv12Staging;      // CPU-lesbare NV12-Kopie
+    static bool _nv12Primed;                  // Doppelpuffer-Readback: Staging haelt ein noch nicht abgeholtes Frame
     static ID3D11VideoProcessorEnumerator _nvVenum;
     static ID3D11VideoProcessor _nvVproc;
     static ID3D11VideoProcessorOutputView _nvVout;
@@ -582,6 +583,7 @@ static class Program
             try { _vctx.VideoProcessorSetStreamColorSpace1(_nvVproc, 0u, ColorSpaceType.RgbFullG22NoneP709); } catch { }
             try { _vctx.VideoProcessorSetOutputColorSpace1(_nvVproc, ColorSpaceType.YcbcrStudioG22LeftP709); } catch { }
             _nv12On = true;
+            _nv12Primed = false;   // frische Staging: das erste Frame synchron abholen, danach doppelgepuffert
         }
         catch (Exception ex)
         {
@@ -605,27 +607,38 @@ static class Program
     {
         try
         {
+            // DOPPELPUFFER-READBACK. Ein Map() auf eine Staging-Textur BLOCKIERT, bis die
+            // GPU die davor eingereihte Farbkonvertierung + Kopie fertig hat - und dieselbe
+            // GPU rendert das aufgenommene Spiel. Unter Last dauerte dieser Map 25-40 ms
+            // (Log: maxcopy), bei 60 fps stehen aber nur 16 ms pro Frame zur Verfuegung ->
+            // der Takt-Rueckstand (lag) baute sich bis zum 5-s-VDROP auf (sichtbarer Ruckler).
+            // Loesung: Wir mappen NICHT das gerade erzeugte Frame, sondern das des VORIGEN
+            // Aufrufs. Dessen Kopie wurde per Flush sofort angestossen und hatte einen ganzen
+            // Frame Zeit auf der GPU -> der Map wartet praktisch nicht mehr. Kostet einen
+            // konstanten Frame (~16 ms) Latenz, im gepufferten Live-Stream unsichtbar.
+            if (_nv12Primed)
+            {
+                // Voriges (laengst fertig kopiertes) Frame abholen - blockiert kaum noch.
+                Nv12Drain(dst);
+            }
+            else
+            {
+                // Allererstes Frame nach (Neu-)Aufbau: es gibt noch kein voriges Ergebnis.
+                // Ein neutrales Bild ausgeben (Y=0, UV=128) statt eines gruenen Frames aus
+                // uninitialisiertem Speicher; ab dem naechsten Frame kommt echter Inhalt.
+                int y0 = _outW * _outH;
+                for (int i = 0; i < y0; i++) dst[i] = 0;
+                for (int i = y0; i < y0 + y0 / 2; i++) dst[i] = 128;
+            }
+            // Aktuelles Frame konvertieren, in die Staging kopieren und die GPU SOFORT
+            // anstossen (Flush), damit die Kopie bis zum naechsten Tick fertig ist.
             using var inView = _vdev.CreateVideoProcessorInputView(_finalTex, _nvVenum,
                 new VideoProcessorInputViewDescription { FourCC = 0, ViewDimension = VideoProcessorInputViewDimension.Texture2D });
             var stream = new VideoProcessorStream { Enable = true, InputSurface = inView };
             _vctx.VideoProcessorBlt(_nvVproc, _nvVout, 0, 1, new[] { stream });
             _context.CopyResource(_nv12Staging, _nv12Tex);
-            var map = _context.Map(_nv12Staging, 0, Vortice.Direct3D11.MapMode.Read, Vortice.Direct3D11.MapFlags.None);
-            int pitch = (int)map.RowPitch;
-            IntPtr src = map.DataPointer;
-            int ySize = _outW * _outH;
-            if (pitch == _outW)
-            {
-                Marshal.Copy(src, dst, 0, ySize);                                   // Y dicht -> ein Rutsch
-                Marshal.Copy(src + (nint)pitch * _outH, dst, ySize, ySize / 2);     // UV dicht -> ein Rutsch
-            }
-            else
-            {
-                for (int y = 0; y < _outH; y++) Marshal.Copy(src + (nint)y * pitch, dst, y * _outW, _outW);
-                IntPtr uv = src + (nint)pitch * _outH;
-                for (int y = 0; y < _outH / 2; y++) Marshal.Copy(uv + (nint)y * pitch, dst, ySize + y * _outW, _outW);
-            }
-            _context.Unmap(_nv12Staging, 0);
+            _context.Flush();
+            _nv12Primed = true;
         }
         catch (Exception ex)
         {
@@ -637,6 +650,29 @@ static class Program
             Console.Error.Flush();
             Environment.Exit(6);
         }
+    }
+
+    // CPU-Abholung des zuletzt in die NV12-Staging kopierten Frames (Y-Plane dicht,
+    // danach UV-Plane; beide teilen sich die RowPitch). Ausgelagert, weil der
+    // Doppelpuffer-Readback dies einen Tick spaeter aufruft als die GPU-Kopie.
+    static void Nv12Drain(byte[] dst)
+    {
+        var map = _context.Map(_nv12Staging, 0, Vortice.Direct3D11.MapMode.Read, Vortice.Direct3D11.MapFlags.None);
+        int pitch = (int)map.RowPitch;
+        IntPtr src = map.DataPointer;
+        int ySize = _outW * _outH;
+        if (pitch == _outW)
+        {
+            Marshal.Copy(src, dst, 0, ySize);                                   // Y dicht -> ein Rutsch
+            Marshal.Copy(src + (nint)pitch * _outH, dst, ySize, ySize / 2);     // UV dicht -> ein Rutsch
+        }
+        else
+        {
+            for (int y = 0; y < _outH; y++) Marshal.Copy(src + (nint)y * pitch, dst, y * _outW, _outW);
+            IntPtr uv = src + (nint)pitch * _outH;
+            for (int y = 0; y < _outH / 2; y++) Marshal.Copy(uv + (nint)y * pitch, dst, ySize + y * _outW, _outW);
+        }
+        _context.Unmap(_nv12Staging, 0);
     }
 
     // Nach einer Fenster-Groessenaenderung: Scaler (neu) aufbauen, der den aktuellen
