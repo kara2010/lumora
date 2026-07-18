@@ -405,7 +405,14 @@ body::before {
   font-size: 14px;
   margin-bottom: 6px;
 }
-.stream-forward-warn .sfw-steps { color: #ddd; }
+.stream-forward-warn .sfw-steps {
+  color: #ddd;
+  white-space: pre-line;     /* nummerierte Schritte (\n) sauber umbrechen */
+  line-height: 1.55;
+  margin-top: 6px;
+  max-height: 340px;         /* lange Anleitungen scrollen statt die UI zu sprengen */
+  overflow-y: auto;
+}
 
 /* Aufklappbare SteamGridDB-Anleitung in den Einstellungen */
 .sgdb-guide { margin-top: 8px; }

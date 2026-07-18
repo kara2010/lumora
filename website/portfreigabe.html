@@ -4,21 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0a0a0f">
-  <title>Gameplay in 4K an Freunde streamen – kostenlos | Lumora</title>
-  <meta name="description" content="Gameplay per Link streamen: flüssig von 1080p60 bis 4K, Zuschauer schauen ohne Installation im Browser zu – IPv6-direkt, kein Abo. Jetzt kostenlos laden.">
-  <meta name="keywords" content="Gameplay mit Freunden teilen, Spiel streamen an Freunde, Bildschirm teilen ohne Qualitätsverlust, 4K 60fps Streaming kostenlos, Spiel im Browser anschauen, Screen Sharing Gaming, Stream ruckelt Alternative, Spiele-Streaming ohne Abo">
+  <title>Portfreigabe einrichten (Port 8787 & 8189) – Anleitung für jeden Router | Lumora</title>
+  <meta name="description" content="Ports 8787 (TCP) und 8189 (UDP) am Router freigeben – Schritt für Schritt für FRITZ!Box, Speedport, Vodafone, TP-Link, ASUS, Netgear u. v. m. Mit dem Schritt, an dem die meisten scheitern.">
+  <meta name="keywords" content="Portfreigabe einrichten, Port freigeben Router, FRITZ!Box Portfreigabe, Speedport Portfreischaltung, Port 8787 8189, Portweiterleitung Anleitung, Gerät hinzufügen Portfreigabe, feste IP Router">
   <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://lumora-streaming.de/streaming.html">
-  <link rel="alternate" hreflang="de" href="https://lumora-streaming.de/streaming.html">
-  <link rel="alternate" hreflang="en" href="https://lumora-streaming.de/en/streaming.html">
-  <link rel="alternate" hreflang="x-default" href="https://lumora-streaming.de/streaming.html">
+  <link rel="canonical" href="https://lumora-streaming.de/portfreigabe.html">
+  <link rel="alternate" hreflang="de" href="https://lumora-streaming.de/portfreigabe.html">
+  <link rel="alternate" hreflang="en" href="https://lumora-streaming.de/en/portfreigabe.html">
+  <link rel="alternate" hreflang="x-default" href="https://lumora-streaming.de/portfreigabe.html">
   <link rel="icon" href="favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://lumora-streaming.de/streaming.html">
-  <meta property="og:title" content="Gameplay in 4K an Freunde streamen – kostenlos">
-  <meta property="og:description" content="Bis zu 4K/60 fps, Zuschauer brauchen nur einen Browser-Link. Direkte Verbindung, kein Konto, kein Abo. Kostenlos für Windows 10/11.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://lumora-streaming.de/portfreigabe.html">
+  <meta property="og:title" content="Portfreigabe einrichten – Anleitung für jeden Router">
+  <meta property="og:description" content="Ports 8787 (TCP) und 8189 (UDP) freigeben – Schritt für Schritt für FRITZ!Box, Speedport, Vodafone, TP-Link, ASUS, Netgear und mehr.">
   <meta property="og:image" content="https://lumora-streaming.de/screenshot.png">
   <meta property="og:locale" content="de_DE">
   <script type="application/ld+json">
@@ -26,102 +26,26 @@
     "@context": "https://schema.org",
     "@graph": [
       {
-        "@type": "SoftwareApplication",
-        "name": "Lumora",
-        "operatingSystem": "Windows 10, Windows 11",
-        "applicationCategory": "GameApplication",
-        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
-        "sameAs": ["https://github.com/kara2010/lumora"],
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "EUR"
-        },
-        "url": "https://lumora-streaming.de/",
-        "downloadUrl": "https://lumora-streaming.de/download.php",
-        "description": "Kostenloses Spiele-Streaming in bis zu 4K/60 fps, Gaming-OSD und komplette Gamepad-Steuerung – ohne Abo, ohne Konto."
+        "@type": "HowTo",
+        "name": "Portfreigabe für Lumora einrichten (Port 8787 & 8189)",
+        "description": "Die Ports 8787 (TCP) und 8189 (UDP) am Router zum Streaming-PC freigeben.",
+        "inLanguage": "de",
+        "step": [
+          { "@type": "HowToStep", "name": "Ins Router-Menü", "text": "Im Browser die Adresse des Routers öffnen und anmelden." },
+          { "@type": "HowToStep", "name": "PC als Gerät auswählen", "text": "Den Streaming-PC auswählen bzw. hinzufügen; taucht er nicht auf, im Router eine feste IP vergeben." },
+          { "@type": "HowToStep", "name": "Port 8787 (TCP) freigeben", "text": "Eine Regel für Port 8787, Protokoll TCP, zum PC anlegen und speichern." },
+          { "@type": "HowToStep", "name": "Port 8189 (UDP) freigeben", "text": "Eine zweite Regel für Port 8189, Protokoll UDP, zum PC anlegen und speichern." }
+        ]
       },
       {
         "@type": "BreadcrumbList",
         "itemListElement": [
-          {
-            "@type": "ListItem",
-            "position": 1,
-            "name": "Lumora",
-            "item": "https://lumora-streaming.de/"
-          },
-          {
-            "@type": "ListItem",
-            "position": 2,
-            "name": "Gameplay in 4K mit Freunden teilen",
-            "item": "https://lumora-streaming.de/streaming.html"
-          }
-        ]
-      },
-      {
-        "@type": "FAQPage",
-        "inLanguage": "de",
-        "mainEntity": [
-          {
-            "@type": "Question",
-            "name": "Was brauchen meine Freunde, um zuzuschauen?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Nur einen Browser. Du schickst einen Link – Zuschauer öffnen ihn am PC, Tablet oder Handy und sehen dein Spiel live mit Ton. Keine Installation, kein Konto, keine Anmeldung."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "Welche Qualität ist möglich?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Bis zu 4K mit 60 Bildern pro Sekunde und bis zu 25 Mbit/s konstanter Bitrate über den Hardware-Encoder der Grafikkarte (NVIDIA, AMD, Intel). Das Spiel wird dabei kaum gebremst, weil der Encoder auf eigenen Chip-Einheiten läuft. Hat ein Zuschauer schwachen Empfang (z. B. Mobilfunk), senkt Lumora die Bitrate automatisch in Stufen und hebt sie wieder an, sobald die Verbindung es hergibt."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "Läuft der Stream über einen Server?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Nein. Bild und Ton laufen direkt von deinem PC zu den Zuschauern (Peer-to-Peer über WebRTC). Es gibt keinen Anbieter-Server dazwischen, der die Qualität herunterrechnet, Wartezeiten verursacht oder deine Inhalte sieht."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "Muss ich Ports freigeben oder den Router konfigurieren?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "In der Regel nicht. Lumora richtet die Verbindung automatisch ein (UPnP) und nutzt bei Anschlüssen ohne öffentliche IPv4-Adresse (DS-Lite/CGNAT) automatisch den IPv6-Direktweg. Der öffentliche Link steht typisch in rund zwei Sekunden."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "Was kostet das Streaming?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Nichts. Lumora ist kostenlos, es gibt kein Abo, keine Premium-Stufe und keine künstliche Qualitätsgrenze. Die volle Streaming-Qualität ist für alle frei."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "Funktioniert es auch auf dem iPhone?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Ja. Stream-Links sind normale Web-Adressen über HTTPS und funktionieren damit auch in Safari auf iPhone und iPad – beim Einzelstream genauso wie in der Gruppe."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "Hört man im Stream meinen ganzen PC-Ton?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Nur wenn du den ganzen Bildschirm teilst. Teilst du ein einzelnes Spiel-Fenster, überträgt Lumora gezielt nur den Ton dieses Spiels – Musik, Benachrichtigungen oder Sprach-Chats auf deinem PC bleiben privat."
-            }
-          }
+          { "@type": "ListItem", "position": 1, "name": "Lumora", "item": "https://lumora-streaming.de/" },
+          { "@type": "ListItem", "position": 2, "name": "Portfreigabe einrichten", "item": "https://lumora-streaming.de/portfreigabe.html" }
         ]
       }
     ]
-  }
+    }
   </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -263,56 +187,222 @@
 </nav>
 
 <main class="wrap" id="main">
-    <h1>Gameplay in 4K mit Freunden teilen – kostenlos, direkt &amp; ohne Konto</h1>
-    <p class="lead">Du willst, dass deine Freunde dein Spiel <strong>wirklich in guter Qualität</strong> sehen – nicht als matschigen, ruckelnden Brei? Lumora streamt dein Spiel in bis zu <strong>4K mit 60 fps</strong> direkt an jeden Browser. Ohne Abo, ohne Anmeldung, ohne Server dazwischen.</p>
-    <a class="cta" href="download.php">⬇ Lumora kostenlos laden</a>
-    <p class="muted">Für Windows 10 &amp; 11 · keine Registrierung · Open Source</p>
+    <h1>Portfreigabe für den Stream einrichten – Schritt für Schritt, für jeden Router</h1>
+    <p class="lead">Damit deine Freunde deinen Stream sehen, muss dein Router zwei Ports zu deinem PC durchlassen. <strong>Meistens erledigt Lumora das automatisch.</strong> Klappt es bei deinem Router nicht, findest du hier die genaue Klick-Anleitung – für jedes gängige Gerät, mit dem Schritt, an dem die meisten scheitern.</p>
 
-    <img class="shot" src="stream.webp" width="1920" height="1252" decoding="async" alt="Lumora Stream-Tab: Live-Vorschau des Spiels, Teilen-Link und „Freunde dazuholen" beim Teilen des Bildschirms">
+    <div class="card">
+      <strong>Brauche ich diese Seite überhaupt?</strong>
+      <p style="margin:8px 0 0">In der Regel <strong>nein</strong>. Lumora öffnet die Ports beim Streamstart selbst (per UPnP) und nutzt bei Anschlüssen ohne öffentliche IPv4-Adresse automatisch den IPv6-Direktweg. Diese Anleitung brauchst du nur, wenn Lumora im Stream-Tab meldet: <em>„Router öffnet die Ports nicht automatisch"</em>.</p>
+    </div>
 
-    <h2>So einfach geht's</h2>
-    <ol class="steps">
-      <li><strong>Stream starten:</strong> Spiel-Fenster oder Bildschirm auswählen, ein Klick (oder Hotkey mitten im Spiel) – fertig. Die Verbindung richtet sich automatisch ein, der öffentliche Link steht in rund zwei Sekunden.</li>
-      <li><strong>Link schicken:</strong> „Freunde dazuholen" kopiert den Einladungslink für die ganze Runde. Zuschauer öffnen ihn einfach im Browser; Freunde mit Lumora sind über denselben Link mit einem Klick in der Gruppe und streamen ihr eigenes Spiel zurück.</li>
-      <li><strong>Zuschauen im Browser:</strong> PC, Tablet oder Handy – Zuschauer brauchen nur den Link. Keine Installation, kein Konto. In der Gruppen-Ansicht sieht jeder jeden im Raster, ein Tipp holt den Ton der gewünschten Person.</li>
-    </ol>
-
-    <h2>Warum die Qualität so gut ist</h2>
+    <h2>Was freigegeben werden muss</h2>
     <div class="card">
       <ul class="feat">
-        <li><strong>Bis 4K / 60 fps / 25 Mbit konstant</strong> – encodiert vom Hardware-Encoder deiner Grafikkarte (NVIDIA, AMD, Intel). Das Spiel verliert dadurch kaum Leistung.</li>
-        <li><strong>Direkte Verbindung (P2P):</strong> Bild und Ton gehen von deinem PC direkt zum Zuschauer. Kein Anbieter-Server, der die Qualität herunterrechnet oder mitliest.</li>
-        <li><strong>Automatische Bitraten-Anpassung:</strong> Hat ein Zuschauer unterwegs schwachen Empfang, regelt Lumora die Bitrate in Stufen herunter – und wieder hoch, sobald es stabil läuft. Kein Dauer-Ruckeln, kein manuelles Nachstellen.</li>
-        <li><strong>Gezielter Spiel-Ton:</strong> Beim Teilen eines Fensters überträgt Lumora nur den Ton dieses Spiels – private Musik, Anrufe und Benachrichtigungen bleiben draußen.</li>
-        <li><strong>HDR-Spiele werden sauber umgewandelt</strong>, damit Zuschauer ohne HDR-Display korrekte Farben sehen.</li>
-        <li><strong>Verbindung ohne Gefrickel:</strong> Router-Freigaben automatisch (UPnP), IPv6-Direktweg bei DS-Lite/CGNAT-Anschlüssen, optional eigener TURN-Server – alles eingebaut.</li>
+        <li><strong>Port 8787 (TCP)</strong> – die Verbindungs-Signalisierung.</li>
+        <li><strong>Port 8189 (UDP)</strong> – das eigentliche Video/Audio.</li>
+        <li>Beide zeigen auf <strong>denselben PC</strong> (den, von dem du streamst). Extern = intern, es wird nichts umgeschrieben.</li>
       </ul>
     </div>
 
-    <h2>Nach dem Stream: deine Zahlen</h2>
-    <p>Sobald du den Stream beendest, zeigt Lumora dir eine kurze Zusammenfassung: wie lange du live warst, wie viele Leute zugeschaut haben, wie viele Videodaten übertragen wurden und mit welcher Qualität du gestreamt hast.</p>
-    <img class="shot" src="stream-stats.webp" width="1920" height="1254" loading="lazy" decoding="async" alt="Lumora Stream-Statistik nach dem Beenden: Dauer, Zuschauer gleichzeitig und gesamt, übertragene Videodaten, durchschnittliche Bitrate und Qualität">
+    <h2>Das Grundmuster – so läuft es bei jedem Router</h2>
+    <ol class="steps">
+      <li><strong>Ins Router-Menü:</strong> Im Browser die Adresse des Routers öffnen (steht meist auf einem Aufkleber am Gerät) und anmelden.</li>
+      <li><strong>Deinen PC als Gerät auswählen:</strong> Fast jeder Router bindet die Freigabe an ein Gerät. Genau hier hängen die meisten – der PC muss erst ausgewählt bzw. hinzugefügt werden. Taucht er nicht auf, gib ihm vorher eine <strong>feste IP</strong> (im Router unter „DHCP" / „Adressreservierung"), sonst zeigt die Regel nach einem Neustart ins Leere.</li>
+      <li><strong>Port 8787 (TCP) freigeben</strong> und speichern.</li>
+      <li><strong>Port 8189 (UDP) freigeben</strong> – bei den meisten Routern eine zweite, getrennte Regel.</li>
+    </ol>
 
-    <h2>Gruppen: Zockt zusammen, schaut euch gegenseitig zu</h2>
-    <p>Ein Klick auf „Freunde dazuholen" am laufenden Stream erstellt die Gruppe und kopiert den Einladungslink. Wer ihn mit Lumora öffnet, ist per „Mit Lumora mitstreamen" sofort dabei – der eigene Stream startet automatisch mit, und eigene Rechner im selben Netzwerk erkennen die Gruppe sogar ganz von selbst. Kein Code-Abtippen. Wer keinen PC hat, öffnet denselben Link im Browser (funktioniert auch auf dem iPhone) und sieht alle Streams gleichzeitig im Raster: Vollbild oder Spotlight per Klick, Ton und Lautstärke pro Person, das ganze Grid als Bild-in-Bild, Live-Statistik zuschaltbar. Die Gruppe hängt an niemandem – wer geht, geht; für alle anderen läuft alles ununterbrochen weiter.</p>
+    <h2>Wähle deinen Router</h2>
+    <p>
+      <strong>Deutschland:</strong>
+      <a href="#fritzbox">FRITZ!Box / 1&amp;1</a> ·
+      <a href="#speedport">Telekom Speedport</a> ·
+      <a href="#vodafone">Vodafone Station</a> ·
+      <a href="#o2">o2 HomeBox</a><br>
+      <strong>Marken:</strong>
+      <a href="#tplink">TP-Link</a> ·
+      <a href="#asus">ASUS</a> ·
+      <a href="#netgear">Netgear</a> ·
+      <a href="#dlink">D-Link</a> ·
+      <a href="#linksys">Linksys</a> ·
+      <a href="#huawei">Huawei</a><br>
+      <strong>International:</strong>
+      <a href="#bt">BT Smart Hub</a> ·
+      <a href="#sky">Sky</a> ·
+      <a href="#virgin">Virgin Media</a> ·
+      <a href="#xfinity">Xfinity</a> ·
+      <a href="#att">AT&amp;T</a>
+    </p>
+
+    <h2 id="fritzbox">FRITZ!Box (auch 1&amp;1 HomeServer)</h2>
+    <p class="muted">1&amp;1-HomeServer sind FRITZ!Box-Modelle – dieselbe Anleitung.</p>
+    <p>Öffne <strong>fritz.box</strong> im Browser und melde dich an.</p>
+    <ol class="steps">
+      <li>„Internet › Freigaben › Portfreigaben" öffnen.</li>
+      <li>„Gerät für Freigaben hinzufügen" klicken und im Feld „Gerät" diesen PC wählen. Fehlt er, wähle „IP-Adresse manuell eingeben".</li>
+      <li>„Neue Freigabe" › „Portfreigabe"; bei „Anwendung" den Punkt „Andere Anwendung" wählen. Bezeichnung „Lumora TCP", Protokoll <strong>TCP</strong>, in allen Portfeldern <strong>8787</strong>. Mit „OK" speichern.</li>
+      <li>Noch einmal „Neue Freigabe": „Lumora UDP", Protokoll <strong>UDP</strong>, Port <strong>8189</strong>. Speichern.</li>
+      <li>Unten mit „Übernehmen" bestätigen.</li>
+    </ol>
+    <p class="muted">Tipp: Hakst du beim PC-Eintrag „Selbstständige Portfreigaben für dieses Gerät erlauben" an, öffnet Lumora den Port künftig wieder selbst.</p>
+
+    <h2 id="speedport">Telekom Speedport (Smart 3 / 4)</h2>
+    <p>Öffne <strong>speedport.ip</strong> (oder 192.168.2.1) und melde dich mit dem Gerätepasswort (Router-Rückseite) an. <strong>Speedport-Router können kein UPnP</strong> – die manuelle Freigabe ist hier der einzige Weg.</p>
+    <ol class="steps">
+      <li>Feste IP zuerst: „Netzwerk › Verbundene Geräte" › diesen PC über „zeigen" öffnen › Haken „Immer dieselbe IPv4-Adresse" › Speichern.</li>
+      <li>„Internet › Portfreischaltung" öffnen und einen Namen eintragen (z. B. „Lumora Stream").</li>
+      <li>In der Liste diesen PC (das Gerät) auswählen.</li>
+      <li>Ohne Vorlage den Port <strong>8787</strong> eintragen (öffentlich = intern) und speichern.</li>
+      <li>Über „Weitere Port-Weiterleitung" eine zweite Regel mit Port <strong>8189</strong> anlegen. Speichern.</li>
+    </ol>
+
+    <h2 id="vodafone">Vodafone Station (Kabel)</h2>
+    <p>Öffne <strong>192.168.0.1</strong>, klicke oben rechts auf das Menü-Symbol und melde dich an (Passwort auf dem Aufkleber).</p>
+    <ol class="steps">
+      <li>„Internet › Port-Mapping" öffnen und auf das „Hinzufügen"-Symbol klicken.</li>
+      <li>Dienstname „Lumora TCP", Gerät = dieser PC, LAN-IP = seine Heimnetz-IP, Protokoll <strong>TCP</strong>, Art „Port aktivieren", WAN-Port <strong>8787</strong>, LAN-Port <strong>8787</strong>.</li>
+      <li>„Speichern" › „Anwenden" › den Slider nach rechts zum Aktivieren.</li>
+      <li>Zweite Regel genauso, aber Protokoll <strong>UDP</strong> und Port <strong>8189</strong>.</li>
+    </ol>
+    <p class="muted">Fehlt der Menüpunkt „Port-Mapping", hast du einen DS-Lite-Anschluss – siehe unten.</p>
+
+    <h2 id="o2">o2 HomeBox</h2>
+    <p>Öffne <strong>o2.box</strong> (oder 192.168.1.1) und melde dich an (Passwort auf der Geräterückseite).</p>
+    <ol class="steps">
+      <li>Dem PC eine feste IP geben (DHCP-Reservierung im Router).</li>
+      <li>Menüpunkt „IPv4/IPv6-Portfreigabe" öffnen (unterstützt TCP und UDP).</li>
+      <li>Neue Regel: Dienst frei benennen, Rechner-IP = dieser PC, Port <strong>8787</strong>, Protokoll <strong>TCP</strong>; speichern.</li>
+      <li>Zweite Regel: Port <strong>8189</strong>, Protokoll <strong>UDP</strong>.</li>
+    </ol>
+    <p class="muted">o2-Kabel liefert oft FRITZ!Box-Modelle – dann gilt die FRITZ!Box-Anleitung.</p>
+
+    <h2 id="tplink">TP-Link (Archer)</h2>
+    <p>Öffne <strong>tplinkwifi.net</strong> (oder 192.168.0.1) und melde dich an.</p>
+    <ol class="steps">
+      <li>„Advanced › NAT Forwarding › Virtual Servers" öffnen (bei manchen Modellen „Port Forwarding").</li>
+      <li>„Add": Service Name „Lumora-TCP", External + Internal Port <strong>8787</strong>, Protokoll <strong>TCP</strong>; Internal IP = dieser PC (über „View Connected Devices" wählen). Speichern.</li>
+      <li>Noch einmal „Add": „Lumora-UDP", Port <strong>8189</strong>, Protokoll <strong>UDP</strong>, gleiche PC-IP. Speichern.</li>
+    </ol>
+    <p class="muted">Feste IP empfehlenswert (Address Reservation). UPnP-Alternative: „Advanced › NAT Forwarding › UPnP" einschalten.</p>
+
+    <h2 id="asus">ASUS (ASUSWRT)</h2>
+    <p>Öffne <strong>router.asus.com</strong> (oder 192.168.1.1) und melde dich an.</p>
+    <ol class="steps">
+      <li>Links „WAN" › Reiter „Virtual Server / Port Forwarding"; „Enable Port Forwarding" auf ON.</li>
+      <li>„Add profile": Service Name „Lumora-TCP", Protocol <strong>TCP</strong>, External + Internal Port <strong>8787</strong>, Internal IP = deine PC-IP. Übernehmen.</li>
+      <li>Zweites „Add profile": Protocol <strong>UDP</strong>, Port <strong>8189</strong>, gleiche PC-IP. Mit „Apply" speichern.</li>
+    </ol>
+    <p class="muted">Feste IP per DHCP-Reservierung. UPnP-Alternative: „WAN › Internet Connection › Enable UPnP: Yes".</p>
+
+    <h2 id="netgear">Netgear (Nighthawk / Orbi)</h2>
+    <p>Öffne <strong>routerlogin.net</strong>, Benutzer „admin" und dein Passwort.</p>
+    <ol class="steps">
+      <li>„ADVANCED › Advanced Setup › Port Forwarding/Port Triggering"; „Port Forwarding" ausgewählt lassen.</li>
+      <li>„Add Custom Service": Name „Lumora-TCP", Type <strong>TCP</strong>, External Start + Ende je <strong>8787</strong>; Server-IP = dieser PC (unten in der Geräteliste anklickbar). „Apply".</li>
+      <li>Noch einmal „Add Custom Service": Type <strong>UDP</strong>, Port <strong>8189</strong>. „Apply".</li>
+    </ol>
+    <p class="muted">Vorher eine reservierte IP geben. UPnP-Alternative: „ADVANCED › Advanced Setup › UPnP › Turn UPnP On".</p>
+
+    <h2 id="dlink">D-Link</h2>
+    <p>Öffne <strong>dlinkrouter.local</strong> (oder 192.168.0.1) und melde dich an.</p>
+    <ol class="steps">
+      <li>Oben auf „Features › Port Forwarding" gehen.</li>
+      <li>„Add Rule": Name „Lumora", Local IP = dieser PC (aus dem Dropdown wählbar).</li>
+      <li>TCP-Port <strong>8787</strong> und UDP-Port <strong>8189</strong> in ihre jeweiligen Felder eintragen (bei D-Link decken beide Ports eine Regel ab).</li>
+      <li>„Schedule" auf „Always Enable", dann „Save".</li>
+    </ol>
+
+    <h2 id="linksys">Linksys (Smart Wi-Fi)</h2>
+    <p>Öffne <strong>LinksysSmartWiFi.com</strong> (oder 192.168.1.1); lokal über „click here" mit dem Router-Passwort anmelden.</p>
+    <ol class="steps">
+      <li>„Router Settings › Security › Apps and Gaming › Single Port Forwarding".</li>
+      <li>„Add a new Single Port Forwarding": „Lumora TCP", External + Internal Port <strong>8787</strong>, Protocol <strong>TCP</strong>, Device IP# = dieser PC. „Enabled" anhaken.</li>
+      <li>Zweite Regel: „Lumora UDP", Port <strong>8189</strong>, Protocol <strong>UDP</strong>. „Enabled". Dann „Save" › „Apply" › „Ok".</li>
+    </ol>
+    <p class="muted">Linksys verlangt eine feste IP – gib dem PC vorher eine statische/reservierte IP.</p>
+
+    <h2 id="huawei">Huawei</h2>
+    <p>Öffne <strong>192.168.3.1</strong> und melde dich an (Passwort auf dem Typenschild).</p>
+    <ol class="steps">
+      <li>„More Functions › Security Settings › NAT Services" öffnen.</li>
+      <li>Bei „Port Forwarding" auf das Plus/„Hinzufügen"-Symbol klicken.</li>
+      <li>Service name „Lumora TCP", Device name = dieser PC (aus der Geräteliste – der PC muss verbunden sein), Protocol <strong>TCP</strong>, interner + externer Port <strong>8787</strong>. „Save".</li>
+      <li>Zweite Regel: „Lumora UDP", Protocol <strong>UDP</strong>, Port <strong>8189</strong>. „Save".</li>
+    </ol>
+    <p class="muted">UPnP ist ab Werk aus: „More Functions › Network Settings › UPnP" einschalten, damit Lumoras Automatik greift.</p>
+
+    <h2 id="bt">BT Smart Hub</h2>
+    <p>Öffne <strong>192.168.1.254</strong> (Admin-Passwort auf der Hub-Karte / Rückseite).</p>
+    <ol class="steps">
+      <li>„Advanced Settings › Firewall" öffnen, Passwort eingeben.</li>
+      <li>„Create a new port forwarding rule", Namen vergeben. Unter „Select the device …" diesen PC aus der Geräteliste wählen.</li>
+      <li>External + Internal Port je <strong>8787</strong>, Protocol <strong>TCP</strong> › „Set" › „Save".</li>
+      <li>Zweite Regel identisch für Port <strong>8189</strong>, Protocol <strong>UDP</strong>.</li>
+    </ol>
+
+    <h2 id="sky">Sky Router</h2>
+    <p><strong>Schwarze Hubs</strong> (Sky Hub / Q Hub / Broadband Hub): <strong>192.168.0.1</strong> › Reiter „Advanced", anmelden.</p>
+    <ol class="steps">
+      <li>„LAN IP Setup › Address Reservation › Add": diesen PC wählen, die angezeigte IP notieren, „Add".</li>
+      <li>„Security › Services › Add Service": Name „Lumora-TCP", Type „TCP/UDP", Start + Finish Port <strong>8787</strong> › „Apply". Zweiten Service „Lumora-UDP" mit Port <strong>8189</strong>/UDP anlegen.</li>
+      <li>„Security › Firewall Rules" › „Inbound Services" › „Add": Service wählen, „Action = ALLOW always", „Destination LAN address" = notierte PC-IP › „Apply".</li>
+    </ol>
+    <p class="muted">Weißer WiFi-Max-Hub (SR213): geht nur in der „My Sky"-App unter Broadband › Product Settings › Advanced settings.</p>
+
+    <h2 id="virgin">Virgin Media Hub</h2>
+    <p>Wichtig: Der Hub muss im <strong>Router-Mode</strong> laufen (im Modem-Mode ist Portfreigabe abgeschaltet). Öffne <strong>192.168.0.1</strong> (Settings-Passwort auf der Unterseite).</p>
+    <ol class="steps">
+      <li>„Advanced settings › DHCP": diesen PC finden und seine IP notieren (idealerweise fest zuordnen).</li>
+      <li>„Advanced settings › Security › Port Forwarding" öffnen.</li>
+      <li>Regel 1: Local + External Start/End Port je <strong>8787</strong>, Protocol <strong>TCP</strong>, Ziel = notierte PC-IP.</li>
+      <li>Regel 2: Ports je <strong>8189</strong>, Protocol <strong>UDP</strong>. Speichern (evtl. Neustart nötig).</li>
+    </ol>
+
+    <h2 id="xfinity">Xfinity Gateway</h2>
+    <p>Bei Xfinity xFi geht Portfreigabe <strong>nur über die Xfinity-App</strong> (nicht im Web-Menü).</p>
+    <ol class="steps">
+      <li>App öffnen › „WiFi › View WiFi equipment › Advanced Settings › Port Forwarding".</li>
+      <li>„Add Port Forward" › „Continue", dann diesen PC wählen. (Nur Geräte mit DHCP + IPv4 erscheinen – schalte am PC ggf. die WLAN-Zufalls-MAC aus.)</li>
+      <li>„Manual Setup": Port <strong>8787</strong>, Protokoll <strong>TCP</strong> › „Next".</li>
+      <li>Noch einmal „Add Port Forward › Manual Setup": Port <strong>8189</strong>, Protokoll <strong>UDP</strong>.</li>
+    </ol>
+    <p class="muted">Klappt es trotz Regel nicht: in der App unter „Advanced Security" für diesen PC „Allow Access" setzen.</p>
+
+    <h2 id="att">AT&amp;T Gateway</h2>
+    <p>AT&amp;T-Gateways bieten kein UPnP – die manuelle Freigabe ist Pflicht. Öffne <strong>192.168.1.254</strong>, gib den „Device Access Code" ein (seitlich/unten am Gerät).</p>
+    <ol class="steps">
+      <li>„Firewall › NAT/Gaming" öffnen.</li>
+      <li>„Custom Services": Service Name „Lumora-TCP", Global Port Range <strong>8787</strong> in beide Felder, Base Host Port <strong>8787</strong>, Protocol <strong>TCP</strong> › „Add".</li>
+      <li>Zweiten Custom Service „Lumora-UDP" mit Port <strong>8189</strong>, Protocol <strong>UDP</strong> anlegen.</li>
+      <li>„Return to NAT/Gaming" › bei „Needed by Device" diesen PC wählen › „Add" › „Save".</li>
+    </ol>
+
+    <h2>Kein Menüpunkt für Portfreigaben? (DS-Lite)</h2>
+    <div class="card">
+      <p style="margin:0">Manche Anschlüsse (viele Kabel- und günstige DSL-Tarife) haben <strong>keine eigene öffentliche IPv4-Adresse</strong> mehr – das nennt sich <strong>DS-Lite</strong>. Dann fehlt der Portfreigabe-Menüpunkt teilweise ganz, und eine IPv4-Freigabe ist technisch unmöglich. Zwei Auswege:</p>
+      <ul class="feat" style="margin-top:10px">
+        <li>Lumoras <strong>IPv6-Direktweg</strong> nutzen – funktioniert für Zuschauer mit IPv6 (Mobilfunk, moderne Anschlüsse) ganz ohne Portfreigabe.</li>
+        <li>Beim Anbieter eine <strong>öffentliche IPv4-Adresse / „Dual Stack"</strong> beantragen (bei vielen Anbietern kostenlos).</li>
+      </ul>
+    </div>
 
     <h2>Häufige Fragen</h2>
-    <h3>Was brauchen meine Freunde?</h3>
-    <p>Nur einen Browser. Link öffnen, zuschauen – mit Ton, auf Wunsch im Vollbild. Keine App, kein Konto.</p>
-    <h3>Wie viel Verzögerung hat der Stream?</h3>
-    <p>Typisch unter einer Sekunde, da die Verbindung direkt läuft (WebRTC). Der Empfangspuffer ist einstellbar: kurz für minimale Verzögerung, länger für maximal ruhiges Bild bei schwankender Leitung.</p>
-    <h3>Wie viele Zuschauer gehen?</h3>
-    <p>Ehrliche Antwort: Das begrenzt dein Internet-Upload, denn jeder Zuschauer erhält den Stream direkt von dir (Bitrate × Zuschauerzahl). Für den Kumpel-Kreis ist das ideal – für hunderte Zuschauer sind Plattformen mit Verteil-Servern die richtige Wahl.</p>
-    <h3>Was kostet es?</h3>
-    <p>Nichts. Keine Werbung, kein Abo, keine Qualitäts-Bezahlschranke. Lumora ist kostenlos und Open Source.</p>
+    <h3>Warum ausgerechnet zwei Ports?</h3>
+    <p>Port 8787 (TCP) baut die Verbindung auf, Port 8189 (UDP) trägt das eigentliche Video und den Ton. Beide müssen zum selben PC führen.</p>
+    <h3>Ist das ein Sicherheitsrisiko?</h3>
+    <p>Die Freigabe öffnet nur diese zwei Ports genau zu deinem PC, und nur Lumora lauscht darauf. Der Video-Datenstrom ist zusätzlich verschlüsselt (WebRTC/DTLS). Wenn du nicht streamst, passiert dort nichts.</p>
+    <h3>Meine IP hat sich geändert und der Stream geht nicht mehr</h3>
+    <p>Dann hatte der PC keine feste IP und die Freigabe zeigt jetzt auf ein anderes Gerät. Gib dem PC im Router eine feste/reservierte IP (Schritt 2 im Grundmuster) – dann bleibt die Regel dauerhaft gültig.</p>
+    <h3>Muss ich das wirklich von Hand machen?</h3>
+    <p>Nur wenn die Automatik scheitert. Aktiviere im Router „UPnP" bzw. „selbstständige Portfreigaben", dann übernimmt Lumora die Freigabe beim nächsten Stream wieder selbst.</p>
 
-    <p style="margin-top:28px"><a class="cta" href="download.php">⬇ Jetzt kostenlos laden &amp; ausprobieren</a></p>
+    <p style="margin-top:28px"><a class="cta" href="download.php">⬇ Lumora kostenlos laden</a></p>
 
     <h2>Mehr von Lumora</h2>
     <p>
-      <a href="discord-alternative.html">Vergleich: Game-Streaming-Qualität kostenlos vs. Abo-Modelle →</a><br>
+      <a href="streaming.html">So streamst du dein Gameplay in 4K an Freunde →</a><br>
       <a href="gaming-osd.html">FPS, GPU- &amp; CPU-Werte im Spiel anzeigen (Gaming-OSD) →</a><br>
-      <a href="gamepad.html">Den ganzen Launcher per Gamepad bedienen (Couch-Gaming) →</a>
+      <a href="index.html">Zurück zur Startseite →</a>
     </p>
   </main>
 </div><!-- /.page -->
