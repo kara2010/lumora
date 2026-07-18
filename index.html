@@ -513,7 +513,17 @@
                 <label class="switch" style="margin-left:auto"><input type="checkbox" id="setStreamDoorman" onchange="onStreamSettingChange()"><span class="switch-slider"></span></label>
               </div>
               <p class="doorman-desc">Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein.</p>
-              <p class="doorman-note">Aktuell gilt: Wer den Raumcode-Link hat, kommt hinein – wer nur die rohe IP kennt, wird abgewiesen. Das gezielte Freigeben einzelner Zuschauer folgt als Nächstes.</p>
+              <p class="doorman-note">Ist der Schutz an, lässt du jeden neuen Zuschauer einzeln zu (Fenster überm Spiel). Ein Ablehnen gilt nur kurz – wer dauerhaft rein oder raus soll, kommt in die Listen unten.</p>
+              <div id="doormanLists" style="display:none">
+                <div class="dl-group" id="dlRegularsGroup" style="display:none">
+                  <div class="dl-head"><span>★ Stammgäste</span></div>
+                  <div id="dlRegulars"></div>
+                </div>
+                <div class="dl-group" id="dlBannedGroup" style="display:none">
+                  <div class="dl-head"><span>🚫 Gesperrt</span></div>
+                  <div id="dlBanned"></div>
+                </div>
+              </div>
             </div>
             <details class="sgdb-guide stream-advanced">
               <summary>Puffer &amp; automatische Anpassung erklärt</summary>
@@ -2528,6 +2538,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('streamBufferVal').textContent = sbuf + ' ms'
       document.getElementById('setStreamAdaptive').checked = s.streamAdaptive !== false
       document.getElementById('setStreamDoorman').checked = !!s.streamDoorman
+      renderDoormanLists()
       const hmode = Math.max(0, Math.min(3, parseInt(s.streamHdrMode, 10) || 0))
       const hexp = Math.max(0.15, Math.min(1.2, Number(s.streamHdrExposure) || 0.3937))
       document.getElementById('setHdrMode').value = String(hmode)
@@ -2718,6 +2729,23 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     function stopViewerPoll() { if (viewerPollTimer) { clearInterval(viewerPollTimer); viewerPollTimer = null }; renderViewers([]) }
     async function refreshViewers() { try { renderViewers(await ipcRenderer.invoke('list-viewers')) } catch (e) {} }
     function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) }
+    // Tuersteher-Verwaltung: dauerhaft akzeptierte (Stammgaeste) / gesperrte Zuschauer.
+    async function renderDoormanLists() {
+      try {
+        const box = document.getElementById('doormanLists'); if (!box) return
+        const r = await ipcRenderer.invoke('doorman-lists'), reg = r.regulars || [], ban = r.banned || []
+        const de = window.LANG !== 'en'
+        const row = (it, kind, label) => '<div class="dl-row"><span class="dl-name">' + escHtml(it.name || 'Gast') + '</span><button class="dl-x" onclick="removeDoorman(\'' + kind + '\',\'' + it.vid + '\')">' + label + '</button></div>'
+        document.getElementById('dlRegulars').innerHTML = reg.map(x => row(x, 'regular', de ? 'Entfernen' : 'Remove')).join('')
+        document.getElementById('dlBanned').innerHTML = ban.map(x => row(x, 'banned', de ? 'Entsperren' : 'Unban')).join('')
+        document.getElementById('dlRegularsGroup').style.display = reg.length ? 'block' : 'none'
+        document.getElementById('dlBannedGroup').style.display = ban.length ? 'block' : 'none'
+        box.style.display = (reg.length || ban.length) ? 'block' : 'none'
+      } catch (e) {}
+    }
+    async function removeDoorman(kind, vid) { try { await ipcRenderer.invoke('doorman-remove', kind, vid) } catch (e) {} renderDoormanLists() }
+    window.removeDoorman = removeDoorman
+    setInterval(renderDoormanLists, 5000)   // neue Stammgaeste/Sperren aus dem Freigabe-Fenster live nachziehen
     function renderViewers(list) {
       const box = document.getElementById('viewerListBox'), el = document.getElementById('viewerList')
       if (!list || !list.length) { box.style.display = 'none'; el.innerHTML = ''; return }

@@ -119,6 +119,9 @@
     font-weight:600; cursor:pointer; box-shadow:0 4px 16px rgba(79,142,247,0.35); }
   #gateBtn:hover { filter:brightness(1.1); }
   #gateWait { display:none; margin-top:18px; align-items:center; justify-content:center; gap:10px; font-size:14px; color:#bcd0f0; }
+  #gateRetry { display:none; margin-top:18px; justify-content:center; }
+  #gateRetryBtn { padding:10px 20px; border-radius:10px; border:1px solid rgba(79,142,247,0.5); background:rgba(79,142,247,0.14); color:#cfe0ff; font-size:14px; font-weight:600; cursor:pointer; }
+  #gateRetryBtn:hover { background:rgba(79,142,247,0.24); }
   .gate-spin { width:16px; height:16px; border-radius:50%; border:2.5px solid rgba(79,142,247,0.25);
     border-top-color:#4F8EF7; animation:gspin .8s linear infinite; }
   @keyframes gspin { to { transform:rotate(360deg); } }
@@ -133,6 +136,7 @@
       <button id="gateBtn" onclick="submitName()">Anfragen</button>
     </div>
     <div id="gateWait"><span class="gate-spin"></span><span id="gateWaitTxt">Warte auf Freigabe…</span></div>
+    <div id="gateRetry"><button id="gateRetryBtn" onclick="retryRequest()">Erneut anfragen</button></div>
   </div>
 </div>
 <div id="soundHint" onclick="enableSound()"><span class="ico">🔊</span><span>Tippen für Ton</span></div>
@@ -182,23 +186,32 @@
   function hideGate() { document.getElementById('gate').style.display = 'none' }
   function showGate(mode) {
     document.getElementById('gate').style.display = 'flex'
-    var form = document.getElementById('gateForm'), wait = document.getElementById('gateWait')
-    if (mode === 'denied') {
-      form.style.display = 'none'; wait.style.display = 'none'
-      document.getElementById('gateIco').textContent = '🚫'
-      document.getElementById('gateTitle').textContent = GATE_DE ? 'Zugang abgelehnt' : 'Access denied'
-      document.getElementById('gateText').textContent = GATE_DE ? 'Der Host hat deine Anfrage abgelehnt.' : 'The host declined your request.'
+    var form = document.getElementById('gateForm'), wait = document.getElementById('gateWait'), retry = document.getElementById('gateRetry')
+    var ico = document.getElementById('gateIco'), title = document.getElementById('gateTitle'), text = document.getElementById('gateText')
+    form.style.display = 'none'; wait.style.display = 'none'; retry.style.display = 'none'
+    if (mode === 'banned') {   // dauerhaft gesperrt -> kein Weg (der Host hebt das aktiv auf)
+      ico.textContent = '🚫'
+      title.textContent = GATE_DE ? 'Kein Zutritt' : 'No access'
+      text.textContent = GATE_DE ? 'Der Host hat dich für diesen Stream gesperrt.' : 'The host has blocked you from this stream.'
       return
     }
-    document.getElementById('gateIco').textContent = '🔒'
-    document.getElementById('gateTitle').textContent = GATE_DE ? 'Zutritt anfragen' : 'Request access'
-    if (viewerName()) {
-      form.style.display = 'none'; wait.style.display = 'flex'
-      document.getElementById('gateText').textContent = GATE_DE ? 'Der Host muss dich freigeben.' : 'The host needs to approve you.'
+    if (mode === 'denied') {   // abgelehnt, aber KEINE Sackgasse: nach kurzem Cooldown erneut moeglich
+      ico.textContent = '⏳'
+      title.textContent = GATE_DE ? 'Gerade nicht freigegeben' : 'Not approved right now'
+      text.textContent = GATE_DE ? 'Du kannst es in einem Moment erneut versuchen.' : 'You can try again in a moment.'
+      retry.style.display = 'flex'
+      document.getElementById('gateRetryBtn').textContent = GATE_DE ? 'Erneut anfragen' : 'Request again'
+      return
+    }
+    ico.textContent = '🔒'
+    title.textContent = GATE_DE ? 'Zutritt anfragen' : 'Request access'
+    if (viewerName()) {   // Name bekannt -> Anfrage laeuft, auf Freigabe warten
+      wait.style.display = 'flex'
+      text.textContent = GATE_DE ? 'Der Host muss dich freigeben.' : 'The host needs to approve you.'
       document.getElementById('gateWaitTxt').textContent = GATE_DE ? 'Warte auf Freigabe…' : 'Waiting for approval…'
-    } else {
-      form.style.display = 'flex'; wait.style.display = 'none'
-      document.getElementById('gateText').textContent = GATE_DE ? 'Der Host muss dich für diesen Stream freigeben.' : 'The host must approve you for this stream.'
+    } else {   // noch kein Name -> ERST Namensabfrage (der Host bekommt noch KEIN Popup)
+      form.style.display = 'flex'
+      text.textContent = GATE_DE ? 'Der Host muss dich für diesen Stream freigeben.' : 'The host must approve you for this stream.'
       document.getElementById('gateBtn').textContent = GATE_DE ? 'Anfragen' : 'Request'
       document.getElementById('gateName').placeholder = GATE_DE ? 'Dein Name' : 'Your name'
     }
@@ -207,9 +220,11 @@
     var n = (document.getElementById('gateName').value || '').trim().slice(0, 24)
     if (!n) return
     try { localStorage.setItem('lumora_name', n) } catch (e) {}
-    showGate('pending')   // auf "Warte" umschalten; der laufende Retry-Loop sendet den Namen mit
+    showGate('pending'); connect()   // erst JETZT (mit Namen) anfragen -> beim Host erscheint jetzt das Popup
   }
   window.submitName = submitName
+  function retryRequest() { showGate('pending'); connect() }   // nach dem 60-s-Cooldown ein frischer Versuch
+  window.retryRequest = retryRequest
   try { document.getElementById('gateName').addEventListener('keydown', function (e) { if (e.key === 'Enter') submitName() }) } catch (e) {}
   // Streamendes Mitglied im Schattenraum frisch aufloesen (App-Neustart vergibt
   // eine NEUE Member-ID; die beim Seitenaufbau injizierte waere dann veraltet).
@@ -651,8 +666,9 @@
           if (rj && rj.error === 'no-room' && RELAY.watch) { location.replace(RELAY.watch); return }
           // Tuersteher: individuelle Freigabe. 'pending' = wartet auf Zulassen -> Gate + weiter pollen;
           // 'denied' = abgelehnt (nicht weiter pollen); 'unauthorized' = ohne gueltigen Nachweis.
-          if (rj && rj.error === 'pending') { try { pc.close() } catch (e) {} showGate('pending'); setTimeout(retry, 2500); return }
+          if (rj && rj.error === 'pending') { try { pc.close() } catch (e) {} showGate('pending'); if (viewerName()) setTimeout(retry, 2500); return }   // ohne Namen NICHT pollen -> erst Namensabfrage
           if (rj && rj.error === 'denied') { try { pc.close() } catch (e) {} showGate('denied'); return }
+          if (rj && rj.error === 'banned') { try { pc.close() } catch (e) {} showGate('banned'); return }
           if (rj && rj.error === 'unauthorized') { try { pc.close() } catch (e) {} status(GATE_DE ? '🔒 Kein Zugriff – nicht freigegeben' : '🔒 No access – not approved', 'err'); return }
           status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return
         }
@@ -669,10 +685,11 @@
           return
         }
         if (resp.status === 401) { status(GATE_DE ? '🔒 Kein Zugriff – nicht freigegeben' : '🔒 No access – not approved', 'err'); return }   // Tuersteher: kein gueltiger Nachweis – NICHT weiter pollen
-        if (resp.status === 403) {   // individuelle Freigabe: pending (weiter pollen) / denied (Stopp)
+        if (resp.status === 403) {   // individuelle Freigabe: banned (Stopp) / denied (Cooldown) / pending
           var reason403 = ''; try { reason403 = (await resp.text()).trim() } catch (e) {}
+          if (reason403 === 'banned') { showGate('banned'); return }
           if (reason403 === 'denied') { showGate('denied'); return }
-          showGate('pending'); setTimeout(retry, 2500); return
+          showGate('pending'); if (viewerName()) setTimeout(retry, 2500); return   // ohne Namen NICHT pollen
         }
         if (resp.status !== 201 && !resp.ok) { status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return }
         hideGate()
