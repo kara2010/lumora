@@ -5237,30 +5237,46 @@ function bcApiPost(apiPath) {
     rq.end()
   })
 }
+// Tuersteher-Nachweis pruefen: HMAC-SHA256 ueber (SDP-Body + '|' + Zeitstempel) mit
+// dem Session-Token als Schluessel. Der Server bildet dieselbe Signatur (gruppe.php
+// a=whep) – stimmt sie ueberein UND ist der Zeitstempel frisch (<=60 s, gegen Replay),
+// ist die Anfrage autorisiert. Zeitkonstanter Vergleich (timingSafeEqual) gegen
+// Timing-Angriffe. Der Token selbst wird nie uebertragen.
+function bcVerifyDoormanSig(body, sig, ts) {
+  if (!bcAccessKey || !sig || !ts) return false
+  const t = parseInt(ts, 10)
+  if (!t || Math.abs(Math.floor(Date.now() / 1000) - t) > 60) return false
+  try {
+    const expect = require('crypto').createHmac('sha256', bcAccessKey).update(body).update('|' + ts).digest('hex')
+    const a = Buffer.from(sig), b = Buffer.from(expect)
+    return a.length === b.length && require('crypto').timingSafeEqual(a, b)
+  } catch { return false }
+}
 // WHEP-Anfrage an mediamtx weiterreichen (dessen Endpoint ist /<path>/whep).
 // Die Session-Sub-URL fuer PATCH/DELETE haengt mediamtx im Location-Header an;
 // wir biegen sie auf unseren Proxy-Pfad um, damit der Zuschauer bei uns bleibt.
 function bcProxyWhep(req, res) {
   const ip = bcClientIp(req)
   if (req.method === 'POST' && bcBlockedIps.has(ip)) { try { res.writeHead(403); res.end('blocked') } catch {}; return }   // gesperrt
-  // Tuersteher (Zugriffsschutz, optional – Standard aus): Ist er an, braucht jede
-  // NEUE Verbindung (POST = SDP-Offer) den geheimen Session-Schluessel (?vk=). Den
-  // haengt NUR der Vermittlungsserver beim Durchreichen an (er kennt ihn aus dem
-  // Roster); der DIREKTE IP-Zugriff hat ihn nicht -> 401. Ohne Answer bekommt der
-  // Zuschauer nie die ICE-Zugangsdaten -> kein Zugriff auf die Medien. Ausgenommen:
-  // die eigene Stream-Vorschau (127.0.0.1). PATCH/DELETE (Session-ID) bleiben frei.
-  if (req.method === 'POST' && appSettings.streamDoorman) {
-    const local = ip === '127.0.0.1' || ip === '::1' || ip === ''
-    let vk = ''
-    try { vk = (new URL(req.url, 'http://x').searchParams.get('vk')) || '' } catch {}
-    const ok = local || (!!bcAccessKey && vk === bcAccessKey)
-    if (!ok) { try { res.writeHead(401, { 'Content-Type': 'text/plain' }); res.end('unauthorized') } catch {}; return }
-  }
   const chunks = []
   req.on('data', (c) => { chunks.push(c); if (Buffer.concat(chunks).length > 300000) req.destroy() })
   req.on('end', () => {
     const body = Buffer.concat(chunks)
-    const rest = req.url.replace(/^\/whep/, '').replace(/\?.*$/, '')   // '' oder '/<session>' (Query wie ?vk= nicht an mediamtx durchreichen)
+    // Tuersteher (Zugriffsschutz, optional – Standard aus): Ist er an, braucht jede NEUE
+    // Verbindung (POST = SDP-Offer) einen gueltigen Nachweis. Der Token (bcAccessKey)
+    // wird dabei NIE uebertragen: Der Vermittlungsserver kennt ihn aus dem Roster und
+    // sendet nur eine HMAC-Signatur ueber GENAU dieses SDP (+Zeitstempel), die er damit
+    // bildet (?sig=&ts=). Lumora bildet dieselbe Signatur mit seinem Token und vergleicht
+    // zeitkonstant. Ein Mitlauscher sieht nur die Signatur (nicht umkehrbar, an dieses
+    // eine SDP gebunden, ~60 s gueltig) – nie den Token. Der direkte IP-Zugriff hat keine
+    // gueltige Signatur -> 401. Ausgenommen: eigene Vorschau (127.0.0.1). PATCH/DELETE frei.
+    if (req.method === 'POST' && appSettings.streamDoorman) {
+      const local = ip === '127.0.0.1' || ip === '::1' || ip === ''
+      let sig = '', ts = ''
+      try { const u = new URL(req.url, 'http://x'); sig = u.searchParams.get('sig') || ''; ts = u.searchParams.get('ts') || '' } catch {}
+      if (!(local || bcVerifyDoormanSig(body, sig, ts))) { try { res.writeHead(401, { 'Content-Type': 'text/plain' }); res.end('unauthorized') } catch {}; return }
+    }
+    const rest = req.url.replace(/^\/whep/, '').replace(/\?.*$/, '')   // '' oder '/<session>' (Query wie ?sig= nicht an mediamtx durchreichen)
     const target = '/' + MTX_PATH + '/whep' + rest
     const headers = {}
     if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type']
