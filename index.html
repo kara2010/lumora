@@ -2727,8 +2727,12 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         const dur = mins < 1 ? 'gerade dazu' : 'seit ' + mins + ' min'
         const mb = v.bytes ? '  ·  ' + (v.bytes / 1048576).toFixed(0) + ' MB' : ''
         const ua = v.ua ? '  ·  ' + escHtml(v.ua) : ''
+        // Mit Zugriffsschutz gab der Zuschauer einen Namen an -> prominent zeigen, IP gedimmt dahinter.
+        const who = v.name
+          ? '<b>' + escHtml(v.name) + '</b>  ·  <span style="opacity:.6">' + escHtml(v.ip || '?') + '</span>'
+          : '<b>' + escHtml(v.ip || '?') + '</b>'
         return '<div style="display:flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(255,255,255,.05); border-radius:8px; margin-bottom:6px; font-size:13px">'
-          + '<span style="flex:1"><b>' + escHtml(v.ip || '?') + '</b>' + ua + '  ·  ' + dur + mb + '</span>'
+          + '<span style="flex:1">' + who + ua + '  ·  ' + dur + mb + '</span>'
           + '<button class="btn-browse" style="padding:5px 10px" onclick="kickViewer(\'' + v.id + '\', \'' + (v.ip || '') + '\', false)" title="Zuschauer trennen">Entfernen</button>'
           + '<button class="btn-browse" style="padding:5px 10px" onclick="kickViewer(\'' + v.id + '\', \'' + (v.ip || '') + '\', true)" title="Trennen und diese IP sperren">🚫 Sperren</button>'
           + '</div>'

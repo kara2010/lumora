@@ -5245,11 +5245,21 @@ function bcApiPost(apiPath) {
 // alle paar Sekunden neu). Zulassen -> vid gilt als granted, der naechste Versuch kommt
 // durch. Ablehnen -> 403 „denied". Die HMAC-Schicht (nur ueber den Relay) bleibt darunter.
 const bcKnocks = new Map()   // vid -> { vid, name, at, status: 'pending'|'granted'|'denied' }
+const bcPrevGrants = new Map()   // vid -> Zeit der letzten Freigabe (Karenz ueber Stream-Neustarts)
+const bcSessionNames = new Map()   // mediamtx-sessionId -> eingegebener Zuschauer-Name (fuer die Liste)
+const BC_GRANT_KARENZ = 15 * 60 * 1000   // 15 Min: kurzer Stop+Neustart fragt Zugelassene nicht erneut
 let doormanWindow = null
 function bcApproveGate(vid, name) {
   if (!vid) return 'denied'
   const k = bcKnocks.get(vid)
   if (k && (k.status === 'granted' || k.status === 'denied')) return k.status
+  // Karenz: kuerzlich (< 15 Min) schon freigegeben -> nach einem Stream-Neustart
+  // OHNE erneutes Fragen wieder rein (der User pausiert oft nur kurz zum Testen).
+  const prev = bcPrevGrants.get(vid)
+  if (prev && Date.now() - prev < BC_GRANT_KARENZ) {
+    bcKnocks.set(vid, { vid, name: String(name || 'Gast').slice(0, 24), at: Date.now(), status: 'granted' })
+    return 'granted'
+  }
   if (!k) {
     const nm = String(name || 'Gast').slice(0, 24)
     bcKnocks.set(vid, { vid, name: nm, at: Date.now(), status: 'pending' })
@@ -5303,7 +5313,13 @@ function createDoormanWindow() {
   return doormanWindow
 }
 function bcCloseDoorman() {
+  // Freigegebene fuer die Karenz merken (kurzer Stop+Neustart -> kein erneutes Fragen);
+  // dabei abgelaufene Karenz-Eintraege aufraeumen, damit die Map nicht endlos waechst.
+  const now = Date.now()
+  for (const [vid, t] of bcPrevGrants) if (now - t >= BC_GRANT_KARENZ) bcPrevGrants.delete(vid)
+  for (const k of bcKnocks.values()) if (k.status === 'granted') bcPrevGrants.set(k.vid, now)
   bcKnocks.clear()
+  bcSessionNames.clear()
   if (doormanWindow && !doormanWindow.isDestroyed()) { try { doormanWindow.close() } catch {} }
   doormanWindow = null
 }
@@ -5375,6 +5391,16 @@ function bcProxyWhep(req, res) {
         } else h[k] = pres.headers[k]
       }
       res.writeHead(pres.statusCode, h)
+      // Eingegebenen Namen dieser Session merken (fuer die Zuschauer-Liste). Die
+      // mediamtx-sessionId steckt im Location-Header (letztes Pfadsegment) und ist
+      // dieselbe, die die webrtcsessions-API (list-viewers) als s.id liefert.
+      if (req.method === 'POST' && loc) {
+        try {
+          const nm = (new URL(req.url, 'http://x').searchParams.get('name') || '').slice(0, 24)
+          const sid = (loc.split('/whep/')[1] || '').split(/[?#]/)[0]
+          if (nm && sid) bcSessionNames.set(sid, nm)
+        } catch {}
+      }
       pres.pipe(res)
     })
     preq.on('error', () => { try { res.writeHead(502); res.end('mediamtx nicht erreichbar') } catch {} })
@@ -5392,7 +5418,7 @@ ipcMain.handle('list-viewers', async () => {
       // ist nur unser Proxy = 127.0.0.1), den User-Agent reichen wir durch. Solange
       // die WebRTC-Verbindung noch aushandelt, ist der Kandidat leer -> "verbindet…".
       const ip = bcExtractIp(s.remoteCandidate)
-      return { id: s.id, ip: ip || '(verbindet…)', ua: bcUaShort(s.userAgent), since: Date.parse(s.created) || Date.now(), bytes: s.bytesSent || 0 }
+      return { id: s.id, ip: ip || '(verbindet…)', ua: bcUaShort(s.userAgent), since: Date.parse(s.created) || Date.now(), bytes: s.bytesSent || 0, name: bcSessionNames.get(s.id) || '' }
     })
   } catch { return [] }
 })
