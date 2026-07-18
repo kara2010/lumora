@@ -585,6 +585,7 @@
           try { pc.close() } catch (e) {}
           return
         }
+        if (resp.status === 401) { status('🔒 Kein Zugriff – für diesen Stream nicht freigegeben', 'err'); return }   // Tuersteher: nicht freigegeben – NICHT weiter pollen
         if (resp.status !== 201 && !resp.ok) { status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return }
         sessionUrl = resp.headers.get('location')
         answer = await resp.text()

@@ -377,6 +377,19 @@ body::before {
 
 .mode-option.active .mode-desc { color: #9bb8e8; }
 
+.doorman-card {
+  margin-top: 12px;
+  padding: 14px 15px;
+  border: 1px solid var(--accent-border);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb),0.12) 0%, rgba(var(--accent-rgb),0.03) 70%);
+}
+.doorman-head { display: flex; align-items: center; gap: 9px; }
+.doorman-ico { font-size: 17px; line-height: 1; }
+.doorman-title { font-size: 14px; font-weight: 600; color: #eee; }
+.doorman-desc { font-size: 12.5px; color: #b7b7b7; line-height: 1.55; margin: 9px 0 0; }
+.doorman-note { font-size: 12px; color: color-mix(in srgb, var(--accent-light) 78%, #999); line-height: 1.5; margin: 7px 0 0; }
+.doorman-note b { color: var(--accent-light); font-weight: 600; }
 .settings-hint {
   font-size: 12px;
   color: #666;

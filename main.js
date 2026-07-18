@@ -92,7 +92,7 @@ const appSettings = { autostart: false, startMinimized: false, minimizeToTray: f
   // streamBufferMs: Empfangspuffer der Zuschauer. 120 ms war fuer Internet-Streams
   // zu knapp - jede kleine Sende-/Netz-Schwankung schlug direkt als Ruckler durch.
   // 300 ms ist weiterhin "live" (unter einer halben Sekunde), schluckt aber Jitter.
-  streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 300, streamHotkey: '', streamEncoder: 'auto',
+  streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 300, streamHotkey: '', streamEncoder: 'auto', streamDoorman: false,
   streamTurnEnabled: false, streamTurnUrl: '', streamTurnUser: '', streamTurnPass: '', streamTurnForce: false,
   streamForceIPv6: false,
   language: 'auto',    // UI-Sprache: 'auto' (Systemsprache), 'de', 'en' - Uebersetzung im Renderer (i18n-Block)
@@ -3555,7 +3555,7 @@ ipcMain.handle('set-app-settings', (event, partial) => {
   // Puffer (Zuschauer-seitig live via /cfg), TURN (wirkt live via /cfg bzw.
   // erst beim naechsten Start), IPv6-Testschalter, Hosts-Cache, Hotkey,
   // Adaptiv-Schalter (Sonderfall direkt darunter).
-  const bcNoRestart = new Set(['streamBufferMs', 'streamAdaptive', 'streamTurnEnabled', 'streamTurnUrl', 'streamTurnUser', 'streamTurnPass', 'streamTurnForce', 'streamForceIPv6', 'streamLastHosts', 'streamHotkey', 'streamFastRestart'])
+  const bcNoRestart = new Set(['streamBufferMs', 'streamAdaptive', 'streamTurnEnabled', 'streamTurnUrl', 'streamTurnUser', 'streamTurnPass', 'streamTurnForce', 'streamForceIPv6', 'streamLastHosts', 'streamHotkey', 'streamFastRestart', 'streamDoorman'])
   // Adaptiv ausgeschaltet, waehrend die Bitrate gerade abgesenkt ist: zurueck
   // zur vollen eingestellten Bitrate (dafuer ist EIN Neustart gerechtfertigt).
   if (partial && partial.streamAdaptive === false && bcAdaptLevel > 0 && broadcastState.active) {
@@ -4880,12 +4880,16 @@ function groupHttpJson(base, urlPath, method, bodyObj, timeoutMs) {
   })
 }
 function groupSelfEntry() {
+  // Zugriffsschutz-Schluessel einmal je Session erzeugen (s. bcAccessKey). Wird
+  // im Roster hinterlegt und vom Server unsichtbar an /whep durchgereicht.
+  if (!bcAccessKey) { try { bcAccessKey = require('crypto').randomBytes(16).toString('hex') } catch { bcAccessKey = String(Date.now()) + Math.floor(Math.random() * 1e9) } }
   return {
     id: groupMemberId(), name: groupDisplayName(),
     linkV4: broadcastState.linkV4 || null, linkV6: broadcastState.linkV6 || null,
     // Mitgliedschaft != Streamen: Wer seinen Stream stoppt, bleibt in der Gruppe
     // (Server laeuft weiter) und erscheint im Grid als "pausiert" statt zu verschwinden.
     streaming: !!broadcastState.active,
+    vk: bcAccessKey,   // Tuersteher-Schluessel (Server strippt ihn aus oeffentlichen Antworten)
   }
 }
 function groupPushState() { sendToUi('group-status', groupPublicState()) }
@@ -5101,6 +5105,12 @@ async function groupLeave() {
 // (Heartbeat traegt neue Adressen ins Roster, der Code bleibt gleich).
 // Faellt die Vermittlung aus, bleibt der klassische IP-Link als Fallback.
 let bcWatchCode = null
+// Zugriffsschutz (Tuersteher): geheimer Stream-Schluessel pro Session. Lumora
+// hinterlegt ihn beim Registrieren im Vermittlungs-Raum (dort NICHT oeffentlich
+// sichtbar – members_out strippt ihn); der Server haengt ihn beim /whep-Durchreichen
+// an. Der DIREKTE IP-Zugriff kennt ihn nicht -> 401 (nur wenn streamDoorman an).
+// Pro Stream-Start neu (Rotation), beim Stop verworfen.
+let bcAccessKey = null
 // 5-Min-Karenz: stoppt der User den Stream nur kurz (z.B. zum Testen) und startet
 // wieder, soll der Beitritts-Code/Watch-Link derselbe bleiben (nicht bei jedem
 // Neustart ein neuer). Nach dem Stop wird der Code + Zeit gemerkt und beim naechsten
@@ -5171,6 +5181,7 @@ async function bcRegisterWatchLink() {
   bcPushState()
 }
 function bcUnregisterWatchLink() {
+  bcAccessKey = null   // Zugriffsschutz-Schluessel verwerfen -> naechster Stream bekommt einen neuen
   if (bcWatchTimer) { clearInterval(bcWatchTimer); bcWatchTimer = null }
   if (bcWatchCode) {
     bcPrevWatchCode = bcWatchCode   // 5-Min-Karenz: Code merken fuer schnellen Neustart
@@ -5232,11 +5243,24 @@ function bcApiPost(apiPath) {
 function bcProxyWhep(req, res) {
   const ip = bcClientIp(req)
   if (req.method === 'POST' && bcBlockedIps.has(ip)) { try { res.writeHead(403); res.end('blocked') } catch {}; return }   // gesperrt
+  // Tuersteher (Zugriffsschutz, optional – Standard aus): Ist er an, braucht jede
+  // NEUE Verbindung (POST = SDP-Offer) den geheimen Session-Schluessel (?vk=). Den
+  // haengt NUR der Vermittlungsserver beim Durchreichen an (er kennt ihn aus dem
+  // Roster); der DIREKTE IP-Zugriff hat ihn nicht -> 401. Ohne Answer bekommt der
+  // Zuschauer nie die ICE-Zugangsdaten -> kein Zugriff auf die Medien. Ausgenommen:
+  // die eigene Stream-Vorschau (127.0.0.1). PATCH/DELETE (Session-ID) bleiben frei.
+  if (req.method === 'POST' && appSettings.streamDoorman) {
+    const local = ip === '127.0.0.1' || ip === '::1' || ip === ''
+    let vk = ''
+    try { vk = (new URL(req.url, 'http://x').searchParams.get('vk')) || '' } catch {}
+    const ok = local || (!!bcAccessKey && vk === bcAccessKey)
+    if (!ok) { try { res.writeHead(401, { 'Content-Type': 'text/plain' }); res.end('unauthorized') } catch {}; return }
+  }
   const chunks = []
   req.on('data', (c) => { chunks.push(c); if (Buffer.concat(chunks).length > 300000) req.destroy() })
   req.on('end', () => {
     const body = Buffer.concat(chunks)
-    const rest = req.url.replace(/^\/whep/, '')          // '' oder '/<session>'
+    const rest = req.url.replace(/^\/whep/, '').replace(/\?.*$/, '')   // '' oder '/<session>' (Query wie ?vk= nicht an mediamtx durchreichen)
     const target = '/' + MTX_PATH + '/whep' + rest
     const headers = {}
     if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type']

@@ -506,6 +506,15 @@
               <input type="checkbox" id="setStreamAdaptive" onchange="onStreamSettingChange()">
             </div>
             <p class="settings-hint">Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum.</p>
+            <div class="doorman-card">
+              <div class="doorman-head">
+                <span class="doorman-ico">🔒</span>
+                <span class="doorman-title">Zugriffsschutz</span>
+                <label class="switch" style="margin-left:auto"><input type="checkbox" id="setStreamDoorman" onchange="onStreamSettingChange()"><span class="switch-slider"></span></label>
+              </div>
+              <p class="doorman-desc">Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein.</p>
+              <p class="doorman-note">Aktuell gilt: Wer den Raumcode-Link hat, kommt hinein – wer nur die rohe IP kennt, wird abgewiesen. Das gezielte Freigeben einzelner Zuschauer folgt als Nächstes.</p>
+            </div>
             <details class="sgdb-guide stream-advanced">
               <summary>Puffer &amp; automatische Anpassung erklärt</summary>
               <p class="settings-hint" style="margin-top:8px">Für schnelle Spiele 1080p/1440p mit genug Bitrate; 4K ist am anspruchsvollsten. Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.</p>
@@ -1205,6 +1214,9 @@ const I18N_EN = {
   '📖 Ausführliche Web-Anleitung mit allen Routern ↗': '📖 Detailed web guide for every router ↗',
   'Encoder': 'Encoder',
   'Automatisch (empfohlen)': 'Automatic (recommended)',
+  'Zugriffsschutz': 'Access protection',
+  'Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein.': 'Off by default. When on, only people you explicitly approve can see your stream – even someone who knows the link or IP cannot get in uninvited.',
+  'Aktuell gilt: Wer den Raumcode-Link hat, kommt hinein – wer nur die rohe IP kennt, wird abgewiesen. Das gezielte Freigeben einzelner Zuschauer folgt als Nächstes.': 'For now: whoever has the room-code link gets in – anyone who only knows the raw IP is rejected. Approving individual viewers is coming next.',
   '⏳ Öffentlicher Link wird vorbereitet…': '⏳ Preparing public link…',
   '  ·  ⏳ Router wird geprüft…': '  ·  ⏳ Checking router…',
   '  ·  🌐 über IPv6 erreichbar (Zuschauer braucht IPv6, z. B. Mobilfunk)': '  ·  🌐 reachable via IPv6 (viewer needs IPv6, e.g. mobile data)',
@@ -2515,6 +2527,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setStreamBuffer').value = String(sbuf)
       document.getElementById('streamBufferVal').textContent = sbuf + ' ms'
       document.getElementById('setStreamAdaptive').checked = s.streamAdaptive !== false
+      document.getElementById('setStreamDoorman').checked = !!s.streamDoorman
       const hmode = Math.max(0, Math.min(3, parseInt(s.streamHdrMode, 10) || 0))
       const hexp = Math.max(0.15, Math.min(1.2, Number(s.streamHdrExposure) || 0.3937))
       document.getElementById('setHdrMode').value = String(hmode)
@@ -3152,6 +3165,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         streamUploadKbit: parseInt(document.getElementById('setStreamBitrate').value, 10),
         streamEncoder: document.getElementById('setStreamEncoder').value,
         streamAdaptive: document.getElementById('setStreamAdaptive').checked,
+        streamDoorman: document.getElementById('setStreamDoorman').checked,
       })
     }
     // Jitter-Puffer der Zuschauer: getrennt gespeichert, damit die Regler-Bewegung
