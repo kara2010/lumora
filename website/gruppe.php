@@ -218,11 +218,15 @@ if ($a === 'whep') {
   if ($j === null || !isset($j['members'][$mid])) jout(array('ok' => false, 'error' => 'no-member'));
   $sdp = read_body();
   if (!$sdp) jout(array('ok' => false, 'error' => 'no-sdp'));
-  // Tuersteher-Schluessel des Streamers unsichtbar mit durchreichen (nur der Server
-  // kennt ihn aus dem Roster; der direkte IP-Zugriff hat ihn nicht -> Lumora weist ab).
-  $vk = (isset($j['members'][$mid]['vk']) && $j['members'][$mid]['vk']) ? '?vk=' . rawurlencode($j['members'][$mid]['vk']) : '';
+  // Tuersteher-Nachweis: NICHT den Token uebertragen, sondern eine HMAC-Signatur ueber
+  // GENAU dieses SDP (+Zeitstempel), mit dem Streamer-Token als Schluessel. Ein Mitlauscher
+  // sieht nur die Signatur (nicht umkehrbar, an dieses SDP gebunden, ~60 s gueltig) – nie
+  // den Token. Der direkte IP-Zugriff ohne gueltige Signatur wird von Lumora abgewiesen.
+  $sig_qs = '';
+  $mvk = isset($j['members'][$mid]['vk']) ? $j['members'][$mid]['vk'] : '';
+  if ($mvk) { $ts = time(); $sig = hash_hmac('sha256', $sdp . '|' . $ts, $mvk); $sig_qs = '?sig=' . $sig . '&ts=' . $ts; }
   foreach (member_addrs($j['members'][$mid]) as $base) {
-    $r = relay($base . '/whep' . $vk, 'POST', $sdp, 'application/sdp');
+    $r = relay($base . '/whep' . $sig_qs, 'POST', $sdp, 'application/sdp');
     if ($r && ($r['status'] === 201 || $r['status'] === 200)) {
       $session = null;
       if ($r['location']) $session = preg_match('#^https?://#', $r['location']) ? $r['location'] : $base . $r['location'];
