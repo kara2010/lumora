@@ -377,19 +377,6 @@ body::before {
 
 .mode-option.active .mode-desc { color: #9bb8e8; }
 
-.doorman-card {
-  margin-top: 12px;
-  padding: 14px 15px;
-  border: 1px solid var(--accent-border);
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(var(--accent-rgb),0.12) 0%, rgba(var(--accent-rgb),0.03) 70%);
-}
-.doorman-head { display: flex; align-items: center; gap: 9px; }
-.doorman-ico { font-size: 17px; line-height: 1; }
-.doorman-title { font-size: 14px; font-weight: 600; color: #eee; }
-.doorman-desc { font-size: 12.5px; color: #b7b7b7; line-height: 1.55; margin: 9px 0 0; }
-.doorman-note { font-size: 12px; color: color-mix(in srgb, var(--accent-light) 78%, #999); line-height: 1.5; margin: 7px 0 0; }
-.doorman-note b { color: var(--accent-light); font-weight: 600; }
 #doormanLists { margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.07); padding-top: 11px; }
 .dl-group { margin-top: 9px; }
 .dl-head { font-size: 11.5px; font-weight: 600; color: #9aa4b2; letter-spacing: .2px; margin-bottom: 5px; }
@@ -473,7 +460,7 @@ body::before {
 .settings-panel[data-panel="stream"]:not(.live) .stream-sec:first-of-type,
 .settings-panel[data-panel="stream"].live .stream-sec-stream { margin-top: 0; padding-top: 0; border-top: none; }
 .settings-panel[data-panel="stream"].live .stream-sec-stream { order: -1; }
-.stream-sec > label { font-size: 12px; color: #777; text-transform: uppercase; letter-spacing: .6px; font-weight: 600; }
+.stream-sec > label { display: block; margin-bottom: 8px; font-size: 12px; color: var(--accent-light); text-transform: uppercase; letter-spacing: .7px; font-weight: 700; }
 /* Der globale Akzent-Schleier (body::before, z-index 9999) liegt ueber der ganzen
    UI und wuerde sich auch ueber das Vorschau-VIDEO legen -> Bild wirkt aufgehellt
    und farbstichig. Ein z-index > 9999 hebt das Bild zuverlaessig ueber den Schleier
