@@ -101,6 +101,40 @@
   <span><span class="val" id="sBitrate">–</span><span class="unit">Mbit/s</span></span>
 </div>
 <div id="overlay"><div class="badge"><span class="dot" id="dot"></span><span id="msg">Verbinde…</span></div></div>
+<style>
+  #gate { display:none; position:fixed; inset:0; z-index:9; align-items:center; justify-content:center;
+    background:radial-gradient(120% 120% at 50% 30%, rgba(10,12,18,0.86), rgba(6,7,11,0.95)); backdrop-filter:blur(3px); }
+  .gate-card { width:min(340px,86vw); padding:26px 26px 24px; text-align:center; border-radius:18px;
+    background:linear-gradient(165deg, rgba(26,29,38,0.98), rgba(16,18,24,0.98));
+    border:1px solid rgba(79,142,247,0.5); box-shadow:0 20px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+    font-family:'Segoe UI',system-ui,sans-serif; color:#eaeef4; }
+  .gate-ico { font-size:34px; line-height:1; margin-bottom:12px; }
+  .gate-title { font-size:19px; font-weight:700; color:#fff; }
+  .gate-text { margin-top:8px; font-size:13.5px; line-height:1.5; color:#a8b3c4; }
+  #gateForm { display:none; margin-top:18px; gap:9px; flex-direction:column; }
+  #gateName { padding:11px 13px; border-radius:10px; border:1px solid rgba(255,255,255,0.14);
+    background:rgba(255,255,255,0.05); color:#fff; font-size:15px; text-align:center; outline:none; }
+  #gateName:focus { border-color:#4F8EF7; }
+  #gateBtn { padding:11px 0; border-radius:10px; border:0; background:#4F8EF7; color:#fff; font-size:14.5px;
+    font-weight:600; cursor:pointer; box-shadow:0 4px 16px rgba(79,142,247,0.35); }
+  #gateBtn:hover { filter:brightness(1.1); }
+  #gateWait { display:none; margin-top:18px; align-items:center; justify-content:center; gap:10px; font-size:14px; color:#bcd0f0; }
+  .gate-spin { width:16px; height:16px; border-radius:50%; border:2.5px solid rgba(79,142,247,0.25);
+    border-top-color:#4F8EF7; animation:gspin .8s linear infinite; }
+  @keyframes gspin { to { transform:rotate(360deg); } }
+</style>
+<div id="gate">
+  <div class="gate-card">
+    <div class="gate-ico" id="gateIco">🔒</div>
+    <div class="gate-title" id="gateTitle">Zutritt anfragen</div>
+    <div class="gate-text" id="gateText">Der Host muss dich für diesen Stream freigeben.</div>
+    <div id="gateForm">
+      <input id="gateName" type="text" maxlength="24" placeholder="Dein Name" autocomplete="off">
+      <button id="gateBtn" onclick="submitName()">Anfragen</button>
+    </div>
+    <div id="gateWait"><span class="gate-spin"></span><span id="gateWaitTxt">Warte auf Freigabe…</span></div>
+  </div>
+</div>
 <div id="soundHint" onclick="enableSound()"><span class="ico">🔊</span><span>Tippen für Ton</span></div>
 <div id="dur"><span class="rec"></span><span id="durVal">0:00</span></div>
 <div id="bar">
@@ -134,6 +168,49 @@
   function relayUrl(action) {
     return RELAY.api + '&a=' + action + (RELAY.id ? '&id=' + encodeURIComponent(RELAY.id) : '')
   }
+  // --- Zugriffsschutz (Tuersteher): Zuschauer-Identitaet + Freigabe-UI ----------
+  // vid = dauerhafte, zufaellige Kennung je Browser (localStorage); Name gemerkt.
+  // Beide reisen bei /whep mit -> der Streamer sieht den Namen und laesst pro Person zu.
+  var VID = (function () {
+    var v = ''; try { v = localStorage.getItem('lumora_vid') || '' } catch (e) {}
+    if (!v) { v = (Date.now().toString(36) + Math.random().toString(36).slice(2, 12)).replace(/[^a-z0-9]/g, ''); try { localStorage.setItem('lumora_vid', v) } catch (e) {} }
+    return v
+  })()
+  var GATE_DE = (navigator.language || 'de').slice(0, 2) !== 'en'
+  function viewerName() { try { return (localStorage.getItem('lumora_name') || '').trim() } catch (e) { return '' } }
+  function whepAuthQs() { return '&vid=' + encodeURIComponent(VID) + '&name=' + encodeURIComponent(viewerName()) }
+  function hideGate() { document.getElementById('gate').style.display = 'none' }
+  function showGate(mode) {
+    document.getElementById('gate').style.display = 'flex'
+    var form = document.getElementById('gateForm'), wait = document.getElementById('gateWait')
+    if (mode === 'denied') {
+      form.style.display = 'none'; wait.style.display = 'none'
+      document.getElementById('gateIco').textContent = '🚫'
+      document.getElementById('gateTitle').textContent = GATE_DE ? 'Zugang abgelehnt' : 'Access denied'
+      document.getElementById('gateText').textContent = GATE_DE ? 'Der Host hat deine Anfrage abgelehnt.' : 'The host declined your request.'
+      return
+    }
+    document.getElementById('gateIco').textContent = '🔒'
+    document.getElementById('gateTitle').textContent = GATE_DE ? 'Zutritt anfragen' : 'Request access'
+    if (viewerName()) {
+      form.style.display = 'none'; wait.style.display = 'flex'
+      document.getElementById('gateText').textContent = GATE_DE ? 'Der Host muss dich freigeben.' : 'The host needs to approve you.'
+      document.getElementById('gateWaitTxt').textContent = GATE_DE ? 'Warte auf Freigabe…' : 'Waiting for approval…'
+    } else {
+      form.style.display = 'flex'; wait.style.display = 'none'
+      document.getElementById('gateText').textContent = GATE_DE ? 'Der Host muss dich für diesen Stream freigeben.' : 'The host must approve you for this stream.'
+      document.getElementById('gateBtn').textContent = GATE_DE ? 'Anfragen' : 'Request'
+      document.getElementById('gateName').placeholder = GATE_DE ? 'Dein Name' : 'Your name'
+    }
+  }
+  function submitName() {
+    var n = (document.getElementById('gateName').value || '').trim().slice(0, 24)
+    if (!n) return
+    try { localStorage.setItem('lumora_name', n) } catch (e) {}
+    showGate('pending')   // auf "Warte" umschalten; der laufende Retry-Loop sendet den Namen mit
+  }
+  window.submitName = submitName
+  try { document.getElementById('gateName').addEventListener('keydown', function (e) { if (e.key === 'Enter') submitName() }) } catch (e) {}
   // Streamendes Mitglied im Schattenraum frisch aufloesen (App-Neustart vergibt
   // eine NEUE Member-ID; die beim Seitenaufbau injizierte waere dann veraltet).
   async function relayResolveId() {
@@ -561,7 +638,7 @@
       // antwortet als JSON {ok, sdp, session}; direkt: SDP-Body + Location-Header.
       var answer, sessionUrl
       if (RELAY) {
-        var resp = await fetch(relayUrl('whep'), { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp })
+        var resp = await fetch(relayUrl('whep') + whepAuthQs(), { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp })
         var rj = null
         try { rj = await resp.json() } catch (e) {}
         if (gen !== _gen) {
@@ -572,12 +649,18 @@
         }
         if (!rj || !rj.ok) {
           if (rj && rj.error === 'no-room' && RELAY.watch) { location.replace(RELAY.watch); return }
+          // Tuersteher: individuelle Freigabe. 'pending' = wartet auf Zulassen -> Gate + weiter pollen;
+          // 'denied' = abgelehnt (nicht weiter pollen); 'unauthorized' = ohne gueltigen Nachweis.
+          if (rj && rj.error === 'pending') { try { pc.close() } catch (e) {} showGate('pending'); setTimeout(retry, 2500); return }
+          if (rj && rj.error === 'denied') { try { pc.close() } catch (e) {} showGate('denied'); return }
+          if (rj && rj.error === 'unauthorized') { try { pc.close() } catch (e) {} status(GATE_DE ? '🔒 Kein Zugriff – nicht freigegeben' : '🔒 No access – not approved', 'err'); return }
           status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return
         }
+        hideGate()
         answer = rj.sdp
         sessionUrl = rj.session
       } else {
-        var resp = await fetch('/whep', { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp })
+        var resp = await fetch('/whep?' + whepAuthQs().slice(1), { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp })
         if (gen !== _gen) {
           // Veraltet: die soeben angelegte Session direkt wieder abmelden, damit
           // kein Zombie-Zuschauer Bandbreite zieht, und still aussteigen.
@@ -585,8 +668,14 @@
           try { pc.close() } catch (e) {}
           return
         }
-        if (resp.status === 401) { status('🔒 Kein Zugriff – für diesen Stream nicht freigegeben', 'err'); return }   // Tuersteher: nicht freigegeben – NICHT weiter pollen
+        if (resp.status === 401) { status(GATE_DE ? '🔒 Kein Zugriff – nicht freigegeben' : '🔒 No access – not approved', 'err'); return }   // Tuersteher: kein gueltiger Nachweis – NICHT weiter pollen
+        if (resp.status === 403) {   // individuelle Freigabe: pending (weiter pollen) / denied (Stopp)
+          var reason403 = ''; try { reason403 = (await resp.text()).trim() } catch (e) {}
+          if (reason403 === 'denied') { showGate('denied'); return }
+          showGate('pending'); setTimeout(retry, 2500); return
+        }
         if (resp.status !== 201 && !resp.ok) { status('Kein Stream (noch nicht gestartet?)', 'err'); setTimeout(retry, 3000); return }
+        hideGate()
         sessionUrl = resp.headers.get('location')
         answer = await resp.text()
       }

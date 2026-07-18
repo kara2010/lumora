@@ -18,7 +18,7 @@ if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
 New-Item -ItemType Directory -Force $tmp | Out-Null
 # grid.html gibt es nicht mehr: der Grid-Player lebt seit dem Vermittlungs-Umbau
 # im PHP-Skript (website/gruppe.php) und wird vom Webspace ausgeliefert.
-foreach ($f in 'main.js','index.html','osd.html','player.html','styles.css','icon.ico','icon-64.png','package.json') {
+foreach ($f in 'main.js','index.html','osd.html','player.html','doorman.html','styles.css','icon.ico','icon-64.png','package.json') {
   Copy-Item "$src\$f" $tmp
 }
 
