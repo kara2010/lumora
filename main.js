@@ -5056,6 +5056,7 @@ async function groupStart() {
   saveAppSettings()
   groupStartHeartbeat()
   groupPushState()
+  broadcastState.link = bcShareUrl() || broadcastState.link; bcPushState()   // Teilen-Link auf den Grid-Link (alle Streams) umstellen – nicht mehr stream.php
   osdDbg('[gruppe] groupStart: Raum ' + c.code + ' erstellt')
   return groupPublicState()
 }
@@ -5075,6 +5076,7 @@ async function groupJoin(raw) {
   saveAppSettings()
   groupStartHeartbeat()
   groupPushState()
+  broadcastState.link = bcShareUrl() || broadcastState.link; bcPushState()   // Teilen-Link auf den Grid-Link umstellen
   osdDbg('[gruppe] groupJoin: Raum ' + code + ' beigetreten, Mitglieder=' + bcGroup.members.length)
   return groupPublicState()
 }
@@ -5088,6 +5090,9 @@ async function groupLeave() {
   // ueberholen kann; scheitert sie, raeumt die TTL der Vermittlung den Eintrag.
   await groupRelay('leave', { code }, { id: groupMemberId() })
   groupPushState()
+  // Teilen-Link zurueck auf den Einzelstream (die Gruppe ist weg) - solange der
+  // eigene Stream weiterlaeuft. bcShareUrl liefert jetzt (bcGroup=null) stream.php?s=.
+  if (broadcastState.active) { broadcastState.link = bcShareUrl() || broadcastState.linkV4 || broadcastState.linkV6 || broadcastState.link; bcPushState() }
   // Lief der Server nur noch fuer die Gruppe (eigener Stream ist aus), jetzt
   // abbauen - ohne Gruppe und ohne Stream gibt es nichts mehr auszuliefern.
   if (!broadcastState.active && broadcastServer) bcTeardownServer()
@@ -5125,6 +5130,15 @@ let bcWatchTimer = null
 // Dateiname analog ersetzt; endet die konfigurierte URL nicht auf gruppe.php,
 // bleibt sie unveraendert (der ?s=-Zweig liegt dann dort).
 function streamShareUrl() { return groupRelayUrl().replace(/gruppe\.php$/, 'stream.php') }
+// Der Link, der aktuell zum Teilen angeboten wird. Laeuft eine GRUPPE, ist es der
+// Grid-Link (alle Streams gemeinsam), sonst der Einzelstream-Link (stream.php); ohne
+// beides null (dann bleibt der rohe IP-Link). So wird bei einer Gruppe NIE mehr der
+// stream.php-Einzelstream angeboten - der wuerde nur EIN Video statt des Grids zeigen.
+function bcShareUrl() {
+  if (bcGroup) return groupRelayUrl() + '?code=' + bcGroup.code
+  if (bcWatchCode) return streamShareUrl() + '?s=' + bcWatchCode
+  return null
+}
 // Merkt einen Wunsch "Link automatisch kopieren, SOBALD er feststeht" (nur beim
 // manuellen Start-Klick gesetzt, s. ipcMain 'start-broadcast'). Der Link
 // durchlaeuft zwei Stufen - sofort der nackte IP-Link, dann ASYNC der schoene
@@ -5164,7 +5178,7 @@ async function bcRegisterWatchLink() {
   // Router-Phase hat broadcastState.link zwischenzeitlich auf den IP-Link
   // zurueckgesetzt (s. startBroadcast) - hier korrigieren + der UI mitteilen,
   // sonst bliebe faelschlich dauerhaft der IP-Link sichtbar.
-  if (bcWatchCode) { broadcastState.link = streamShareUrl() + '?s=' + bcWatchCode; bcPushState(); return }
+  if (bcWatchCode) { broadcastState.link = bcShareUrl() || broadcastState.link; bcPushState(); return }
   if (!broadcastState.linkV4 && !broadcastState.linkV6) return   // nur LAN -> URL-Weg zwecklos
   // 5-Min-Karenz: zuletzt genutzten Code wieder anfragen, wenn der Stop <5 Min her ist.
   const want = (bcPrevWatchCode && (Date.now() - bcPrevWatchAt) < 300000) ? bcPrevWatchCode : null
@@ -5174,7 +5188,7 @@ async function bcRegisterWatchLink() {
   if (!r || !r.ok) { bcLogStream('watch-link: Registrierung fehlgeschlagen -> IP-Link bleibt'); return }
   if (!broadcastState.active) { groupRelay('leave', { code: c.code }, { id: groupMemberId() }); return }   // Stream inzwischen gestoppt
   bcWatchCode = c.code
-  broadcastState.link = streamShareUrl() + '?s=' + c.code
+  broadcastState.link = bcShareUrl() || (streamShareUrl() + '?s=' + c.code)
   bcLogStream('watch-link: ' + broadcastState.link)
   if (!bcWatchTimer) bcWatchTimer = setInterval(() => {
     if (bcWatchCode) groupRelay('update', { code: bcWatchCode }, groupSelfEntry())
@@ -6236,7 +6250,7 @@ async function bcIpWatchTick() {
     if (ip6) broadcastState.linkV6 = 'http://[' + ip6 + ']:' + BROADCAST_PORT + '/'
     // Watch-URL BEWAHREN: der geteilte Link haengt am Code, nicht an der IP -
     // ein IP-Wechsel wird nur ins Schattenraum-Roster getragen, der Link bleibt.
-    broadcastState.link = bcWatchCode ? (streamShareUrl() + '?s=' + bcWatchCode) : (broadcastState.linkV4 || broadcastState.linkV6 || broadcastState.link)
+    broadcastState.link = bcShareUrl() || broadcastState.linkV4 || broadcastState.linkV6 || broadcastState.link
     if (bcWatchCode) groupRelay('update', { code: bcWatchCode }, groupSelfEntry())
     else if (broadcastState.internet) bcRegisterWatchLink().catch(() => {})   // Relay war beim Start evtl. nicht erreichbar
     bcPushState()
