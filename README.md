@@ -1,81 +1,82 @@
 # Lumora
 
-Ein store-übergreifender Game-Launcher für Windows mit automatischem HDR,
-Game-Streaming und Gaming-OSD. Lumora findet installierte Spiele aus mehreren
-Stores, zeigt sie in einer einheitlichen, schön kuratierten Bibliothek und
-schaltet beim Spielstart automatisch HDR ein.
+🇩🇪 [Deutsche Version](README.de.md)
 
-Download & Infos: <https://lumora-streaming.de/>
+A cross-store game launcher for Windows with automatic HDR, game streaming
+and a gaming OSD. Lumora finds installed games from multiple stores, shows
+them in a unified, beautifully curated library and automatically enables HDR
+when a game starts.
+
+Download & info: <https://lumora-streaming.de/>
 
 ## Features
 
-- **Store-übergreifend** – findet Spiele von Steam, Microsoft Store / Xbox,
-  EA, Epic, GOG u. a. und scannt automatisch alle Laufwerke.
-- **Automatisches HDR** – aktiviert HDR beim Spielstart und schaltet danach
-  zurück (via `HDRCmd.exe`).
-- **Game-Streaming per Link** – bis 4K/60 fps direkt an jeden Browser
-  (FFmpeg-Hardware-Encoder → mediamtx → WebRTC/WHEP), Gruppen-Streams mit
-  Raumcodes, adaptive Bitrate, nahtloser Qualitätswechsel.
-- **Gaming-OSD** – FPS, GPU- und CPU-Werte im Spiel, ohne Afterburner & Co.
-- **Gamepad-Steuerung** – die gesamte Oberfläche ist per Xbox-Controller
-  bedienbar (Couch-Gaming am TV).
-- **Cover & Artwork** – Cover, Hero-Banner, Beschreibung, Genre und
-  Release-Jahr werden automatisch geladen (Steam, Microsoft Store, optional
-  [SteamGridDB](https://www.steamgriddb.com)); passt etwas nicht, wählst du
-  selbst aus mehreren Quellen oder legst ein eigenes Bild ab.
-- **Bibliothek** – Favoriten anpinnen, Poster- oder Hero-Ansicht, sortieren
-  nach Name, Spielzeit oder zuletzt gespielt.
-- **Spielzeit-Tracking** – zuverlässige Erfassung pro Spiel, launcher-übergreifend.
-- **Komfort** – Autostart, Start im Infobereich (Tray), Akzentfarbe.
+- **Cross-store** – finds games from Steam, Microsoft Store / Xbox, EA, Epic,
+  GOG and more, automatically scanning all drives.
+- **Automatic HDR** – enables HDR when a game launches and switches it back
+  off afterwards (via `HDRCmd.exe`).
+- **Game streaming via link** – up to 4K/60 fps straight to any browser
+  (FFmpeg hardware encoder → mediamtx → WebRTC/WHEP), group streams with
+  room codes, adaptive bitrate, seamless quality switching.
+- **Gaming OSD** – FPS, GPU and CPU readings in-game, without Afterburner & co.
+- **Gamepad control** – the entire UI can be driven with an Xbox controller
+  (couch gaming on the TV).
+- **Covers & artwork** – covers, hero banners, description, genre and release
+  year are fetched automatically (Steam, Microsoft Store, optionally
+  [SteamGridDB](https://www.steamgriddb.com)); if something doesn't fit, you
+  pick from multiple sources yourself or drop in your own image.
+- **Library** – pin favorites, poster or hero view, sort by name, playtime
+  or last played.
+- **Playtime tracking** – reliable per-game tracking across launchers.
+- **Convenience** – autostart, start in the system tray, accent color.
 
-## Technik
+## Technology
 
-Electron-App (`main.js` Backend, `index.html`/`styles.css` Renderer),
-NSIS-Installer via electron-builder. Nutzerdaten liegen unter
+Electron app (`main.js` backend, `index.html`/`styles.css` renderer),
+NSIS installer via electron-builder. User data lives under
 `%APPDATA%\lumora\` (`games.json`, `prefs.json`, `app-settings.json`).
 
-### Entwicklung
+### Development
 
 ```powershell
 npm install
-npm start                 # App lokal starten
-npx electron-builder --win   # Installer bauen -> dist\Lumora Setup <version>.exe
+npm start                 # run the app locally
+npx electron-builder --win   # build the installer -> dist\Lumora Setup <version>.exe
 ```
 
-Hilfs- und Diagnose-Skripte liegen in [`_testlab/`](_testlab/) (Deploy,
-Launcher-Check, Artwork-Check) und sind vom Build ausgeschlossen.
+Helper and diagnostic scripts live in [`_testlab/`](_testlab/) (deploy,
+launcher check, artwork check) and are excluded from the build.
 
-Die gebündelten Binaries (`bin/`: FFmpeg LGPL-Build, mediamtx,
-`lumora-capture` aus [`capture/`](capture/) per `dotnet publish`) sind nicht
-im Repo – Bezugsquellen stehen in der [`.gitignore`](.gitignore).
+The bundled binaries (`bin/`: FFmpeg LGPL build, mediamtx, `lumora-capture`
+built from [`capture/`](capture/) via `dotnet publish`) are not part of the
+repo – sources for obtaining them are listed in [`.gitignore`](.gitignore).
 
 ## Website
 
-Der Ordner [`website/`](website/) enthält die Downloadseite
+The [`website/`](website/) folder contains the download page
 (lumora-streaming.de/).
 
-## Autor
+## Author
 
-Lumora wird entwickelt und gepflegt von **Karsten Radermacher**
+Lumora is developed and maintained by **Karsten Radermacher**
 (GitHub: [kara2010](https://github.com/kara2010)).
 Copyright © 2026 Karsten Radermacher.
 
-## Lizenz
+## License
 
-Lumora ist freie Software unter der **GNU Affero General Public License v3.0**
-([LICENSE](LICENSE)). Das bedeutet: Du darfst den Code nutzen, verändern und
-weitergeben – aber jede abgeleitete oder darauf aufbauende Software (auch als
-Netzwerkdienst betrieben) muss ihren vollständigen Quellcode unter derselben
-Lizenz offenlegen.
+Lumora is free software under the **GNU Affero General Public License v3.0**
+([LICENSE](LICENSE)). That means you may use, modify and redistribute the
+code – but any derived software or software built on top of it (including
+when operated as a network service) must publish its complete source code
+under the same license.
 
-**Marke:** Der Name „Lumora", das Logo und das Erscheinungsbild sind **nicht**
-Teil der Lizenz. Forks müssen unter eigenem Namen und Branding auftreten und
-dürfen nicht den Eindruck erwecken, das offizielle Lumora zu sein oder mit ihm
-in Verbindung zu stehen.
+**Trademark:** The name "Lumora", the logo and the visual identity are **not**
+part of the license. Forks must use their own name and branding and must not
+give the impression of being the official Lumora or being affiliated with it.
 
-## Beiträge
+## Contributing
 
-Fehlerberichte und Vorschläge sind als GitHub-Issues willkommen!
-**Pull Requests werden derzeit nicht angenommen** – Lumora bleibt bewusst ein
-Ein-Personen-Projekt, damit der Autor die alleinige Urheberschaft (und damit
-volle Lizenzhoheit über künftige Versionen) behält.
+Bug reports and suggestions are welcome as GitHub issues!
+**Pull requests are currently not accepted** – Lumora deliberately remains a
+one-person project so the author retains sole authorship (and with it full
+licensing authority over future versions).
