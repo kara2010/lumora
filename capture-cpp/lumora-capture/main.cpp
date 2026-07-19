@@ -7,6 +7,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
 #include <d3d11.h>
 #include <dxgi.h>
 #include <winrt/base.h>
@@ -124,14 +126,29 @@ struct AmfEncoder : Encoder {
     }
 };
 
+// Groesstes sichtbares Fenster finden (fuer --window), analog zum PoC-C.
+struct FindCtx { HWND best = nullptr; long area = 0; HWND self = nullptr; };
+static BOOL CALLBACK enumProc(HWND h, LPARAM lp) {
+    auto* c = (FindCtx*)lp;
+    if (h == c->self || !IsWindowVisible(h) || IsIconic(h) || GetWindowTextLengthW(h) == 0) return TRUE;
+    int cloaked = 0; DwmGetWindowAttribute(h, 14 /*DWMWA_CLOAKED*/, &cloaked, sizeof(cloaked)); if (cloaked) return TRUE;
+    RECT r; if (!GetWindowRect(h, &r)) return TRUE; long w = r.right - r.left, ht = r.bottom - r.top;
+    if (w < 400 || ht < 300) return TRUE; long ar = w * ht; if (ar > c->area) { c->area = ar; c->best = h; }
+    return TRUE;
+}
+
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     int fps = 60, mbit = 20, port = 9998, maxFrames = 0; std::string host = "127.0.0.1", tsout, encName = "auto";
+    HWND targetHwnd = nullptr; bool findWindow = false;
     for (int i = 1; i < argc; ++i) { std::string a = argv[i];
         if (a == "--fps" && i + 1 < argc) fps = atoi(argv[++i]); else if (a == "--bitrate" && i + 1 < argc) mbit = atoi(argv[++i]);
         else if (a == "--mtx-host" && i + 1 < argc) host = argv[++i]; else if (a == "--mtx-port" && i + 1 < argc) port = atoi(argv[++i]);
         else if (a == "--frames" && i + 1 < argc) maxFrames = atoi(argv[++i]); else if (a == "--tsout" && i + 1 < argc) tsout = argv[++i];
-        else if (a == "--encoder" && i + 1 < argc) encName = argv[++i]; }
+        else if (a == "--encoder" && i + 1 < argc) encName = argv[++i];
+        else if (a == "--hwnd" && i + 1 < argc) targetHwnd = (HWND)(uintptr_t)strtoull(argv[++i], nullptr, 0);
+        else if (a == "--window") findWindow = true; }
+    if (findWindow && !targetHwnd) { FindCtx fc; fc.self = GetConsoleWindow(); EnumWindows(enumProc, (LPARAM)&fc); targetHwnd = fc.best; }
 
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     if (!wg::GraphicsCaptureSession::IsSupported()) { printf("WGC nicht unterstuetzt\n"); return 1; }
@@ -147,9 +164,15 @@ int main(int argc, char** argv) {
     if (FAILED(D3D11CreateDevice(pick.get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, dev.put(), &fl, ctx.put()))) { printf("D3D11CreateDevice fehlgeschlagen\n"); return 1; }
     auto dxgiDev = dev.as<IDXGIDevice>(); wg::IDirect3DDevice d3dDevice{ nullptr };
     CreateDirect3D11DeviceFromDXGIDevice(dxgiDev.get(), reinterpret_cast<::IInspectable**>(winrt::put_abi(d3dDevice)));
-    HMONITOR hmon = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
     auto interop = winrt::get_activation_factory<wg::GraphicsCaptureItem>().as<IGraphicsCaptureItemInterop>();
-    wg::GraphicsCaptureItem item{ nullptr }; interop->CreateForMonitor(hmon, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item));
+    wg::GraphicsCaptureItem item{ nullptr };
+    if (targetHwnd) {
+        if (FAILED(interop->CreateForWindow(targetHwnd, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item)))) { printf("FEHLER: Fenster-Capture fehlgeschlagen (HWND ungueltig?)\n"); return 1; }
+        wchar_t t[128] = {}; GetWindowTextW(targetHwnd, t, 127); printf("Quelle: Fenster \"%ls\"\n", t);
+    } else {
+        HMONITOR hmon = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
+        interop->CreateForMonitor(hmon, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item)); printf("Quelle: Hauptmonitor\n");
+    }
     auto sz = item.Size(); int W = sz.Width & ~1, H = sz.Height & ~1;
     auto framePool = wg::Direct3D11CaptureFramePool::CreateFreeThreaded(d3dDevice, wg::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, sz);
     auto session = framePool.CreateCaptureSession(item); session.StartCapture();
@@ -181,6 +204,7 @@ int main(int argc, char** argv) {
         winrt::com_ptr<ID3D11Texture2D> ft; access->GetInterface(winrt::guid_of<ID3D11Texture2D>(), ft.put_void());
         D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC ivd{}; ivd.FourCC = 0; ivd.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D; ivd.Texture2D.MipSlice = 0;
         winrt::com_ptr<ID3D11VideoProcessorInputView> iv; if (FAILED(vdev->CreateVideoProcessorInputView(ft.get(), venum.get(), &ivd, iv.put()))) continue;
+        RECT srcRect{ 0,0,W,H }; vctx->VideoProcessorSetStreamSourceRect(vproc.get(), 0, TRUE, &srcRect); // Content-Bereich aus (evtl. gepaddeter) Fenster-Textur croppen
         D3D11_VIDEO_PROCESSOR_STREAM st{}; st.Enable = TRUE; st.pInputSurface = iv.get();
         if (FAILED(vctx->VideoProcessorBlt(vproc.get(), outView.get(), 0, 1, &st))) continue;
         ctx->Flush(); inFrame++;
