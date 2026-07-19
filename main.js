@@ -5520,7 +5520,11 @@ function bcPushState() { sendToUi('broadcast-status', broadcastState) }
 function bcStartMtx(configPath) {
   return new Promise((resolve, reject) => {
     let done = false, out = '', p
-    try { p = spawn(streamBin('mediamtx.exe'), [configPath], { windowsHide: true }) }
+    // Eigener signierter Build "Lumora Media-Relay" (= mediamtx, gebrandet): eigener Name +
+    // Logo + verifizierter Herausgeber im Firewall-/SmartScreen-Dialog. Fallback auf das
+    // Original, falls der Relay in einer aelteren Installation noch fehlt.
+    const relayBin = fs.existsSync(streamBin('lumora-media-relay.exe')) ? 'lumora-media-relay.exe' : 'mediamtx.exe'
+    try { p = spawn(streamBin(relayBin), [configPath], { windowsHide: true }) }
     catch (e) { return reject(e) }
     const onData = (d) => { out = (out + d.toString()).slice(-2000); const t = d.toString().trim(); if (t) bcLogStream('mtx: ' + t) }   // bei logLevel error nur echte Fehler
     if (p.stdout) p.stdout.on('data', onData)
