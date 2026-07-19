@@ -38,10 +38,23 @@ int main() {
     if (!wg::GraphicsCaptureSession::IsSupported()) { printf("FEHLER: WGC nicht unterstuetzt\n"); return 1; }
 
     // --- D3D11 + WGC-Monitor (wie PoC-D) ---
+    // AMD-Adapter (VendorId 0x1002) gezielt waehlen: auf Multi-GPU (NVIDIA + AMD) muss das
+    // D3D11-Device auf der AMD-GPU liegen, sonst findet AMF keine AMD-Hardware. WGC liefert
+    // die Monitor-Frames dann per DWM cross-GPU auf dieses AMD-Device.
+    winrt::com_ptr<IDXGIFactory1> dxgiFactory;
+    winrt::check_hresult(CreateDXGIFactory1(winrt::guid_of<IDXGIFactory1>(), dxgiFactory.put_void()));
+    winrt::com_ptr<IDXGIAdapter1> amdAdapter;
+    for (UINT ai = 0; ; ++ai) {
+        winrt::com_ptr<IDXGIAdapter1> a;
+        if (dxgiFactory->EnumAdapters1(ai, a.put()) == DXGI_ERROR_NOT_FOUND) break;
+        DXGI_ADAPTER_DESC1 d; a->GetDesc1(&d);
+        if (d.VendorId == 0x1002) { amdAdapter = a; printf("AMD-Adapter: %ls\n", d.Description); break; }
+    }
+    if (!amdAdapter) { printf("FEHLER: kein AMD-Adapter (VendorId 0x1002) gefunden\n"); return 1; }
     winrt::com_ptr<ID3D11Device> dev; winrt::com_ptr<ID3D11DeviceContext> ctx;
     D3D_FEATURE_LEVEL fl;
-    HROK(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-        nullptr, 0, D3D11_SDK_VERSION, dev.put(), &fl, ctx.put()), "D3D11CreateDevice");
+    HROK(D3D11CreateDevice(amdAdapter.get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        nullptr, 0, D3D11_SDK_VERSION, dev.put(), &fl, ctx.put()), "D3D11CreateDevice(AMD)");
     auto dxgiDev = dev.as<IDXGIDevice>();
     wg::IDirect3DDevice d3dDevice{ nullptr };
     HROK(CreateDirect3D11DeviceFromDXGIDevice(dxgiDev.get(),
