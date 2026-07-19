@@ -1,0 +1,11 @@
+logLevel: debug
+api: yes
+apiAddress: 127.0.0.1:9996
+rtsp: no
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+paths:
+  test:
+    source: udp+mpegts://127.0.0.1:9998

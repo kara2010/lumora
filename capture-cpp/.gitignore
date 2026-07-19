@@ -1,6 +1,9 @@
 build/
 third_party/
 *.h264
+*.ts
 *.png
 out.txt
 err.txt
+*.out
+*.err

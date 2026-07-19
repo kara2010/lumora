@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(poc_mpegts CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_executable(poc_mpegts main.cpp)
+target_link_libraries(poc_mpegts PRIVATE ws2_32)
