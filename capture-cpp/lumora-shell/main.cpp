@@ -15,13 +15,16 @@
 #include <fstream>
 #include <sstream>
 #include "WebView2.h"
+#include "json.hpp"
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
+using nlohmann::json;
 
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
 static std::wstring g_appDir;
+static HWND g_hwnd = nullptr;
 
 // require('electron')-Shim: ipcRenderer.invoke/send/on ueber window.chrome.webview.
 // invoke korreliert Antworten ueber eine laufende id; on-Listener werden von der Shell
@@ -50,43 +53,66 @@ static std::string readFile(const std::wstring& p) {
     std::ifstream f(p, std::ios::binary); if (!f) return "";
     std::ostringstream ss; ss << f.rdbuf(); return ss.str();
 }
+static bool writeFile(const std::wstring& p, const std::string& data) {
+    std::ofstream f(p, std::ios::binary | std::ios::trunc); if (!f) return false;   // binaer = UTF-8 OHNE BOM (BOM = JSON-Datenverlust-Falle!)
+    f.write(data.data(), (std::streamsize)data.size()); return (bool)f;
+}
 static std::wstring widen(const std::string& s) {
     if (s.empty()) return L"";
     int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
     std::wstring w(n, 0); MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n); return w;
 }
-// Primitive Feld-Extraktion aus dem WebMessage-JSON (PoC; Phase 2 bekommt einen echten Parser).
-static long long jsonId(const std::wstring& j) {
-    size_t p = j.find(L"\"id\":"); if (p == std::wstring::npos) return 0;
-    return _wtoi64(j.c_str() + p + 5);
-}
-static std::wstring jsonStr(const std::wstring& j, const wchar_t* key) {
-    std::wstring pat = std::wstring(L"\"") + key + L"\":\"";
-    size_t p = j.find(pat); if (p == std::wstring::npos) return L"";
-    p += pat.size(); std::wstring out;
-    while (p < j.size() && j[p] != L'"') { if (j[p] == L'\\' && p + 1 < j.size()) ++p; out.push_back(j[p++]); }
-    return out;
+static std::string narrow(const std::wstring& w) {
+    if (w.empty()) return "";
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    std::string s(n, 0); WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr, nullptr); return s;
 }
 
-static void onWebMessage(const std::wstring& json) {
-    long long id = jsonId(json);
-    std::wstring channel = jsonStr(json, L"channel");
-    std::wstring result = L"null";
-    if (channel == L"get-app-settings") {
-        wchar_t appdata[MAX_PATH] = {}; GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
-        std::string s = readFile(std::wstring(appdata) + L"\\lumora\\app-settings.json");
-        if (!s.empty()) result = widen(s);      // Dateiinhalt IST JSON -> direkt als result einbetten
-        else result = L"{}";
-    } else if (channel == L"shell-open-external") {
-        std::wstring url = jsonStr(json, L"args");   // args:["url"] -> erster String ("args":[" ist Teil des Musters unten)
-        size_t p = json.find(L"\"args\":[\"");
-        if (p != std::wstring::npos) { p += 9; std::wstring u; while (p < json.size() && json[p] != L'"') { if (json[p] == L'\\') ++p; u.push_back(json[p++]); }
-            if (u.rfind(L"http", 0) == 0) ShellExecuteW(nullptr, L"open", u.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }
-        result = L"true";
+// --- Modul: Einstellungen (gleiche Datei wie die Electron-App -> Parallelbetrieb) ---
+static std::wstring settingsPath() {
+    wchar_t appdata[MAX_PATH] = {}; GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
+    return std::wstring(appdata) + L"\\lumora\\app-settings.json";
+}
+static json loadSettings() {
+    json j = json::parse(readFile(settingsPath()), nullptr, false);
+    return j.is_object() ? j : json::object();
+}
+
+// Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
+// Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
+static json handleChannel(const std::string& channel, const json& args) {
+    if (channel == "get-app-settings") return loadSettings();
+    if (channel == "set-app-settings") {                      // Merge wie Object.assign in main.js
+        if (args.size() >= 1 && args[0].is_object()) {
+            json s = loadSettings(); s.update(args[0]);
+            writeFile(settingsPath(), s.dump(2));
+        }
+        return true;
     }
+    if (channel == "minimize-window") { ShowWindow(g_hwnd, SW_MINIMIZE); return true; }
+    if (channel == "toggle-maximize") { ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE); return true; }
+    if (channel == "close-window")    { PostMessageW(g_hwnd, WM_CLOSE, 0, 0); return true; }
+    if (channel == "shell-open-external") {
+        if (args.size() >= 1 && args[0].is_string()) {
+            std::wstring u = widen(args[0].get<std::string>());
+            if (u.rfind(L"http", 0) == 0) ShellExecuteW(nullptr, L"open", u.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        return true;
+    }
+    return nullptr;
+}
+
+static void onWebMessage(const std::wstring& raw) {
+    json msg = json::parse(narrow(raw), nullptr, false);
+    if (!msg.is_object()) return;
+    long long id = msg.value("id", 0ll);
+    std::string channel = msg.value("channel", "");
+    json args = msg.contains("args") && msg["args"].is_array() ? msg["args"] : json::array();
+    json result = nullptr;
+    try { result = handleChannel(channel, args); } catch (...) {}
     if (id > 0 && g_webview) {
-        std::wstring resp = L"{\"id\":" + std::to_wstring(id) + L",\"result\":" + result + L"}";
-        g_webview->PostWebMessageAsJson(resp.c_str());
+        json resp = { {"id", id}, {"result", result} };
+        g_webview->PostWebMessageAsJson(widen(resp.dump()).c_str());
     }
 }
 
@@ -104,6 +130,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // von dort aufwaerts (Doppelklick aus build/Release im Quellbaum). Im spaeteren
     // Installer liegt das UI direkt neben der exe - dann greift Stufe 3 sofort.
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
+    // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-ipc") == 0) {
+        json s = handleChannel("get-app-settings", json::array());
+        json m = s; m.update(json{ {"__testfeld", 42} });
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt",
+            "settings_keys=" + std::to_string(s.size()) + " merged_keys=" + std::to_string(m.size()) +
+            " testfeld=" + std::to_string(m.value("__testfeld", 0)) + "\n");
+        return 0;
+    }
     auto hasIndex = [](const std::wstring& d) { return GetFileAttributesW((d + L"\\index.html").c_str()) != INVALID_FILE_ATTRIBUTES; };
     g_appDir.clear();
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--appdir") == 0 && i + 1 < argc) g_appDir = argv[i + 1];
@@ -129,6 +166,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     RegisterClassW(&wc);
     HWND hwnd = CreateWindowExW(0, L"LumoraShell", L"Lumora", WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 1400, 900, nullptr, nullptr, hInst, nullptr);
+    g_hwnd = hwnd;
     ShowWindow(hwnd, nShow);
 
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
