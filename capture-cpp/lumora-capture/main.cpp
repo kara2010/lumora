@@ -304,7 +304,11 @@ struct AudioCapture {
 
         const int FR = 960;                                   // 20 ms bei 48 kHz = ein Opus-Frame
         const uint64_t tickPerFrame = (uint64_t)FR * 90000 / SR;   // = 1800
-        uint64_t inFrames = 0, produced = 0; long long captured = 0;
+        // inFrames auf die gemeinsame Epoche synchronisieren: wird die Ton-Aufnahme mitten im
+        // Stream neu gestartet (Quellwechsel Monitor<->Fenster), laufen PTS kontinuierlich
+        // weiter statt bei 0 zu beginnen - und die due-Schleife holt nichts rueckwirkend auf.
+        uint64_t inFrames = (uint64_t)(std::chrono::duration<double>(std::chrono::steady_clock::now() - epoch).count() * SR / FR);
+        uint64_t produced = 0; long long captured = 0;
         printf("AUDIO: %s 48000 Hz/2 ch (dev %d ch, %s) -> Opus 128k (WebRTC-tauglich)\n", procMode ? "Prozess-Loopback" : "System-Loopback", devCH, devFloat ? "f32" : "int");
         ac->Start();
 
@@ -387,10 +391,19 @@ struct TonemapStage {
     winrt::com_ptr<ID3D11SamplerState> samp; winrt::com_ptr<ID3D11Texture2D> srcCopy, sdrTex;
     winrt::com_ptr<ID3D11ShaderResourceView> srv; winrt::com_ptr<ID3D11RenderTargetView> rtv; winrt::com_ptr<ID3D11Buffer> cb;
     int W = 0, H = 0, outW = 0, outH = 0, mode = 0, ctlCtr = 0; float exposure = 1.0f;
+    int lbX = 0, lbY = 0, lbW = 0, lbH = 0;   // Letterbox-Zielrechteck in sdrTex (Aspect-Erhalt beim Quellwechsel)
     std::string ctlPath; uint64_t ctlMtime = ~0ull;
 
+    // Eingangsseite (FP16-Kopie der Quelle) neu aufbauen - beim Start UND bei Quellwechsel/Resize.
+    bool reinitInput(ID3D11Device* dev, int w, int h) {
+        W = w; H = h; srcCopy = nullptr; srv = nullptr;
+        D3D11_TEXTURE2D_DESC td{}; td.Width = W; td.Height = H; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        if (FAILED(dev->CreateTexture2D(&td, nullptr, srcCopy.put()))) return false;
+        return SUCCEEDED(dev->CreateShaderResourceView(srcCopy.get(), nullptr, srv.put()));
+    }
+    void setViewport(int x, int y, int w, int h) { lbX = x; lbY = y; lbW = w; lbH = h; }   // Letterbox-Ziel im sdrTex
     bool init(ID3D11Device* dev, int w, int h, int ow, int oh) {
-        W = w; H = h; outW = ow; outH = oh;
+        outW = ow; outH = oh; lbX = 0; lbY = 0; lbW = ow; lbH = oh;
         winrt::com_ptr<ID3DBlob> vsb, psb, err;
         if (FAILED(D3DCompile(TONEMAP_HLSL, strlen(TONEMAP_HLSL), nullptr, nullptr, nullptr, "vsmain", "vs_5_0", 0, 0, vsb.put(), err.put()))) return false;
         if (FAILED(D3DCompile(TONEMAP_HLSL, strlen(TONEMAP_HLSL), nullptr, nullptr, nullptr, "psmain", "ps_5_0", 0, 0, psb.put(), err.put()))) return false;
@@ -398,9 +411,7 @@ struct TonemapStage {
         if (FAILED(dev->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, ps.put()))) return false;
         D3D11_SAMPLER_DESC sd{}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
         dev->CreateSamplerState(&sd, samp.put());
-        D3D11_TEXTURE2D_DESC td{}; td.Width = W; td.Height = H; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        if (FAILED(dev->CreateTexture2D(&td, nullptr, srcCopy.put()))) return false;
-        if (FAILED(dev->CreateShaderResourceView(srcCopy.get(), nullptr, srv.put()))) return false;
+        if (!reinitInput(dev, w, h)) return false;
         D3D11_TEXTURE2D_DESC od{}; od.Width = outW; od.Height = outH; od.MipLevels = 1; od.ArraySize = 1; od.Format = DXGI_FORMAT_B8G8R8A8_UNORM; od.SampleDesc.Count = 1; od.Usage = D3D11_USAGE_DEFAULT; od.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
         if (FAILED(dev->CreateTexture2D(&od, nullptr, sdrTex.put()))) return false;
         if (FAILED(dev->CreateRenderTargetView(sdrTex.get(), nullptr, rtv.put()))) return false;
@@ -436,7 +447,8 @@ struct TonemapStage {
         ID3D11SamplerState* sm = samp.get(); ctx->PSSetSamplers(0, 1, &sm);
         ID3D11Buffer* c = cb.get(); ctx->PSSetConstantBuffers(0, 1, &c);
         ID3D11RenderTargetView* r = rtv.get(); ctx->OMSetRenderTargets(1, &r, nullptr);
-        D3D11_VIEWPORT vp{ 0, 0, (float)outW, (float)outH, 0, 1 }; ctx->RSSetViewports(1, &vp);
+        const float black[4] = { 0, 0, 0, 1 }; ctx->ClearRenderTargetView(rtv.get(), black);   // Letterbox-Raender schwarz
+        D3D11_VIEWPORT vp{ (float)lbX, (float)lbY, (float)lbW, (float)lbH, 0, 1 }; ctx->RSSetViewports(1, &vp);
         ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         ctx->Draw(3, 0);
         ID3D11RenderTargetView* nullr = nullptr; ctx->OMSetRenderTargets(1, &nullr, nullptr); // RTV loesen fuer den folgenden VideoProcessor-Input
@@ -556,46 +568,85 @@ int main(int argc, char** argv) {
     auto dxgiDev = dev.as<IDXGIDevice>(); wg::IDirect3DDevice d3dDevice{ nullptr };
     CreateDirect3D11DeviceFromDXGIDevice(dxgiDev.get(), reinterpret_cast<::IInspectable**>(winrt::put_abi(d3dDevice)));
     auto interop = winrt::get_activation_factory<wg::GraphicsCaptureItem>().as<IGraphicsCaptureItemInterop>();
-    wg::GraphicsCaptureItem item{ nullptr };
-    if (targetHwnd) {
-        if (FAILED(interop->CreateForWindow(targetHwnd, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item)))) { printf("FEHLER: Fenster-Capture fehlgeschlagen (HWND ungueltig?)\n"); return 1; }
-        wchar_t t[128] = {}; GetWindowTextW(targetHwnd, t, 127); printf("Quelle: Fenster \"%ls\"\n", t);
-    } else {
-        HMONITOR hmon = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
-        interop->CreateForMonitor(hmon, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item)); printf("Quelle: Hauptmonitor\n");
-    }
-    auto sz = item.Size(); int W = sz.Width & ~1, H = sz.Height & ~1;
-    // Zielaufloesung: --scale N begrenzt die Hoehe (proportional, gerade Kanten). 0/>=nativ = nativ.
-    int outW = W, outH = H;
-    if (scaleH > 0 && scaleH < H) { outH = scaleH & ~1; outW = ((W * outH / H) + 1) & ~1; }
+    auto vdev = dev.as<ID3D11VideoDevice>(); auto vctx = ctx.as<ID3D11VideoContext>();
     // HDR-Quelle -> per FP16 (scRGB linear) erfassen und im eigenen Shader tonemappen (VP kann kein FP16).
     bool hdr = forceHdr || detectHdr(pick.get());
     auto capFmt = hdr ? wg::DirectXPixelFormat::R16G16B16A16Float : wg::DirectXPixelFormat::B8G8R8A8UIntNormalized;
-    auto framePool = wg::Direct3D11CaptureFramePool::CreateFreeThreaded(d3dDevice, capFmt, 3, sz);
-    auto session = framePool.CreateCaptureSession(item);
-    // Gelben WGC-Aufnahme-Rahmen abschalten (Borderless-Zugriff anfordern + Border aus).
+    // Gelben WGC-Aufnahme-Rahmen abschalten (einmalig; gilt fuer alle folgenden Sessions).
     try { wg::GraphicsCaptureAccess::RequestAccessAsync(wg::GraphicsCaptureAccessKind::Borderless).get(); } catch (...) {}
-    try { session.IsBorderRequired(false); } catch (...) {}
-    session.StartCapture();
 
-    auto vdev = dev.as<ID3D11VideoDevice>(); auto vctx = ctx.as<ID3D11VideoContext>();
-    // Bei HDR liefert der Tonemap-Shader die BGRA-SDR-Textur bereits in Zielgroesse -> VP macht dann nur BGRA->NV12 (1:1).
-    // Bei SDR skaliert der VP selbst (W x H -> outW x outH).
-    D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd{}; cd.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE; cd.InputWidth = hdr ? outW : W; cd.InputHeight = hdr ? outH : H; cd.OutputWidth = outW; cd.OutputHeight = outH; cd.InputFrameRate = { (UINT)fps,1 }; cd.OutputFrameRate = { (UINT)fps,1 }; cd.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
-    winrt::com_ptr<ID3D11VideoProcessorEnumerator> venum; vdev->CreateVideoProcessorEnumerator(&cd, venum.put());
-    winrt::com_ptr<ID3D11VideoProcessor> vproc; vdev->CreateVideoProcessor(venum.get(), 0, vproc.put());
+    // ======= DYNAMISCHE QUELLE: Capture-Seite ist zur Laufzeit austauschbar =======
+    // Encoder, Muxer, Zeitachse, Ton und UDP laufen beim Quellwechsel/Resize WEITER -
+    // nur Capture-Item/FramePool/Scaler werden neu aufgebaut. Fuer den Zuschauer ist
+    // ein Wechsel damit ein nahtloser Schnitt (kein Reconnect, kein Freeze).
+    wg::GraphicsCaptureItem item{ nullptr };
+    wg::Direct3D11CaptureFramePool framePool{ nullptr };
+    wg::GraphicsCaptureSession session{ nullptr };
+    winrt::com_ptr<ID3D11VideoProcessorEnumerator> venum; winrt::com_ptr<ID3D11VideoProcessor> vproc;
+    winrt::com_ptr<ID3D11VideoProcessorOutputView> outView; winrt::com_ptr<ID3D11Texture2D> nv12, bgraIn;
+    TonemapStage tonemap; bool tonemapReady = false;
+    HWND curHwnd = nullptr; int W = 0, H = 0, outW = 0, outH = 0;
+
+    // Scaler-Kette (VideoProcessor + Eingangstexturen) fuer die AKTUELLE Quellgroesse W x H
+    // aufbauen; Ausgabe bleibt konstant outW x outH. Letterbox erhaelt das Seitenverhaeltnis.
+    auto rebuildScaler = [&]() -> bool {
+        int lw = outW, lh = W ? (int)(((long long)outW * H / W)) & ~1 : outH;
+        if (lh > outH) { lh = outH; lw = H ? (int)(((long long)outH * W / H)) & ~1 : outW; }
+        int lx = ((outW - lw) / 2) & ~1, ly = ((outH - lh) / 2) & ~1;
+        venum = nullptr; vproc = nullptr; outView = nullptr; bgraIn = nullptr;
+        // Bei HDR liefert der Tonemap-Shader BGRA-SDR bereits in Zielgroesse (inkl. Letterbox) -> VP nur BGRA->NV12 1:1.
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd{}; cd.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE; cd.InputWidth = hdr ? outW : W; cd.InputHeight = hdr ? outH : H; cd.OutputWidth = outW; cd.OutputHeight = outH; cd.InputFrameRate = { (UINT)fps,1 }; cd.OutputFrameRate = { (UINT)fps,1 }; cd.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+        if (FAILED(vdev->CreateVideoProcessorEnumerator(&cd, venum.put()))) return false;
+        if (FAILED(vdev->CreateVideoProcessor(venum.get(), 0, vproc.put()))) return false;
+        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC ovd{}; ovd.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+        if (FAILED(vdev->CreateVideoProcessorOutputView(nv12.get(), venum.get(), &ovd, outView.put()))) return false;
+        if (hdr) {
+            if (!tonemap.reinitInput(dev.get(), W, H)) return false;
+            tonemap.setViewport(lx, ly, lw, lh);
+        } else {
+            // Eigene BGRA-Textur EXAKT in FramePool-Groesse (CopyResource braucht identische Masse).
+            D3D11_TEXTURE2D_DESC bd{}; bd.Width = W; bd.Height = H; bd.MipLevels = 1; bd.ArraySize = 1; bd.Format = DXGI_FORMAT_B8G8R8A8_UNORM; bd.SampleDesc.Count = 1; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+            if (FAILED(dev->CreateTexture2D(&bd, nullptr, bgraIn.put()))) return false;
+            // Letterbox im VP: Quelle aspect-erhaltend in outW x outH, Raender schwarz.
+            RECT dr{ lx, ly, lx + lw, ly + lh };
+            vctx->VideoProcessorSetStreamDestRect(vproc.get(), 0, TRUE, &dr);
+            D3D11_VIDEO_COLOR black{}; black.RGBA = { 0, 0, 0, 1 };
+            vctx->VideoProcessorSetOutputBackgroundColor(vproc.get(), FALSE, &black);
+        }
+        printf("SOURCE: %dx%d -> %dx%d (Bild %dx%d @ %d,%d)\n", W, H, outW, outH, lw, lh, lx, ly);
+        return true;
+    };
+    // Capture-Quelle (Monitor oder Fenster) neu aufsetzen. initial=true beim Programmstart.
+    auto setupSource = [&](HWND hw, bool initial) -> bool {
+        if (session) { try { session.Close(); } catch (...) {} session = nullptr; }
+        if (framePool) { try { framePool.Close(); } catch (...) {} framePool = nullptr; }
+        item = nullptr;
+        if (hw) {
+            if (FAILED(interop->CreateForWindow(hw, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item))) || !item) { printf("SOURCE: Fenster-Capture fehlgeschlagen (HWND ungueltig?)\n"); return false; }
+            wchar_t t[128] = {}; GetWindowTextW(hw, t, 127); printf("Quelle: Fenster \"%ls\"\n", t);
+        } else {
+            HMONITOR hmon = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
+            if (FAILED(interop->CreateForMonitor(hmon, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item))) || !item) { printf("SOURCE: Monitor-Capture fehlgeschlagen\n"); return false; }
+            printf("Quelle: Hauptmonitor\n");
+        }
+        curHwnd = hw;
+        auto s2 = item.Size(); W = s2.Width; H = s2.Height;
+        framePool = wg::Direct3D11CaptureFramePool::CreateFreeThreaded(d3dDevice, capFmt, 3, s2);
+        session = framePool.CreateCaptureSession(item);
+        try { session.IsBorderRequired(false); } catch (...) {}
+        session.StartCapture();
+        return initial ? true : rebuildScaler();   // beim Start folgt rebuildScaler nach outW/outH-Berechnung
+    };
+
+    if (!setupSource(targetHwnd, true)) { printf("FEHLER: Capture-Start fehlgeschlagen\n"); return 1; }
+    // Zielaufloesung EINMAL aus der Startquelle ableiten (--scale N = Hoehe, gerade Kanten);
+    // sie bleibt fuer die gesamte Laufzeit konstant - der Encoder wird nie neu gestartet.
+    outW = W & ~1; outH = H & ~1;
+    if (scaleH > 0 && scaleH < H) { outH = scaleH & ~1; outW = ((W * outH / H) + 1) & ~1; }
     D3D11_TEXTURE2D_DESC nd{}; nd.Width = outW; nd.Height = outH; nd.MipLevels = 1; nd.ArraySize = 1; nd.Format = DXGI_FORMAT_NV12; nd.SampleDesc.Count = 1; nd.Usage = D3D11_USAGE_DEFAULT; nd.BindFlags = D3D11_BIND_RENDER_TARGET;
-    winrt::com_ptr<ID3D11Texture2D> nv12; dev->CreateTexture2D(&nd, nullptr, nv12.put());
-    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC ovd{}; ovd.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
-    winrt::com_ptr<ID3D11VideoProcessorOutputView> outView; vdev->CreateVideoProcessorOutputView(nv12.get(), venum.get(), &ovd, outView.put());
-    // Eigene BGRA-Textur (W x H, volle Bind-Flags): die WGC-FramePool-Textur wird recycelt,
-    // darum sofort hierein kopieren, bevor der naechste Frame sie ueberschreibt.
-    D3D11_TEXTURE2D_DESC bd{}; bd.Width = W; bd.Height = H; bd.MipLevels = 1; bd.ArraySize = 1; bd.Format = DXGI_FORMAT_B8G8R8A8_UNORM; bd.SampleDesc.Count = 1; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    winrt::com_ptr<ID3D11Texture2D> bgraIn; dev->CreateTexture2D(&bd, nullptr, bgraIn.put());
-
-    // HDR: Tonemap-Shader-Stufe (FP16 scRGB -> BGRA SDR, in Zielgroesse).
-    TonemapStage tonemap;
-    if (hdr) { if (!tonemap.init(dev.get(), W, H, outW, outH)) { printf("FEHLER: HDR-Tonemap-Init fehlgeschlagen\n"); return 3; } tonemap.readControl(ctx.get(), true); }
+    dev->CreateTexture2D(&nd, nullptr, nv12.put());
+    if (hdr) { if (!tonemap.init(dev.get(), W, H, outW, outH)) { printf("FEHLER: HDR-Tonemap-Init fehlgeschlagen\n"); return 3; } tonemap.readControl(ctx.get(), true); tonemapReady = true; }
+    if (!rebuildScaler()) { printf("FEHLER: Scaler-Init fehlgeschlagen\n"); return 3; }
 
     Encoder* encoder = useQsv ? (Encoder*)new QsvEncoder() : (useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder());
     if (!encoder->init(dev.get(), outW, outH, fps, mbit)) { printf("FEHLER: Encoder-Init (%s) fehlgeschlagen\n", encoder->name()); return 2; }
@@ -613,19 +664,30 @@ int main(int argc, char** argv) {
     std::string brPath = std::string(getenv("TEMP") ? getenv("TEMP") : ".") + "\\lumora-bitrate.txt";
     uint64_t brMtime = ~0ull; int curKbit = mbit * 1000;
     uint64_t inFrame = 0, outFrame = 0; int tries = 0; auto t0 = std::chrono::steady_clock::now();
-    AudioCapture audio;
+    // Ton als Pointer: beim Quellwechsel (Monitor<->Fenster) wird die Aufnahme-Seite neu
+    // gestartet (System- vs. Prozess-Loopback); die PTS laufen dank Epoch-Sync nahtlos weiter.
+    AudioCapture* audio = new AudioCapture();
+    auto audioPidFor = [&](HWND hw) -> DWORD { if (audioPid) return audioPid; DWORD p = 0; if (hw) GetWindowThreadProcessId(hw, &p); return p; };
     if (g_withAudio) {
-        // Im Fenster-Modus den Ton NUR dieses Prozesses aufnehmen (Prozess-Loopback); sonst System-Ton.
-        if (audioPid) audio.targetPid = audioPid;
-        else if (targetHwnd) GetWindowThreadProcessId(targetHwnd, &audio.targetPid);
-        audio.start(t0, basePts);
+        audio->targetPid = audioPidFor(targetHwnd);   // Fenster-Modus: nur der Ton dieses Prozesses
+        audio->start(t0, basePts);
         // Auf die erste Ton-Probe warten, BEVOR wir Video-Pakete senden: sonst sieht mediamtx
         // anfangs nur Video, puffert den deklarierten (noch leeren) Ton-Track und sprengt sein
         // Limit ("max recorded size exceeded"). Timeout, falls kein Audiogeraet. Bild und Ton
         // teilen dieselbe Epoche t0 -> der Warte-Versatz steckt in beiden PTS, bleibt synchron.
-        for (int w = 0; w < 400 && audio.empty(); ++w) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        if (audio.empty()) printf("AUDIO: keine Ton-Probe nach 4s - starte trotzdem (Stream evtl. ohne Ton)\n");
+        for (int w = 0; w < 400 && audio->empty(); ++w) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (audio->empty()) printf("AUDIO: keine Ton-Probe nach 4s - starte trotzdem (Stream evtl. ohne Ton)\n");
     }
+    // Quellwechsel-Steuerdatei: "monitor" oder "hwnd <id>". Beim Start nur den Stand merken
+    // (NICHT anwenden - ein alter Eintrag darf die per Argument gewaehlte Quelle nicht kippen).
+    std::string srcPath = std::string(getenv("TEMP") ? getenv("TEMP") : ".") + "\\lumora-source.txt";
+    uint64_t srcMtime = 0;
+    { WIN32_FILE_ATTRIBUTE_DATA fa{}; if (GetFileAttributesExA(srcPath.c_str(), GetFileExInfoStandard, &fa)) srcMtime = ((uint64_t)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime; }
+    // Quelle live wechseln: Capture+Scaler neu, Ton-Seite passend neu - Encoder/Muxer laufen durch.
+    auto switchSource = [&](HWND hw) {
+        if (!setupSource(hw, false)) { if (hw) { printf("SOURCE: Wechsel fehlgeschlagen -> Monitor\n"); setupSource(nullptr, false); } else return; }
+        if (g_withAudio) { audio->join(); delete audio; audio = new AudioCapture(); audio->targetPid = audioPidFor(curHwnd); audio->start(t0, basePts); }
+    };
     // FRAME-PACING (fester fps-Takt): WGC liefert nur bei BILDAENDERUNG einen Frame - bei
     // ruhigem Desktop kommen Frames unregelmaessig (30-60 schwankend) -> Ruckeln beim
     // Zuschauer (real gemeldet; beim 25fps-Video passt es zufaellig). Darum entkoppelt:
@@ -636,6 +698,16 @@ int main(int argc, char** argv) {
         // 1) alle bereitliegenden WGC-Frames abholen, den NEUESTEN uebernehmen.
         for (;;) {
             auto f = framePool.TryGetNextFrame(); if (!f) break;
+            // RESIZE (Fenster geaendert / Spiel wechselt Aufloesung): FramePool + Scaler auf die
+            // neue Quellgroesse umbauen; Encoder/Muxer laufen unveraendert weiter (Letterbox).
+            auto cs = f.ContentSize();
+            if (cs.Width != W || cs.Height != H) {
+                if (cs.Width < 16 || cs.Height < 16) continue;   // minimiert/degeneriert -> letzter Frame laeuft weiter
+                printf("SOURCE: Groessenwechsel %dx%d -> %dx%d\n", W, H, cs.Width, cs.Height);
+                framePool.Recreate(d3dDevice, capFmt, 3, cs);
+                W = cs.Width; H = cs.Height; rebuildScaler();
+                break;   // diesen (alten) Frame verwerfen; die naechsten kommen in neuer Groesse
+            }
             auto access = f.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
             winrt::com_ptr<ID3D11Texture2D> ft; access->GetInterface(winrt::guid_of<ID3D11Texture2D>(), ft.put_void());
             // sofort in eigene Textur (WGC recycelt den FramePool-Buffer): HDR -> FP16-Kopie
@@ -670,15 +742,27 @@ int main(int argc, char** argv) {
             if (tsf) fwrite(ts.data(), 1, ts.size(), tsf);
             outFrame++;
             if (outFrame % fps == 0) {
-                WIN32_FILE_ATTRIBUTE_DATA fa{}; uint64_t mt = 0;   // Steuerdatei 1x/s pruefen
+                WIN32_FILE_ATTRIBUTE_DATA fa{}; uint64_t mt = 0;   // Bitrate-Steuerdatei 1x/s pruefen
                 if (GetFileAttributesExA(brPath.c_str(), GetFileExInfoStandard, &fa)) mt = ((uint64_t)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime;
                 if (mt != brMtime) { brMtime = mt; FILE* bf = nullptr; fopen_s(&bf, brPath.c_str(), "r"); if (bf) { int k = 0; if (fscanf_s(bf, "%d", &k) == 1 && k >= 500 && k <= 200000 && k != curKbit) { curKbit = k; encoder->setBitrate(k); printf("  Bitrate live -> %d kbit\n", k); } fclose(bf); } }
+                // Quellwechsel-Steuerdatei ("monitor" | "hwnd <id>"): Capture live umschalten - fuer
+                // den Zuschauer ein nahtloser Schnitt (Encoder/Zeitachse/Verbindung laufen durch).
+                WIN32_FILE_ATTRIBUTE_DATA sfa{}; uint64_t smt = 0;
+                if (GetFileAttributesExA(srcPath.c_str(), GetFileExInfoStandard, &sfa)) smt = ((uint64_t)sfa.ftLastWriteTime.dwHighDateTime << 32) | sfa.ftLastWriteTime.dwLowDateTime;
+                if (smt != srcMtime) { srcMtime = smt;
+                    FILE* sf = nullptr; fopen_s(&sf, srcPath.c_str(), "r");
+                    if (sf) { char what[16] = { 0 }; unsigned long long id = 0; int n = fscanf_s(sf, "%15s %llu", what, (unsigned)_countof(what), &id); fclose(sf);
+                        HWND want = (n >= 2 && _stricmp(what, "hwnd") == 0) ? (HWND)(uintptr_t)id : nullptr;
+                        if (n >= 1 && want != curHwnd) { printf("SOURCE: Wechsel angefordert\n"); switchSource(want); } }
+                }
+                // Fenster geschlossen? -> automatisch auf den Monitor zurueck (statt ewigem Standbild).
+                if (curHwnd && !IsWindow(curHwnd)) { printf("SOURCE: Fenster geschlossen -> Monitor\n"); switchSource(nullptr); }
                 printf("  %llu Frames live (%.1fs, %s)%s\n", (unsigned long long)outFrame, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), encoder->name(), g_withAudio ? " +Ton" : "");
             }
         }
         // Fertige Ton-Frames (Opus) einmuxen (PID 0x101, PES stream_id 0xBD = private_stream_1).
         if (g_withAudio && !g_audioNoBytes) { AudioFrame af;
-            while (audio.pop(af)) { g_audioMuxed++;
+            while (audio->pop(af)) { g_audioMuxed++;
                 std::vector<uint8_t> ts; int plen = 8 + (int)af.data.size(); std::vector<uint8_t> pes;
                 pes.push_back(0); pes.push_back(0); pes.push_back(1); pes.push_back(0xBD); pes.push_back((plen >> 8) & 0xFF); pes.push_back(plen & 0xFF);
                 pes.push_back(0x80); pes.push_back(0x80); pes.push_back(5); writePTS(pes, 0x2, af.pts);
@@ -689,7 +773,7 @@ int main(int argc, char** argv) {
             }
         }
     }
-    if (g_withAudio) { audio.join(); printf("AUDIO-MUX: %llu Ton-Frames eingemuxt\n", (unsigned long long)g_audioMuxed); }
+    if (g_withAudio) { audio->join(); printf("AUDIO-MUX: %llu Ton-Frames eingemuxt\n", (unsigned long long)g_audioMuxed); }
     if (tsf) fclose(tsf);
     printf("Ende: %llu in / %llu out Frames (%s).\n", (unsigned long long)inFrame, (unsigned long long)outFrame, encoder->name());
     session.Close(); framePool.Close(); closesocket(s); WSACleanup(); return 0;
