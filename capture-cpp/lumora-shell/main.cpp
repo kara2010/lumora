@@ -37,9 +37,17 @@ static const wchar_t* SHIM_JS = LR"JS(
     if (d && d.id && pending.has(d.id)) { const p = pending.get(d.id); pending.delete(d.id); p.resolve(d.result); }
     else if (d && d.channel) { (listeners[d.channel] || []).forEach((f) => { try { f({}, d.payload) } catch {} }); }
   });
+  const syncGet = (u) => { try { const x = new XMLHttpRequest(); x.open('GET', u + '?t=' + Date.now(), false); x.send(); return x.status === 200 ? x.responseText : null; } catch (e) { return null; } };
   const ipcRenderer = {
     invoke: (channel, ...args) => new Promise((resolve) => { const id = ++seq; pending.set(id, { resolve }); window.chrome.webview.postMessage({ id, channel, args }); }),
     send: (channel, ...args) => window.chrome.webview.postMessage({ id: 0, channel, args }),
+    // sendSync-Emulation: Datendateien synchron ueber das data.lumora-Mapping (lokal).
+    sendSync: (channel) => {
+      if (channel === 'load-games-sync') return syncGet('https://data.lumora/games.json');
+      if (channel === 'load-prefs-sync') return syncGet('https://data.lumora/prefs.json');
+      if (channel === 'get-version-sync') return '%SHELL_VERSION%';
+      return null;
+    },
     on: (channel, fn) => { (listeners[channel] = listeners[channel] || []).push(fn); },
     removeAllListeners: (channel) => { delete listeners[channel]; },
   };
@@ -68,14 +76,31 @@ static std::string narrow(const std::wstring& w) {
     std::string s(n, 0); WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr, nullptr); return s;
 }
 
-// --- Modul: Einstellungen (gleiche Datei wie die Electron-App -> Parallelbetrieb) ---
-static std::wstring settingsPath() {
+// --- Modul: Einstellungen/Daten (gleiche Dateien wie die Electron-App -> Parallelbetrieb) ---
+static std::wstring dataDir() {
     wchar_t appdata[MAX_PATH] = {}; GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
-    return std::wstring(appdata) + L"\\lumora\\app-settings.json";
+    return std::wstring(appdata) + L"\\lumora";
 }
+static std::wstring settingsPath() { return dataDir() + L"\\app-settings.json"; }
 static json loadSettings() {
     json j = json::parse(readFile(settingsPath()), nullptr, false);
     return j.is_object() ? j : json::object();
+}
+// Produkt-Version aus der eigenen VersionInfo (fuer get-version-sync im Shim).
+static std::string shellVersion() {
+    wchar_t exe[MAX_PATH] = {}; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    DWORD h = 0, sz = GetFileVersionInfoSizeW(exe, &h); if (!sz) return "0.0.0";
+    std::string buf(sz, 0);
+    if (!GetFileVersionInfoW(exe, 0, sz, &buf[0])) return "0.0.0";
+    VS_FIXEDFILEINFO* ffi = nullptr; UINT len = 0;
+    if (!VerQueryValueW(buf.data(), L"\\", (void**)&ffi, &len) || !ffi) return "0.0.0";
+    return std::to_string(HIWORD(ffi->dwProductVersionMS)) + "." + std::to_string(LOWORD(ffi->dwProductVersionMS)) + "." + std::to_string(HIWORD(ffi->dwProductVersionLS));
+}
+// Push an das UI (der Shim verteilt {channel,payload} an ipcRenderer.on-Listener).
+static void sendToUi(const std::string& channel, const json& payload) {
+    if (!g_webview) return;
+    json m = { {"channel", channel}, {"payload", payload} };
+    g_webview->PostWebMessageAsJson(widen(m.dump()).c_str());
 }
 
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
@@ -87,6 +112,26 @@ static json handleChannel(const std::string& channel, const json& args) {
             json s = loadSettings(); s.update(args[0]);
             writeFile(settingsPath(), s.dump(2));
         }
+        return true;
+    }
+    if (channel == "save-games" && args.size() >= 1 && args[0].is_string()) {   // UI liefert fertigen JSON-String
+        writeFile(dataDir() + L"\\games.json", args[0].get<std::string>()); return true;
+    }
+    if (channel == "save-prefs" && args.size() >= 1 && args[0].is_string()) {
+        writeFile(dataDir() + L"\\prefs.json", args[0].get<std::string>()); return true;
+    }
+    if (channel == "launch-game" && args.size() >= 1 && args[0].is_string()) {
+        // Erstversion: Basis-Start (HDR-Schalter/Steam-Erkennung/Prozess-Watch folgen mit dem HDR-Modul).
+        std::wstring p = widen(args[0].get<std::string>());
+        sendToUi("launch-status", "launching");
+        std::wstring dir = p.substr(0, p.find_last_of(L'\\'));
+        ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, dir.c_str(), SW_SHOWNORMAL);
+        return true;
+    }
+    if (channel == "open-game-folder" && args.size() >= 1 && args[0].is_string()) {
+        std::wstring p = widen(args[0].get<std::string>());
+        std::wstring param = L"/select,\"" + p + L"\"";
+        ShellExecuteW(nullptr, L"open", L"explorer.exe", param.c_str(), nullptr, SW_SHOWNORMAL);
         return true;
     }
     if (channel == "minimize-window") { ShowWindow(g_hwnd, SW_MINIMIZE); return true; }
@@ -183,10 +228,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                             g_controller = ctrl;
                             g_controller->get_CoreWebView2(&g_webview);
                             RECT rc; GetClientRect(hwnd, &rc); g_controller->put_Bounds(rc);
-                            // Projektordner als https://app.lumora/ einblenden (fetch/relative Pfade funktionieren)
+                            // Projektordner als https://app.lumora/, Datenordner (%APPDATA%\lumora)
+                            // als https://data.lumora/ einblenden (sendSync-Emulation + spaeter Medien)
                             ComPtr<ICoreWebView2_3> wv3; g_webview.As(&wv3);
-                            if (wv3) wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
-                            g_webview->AddScriptToExecuteOnDocumentCreated(SHIM_JS, nullptr);
+                            if (wv3) {
+                                wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                                wv3->SetVirtualHostNameToFolderMapping(L"data.lumora", dataDir().c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            }
+                            std::wstring shim = SHIM_JS;   // Versions-Platzhalter fuellen
+                            size_t vp = shim.find(L"%SHELL_VERSION%");
+                            if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
+                            g_webview->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
                             g_webview->add_WebMessageReceived(
                                 Callback<ICoreWebView2WebMessageReceivedEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
