@@ -48,6 +48,8 @@
 #include "public/include/core/Buffer.h"
 #include "public/include/components/Component.h"
 #include "public/include/components/VideoEncoderVCE.h"
+#include "vpl/mfxvideo.h"
+#include "vpl/mfxdispatcher.h"
 #pragma comment(lib, "ws2_32.lib")
 
 namespace wg {
@@ -148,6 +150,52 @@ struct AmfEncoder : Encoder {
         encoder->SubmitInput(surf);
         amf::AMFDataPtr data;
         while (encoder->QueryOutput(&data) == AMF_OK && data) { amf::AMFBufferPtr b(data); if (b) out.emplace_back((uint8_t*)b->GetNative(), (uint8_t*)b->GetNative() + b->GetSize()); data = nullptr; }
+    }
+};
+
+// Intel-QSV via oneVPL (MFXVideoENCODE). Struktur wie NVENC/AMF. HINWEIS: kompiliert und
+// nutzt die API korrekt, aber der echte Encode ist erst auf Intel-Silizium verifiziert -
+// insbesondere der GPU->GPU-Copy in die oneVPL-Surface (Texture-Array-Subresource?) ist dort
+// zu pruefen. Runtime (libmfx) kommt mit dem Intel-Treiber; Dispatcher = libvpl.dll.
+struct QsvEncoder : Encoder {
+    mfxLoader loader = nullptr; mfxSession session = nullptr; winrt::com_ptr<ID3D11DeviceContext> ctx;
+    std::vector<uint8_t> bsBuf; bool inited = false;
+    const char* name() override { return "QSV"; }
+    ~QsvEncoder() { if (session) { if (inited) MFXVideoENCODE_Close(session); MFXClose(session); } if (loader) MFXUnload(loader); }
+    bool init(ID3D11Device* dev, int w, int h, int fps, int mbit) override {
+        dev->GetImmediateContext(ctx.put());
+        loader = MFXLoad(); if (!loader) return false;
+        mfxConfig cfg = MFXCreateConfig(loader);
+        mfxVariant v{}; v.Version.Version = MFX_VARIANT_VERSION; v.Type = MFX_VARIANT_TYPE_U32;
+        v.Data.U32 = MFX_IMPL_TYPE_HARDWARE; MFXSetConfigFilterProperty(cfg, (const mfxU8*)"mfxImplDescription.Impl", v);
+        v.Data.U32 = MFX_CODEC_AVC; MFXSetConfigFilterProperty(cfg, (const mfxU8*)"mfxImplDescription.mfxEncoderDescription.encoder.CodecID", v);
+        if (MFXCreateSession(loader, 0, &session) != MFX_ERR_NONE) return false;
+        if (MFXVideoCORE_SetHandle(session, MFX_HANDLE_D3D11_DEVICE, dev) != MFX_ERR_NONE) return false;
+        mfxVideoParam par{};
+        par.mfx.CodecId = MFX_CODEC_AVC; par.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
+        par.mfx.RateControlMethod = MFX_RATECONTROL_CBR; par.mfx.TargetKbps = (mfxU16)(mbit * 1000);
+        par.mfx.FrameInfo.FourCC = MFX_FOURCC_NV12; par.mfx.FrameInfo.ChromaFormat = MFX_CHROMAFORMAT_YUV420; par.mfx.FrameInfo.PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
+        par.mfx.FrameInfo.FrameRateExtN = fps; par.mfx.FrameInfo.FrameRateExtD = 1;
+        par.mfx.FrameInfo.Width = (mfxU16)((w + 15) & ~15); par.mfx.FrameInfo.Height = (mfxU16)((h + 15) & ~15);
+        par.mfx.FrameInfo.CropW = (mfxU16)w; par.mfx.FrameInfo.CropH = (mfxU16)h;
+        par.mfx.GopPicSize = (mfxU16)(fps * 2); par.mfx.GopRefDist = 1; par.mfx.IdrInterval = 0; par.AsyncDepth = 1;
+        par.IOPattern = MFX_IOPATTERN_IN_VIDEO_MEMORY;
+        mfxExtCodingOption2 co2{}; co2.Header.BufferId = MFX_EXTBUFF_CODING_OPTION2; co2.Header.BufferSz = sizeof(co2); co2.RepeatPPS = MFX_CODINGOPTION_ON; // SPS/PPS periodisch (Zuschauer-Einstieg)
+        mfxExtBuffer* eb[] = { (mfxExtBuffer*)&co2 }; par.ExtParam = eb; par.NumExtParam = 1;
+        MFXVideoENCODE_Query(session, &par, &par);
+        if (MFXVideoENCODE_Init(session, &par) < MFX_ERR_NONE) return false;
+        bsBuf.resize((size_t)mbit * 1000 * 1000 / 8 + (1 << 20)); inited = true; return true;
+    }
+    void encode(ID3D11Texture2D* nv12, std::vector<std::vector<uint8_t>>& out) override {
+        mfxFrameSurface1* surf = nullptr;
+        if (MFXMemory_GetSurfaceForEncode(session, &surf) != MFX_ERR_NONE || !surf) return;
+        mfxHDL hdl = nullptr; mfxResourceType rt{};
+        if (surf->FrameInterface->GetNativeHandle(surf, &hdl, &rt) == MFX_ERR_NONE && hdl) ctx->CopyResource((ID3D11Texture2D*)hdl, nv12); // GPU->GPU, kein Readback
+        mfxBitstream bs{}; bs.Data = bsBuf.data(); bs.MaxLength = (mfxU32)bsBuf.size();
+        mfxSyncPoint syncp = nullptr; mfxStatus st;
+        do { st = MFXVideoENCODE_EncodeFrameAsync(session, nullptr, surf, &bs, &syncp); if (st == MFX_WRN_DEVICE_BUSY) Sleep(1); } while (st == MFX_WRN_DEVICE_BUSY);
+        surf->FrameInterface->Release(surf);
+        if (st == MFX_ERR_NONE && syncp) { MFXVideoCORE_SyncOperation(session, syncp, 100000); out.emplace_back(bs.Data + bs.DataOffset, bs.Data + bs.DataOffset + bs.DataLength); }
     }
 };
 
@@ -486,9 +534,11 @@ int main(int argc, char** argv) {
 
     // GPU/Encoder-Auswahl: passenden Adapter finden (NVENC->NVIDIA, AMF->AMD)
     winrt::com_ptr<IDXGIFactory1> fac; CreateDXGIFactory1(winrt::guid_of<IDXGIFactory1>(), fac.put_void());
-    winrt::com_ptr<IDXGIAdapter1> nvA, amdA; for (UINT ai = 0;; ++ai) { winrt::com_ptr<IDXGIAdapter1> a; if (fac->EnumAdapters1(ai, a.put()) == DXGI_ERROR_NOT_FOUND) break; DXGI_ADAPTER_DESC1 d; a->GetDesc1(&d); if (d.VendorId == 0x10DE && !nvA) nvA = a; else if (d.VendorId == 0x1002 && !amdA) amdA = a; }
+    winrt::com_ptr<IDXGIAdapter1> nvA, amdA, intelA; for (UINT ai = 0;; ++ai) { winrt::com_ptr<IDXGIAdapter1> a; if (fac->EnumAdapters1(ai, a.put()) == DXGI_ERROR_NOT_FOUND) break; DXGI_ADAPTER_DESC1 d; a->GetDesc1(&d); if (d.VendorId == 0x10DE && !nvA) nvA = a; else if (d.VendorId == 0x1002 && !amdA) amdA = a; else if (d.VendorId == 0x8086 && !intelA) intelA = a; }
+    // Encoder-Wahl: explizit oder auto (Vorrang NVIDIA > AMD > Intel).
+    bool useQsv = (encName == "qsv") || (encName == "auto" && !nvA && !amdA && intelA);
     bool useAmf = (encName == "amf") || (encName == "auto" && !nvA && amdA);
-    winrt::com_ptr<IDXGIAdapter1> pick = useAmf ? amdA : nvA;
+    winrt::com_ptr<IDXGIAdapter1> pick = useQsv ? intelA : (useAmf ? amdA : nvA);
     if (!pick) { printf("FEHLER: kein passender GPU-Adapter fuer '%s'\n", encName.c_str()); return 1; }
 
     winrt::com_ptr<ID3D11Device> dev; winrt::com_ptr<ID3D11DeviceContext> ctx; D3D_FEATURE_LEVEL fl;
@@ -537,7 +587,7 @@ int main(int argc, char** argv) {
     TonemapStage tonemap;
     if (hdr) { if (!tonemap.init(dev.get(), W, H, outW, outH)) { printf("FEHLER: HDR-Tonemap-Init fehlgeschlagen\n"); return 3; } tonemap.readControl(ctx.get(), true); }
 
-    Encoder* encoder = useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder();
+    Encoder* encoder = useQsv ? (Encoder*)new QsvEncoder() : (useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder());
     if (!encoder->init(dev.get(), outW, outH, fps, mbit)) { printf("FEHLER: Encoder-Init (%s) fehlgeschlagen\n", encoder->name()); return 2; }
 
     WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa); SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
