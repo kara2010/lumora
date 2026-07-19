@@ -1591,7 +1591,13 @@ async function ensureOsdSetup() {
     if (needFps) ps.push(...taskPs(FPS_TASK, '--fps-broker', ''))
     if (needSense || needPawnio) ps.push(...taskPs(SENSE_TASK, '--sensor-broker', '2'))
     const b64 = Buffer.from(ps.join('; '), 'utf16le').toString('base64')
-    const outer = `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand ${b64}'`
+    // Signierten Lumora-Rechte-Helfer per RunAs elevaten -> der UAC-Dialog zeigt unseren
+    // Namen + Logo + verifizierten Herausgeber statt "Windows PowerShell". Fehlt der Helfer
+    // (aeltere Installation), greift der bisherige powershell-Weg.
+    const _elevExe = streamBin('lumora-elevate.exe')
+    const outer = fs.existsSync(_elevExe)
+      ? `Start-Process -FilePath '${_elevExe.replace(/'/g, "''")}' -Verb RunAs -WindowStyle Hidden -ArgumentList '--ps-encoded','${b64}'`
+      : `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand ${b64}'`
     status('OSD-Einrichtung: Warte auf deine Bestaetigung (Windows-Sicherheitsabfrage) …')
     try { spawn('powershell', ['-NoProfile', '-Command', outer], { windowsHide: true }) } catch (e) { osdDbg('ensureOsdSetup spawn: ' + (e && e.message)); status(null); return }
     // 3) Warten, bis alles da ist (Install braucht Momente), dann Broker anwerfen.
@@ -6822,7 +6828,10 @@ ipcMain.handle('osd-edit-done', () => setOsdEditMode(false))
 ipcMain.handle('fps-grant-access', () => {
   const inner = 'Add-LocalGroupMember -SID S-1-5-32-559 -Member $env:USERNAME'
   const b64 = Buffer.from(inner, 'utf16le').toString('base64')
-  const outer = `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand ${b64}'`
+  const _elevExe = streamBin('lumora-elevate.exe')   // signierter Rechte-Helfer -> UAC zeigt Lumora statt PowerShell
+  const outer = fs.existsSync(_elevExe)
+    ? `Start-Process -FilePath '${_elevExe.replace(/'/g, "''")}' -Verb RunAs -WindowStyle Hidden -ArgumentList '--ps-encoded','${b64}'`
+    : `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand ${b64}'`
   try { spawn('powershell', ['-NoProfile', '-Command', outer], { windowsHide: true }) } catch (e) { return { ok: false, error: e && e.message } }
   return { ok: true }
 })
