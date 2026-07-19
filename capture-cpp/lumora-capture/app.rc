@@ -1,0 +1,35 @@
+// Ressourcen des nativen Aufnahme-Helfers: Lumora-Logo (Explorer, Task-Manager,
+// SmartScreen, evtl. Firewall-Dialog) + VersionInfo (Produktname/Beschreibung, die
+// Windows im Datei-Dialog anzeigt). Signatur (Herausgebername) kommt separat beim Build.
+#include <windows.h>
+
+IDI_ICON1 ICON "app.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 2,2,21,0
+ PRODUCTVERSION 2,2,21,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Karsten Radermacher"
+            VALUE "FileDescription", "Lumora Aufnahme-Helfer"
+            VALUE "FileVersion", "2.2.21.0"
+            VALUE "InternalName", "lumora-capture-native"
+            VALUE "LegalCopyright", "\xA9 Karsten Radermacher"
+            VALUE "OriginalFilename", "lumora-capture-native.exe"
+            VALUE "ProductName", "Lumora"
+            VALUE "ProductVersion", "2.2.21.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
