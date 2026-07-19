@@ -110,7 +110,7 @@ if (Test-Path $binSrcDir) {
     if (Test-Path $resDir) {
       $binDst = Join-Path $resDir 'bin'
       New-Item -ItemType Directory -Force $binDst | Out-Null
-      foreach ($b in 'ffmpeg.exe','mediamtx.exe','lumora-capture.exe') {
+      foreach ($b in 'ffmpeg.exe','mediamtx.exe','lumora-capture.exe','lumora-capture-native.exe','libvpl.dll') {
         $bs = Join-Path $binSrcDir $b; $bd = Join-Path $binDst $b
         # NICHT nur auf Groesse pruefen: zwei verschiedene Builds von lumora-capture.exe
         # (self-contained single-file) landen leicht zufaellig auf exakt derselben
