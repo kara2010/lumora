@@ -10,12 +10,17 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shellapi.h>
+#include <shobjidl.h>
+#include <objidl.h>
+#include <gdiplus.h>
 #include <wrl.h>
 #include <string>
+#include <vector>
 #include <fstream>
 #include <sstream>
 #include "WebView2.h"
 #include "json.hpp"
+#pragma comment(lib, "gdiplus.lib")
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -103,6 +108,60 @@ static void sendToUi(const std::string& channel, const json& payload) {
     g_webview->PostWebMessageAsJson(widen(m.dump()).c_str());
 }
 
+// --- Modul: Datei-/Ordner-Dialoge (IFileOpenDialog, modal wie in Electron) ---
+static json pickPathDialog(const wchar_t* title, bool folder, const wchar_t* filterName, const wchar_t* filterSpec) {
+    ComPtr<IFileOpenDialog> dlg;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg)))) return nullptr;
+    dlg->SetTitle(title);
+    DWORD opts = 0; dlg->GetOptions(&opts);
+    if (folder) dlg->SetOptions(opts | FOS_PICKFOLDERS);
+    else if (filterSpec) { COMDLG_FILTERSPEC fs[2] = { { filterName, filterSpec }, { L"Alle Dateien", L"*.*" } }; dlg->SetFileTypes(2, fs); }
+    if (FAILED(dlg->Show(g_hwnd))) return nullptr;             // abgebrochen
+    ComPtr<IShellItem> item; if (FAILED(dlg->GetResult(&item))) return nullptr;
+    LPWSTR p = nullptr; if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &p)) || !p) return nullptr;
+    std::string out = narrow(p); CoTaskMemFree(p);
+    return out;
+}
+
+// --- Modul: Datei-Icon als data-URL (SHGetFileInfo -> GDI+ -> PNG-Base64) ---
+static std::string b64encode(const uint8_t* d, size_t n) {
+    static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string o; o.reserve((n + 2) / 3 * 4);
+    for (size_t i = 0; i < n; i += 3) {
+        uint32_t x = (uint32_t)d[i] << 16; if (i + 1 < n) x |= (uint32_t)d[i + 1] << 8; if (i + 2 < n) x |= d[i + 2];
+        o.push_back(t[(x >> 18) & 63]); o.push_back(t[(x >> 12) & 63]);
+        o.push_back(i + 1 < n ? t[(x >> 6) & 63] : '='); o.push_back(i + 2 < n ? t[x & 63] : '=');
+    }
+    return o;
+}
+static int pngClsid(CLSID* clsid) {
+    UINT num = 0, size = 0; Gdiplus::GetImageEncodersSize(&num, &size); if (!size) return -1;
+    std::vector<uint8_t> buf(size); auto* c = (Gdiplus::ImageCodecInfo*)buf.data();
+    Gdiplus::GetImageEncoders(num, size, c);
+    for (UINT i = 0; i < num; ++i) if (wcscmp(c[i].MimeType, L"image/png") == 0) { *clsid = c[i].Clsid; return 0; }
+    return -1;
+}
+static json fileIconDataUrl(const std::wstring& path) {
+    SHFILEINFOW sfi{};
+    if (!SHGetFileInfoW(path.c_str(), 0, &sfi, sizeof(sfi), SHGFI_ICON | SHGFI_LARGEICON) || !sfi.hIcon) return nullptr;
+    json out = nullptr;
+    Gdiplus::Bitmap* bmp = Gdiplus::Bitmap::FromHICON(sfi.hIcon);
+    if (bmp) {
+        CLSID clsid; IStream* stm = nullptr;
+        if (pngClsid(&clsid) == 0 && SUCCEEDED(CreateStreamOnHGlobal(nullptr, TRUE, &stm))) {
+            if (bmp->Save(stm, &clsid, nullptr) == Gdiplus::Ok) {
+                HGLOBAL hg = nullptr; GetHGlobalFromStream(stm, &hg);
+                if (hg) { SIZE_T sz = GlobalSize(hg); void* p = GlobalLock(hg);
+                    if (p) out = "data:image/png;base64," + b64encode((uint8_t*)p, sz); GlobalUnlock(hg); }
+            }
+            stm->Release();
+        }
+        delete bmp;
+    }
+    DestroyIcon(sfi.hIcon);
+    return out;
+}
+
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
 // Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
 static json handleChannel(const std::string& channel, const json& args) {
@@ -134,6 +193,12 @@ static json handleChannel(const std::string& channel, const json& args) {
         ShellExecuteW(nullptr, L"open", L"explorer.exe", param.c_str(), nullptr, SW_SHOWNORMAL);
         return true;
     }
+    if (channel == "browse-game")        return pickPathDialog(L"Spiel auswaehlen", false, L"Spiele", L"*.exe;*.lnk");
+    if (channel == "browse-icon")        return pickPathDialog(L"Icon auswaehlen (.exe oder .ico)", false, L"Icon-Dateien", L"*.ico;*.exe");
+    if (channel == "browse-scan-folder") return pickPathDialog(L"Ordner scannen", true, nullptr, nullptr);
+    if (channel == "get-file-icon" && args.size() >= 1 && args[0].is_string())
+        return fileIconDataUrl(widen(args[0].get<std::string>()));   // Erstversion: Datei-Icon (Steam-Original folgt mit dem Library-Modul)
+    if (channel == "list-gpus") return json::array();   // OSD-Sensorik (nvml/adl) folgt mit dem OSD-Modul
     if (channel == "minimize-window") { ShowWindow(g_hwnd, SW_MINIMIZE); return true; }
     if (channel == "toggle-maximize") { ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE); return true; }
     if (channel == "close-window")    { PostMessageW(g_hwnd, WM_CLOSE, 0, 0); return true; }
@@ -171,6 +236,8 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // COM (FileDialogs, WebView2) - GUI-Thread = STA
+    Gdiplus::GdiplusStartupInput gsi; ULONG_PTR gtok = 0; Gdiplus::GdiplusStartup(&gtok, &gsi, nullptr);   // Datei-Icons (PNG)
     // App-Ordner (index.html) finden: --appdir > aktuelles Verzeichnis > exe-Ordner >
     // von dort aufwaerts (Doppelklick aus build/Release im Quellbaum). Im spaeteren
     // Installer liegt das UI direkt neben der exe - dann greift Stufe 3 sofort.
