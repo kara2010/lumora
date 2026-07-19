@@ -100,12 +100,27 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    // --appdir bestimmen (Ordner mit index.html); Default: aktuelles Verzeichnis.
+    // App-Ordner (index.html) finden: --appdir > aktuelles Verzeichnis > exe-Ordner >
+    // von dort aufwaerts (Doppelklick aus build/Release im Quellbaum). Im spaeteren
+    // Installer liegt das UI direkt neben der exe - dann greift Stufe 3 sofort.
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    wchar_t cwd[MAX_PATH] = {}; GetCurrentDirectoryW(MAX_PATH, cwd); g_appDir = cwd;
-    for (int i = 1; i + 1 < argc + 1 && i < argc; ++i) if (wcscmp(argv[i], L"--appdir") == 0 && i + 1 < argc) g_appDir = argv[i + 1];
-    if (GetFileAttributesW((g_appDir + L"\\index.html").c_str()) == INVALID_FILE_ATTRIBUTES) {
-        MessageBoxW(nullptr, (L"index.html nicht gefunden in:\n" + g_appDir + L"\n\nMit --appdir <Ordner> starten.").c_str(), L"Lumora Shell", MB_ICONERROR); return 1;
+    auto hasIndex = [](const std::wstring& d) { return GetFileAttributesW((d + L"\\index.html").c_str()) != INVALID_FILE_ATTRIBUTES; };
+    g_appDir.clear();
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--appdir") == 0 && i + 1 < argc) g_appDir = argv[i + 1];
+    if (g_appDir.empty() || !hasIndex(g_appDir)) {
+        wchar_t cwd[MAX_PATH] = {}; GetCurrentDirectoryW(MAX_PATH, cwd);
+        if (hasIndex(cwd)) g_appDir = cwd;
+        else {
+            wchar_t exe[MAX_PATH] = {}; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+            std::wstring d = exe; d = d.substr(0, d.find_last_of(L'\\'));
+            for (int up = 0; up < 6 && !d.empty(); ++up) {
+                if (hasIndex(d)) { g_appDir = d; break; }
+                size_t p = d.find_last_of(L'\\'); if (p == std::wstring::npos) break; d = d.substr(0, p);
+            }
+        }
+    }
+    if (g_appDir.empty() || !hasIndex(g_appDir)) {
+        MessageBoxW(nullptr, L"index.html nicht gefunden.\nMit --appdir <Ordner> starten.", L"Lumora Shell", MB_ICONERROR); return 1;
     }
 
     WNDCLASSW wc{}; wc.lpfnWndProc = wndProc; wc.hInstance = hInst; wc.lpszClassName = L"LumoraShell";
