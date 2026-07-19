@@ -1776,6 +1776,41 @@
           <td><span class="badge badge-mit">MIT</span></td>
           <td><a href="https://dotnet.microsoft.com" target="_blank" rel="noopener">dotnet.microsoft.com</a></td>
         </tr>
+        <!-- =============================================================================
+             VORBEREITET fuer den Release des nativen C++-Capture-Helfers (Branch
+             feature/cpp-capture). BEIM AUSLIEFERN:
+               1. Die vier Zeilen oben ENTFERNEN: FFmpeg, Vortice.Windows, NAudio,
+                  .NET-Runtime (sie werden vollstaendig ersetzt).
+               2. Die drei <tr> unten AKTIVIEREN (aus dem Kommentar herausnehmen).
+               3. Website EN (website/en/index.html) und den "Ueber"-Dialog der App
+                  (index.html, about-credits + EN-Uebersetzungstabelle) SYNCHRON ziehen.
+             Der native Helfer macht Capture (Windows.Graphics.Capture via C++/WinRT),
+             Hardware-Encoding (NVENC/AMF/QSV direkt) und MPEG-TS-Muxing SELBST - dafuer
+             ist keine Fremdbibliothek noetig (nur Windows-SDK). Als externe Komponente
+             bleibt der Opus-Audio-Encoder; die HW-Encoder brauchen ihre Vendor-Header.
+        <tr>
+          <td><strong>libopus</strong></td>
+          <td>1.5.x</td>
+          <td>Opus-Audio-Encoding fuer den Stream-Ton (WebRTC-tauglich, patentfrei)</td>
+          <td><span class="badge badge-mit">BSD-3</span></td>
+          <td><a href="https://opus-codec.org" target="_blank" rel="noopener">opus-codec.org</a><br>
+              <small style="color:var(--muted)">&copy; Xiph.Org, Skype, Mozilla u.&nbsp;a.</small></td>
+        </tr>
+        <tr>
+          <td><strong>nv-codec-headers</strong></td>
+          <td>13.x</td>
+          <td>NVENC-API-Header fuer das NVIDIA-Hardware-Encoding im Helfer</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://github.com/FFmpeg/nv-codec-headers" target="_blank" rel="noopener">github.com/FFmpeg/nv-codec-headers</a></td>
+        </tr>
+        <tr>
+          <td><strong>AMF SDK</strong></td>
+          <td>1.4.x</td>
+          <td>AMD-Hardware-Encoding-API (AMF) fuer Radeon-GPUs im Helfer</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://github.com/GPUOpen-LibrariesAndSDKs/AMF" target="_blank" rel="noopener">github.com/GPUOpen-LibrariesAndSDKs/AMF</a></td>
+        </tr>
+             ============================================================================= -->
         <tr>
           <td><strong>electron-updater</strong></td>
           <td>6.x</td>
