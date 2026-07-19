@@ -234,6 +234,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                             if (wv3) {
                                 wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
                                 wv3->SetVirtualHostNameToFolderMapping(L"data.lumora", dataDir().c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                                // Cover/Hero: aktueller Medienordner + Alt-Pfad (hdr-launcher) aus aelteren games.json-Eintraegen
+                                wv3->SetVirtualHostNameToFolderMapping(L"media.lumora", (dataDir() + L"\\media").c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                                wchar_t ad[MAX_PATH] = {}; GetEnvironmentVariableW(L"APPDATA", ad, MAX_PATH);
+                                wv3->SetVirtualHostNameToFolderMapping(L"media0.lumora", (std::wstring(ad) + L"\\hdr-launcher\\media").c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
                             }
                             std::wstring shim = SHIM_JS;   // Versions-Platzhalter fuellen
                             size_t vp = shim.find(L"%SHELL_VERSION%");

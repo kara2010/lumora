@@ -1968,6 +1968,17 @@ function applyI18n() {
     function mediaSrc(v) {
       if (!v) return ''
       if (v.startsWith('data:')) return v
+      // Native Shell (WebView2): file:// ist von der https-App-Origin blockiert -> Medien
+      // laufen ueber die media-Mappings der Shell (media.lumora = aktueller Ordner,
+      // media0.lumora = alter hdr-launcher-Ordner). Electron behaelt den file://-Weg.
+      if (window.chrome && window.chrome.webview) {
+        const p = v.replace(/\\/g, '/')
+        let m = p.match(/\/lumora\/media\/(.+)$/i)
+        if (m) return 'https://media.lumora/' + encodeURIComponent(m[1]).replace(/%2F/gi, '/')
+        m = p.match(/\/hdr-launcher\/media\/(.+)$/i)
+        if (m) return 'https://media0.lumora/' + encodeURIComponent(m[1]).replace(/%2F/gi, '/')
+        return ''
+      }
       return 'file:///' + v.replace(/\\/g, '/').replace(/ /g, '%20').replace(/#/g, '%23')
     }
 
