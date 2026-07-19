@@ -8,7 +8,10 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <dwmapi.h>
+#include <objidl.h>
+#include <gdiplus.h>
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "gdiplus.lib")
 #include <d3d11.h>
 #include <dxgi.h>
 #include <dxgi1_6.h>
@@ -371,8 +374,86 @@ struct TonemapStage {
     }
 };
 
+// =============== Fensterliste (--list) + HDR-Status (--hdr-check) fuer die UI ===============
+// main.js ruft "lumora-capture --list" und erwartet je sichtbarem Fenster: HWND \t Titel \t
+// Icon-PNG-Base64 (UTF-8). Ohne diese Ausgabe bliebe die Fensterauswahl in der App leer.
+static std::string b64encode(const uint8_t* d, size_t n) {
+    static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string o; o.reserve((n + 2) / 3 * 4);
+    for (size_t i = 0; i < n; i += 3) {
+        uint32_t x = (uint32_t)d[i] << 16; if (i + 1 < n) x |= (uint32_t)d[i + 1] << 8; if (i + 2 < n) x |= d[i + 2];
+        o.push_back(t[(x >> 18) & 63]); o.push_back(t[(x >> 12) & 63]);
+        o.push_back(i + 1 < n ? t[(x >> 6) & 63] : '='); o.push_back(i + 2 < n ? t[x & 63] : '=');
+    }
+    return o;
+}
+static int pngEncoderClsid(CLSID* clsid) {
+    UINT num = 0, size = 0; Gdiplus::GetImageEncodersSize(&num, &size); if (size == 0) return -1;
+    std::vector<uint8_t> buf(size); auto* codecs = (Gdiplus::ImageCodecInfo*)buf.data();
+    Gdiplus::GetImageEncoders(num, size, codecs);
+    for (UINT i = 0; i < num; ++i) if (wcscmp(codecs[i].MimeType, L"image/png") == 0) { *clsid = codecs[i].Clsid; return 0; }
+    return -1;
+}
+static std::string iconBase64(HWND hwnd) {
+    HICON hIcon = nullptr; DWORD_PTR r = 0;
+    SendMessageTimeoutW(hwnd, WM_GETICON, ICON_BIG, 0, SMTO_ABORTIFHUNG, 200, &r); hIcon = (HICON)r;
+    if (!hIcon) { SendMessageTimeoutW(hwnd, WM_GETICON, 2 /*ICON_SMALL2*/, 0, SMTO_ABORTIFHUNG, 200, &r); hIcon = (HICON)r; }
+    if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICON);
+    if (!hIcon) hIcon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICONSM);
+    if (!hIcon) return "";
+    Gdiplus::Bitmap* ico = Gdiplus::Bitmap::FromHICON(hIcon); if (!ico) return "";
+    std::string out;
+    Gdiplus::Bitmap sm24(24, 24, PixelFormat32bppARGB);   // Anzeigegroesse -> kleine Base64 ('small' ist ein Win-Makro!)
+    { Gdiplus::Graphics g(&sm24); g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic); g.DrawImage(ico, 0, 0, 24, 24); }
+    CLSID clsid; IStream* stm = nullptr;
+    if (pngEncoderClsid(&clsid) == 0 && SUCCEEDED(CreateStreamOnHGlobal(nullptr, TRUE, &stm))) {
+        if (sm24.Save(stm, &clsid, nullptr) == Gdiplus::Ok) {
+            HGLOBAL hg = nullptr; GetHGlobalFromStream(stm, &hg);
+            if (hg) { SIZE_T sz = GlobalSize(hg); void* p = GlobalLock(hg); if (p) out = b64encode((uint8_t*)p, sz); GlobalUnlock(hg); }
+        }
+        stm->Release();
+    }
+    delete ico;
+    return out;
+}
+static std::string wideToUtf8(const std::wstring& w) {
+    if (w.empty()) return "";
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    std::string s(n, 0); WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr, nullptr);
+    return s;
+}
+static int listWindows() {
+    Gdiplus::GdiplusStartupInput gsi; ULONG_PTR gtoken = 0; Gdiplus::GdiplusStartup(&gtoken, &gsi, nullptr);
+    EnumWindows([](HWND h, LPARAM) -> BOOL {
+        if (!IsWindowVisible(h)) return TRUE;
+        int len = GetWindowTextLengthW(h); if (len == 0) return TRUE;
+        std::wstring title(len + 1, 0); GetWindowTextW(h, &title[0], len + 1); title.resize(wcslen(title.c_str()));
+        size_t a = title.find_first_not_of(L" \t\r\n"); if (a == std::wstring::npos) return TRUE;
+        title = title.substr(a, title.find_last_not_of(L" \t\r\n") - a + 1);
+        int cloaked = 0; DwmGetWindowAttribute(h, 14 /*DWMWA_CLOAKED*/, &cloaked, sizeof(cloaked)); if (cloaked) return TRUE;
+        std::string line = std::to_string((long long)(intptr_t)h) + "\t" + wideToUtf8(title) + "\t" + iconBase64(h) + "\n";
+        fwrite(line.data(), 1, line.size(), stdout);
+        return TRUE;
+    }, 0);
+    Gdiplus::GdiplusShutdown(gtoken);
+    return 0;
+}
+static int hdrCheck() {   // pro Monitor "1" (HDR/PQ aktiv) oder "0"
+    winrt::com_ptr<IDXGIFactory1> fac; if (FAILED(CreateDXGIFactory1(winrt::guid_of<IDXGIFactory1>(), fac.put_void()))) return 1;
+    for (UINT ai = 0; ; ++ai) {
+        winrt::com_ptr<IDXGIAdapter1> a; if (fac->EnumAdapters1(ai, a.put()) == DXGI_ERROR_NOT_FOUND) break;
+        for (UINT oi = 0; ; ++oi) {
+            winrt::com_ptr<IDXGIOutput> o; if (a->EnumOutputs(oi, o.put()) == DXGI_ERROR_NOT_FOUND) break;
+            auto o6 = o.try_as<IDXGIOutput6>(); DXGI_OUTPUT_DESC1 d1{};
+            printf("%d\n", (o6 && SUCCEEDED(o6->GetDesc1(&d1)) && d1.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) ? 1 : 0);
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
+    for (int i = 1; i < argc; ++i) { std::string a = argv[i]; if (a == "--list") return listWindows(); if (a == "--hdr-check") return hdrCheck(); }
     int fps = 60, mbit = 20, port = 9998, maxFrames = 0, scaleH = 0; std::string host = "127.0.0.1", tsout, encName = "auto";
     HWND targetHwnd = nullptr; bool findWindow = false, forceHdr = false; DWORD audioPid = 0;
     for (int i = 1; i < argc; ++i) { std::string a = argv[i];
