@@ -107,6 +107,22 @@
         "to": "mediamtx-LICENSE.txt"
       },
       {
+        "from": "opus-LICENSE.txt",
+        "to": "opus-LICENSE.txt"
+      },
+      {
+        "from": "libvpl-LICENSE.txt",
+        "to": "libvpl-LICENSE.txt"
+      },
+      {
+        "from": "AMF-LICENSE.txt",
+        "to": "AMF-LICENSE.txt"
+      },
+      {
+        "from": "nv-codec-headers-LICENSE.txt",
+        "to": "nv-codec-headers-LICENSE.txt"
+      },
+      {
         "from": "Vortice-LICENSE.txt",
         "to": "Vortice-LICENSE.txt"
       },

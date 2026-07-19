@@ -90,7 +90,7 @@ Write-Host "app-update.yml mitgeliefert."
 
 # Gebuendelte Binaries (extraResources, liegen NEBEN dem asar). Muessen beim
 # Dev-Deploy mitkopiert werden, da sie nicht im asar stecken.
-foreach ($bin in 'PresentMon.exe','PresentMon-LICENSE.txt','AMDFamily17.bin','IntelMSR.bin','PawnIO-Modules-LICENSE.txt') {
+foreach ($bin in 'PresentMon.exe','PresentMon-LICENSE.txt','AMDFamily17.bin','IntelMSR.bin','PawnIO-Modules-LICENSE.txt','opus-LICENSE.txt','libvpl-LICENSE.txt','AMF-LICENSE.txt','nv-codec-headers-LICENSE.txt') {
   $binSrc = Join-Path $src $bin
   if (Test-Path $binSrc) {
     foreach ($t in $targets) {
