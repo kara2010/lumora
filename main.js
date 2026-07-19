@@ -5658,6 +5658,11 @@ function bcStartFfmpeg(cfg) {
   const aud = bcStartAudio()
   return bcSpawnEncoder(bcBuildFfmpegArgs(cfg, 0, 0, !!aud), null, null, aud)
 }
+// Ziel-Bitrate (kbit) fuer den nativen Helfer in die Steuerdatei schreiben; er liest sie
+// 1x/s und stellt seinen Encoder OHNE Neustart um (nahtlose Live-Bitrate).
+function bcWriteBitrateControl(kbit) {
+  try { fs.writeFileSync(path.join(app.getPath('temp'), 'lumora-bitrate.txt'), String(Math.max(500, Math.round(kbit || 8000)))) } catch {}
+}
 // Nativer Ein-Prozess-Weg (Test-Schalter streamNativeHelper): der C++-Helfer captured +
 // encodet selbst (HDR/Scale/NVENC/AMF/QSV) und published per UDP/MPEG-TS an mediamtx
 // (Pfad MTX_PATH, source: udp+mpegts). Ersetzt FFmpeg + C#-Capture + Audio-Helfer in EINEM
@@ -5676,6 +5681,8 @@ function bcStartNative(cfg) {
   if (cfg.scaleH) args.push('--scale', String(cfg.scaleH))
   if (cfg.mode === 'window' && cfg.hwnd) args.push('--window', '--hwnd', String(cfg.hwnd))
   bcWriteHdrControl()   // HDR-Tonemap-Werte bereitstellen; der Helfer liest sie live nach
+  bcCapKey = (cfg.hwnd || 0) + '|' + cfg.fps + '|' + (cfg.scaleH || 0)   // erkennt reine Bitrate-Aenderung (Live-Bitrate statt Neustart)
+  bcWriteBitrateControl(cfg.kbit)   // Start-Bitrate; adaptive Anpassung laeuft danach live ueber die Steuerdatei
   osdDbg('[stream] native ' + args.join(' '))
   let p
   // Eigener Binary-Name, damit der native C++-Helfer neben dem alten C#-Helfer
@@ -5986,6 +5993,20 @@ function bcDoRestartFfmpeg() {
   if (ffRestartTimer) { clearTimeout(ffRestartTimer); ffRestartTimer = null }
   const cfg = bcStreamCfg(bcEncoderCache || { encoder: 'h264_nvenc' })
   broadcastState.quality = bcQualityLabel(cfg)
+  // NATIVER MODUS: aendert sich NUR die Bitrate (hwnd/fps/scaleH = bcCapKey unveraendert),
+  // stellt der Helfer seinen Encoder LIVE um (Steuerdatei %TEMP%\lumora-bitrate.txt) -> KEIN
+  // Neustart, kein Aussetzer/Freeze. Nur bei echter Parameteraenderung faellt es unten durch
+  // zum Vollneustart (bcStartNative killt+startet den Helfer neu).
+  if (appSettings.streamNativeHelper && ffProc) {
+    const natKey = cfg.hwnd + '|' + cfg.fps + '|' + (cfg.scaleH || 0)
+    if (natKey === bcCapKey) {
+      bcWriteBitrateControl(cfg.kbit)
+      broadcastState.adaptKbit = (bcAdaptLevel > 0 && appSettings.streamAdaptive !== false) ? cfg.kbit : 0
+      bcPushState()
+      bcLogStream('nat: Bitrate live -> ' + cfg.kbit + ' kbit (kein Neustart)')
+      return
+    }
+  }
   // FAST-RESTART: Aendert sich NUR die Bitrate (Helfer-Parameter hwnd/fps/scaleH
   // = bcCapKey unveraendert), laeuft im Fenster-Weg der Helfer per --reconnect
   // weiter und nur FFmpeg wird an die bestehende Pipe neu gehaengt -> ~370ms
