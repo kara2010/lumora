@@ -220,9 +220,20 @@ struct AudioCapture {
             winrt::com_ptr<IMMDevice> mmdev; if (FAILED(en->GetDefaultAudioEndpoint(eRender, eConsole, mmdev.put()))) { printf("AUDIO: kein Ausgabegeraet\n"); return; }
             if (FAILED(mmdev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, ac.put_void()))) { printf("AUDIO: Activate fehlgeschlagen\n"); return; }
             WAVEFORMATEX* mix = nullptr; ac->GetMixFormat(&mix);
-            if (!mix || FAILED(ac->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 2000000, 0, mix, nullptr))) { printf("AUDIO: Init fehlgeschlagen\n"); if (mix) CoTaskMemFree(mix); return; }
-            devSR = mix->nSamplesPerSec; devCH = mix->nChannels; devFloat = (mix->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) || (mix->wFormatTag == WAVE_FORMAT_EXTENSIBLE && mix->wBitsPerSample == 32);
-            CoTaskMemFree(mix);
+            bool mix48 = mix && mix->nSamplesPerSec == 48000;
+            if (mix48) {
+                // Standardfall (fast immer): Mischformat ist 48 kHz -> bewaehrter Weg, unveraendert.
+                if (FAILED(ac->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 2000000, 0, mix, nullptr))) { printf("AUDIO: Init fehlgeschlagen\n"); CoTaskMemFree(mix); return; }
+                devSR = 48000; devCH = mix->nChannels; devFloat = (mix->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) || (mix->wFormatTag == WAVE_FORMAT_EXTENSIBLE && mix->wBitsPerSample == 32);
+                CoTaskMemFree(mix);
+            } else {
+                // Sonderfall (z.B. 44,1-kHz-DAC/AVR): festes 48k/f32/stereo mit AUTOCONVERTPCM ->
+                // WASAPI resampelt selbst, Opus bekommt trotzdem 48 kHz (kein eigener Resampler noetig).
+                if (mix) { printf("AUDIO: Geraet %d Hz -> WASAPI-Resampling auf 48 kHz\n", (int)mix->nSamplesPerSec); CoTaskMemFree(mix); }
+                WAVEFORMATEX want{}; want.wFormatTag = WAVE_FORMAT_IEEE_FLOAT; want.nChannels = 2; want.nSamplesPerSec = 48000; want.wBitsPerSample = 32; want.nBlockAlign = 8; want.nAvgBytesPerSec = 48000 * 8;
+                if (FAILED(ac->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, 2000000, 0, &want, nullptr))) { printf("AUDIO: 48k-AUTOCONVERT fehlgeschlagen -> Ton aus (Video laeuft)\n"); return; }
+                devSR = 48000; devCH = 2; devFloat = true;
+            }
         }
         winrt::com_ptr<IAudioCaptureClient> cap; if (FAILED(ac->GetService(__uuidof(IAudioCaptureClient), cap.put_void()))) { printf("AUDIO: GetService fehlgeschlagen\n"); return; }
         // Opus erlaubt 48/24/16/12/8 kHz. Mix ist praktisch immer 48 kHz; sonst Ton aus (Video laeuft weiter).
