@@ -148,11 +148,21 @@ let _legacyAutostartCleaned = false
 function cleanupLegacyAutostart() {
   if (_legacyAutostartCleaned || process.platform !== 'win32') return
   _legacyAutostartCleaned = true
-  try {
-    require('child_process').execFile('reg',
-      ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'electron.app.HDR Launcher', '/f'],
-      { windowsHide: true }, () => {})
-  } catch {}
+  // Verwaiste UND doppelte Autostart-Eintraege SYNCHRON entfernen, BEVOR applyAutostart
+  // den einen aktuellen Key neu setzt. Hintergrund: es gab zeitweise ZWEI Run-Keys fuer
+  // dieselbe App ('electron.app.Lumora' UND die AUMID 'com.lumora.app'), dazu der uralte
+  // 'electron.app.HDR Launcher'. Zwei Keys => Windows startet Lumora beim Login ZWEImal;
+  // die Zweitinstanz feuert second-instance und holte das eigentlich minimierte Fenster
+  // nach vorne (der gemeldete "Autostart startet im Vordergrund"-Bug). Nach diesem Cleanup
+  // setzt setLoginItemSettings genau EINEN Key. SYNCHRON (execFileSync), sonst koennte ein
+  // spaet zurueckkehrender async-Callback den gerade neu gesetzten Key wieder loeschen.
+  for (const key of ['electron.app.HDR Launcher', 'electron.app.Lumora', 'com.lumora.app']) {
+    try {
+      require('child_process').execFileSync('reg',
+        ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', key, '/f'],
+        { windowsHide: true, stdio: 'ignore' })
+    } catch {}
+  }
 }
 
 // HWND eines Electron-Fensters als Zahl (0 wenn weg) – fuer Foreground-Vergleiche.
@@ -2171,10 +2181,21 @@ function createWindow() {
 
   // Nur beim minimierten Start (Autostart): nach dem ersten Rendern minimieren bzw. im Tray lassen.
   mainWindow.once('ready-to-show', () => {
-    startLog('ready-to-show = erster Frame gerendert, FENSTER SICHTBAR')
+    startLog('ready-to-show: wantMin=' + wantMin + ' tray=' + !!appSettings.minimizeToTray)
     if (!wantMin) return
     if (appSettings.minimizeToTray) return
+    // Minimiert in die Taskleiste - OHNE den Vordergrund zu stehlen. Ein mit
+    // show:false erstelltes Fenster minimiert sich per .minimize() allein auf
+    // Windows NICHT zuverlaessig - es kommt stattdessen normal nach vorne (genau
+    // der gemeldete Bug). Erst per showInactive() in einen definierten, UNFOKUS-
+    // sierten sichtbaren Zustand bringen, dann minimieren: so landet es sauber
+    // als Taskleisten-Button, ohne dem Spiel/Desktop den Fokus zu nehmen.
+    mainWindow.showInactive()
     mainWindow.minimize()
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed())
+        startLog('minimiert-start: visible=' + mainWindow.isVisible() + ' min=' + mainWindow.isMinimized() + ' focus=' + mainWindow.isFocused())
+    }, 300)
   })
 
   mainWindow.on('maximize',   () => mainWindow.webContents.send('window-maximized'))
@@ -3595,6 +3616,7 @@ const MTX_API_PORT = 9997         // localhost: mediamtx-API (Zuschauerzahl)
 const MTX_ICE_UDP = 8189          // UDP: WebRTC-Medien (muss ans Internet)
 const MTX_RTP_UDP = 8556          // localhost-UDP: RTP-Ingest FFmpeg -> mediamtx (s. bcWriteMtxConfig)
 const MTX_RTCP_UDP = 8557         // localhost-UDP: zugehoeriges RTCP
+const MTX_TS_UDP = 8558           // localhost-UDP: MPEG-TS-Ingest des nativen C++-Helfers (streamNativeHelper)
 const MTX_PATH = 'live'           // mediamtx-Pfadname
 let broadcastServer = null        // HTTP-Server (player + WHEP-Proxy)
 let mtxProc = null                // mediamtx-Kindprozess
@@ -4558,7 +4580,9 @@ function bcWriteMtxConfig(hosts) {
   // ready=true mit beiden Tracks; Bug #5559 hier NICHT vorhanden. alwaysAvailable
   // MUSS statisch in der Config stehen (nicht per API) - hier erfuellt.
   lines.push('paths:', '  ' + MTX_PATH + ':',
-    '    source: publisher',
+    // Native-Helfer publisht per UDP/MPEG-TS (mediamtx zieht aktiv); der alte Weg
+    // pusht per RTSP (source: publisher). Track-Struktur (H264+Opus) ist identisch.
+    appSettings.streamNativeHelper ? '    source: udp+mpegts://127.0.0.1:' + MTX_TS_UDP : '    source: publisher',
     '    alwaysAvailable: yes',
     '    alwaysAvailableTracks:',
     '      - codec: H264',
@@ -5261,7 +5285,11 @@ function bcApiPost(apiPath) {
 // durch. Ablehnen -> 403 „denied". Die HMAC-Schicht (nur ueber den Relay) bleibt darunter.
 const bcKnocks = new Map()   // vid -> { vid, name, at, status: 'pending'|'granted'|'denied' }
 const bcPrevGrants = new Map()   // vid -> Zeit der letzten Freigabe (Karenz ueber Stream-Neustarts)
-const bcSessionNames = new Map()   // mediamtx-sessionId -> eingegebener Zuschauer-Name (fuer die Liste)
+// Zuschauer-Name fuer die "Wer schaut zu"-Liste: kommt als ?name= in der WHEP-Query mit,
+// wird an mediamtx durchgereicht und steht dort als session.query -> direkt auslesbar.
+// (Frueher ueber Location-Header/sessionId gemappt; schlug fehl, weil mediamtx im Location
+// das 'secret' liefert, in der webrtcsessions-API aber die davon VERSCHIEDENE 'uuid'.)
+const bcNameFromQuery = (q) => { try { return (new URLSearchParams(q || '').get('name') || '').slice(0, 24) } catch { return '' } }
 let bcViewerDbgAt = 0              // TEMP-Diagnose: Drosselung des viewers-raw-Logs
 const BC_GRANT_KARENZ = 15 * 60 * 1000   // 15 Min: kurzer Stop+Neustart fragt Zugelassene nicht erneut
 let doormanWindow = null
@@ -5352,7 +5380,6 @@ function bcCloseDoorman() {
   for (const [vid, t] of bcPrevGrants) if (now - t >= BC_GRANT_KARENZ) bcPrevGrants.delete(vid)
   for (const k of bcKnocks.values()) if (k.status === 'granted') bcPrevGrants.set(k.vid, now)
   bcKnocks.clear()
-  bcSessionNames.clear()
   if (doormanWindow && !doormanWindow.isDestroyed()) { try { doormanWindow.close() } catch {} }
   doormanWindow = null
 }
@@ -5405,6 +5432,11 @@ function bcProxyWhep(req, res) {
   req.on('data', (c) => { chunks.push(c); if (Buffer.concat(chunks).length > 300000) req.destroy() })
   req.on('end', () => {
     const body = Buffer.concat(chunks)
+    // Eingegebenen Zuschauer-Namen aus der Query lesen - UNABHAENGIG vom Tuersteher, die
+    // "Wer schaut zu"-Liste soll den Namen immer zeigen. Wird beim POST an mediamtx
+    // durchgereicht (s. unten) und landet dort als session.query.
+    let reqName = ''
+    try { reqName = (new URL(req.url, 'http://x').searchParams.get('name') || '').slice(0, 24) } catch {}
     // Tuersteher (Zugriffsschutz, optional – Standard aus): Ist er an, braucht jede NEUE
     // Verbindung (POST = SDP-Offer) einen gueltigen Nachweis. Der Token (bcAccessKey)
     // wird dabei NIE uebertragen: Der Vermittlungsserver kennt ihn aus dem Roster und
@@ -5415,18 +5447,23 @@ function bcProxyWhep(req, res) {
     // gueltige Signatur -> 401. Ausgenommen: eigene Vorschau (127.0.0.1). PATCH/DELETE frei.
     if (req.method === 'POST' && appSettings.streamDoorman) {
       const local = ip === '127.0.0.1' || ip === '::1' || ip === ''
-      let sig = '', ts = '', vid = '', name = ''
-      try { const u = new URL(req.url, 'http://x'); sig = u.searchParams.get('sig') || ''; ts = u.searchParams.get('ts') || ''; vid = u.searchParams.get('vid') || ''; name = u.searchParams.get('name') || '' } catch {}
+      let sig = '', ts = '', vid = ''
+      try { const u = new URL(req.url, 'http://x'); sig = u.searchParams.get('sig') || ''; ts = u.searchParams.get('ts') || ''; vid = u.searchParams.get('vid') || '' } catch {}
       if (!local) {
         // 1) Transport-Nachweis (nur ueber den Relay -> HMAC gueltig), sonst 401.
         if (!bcVerifyDoormanSig(body, sig, ts)) { try { res.writeHead(401, { 'Content-Type': 'text/plain' }); res.end('unauthorized') } catch {}; return }
         // 2) Individuelle Freigabe: granted -> durch, sonst 403 mit 'pending'/'denied'/'banned'.
-        const gate = bcApproveGate(vid, name)
+        const gate = bcApproveGate(vid, reqName)
         if (gate !== 'granted') { try { res.writeHead(403, { 'Content-Type': 'text/plain' }); res.end(gate) } catch {}; return }
       }
     }
-    const rest = req.url.replace(/^\/whep/, '').replace(/\?.*$/, '')   // '' oder '/<session>' (Query wie ?sig= nicht an mediamtx durchreichen)
-    const target = '/' + MTX_PATH + '/whep' + rest
+    const rest = req.url.replace(/^\/whep/, '').replace(/\?.*$/, '')   // '' oder '/<session>' (Auth-Query wie ?sig= NICHT an mediamtx durchreichen)
+    // NUR den Zuschauer-Namen beim POST an mediamtx durchreichen -> steht dort als
+    // session.query und ist in list-viewers direkt auslesbar. Die ID-Zuordnung ueber den
+    // Location-Header scheiterte, weil mediamtx dort das 'secret' liefert, in der
+    // webrtcsessions-API aber die davon verschiedene 'uuid'.
+    let target = '/' + MTX_PATH + '/whep' + rest
+    if (req.method === 'POST' && !rest && reqName) target += '?name=' + encodeURIComponent(reqName)
     const headers = {}
     if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type']
     if (req.headers['user-agent']) headers['User-Agent'] = req.headers['user-agent']   // -> mediamtx-Session (Browser)
@@ -5441,16 +5478,6 @@ function bcProxyWhep(req, res) {
         } else h[k] = pres.headers[k]
       }
       res.writeHead(pres.statusCode, h)
-      // Eingegebenen Namen dieser Session merken (fuer die Zuschauer-Liste). Die
-      // mediamtx-sessionId steckt im Location-Header (letztes Pfadsegment) und ist
-      // dieselbe, die die webrtcsessions-API (list-viewers) als s.id liefert.
-      if (req.method === 'POST' && loc) {
-        try {
-          const nm = (new URL(req.url, 'http://x').searchParams.get('name') || '').slice(0, 24)
-          const sid = (loc.split('/whep/')[1] || '').split(/[?#]/)[0]
-          if (nm && sid) bcSessionNames.set(sid, nm)
-        } catch {}
-      }
       pres.pipe(res)
     })
     preq.on('error', () => { try { res.writeHead(502); res.end('mediamtx nicht erreichbar') } catch {} })
@@ -5463,14 +5490,11 @@ ipcMain.handle('list-viewers', async () => {
     const r = await upnpHttpGet('http://127.0.0.1:' + MTX_API_PORT + '/v3/webrtcsessions/list')
     const j = JSON.parse(r.body)
     const all = (Array.isArray(j.items) ? j.items : []).filter((s) => s.path === MTX_PATH && !bcIsPreviewSession(s))
-    // TEMP-Diagnose (gedrosselt ~7 s) -> lumora-stream.log: rohe Session-Felder +
-    // die per Location-Header gemerkten Namens-Keys. Klaert faktenbasiert: (a) warum
-    // der Name nicht matcht (locParse-id vs. s.id), (b) warum tote Sessions als
-    // Zombie haengen (state/peerConnection/bytes), (c) die Statistik-Doppelzaehlung.
+    // TEMP-Diagnose (gedrosselt ~7 s) -> lumora-stream.log: rohe Session-Felder inkl.
+    // q=<query> (enthaelt jetzt den durchgereichten ?name=). VOR RELEASE ENTFERNEN.
     if (Date.now() - bcViewerDbgAt > 7000) {
       bcViewerDbgAt = Date.now()
       bcLogStream('viewers-raw: ' + all.map((s) => 'id=' + String(s.id).slice(0, 8) + ' st=' + s.state + ' pc=' + (s.peerConnectionEstablished ? 1 : 0) + ' by=' + (s.bytesSent || 0) + ' ip=' + (bcExtractIp(s.remoteCandidate) || '?') + ' q=' + (s.query || '')).join('  ||  '))
-      bcLogStream('name-keys(locParse): ' + [...bcSessionNames.keys()].map((k) => String(k).slice(0, 8)).join(','))
     }
     const sessions = all.filter((s) => s.state === 'read')
     return sessions.map((s) => {
@@ -5478,7 +5502,7 @@ ipcMain.handle('list-viewers', async () => {
       // ist nur unser Proxy = 127.0.0.1), den User-Agent reichen wir durch. Solange
       // die WebRTC-Verbindung noch aushandelt, ist der Kandidat leer -> "verbindet…".
       const ip = bcExtractIp(s.remoteCandidate)
-      return { id: s.id, ip: ip || '(verbindet…)', ua: bcUaShort(s.userAgent), since: Date.parse(s.created) || Date.now(), bytes: s.bytesSent || 0, name: bcSessionNames.get(s.id) || '' }
+      return { id: s.id, ip: ip || '(verbindet…)', ua: bcUaShort(s.userAgent), since: Date.parse(s.created) || Date.now(), bytes: s.bytesSent || 0, name: bcNameFromQuery(s.query) }
     })
   } catch { return [] }
 })
@@ -5613,6 +5637,9 @@ function bcStartFfmpeg(cfg) {
   broadcastState.quality = bcQualityLabel(cfg)
   broadcastState.adaptKbit = (bcAdaptLevel > 0 && appSettings.streamAdaptive !== false) ? cfg.kbit : 0
   bcPushState()
+  // Test-Schalter (opt-in): EIN nativer C++-Helfer (Capture+Encode+Opus, publisht per
+  // UDP/MPEG-TS an mediamtx) statt FFmpeg + C#-Capture + Audio-Helfer. Alter Weg = Default.
+  if (appSettings.streamNativeHelper) return bcStartNative(cfg)
   if (cfg.mode === 'window') return bcStartWindowCapture(cfg)
   // Monitor-Weg (ddagrab): der Ton kommt vom parallelen Audio-Helfer ueber fd 3 -
   // hier bewusst OHNE hwnd, also System-weites Loopback (der ganze Bildschirm wird
@@ -5620,6 +5647,48 @@ function bcStartFfmpeg(cfg) {
   // Bild, daher Audio separat.
   const aud = bcStartAudio()
   return bcSpawnEncoder(bcBuildFfmpegArgs(cfg, 0, 0, !!aud), null, null, aud)
+}
+// Nativer Ein-Prozess-Weg (Test-Schalter streamNativeHelper): der C++-Helfer captured +
+// encodet selbst (HDR/Scale/NVENC/AMF/QSV) und published per UDP/MPEG-TS an mediamtx
+// (Pfad MTX_PATH, source: udp+mpegts). Ersetzt FFmpeg + C#-Capture + Audio-Helfer in EINEM
+// Prozess. Handle in ffProc -> Stop (stopBroadcast) und Restart (bcDoRestartFfmpeg) greifen
+// unveraendert; capProc/audProc bleiben null. Kein Fast-Restart (bcDoRestartFfmpeg erzwingt
+// im Native-Modus den Vollneustart). HDR-Tonemap kommt aus %TEMP%\lumora-hdr.txt (live).
+function bcStartNative(cfg) {
+  const encMap = { h264_nvenc: 'nvenc', h264_amf: 'amf', h264_qsv: 'qsv' }
+  const args = [
+    '--encoder', encMap[cfg.encoder] || 'auto',
+    '--fps', String(cfg.fps),
+    '--bitrate', String(Math.max(1, Math.round(cfg.kbit / 1000))),
+    '--mtx-host', '127.0.0.1', '--mtx-port', String(MTX_TS_UDP),
+    '--audio',
+  ]
+  if (cfg.scaleH) args.push('--scale', String(cfg.scaleH))
+  if (cfg.mode === 'window' && cfg.hwnd) args.push('--window', '--hwnd', String(cfg.hwnd))
+  bcWriteHdrControl()   // HDR-Tonemap-Werte bereitstellen; der Helfer liest sie live nach
+  osdDbg('[stream] native ' + args.join(' '))
+  let p
+  // Eigener Binary-Name, damit der native C++-Helfer neben dem alten C#-Helfer
+  // (lumora-capture.exe, weiter fuer --list + den Rueckfall-Weg) koexistiert.
+  try { p = spawn(streamBin('lumora-capture-native.exe'), args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }) }
+  catch (e) { osdDbg('[stream] native-Start fehlgeschlagen: ' + (e && e.message)); return null }
+  ffProc = p
+  const startedAt = Date.now()
+  bcBoostPriority(p, 'ffmpeg', true)
+  if (!bcAdaptTimer) { bcAdaptTimer = setInterval(() => { if (!ffProc && !broadcastState.active) { clearInterval(bcAdaptTimer); bcAdaptTimer = null; return } try { bcAdaptTick() } catch {} }, 5000) }
+  const log = (d) => { const s = d.toString().trim(); if (s) bcLogStream('nat: ' + s) }
+  if (p.stdout) p.stdout.on('data', log)
+  if (p.stderr) p.stderr.on('data', log)
+  p.on('error', (e) => { bcLogStream('nat-error: ' + (e && e.message)) })
+  p.on('exit', (code) => {
+    if (ffProc === p) ffProc = null
+    if (p._intentional || ffStopping || !broadcastState.active) return   // gewollt beendet -> kein Auto-Neustart
+    if (Date.now() - startedAt < 4000) ffFastFails++; else ffFastFails = 0
+    const delay = ffFastFails > 3 ? 4000 : 500
+    bcLogStream('nat beendet (' + code + ') -> Neustart in ' + delay + 'ms')
+    setTimeout(() => { if (broadcastState.active && !ffStopping && !ffProc) { try { bcStartFfmpeg(bcStreamCfg(bcEncoderCache || {})) } catch (e) { bcLogStream('nat-restart: ' + (e && e.message)) } } }, delay)
+  })
+  return p
 }
 // Fenster-Aufnahme: WGC-Helfer starten, dessen gemeldete Groesse (SIZE auf
 // stderr) abwarten, dann FFmpeg mit rawvideo-Eingang starten und die Frames
@@ -5914,7 +5983,7 @@ function bcDoRestartFfmpeg() {
   // bekannt, nicht als kaputt markiert (Sicherheitsnetz bcFastRestartBroken).
   const newCapKey = cfg.hwnd + '|' + cfg.fps + '|' + (cfg.scaleH || 0)
   const canFast = cfg.mode === 'window' && capProc && bcVidPipe && bcCapW && !bcFastRestartBroken
-      && appSettings.streamFastRestart !== false && newCapKey === bcCapKey
+      && appSettings.streamFastRestart !== false && newCapKey === bcCapKey && !appSettings.streamNativeHelper
   // Letztes Bild einfrieren statt mediamtx' "STREAM IS OFFLINE"-Platzhalter zu
   // zeigen (User-Wunsch 2026-07-15): GENAU jetzt, wo der sichtbare Wechsel
   // beginnt, allen Playern (eigene Vorschau per IPC + externe Zuschauer per SSE)
@@ -6820,7 +6889,14 @@ if (process.argv.includes('--fps-broker')) {
     // Ein Toast-Klick startet die App per lumora://-Protokoll neu; das Argument
     // landet dank Single-Instance-Lock hier in der schon laufenden Instanz.
     const url = argv.find((a) => typeof a === 'string' && a.startsWith('lumora://'))
-    if (url) bcHandleDeepLink(url); else showMainWindow()
+    if (url) { bcHandleDeepLink(url); return }
+    // Absicherung gegen den Autostart-Doppelstart: kam die Zweitinstanz mit
+    // '--minimized' (also aus dem Windows-Autostart, nicht aus einem echten Nutzer-
+    // Doppelklick), darf sie das minimierte Fenster NICHT nach vorne holen - sonst
+    // startet Lumora trotz "minimiert" im Vordergrund. Nur echte Doppelklicks
+    // (ohne --minimized) sollen die App zeigen.
+    if (argv.includes('--minimized')) return
+    showMainWindow()
   })
 
   // AppUserModelID VOR der ersten Notification setzen - sonst zeigt Windows im
