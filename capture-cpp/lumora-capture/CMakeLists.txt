@@ -5,5 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(lumora_capture main.cpp)
 target_include_directories(lumora_capture PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/nv-codec-headers/include/ffnvcodec"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/AMF/amf")
-target_link_libraries(lumora_capture PRIVATE d3d11 dxgi windowsapp ws2_32 dwmapi mfplat mfuuid ole32)
+  "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/AMF/amf"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opus/include")
+target_link_libraries(lumora_capture PRIVATE d3d11 dxgi windowsapp ws2_32 dwmapi ole32
+  "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opus/build/Release/opus.lib")
