@@ -11,6 +11,7 @@
 #pragma comment(lib, "dwmapi.lib")
 #include <d3d11.h>
 #include <dxgi.h>
+#include <dxgi1_6.h>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Graphics.Capture.h>
@@ -30,7 +31,9 @@
 #include <cmath>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <d3dcompiler.h>
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "d3dcompiler.lib")
 #include "opus.h"
 #include "nvEncodeAPI.h"
 #include "public/include/core/Factory.h"
@@ -234,10 +237,105 @@ struct AudioCapture {
     }
 };
 
+// =============== HDR: Erkennung + Tonemap-Shader (scRGB FP16 -> SDR BGRA) ===============
+// Portiert aus dem C#-Helfer: HDR-Quelle wird als FP16 (scRGB linear) erfasst; ein eigener
+// Pixel-Shader komprimiert die Highlights (ACES/Hable/Reinhard/Linear) und skaliert zugleich
+// auf die Zielgroesse (der VideoProcessor kann kein FP16). Kurve + Helligkeit live justierbar.
+static bool detectHdr(IDXGIAdapter1* adapter) {
+    for (UINT oi = 0; ; ++oi) {
+        winrt::com_ptr<IDXGIOutput> o; if (adapter->EnumOutputs(oi, o.put()) == DXGI_ERROR_NOT_FOUND) break;
+        auto o6 = o.try_as<IDXGIOutput6>();
+        DXGI_OUTPUT_DESC1 d1{};
+        if (o6 && SUCCEEDED(o6->GetDesc1(&d1)) && d1.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) return true;
+    }
+    return false;
+}
+static const char* TONEMAP_HLSL = R"(
+cbuffer Params : register(b0) { int uMode; float uExposure; float uP1; float uP2; };
+Texture2D tex : register(t0);
+SamplerState samp : register(s0);
+void vsmain(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0) {
+    uv = float2((id << 1) & 2, id & 2);
+    pos = float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
+}
+float3 tmACES(float3 x)     { return saturate((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)); }
+float3 hableU(float3 x)     { float A=0.15,B=0.50,C=0.10,D=0.20,E=0.02,F=0.30; return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F; }
+float3 tmHable(float3 x)    { return saturate(hableU(x) / hableU(11.2)); }
+float3 tmReinhard(float3 x) { float L=4.0; return saturate(x * (1.0 + x/(L*L)) / (1.0 + x)); }
+float4 psmain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
+    float3 c = max(tex.Sample(samp, uv).rgb, 0.0) * uExposure;
+    float3 x;
+    if (uMode == 1)      x = tmHable(c);
+    else if (uMode == 2) x = tmReinhard(c);
+    else if (uMode == 3) x = saturate(c);
+    else                 x = tmACES(c);
+    x = pow(x, 1.0 / 2.2);
+    return float4(x, 1.0);
+}
+)";
+struct TonemapStage {
+    winrt::com_ptr<ID3D11VertexShader> vs; winrt::com_ptr<ID3D11PixelShader> ps;
+    winrt::com_ptr<ID3D11SamplerState> samp; winrt::com_ptr<ID3D11Texture2D> srcCopy, sdrTex;
+    winrt::com_ptr<ID3D11ShaderResourceView> srv; winrt::com_ptr<ID3D11RenderTargetView> rtv; winrt::com_ptr<ID3D11Buffer> cb;
+    int W = 0, H = 0, outW = 0, outH = 0, mode = 0, ctlCtr = 0; float exposure = 1.0f;
+    std::string ctlPath; uint64_t ctlMtime = ~0ull;
+
+    bool init(ID3D11Device* dev, int w, int h, int ow, int oh) {
+        W = w; H = h; outW = ow; outH = oh;
+        winrt::com_ptr<ID3DBlob> vsb, psb, err;
+        if (FAILED(D3DCompile(TONEMAP_HLSL, strlen(TONEMAP_HLSL), nullptr, nullptr, nullptr, "vsmain", "vs_5_0", 0, 0, vsb.put(), err.put()))) return false;
+        if (FAILED(D3DCompile(TONEMAP_HLSL, strlen(TONEMAP_HLSL), nullptr, nullptr, nullptr, "psmain", "ps_5_0", 0, 0, psb.put(), err.put()))) return false;
+        if (FAILED(dev->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, vs.put()))) return false;
+        if (FAILED(dev->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, ps.put()))) return false;
+        D3D11_SAMPLER_DESC sd{}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        dev->CreateSamplerState(&sd, samp.put());
+        D3D11_TEXTURE2D_DESC td{}; td.Width = W; td.Height = H; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        if (FAILED(dev->CreateTexture2D(&td, nullptr, srcCopy.put()))) return false;
+        if (FAILED(dev->CreateShaderResourceView(srcCopy.get(), nullptr, srv.put()))) return false;
+        D3D11_TEXTURE2D_DESC od{}; od.Width = outW; od.Height = outH; od.MipLevels = 1; od.ArraySize = 1; od.Format = DXGI_FORMAT_B8G8R8A8_UNORM; od.SampleDesc.Count = 1; od.Usage = D3D11_USAGE_DEFAULT; od.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        if (FAILED(dev->CreateTexture2D(&od, nullptr, sdrTex.put()))) return false;
+        if (FAILED(dev->CreateRenderTargetView(sdrTex.get(), nullptr, rtv.put()))) return false;
+        D3D11_BUFFER_DESC bd{}; bd.ByteWidth = 16; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (FAILED(dev->CreateBuffer(&bd, nullptr, cb.put()))) return false;
+        char* tmp = getenv("TEMP"); ctlPath = std::string(tmp ? tmp : ".") + "\\lumora-hdr.txt";
+        return true;
+    }
+    void updateBuffer(ID3D11DeviceContext* ctx) {
+        D3D11_MAPPED_SUBRESOURCE m; if (SUCCEEDED(ctx->Map(cb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
+            struct { int mode; float exp; float p1, p2; } p{ mode, exposure, 0, 0 };
+            memcpy(m.pData, &p, sizeof(p)); ctx->Unmap(cb.get(), 0);
+        }
+    }
+    // Steuerdatei %TEMP%\lumora-hdr.txt ("<mode> <exposure>") live einlesen (alle 15 Frames).
+    void readControl(ID3D11DeviceContext* ctx, bool force) {
+        if (!force && (++ctlCtr % 15) != 0) return;
+        WIN32_FILE_ATTRIBUTE_DATA fa{}; uint64_t mt = 0;
+        if (GetFileAttributesExA(ctlPath.c_str(), GetFileExInfoStandard, &fa)) mt = ((uint64_t)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime;
+        if (mt == ctlMtime) { if (force) updateBuffer(ctx); return; }
+        ctlMtime = mt;
+        if (mt != 0) { FILE* f = nullptr; fopen_s(&f, ctlPath.c_str(), "r"); if (f) { int m = 0; float e = 1; int n = fscanf_s(f, "%d %f", &m, &e); if (n >= 1) mode = m; if (n >= 2 && e > 0.01f && e < 20.0f) exposure = e; fclose(f); printf("HDR-TM mode=%d exp=%.2f\n", mode, exposure); } }
+        updateBuffer(ctx);
+    }
+    // FP16-Quelle tonemappen + auf Zielgroesse rendern -> sdrTex (BGRA, SDR).
+    void render(ID3D11DeviceContext* ctx, ID3D11Texture2D* srcFp16) {
+        readControl(ctx, false);
+        ctx->CopyResource(srcCopy.get(), srcFp16);
+        ctx->VSSetShader(vs.get(), nullptr, 0); ctx->PSSetShader(ps.get(), nullptr, 0);
+        ID3D11ShaderResourceView* s = srv.get(); ctx->PSSetShaderResources(0, 1, &s);
+        ID3D11SamplerState* sm = samp.get(); ctx->PSSetSamplers(0, 1, &sm);
+        ID3D11Buffer* c = cb.get(); ctx->PSSetConstantBuffers(0, 1, &c);
+        ID3D11RenderTargetView* r = rtv.get(); ctx->OMSetRenderTargets(1, &r, nullptr);
+        D3D11_VIEWPORT vp{ 0, 0, (float)outW, (float)outH, 0, 1 }; ctx->RSSetViewports(1, &vp);
+        ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        ctx->Draw(3, 0);
+        ID3D11RenderTargetView* nullr = nullptr; ctx->OMSetRenderTargets(1, &nullr, nullptr); // RTV loesen fuer den folgenden VideoProcessor-Input
+    }
+};
+
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     int fps = 60, mbit = 20, port = 9998, maxFrames = 0, scaleH = 0; std::string host = "127.0.0.1", tsout, encName = "auto";
-    HWND targetHwnd = nullptr; bool findWindow = false;
+    HWND targetHwnd = nullptr; bool findWindow = false, forceHdr = false;
     for (int i = 1; i < argc; ++i) { std::string a = argv[i];
         if (a == "--fps" && i + 1 < argc) fps = atoi(argv[++i]); else if (a == "--bitrate" && i + 1 < argc) mbit = atoi(argv[++i]);
         else if (a == "--mtx-host" && i + 1 < argc) host = argv[++i]; else if (a == "--mtx-port" && i + 1 < argc) port = atoi(argv[++i]);
@@ -246,6 +344,7 @@ int main(int argc, char** argv) {
         else if (a == "--hwnd" && i + 1 < argc) targetHwnd = (HWND)(uintptr_t)strtoull(argv[++i], nullptr, 0);
         else if (a == "--window") findWindow = true;
         else if (a == "--scale" && i + 1 < argc) scaleH = atoi(argv[++i]);
+        else if (a == "--hdr-force") forceHdr = true;   // Diagnose: HDR-Pfad (FP16+Tonemap) auch ohne aktives HDR erzwingen
         else if (a == "--audio") g_withAudio = true;
         else if (a == "--audio-nobytes") { g_withAudio = true; g_audioNoBytes = true; } }
     if (findWindow && !targetHwnd) { FindCtx fc; fc.self = GetConsoleWindow(); EnumWindows(enumProc, (LPARAM)&fc); targetHwnd = fc.best; }
@@ -277,7 +376,10 @@ int main(int argc, char** argv) {
     // Zielaufloesung: --scale N begrenzt die Hoehe (proportional, gerade Kanten). 0/>=nativ = nativ.
     int outW = W, outH = H;
     if (scaleH > 0 && scaleH < H) { outH = scaleH & ~1; outW = ((W * outH / H) + 1) & ~1; }
-    auto framePool = wg::Direct3D11CaptureFramePool::CreateFreeThreaded(d3dDevice, wg::DirectXPixelFormat::B8G8R8A8UIntNormalized, 3, sz);
+    // HDR-Quelle -> per FP16 (scRGB linear) erfassen und im eigenen Shader tonemappen (VP kann kein FP16).
+    bool hdr = forceHdr || detectHdr(pick.get());
+    auto capFmt = hdr ? wg::DirectXPixelFormat::R16G16B16A16Float : wg::DirectXPixelFormat::B8G8R8A8UIntNormalized;
+    auto framePool = wg::Direct3D11CaptureFramePool::CreateFreeThreaded(d3dDevice, capFmt, 3, sz);
     auto session = framePool.CreateCaptureSession(item);
     // Gelben WGC-Aufnahme-Rahmen abschalten (Borderless-Zugriff anfordern + Border aus).
     try { wg::GraphicsCaptureAccess::RequestAccessAsync(wg::GraphicsCaptureAccessKind::Borderless).get(); } catch (...) {}
@@ -285,7 +387,9 @@ int main(int argc, char** argv) {
     session.StartCapture();
 
     auto vdev = dev.as<ID3D11VideoDevice>(); auto vctx = ctx.as<ID3D11VideoContext>();
-    D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd{}; cd.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE; cd.InputWidth = W; cd.InputHeight = H; cd.OutputWidth = outW; cd.OutputHeight = outH; cd.InputFrameRate = { (UINT)fps,1 }; cd.OutputFrameRate = { (UINT)fps,1 }; cd.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+    // Bei HDR liefert der Tonemap-Shader die BGRA-SDR-Textur bereits in Zielgroesse -> VP macht dann nur BGRA->NV12 (1:1).
+    // Bei SDR skaliert der VP selbst (W x H -> outW x outH).
+    D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd{}; cd.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE; cd.InputWidth = hdr ? outW : W; cd.InputHeight = hdr ? outH : H; cd.OutputWidth = outW; cd.OutputHeight = outH; cd.InputFrameRate = { (UINT)fps,1 }; cd.OutputFrameRate = { (UINT)fps,1 }; cd.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
     winrt::com_ptr<ID3D11VideoProcessorEnumerator> venum; vdev->CreateVideoProcessorEnumerator(&cd, venum.put());
     winrt::com_ptr<ID3D11VideoProcessor> vproc; vdev->CreateVideoProcessor(venum.get(), 0, vproc.put());
     D3D11_TEXTURE2D_DESC nd{}; nd.Width = outW; nd.Height = outH; nd.MipLevels = 1; nd.ArraySize = 1; nd.Format = DXGI_FORMAT_NV12; nd.SampleDesc.Count = 1; nd.Usage = D3D11_USAGE_DEFAULT; nd.BindFlags = D3D11_BIND_RENDER_TARGET;
@@ -297,13 +401,17 @@ int main(int argc, char** argv) {
     D3D11_TEXTURE2D_DESC bd{}; bd.Width = W; bd.Height = H; bd.MipLevels = 1; bd.ArraySize = 1; bd.Format = DXGI_FORMAT_B8G8R8A8_UNORM; bd.SampleDesc.Count = 1; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     winrt::com_ptr<ID3D11Texture2D> bgraIn; dev->CreateTexture2D(&bd, nullptr, bgraIn.put());
 
+    // HDR: Tonemap-Shader-Stufe (FP16 scRGB -> BGRA SDR, in Zielgroesse).
+    TonemapStage tonemap;
+    if (hdr) { if (!tonemap.init(dev.get(), W, H, outW, outH)) { printf("FEHLER: HDR-Tonemap-Init fehlgeschlagen\n"); return 3; } tonemap.readControl(ctx.get(), true); }
+
     Encoder* encoder = useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder();
     if (!encoder->init(dev.get(), outW, outH, fps, mbit)) { printf("FEHLER: Encoder-Init (%s) fehlgeschlagen\n", encoder->name()); return 2; }
 
     WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa); SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     sockaddr_in dst{}; dst.sin_family = AF_INET; dst.sin_port = htons((u_short)port); inet_pton(AF_INET, host.c_str(), &dst.sin_addr);
     DXGI_ADAPTER_DESC1 gd; pick->GetDesc1(&gd);
-    printf("lumora-capture: Aufnahme %dx%d -> Ausgabe %dx%d @ %dfps, %d Mbit | Encoder %s auf %ls -> mediamtx %s:%d (ohne FFmpeg)\n", W, H, outW, outH, fps, mbit, encoder->name(), gd.Description, host.c_str(), port);
+    printf("lumora-capture: Aufnahme %dx%d -> Ausgabe %dx%d @ %dfps, %d Mbit | %s | Encoder %s auf %ls -> mediamtx %s:%d (ohne FFmpeg)\n", W, H, outW, outH, fps, mbit, hdr ? "HDR->SDR (Tonemap)" : "SDR", encoder->name(), gd.Description, host.c_str(), port);
 
     static const uint8_t AUD[6] = { 0,0,0,1, 0x09, 0xF0 };
     FILE* tsf = nullptr; if (!tsout.empty()) fopen_s(&tsf, tsout.c_str(), "wb");
@@ -324,9 +432,13 @@ int main(int argc, char** argv) {
         if (!f) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); tries++; continue; }
         auto access = f.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
         winrt::com_ptr<ID3D11Texture2D> ft; access->GetInterface(winrt::guid_of<ID3D11Texture2D>(), ft.put_void());
-        ctx->CopyResource(bgraIn.get(), ft.get()); // sofort in eigene Textur, bevor WGC den FramePool-Buffer recycelt
+        // HDR: FP16-Quelle tonemappen+skalieren -> sdrTex (BGRA); SDR: sofort in eigene BGRA-Textur kopieren
+        // (die WGC-FramePool-Textur wird recycelt). Beides liefert die BGRA-Quelle fuer den NV12-VideoProcessor.
+        ID3D11Texture2D* vpIn;
+        if (hdr) { tonemap.render(ctx.get(), ft.get()); vpIn = tonemap.sdrTex.get(); }
+        else { ctx->CopyResource(bgraIn.get(), ft.get()); vpIn = bgraIn.get(); }
         D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC ivd{}; ivd.FourCC = 0; ivd.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D; ivd.Texture2D.MipSlice = 0;
-        winrt::com_ptr<ID3D11VideoProcessorInputView> iv; if (FAILED(vdev->CreateVideoProcessorInputView(bgraIn.get(), venum.get(), &ivd, iv.put()))) continue;
+        winrt::com_ptr<ID3D11VideoProcessorInputView> iv; if (FAILED(vdev->CreateVideoProcessorInputView(vpIn, venum.get(), &ivd, iv.put()))) continue;
         D3D11_VIDEO_PROCESSOR_STREAM st{}; st.Enable = TRUE; st.pInputSurface = iv.get();
         if (FAILED(vctx->VideoProcessorBlt(vproc.get(), outView.get(), 0, 1, &st))) continue;
         ctx->Flush(); inFrame++;
