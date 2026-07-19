@@ -96,26 +96,33 @@ struct Encoder {
     virtual ~Encoder() {}
     virtual bool init(ID3D11Device* dev, int w, int h, int fps, int mbit) = 0;
     virtual void encode(ID3D11Texture2D* nv12, std::vector<std::vector<uint8_t>>& out) = 0; // 0..N fertige H.264-AUs
+    virtual void setBitrate(int kbit) {}   // Live-Bitrate in kbit (Reconfigure OHNE Neustart); default no-op
     virtual const char* name() = 0;
 };
 
 struct NvencEncoder : Encoder {
     NV_ENCODE_API_FUNCTION_LIST nv{ NV_ENCODE_API_FUNCTION_LIST_VER }; void* enc = nullptr; NV_ENC_OUTPUT_PTR outBuf = nullptr; int W = 0, H = 0;
+    NV_ENC_PRESET_CONFIG pc{ NV_ENC_PRESET_CONFIG_VER }; NV_ENC_INITIALIZE_PARAMS ip{ NV_ENC_INITIALIZE_PARAMS_VER };  // gespeichert fuer Live-Bitrate-Reconfigure
     const char* name() override { return "NVENC"; }
     bool init(ID3D11Device* dev, int w, int h, int fps, int mbit) override {
         W = w; H = h; HMODULE lib = LoadLibraryW(L"nvEncodeAPI64.dll"); if (!lib) return false;
         typedef NVENCSTATUS(NVENCAPI* Fn)(NV_ENCODE_API_FUNCTION_LIST*); if (((Fn)GetProcAddress(lib, "NvEncodeAPICreateInstance"))(&nv) != NV_ENC_SUCCESS) return false;
         NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS op{ NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER }; op.deviceType = NV_ENC_DEVICE_TYPE_DIRECTX; op.device = dev; op.apiVersion = NVENCAPI_VERSION;
         if (nv.nvEncOpenEncodeSessionEx(&op, &enc) != NV_ENC_SUCCESS) return false;
-        NV_ENC_PRESET_CONFIG pc{ NV_ENC_PRESET_CONFIG_VER }; pc.presetCfg.version = NV_ENC_CONFIG_VER;
+        pc.presetCfg.version = NV_ENC_CONFIG_VER;
         nv.nvEncGetEncodePresetConfigEx(enc, NV_ENC_CODEC_H264_GUID, NV_ENC_PRESET_P4_GUID, NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY, &pc);
         pc.presetCfg.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR; pc.presetCfg.rcParams.averageBitRate = mbit * 1000000;
         pc.presetCfg.gopLength = fps * 2; pc.presetCfg.frameIntervalP = 1;
         pc.presetCfg.encodeCodecConfig.h264Config.repeatSPSPPS = 1; pc.presetCfg.encodeCodecConfig.h264Config.idrPeriod = fps * 2;
-        NV_ENC_INITIALIZE_PARAMS ip{ NV_ENC_INITIALIZE_PARAMS_VER }; ip.encodeGUID = NV_ENC_CODEC_H264_GUID; ip.presetGUID = NV_ENC_PRESET_P4_GUID; ip.tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
+        ip.encodeGUID = NV_ENC_CODEC_H264_GUID; ip.presetGUID = NV_ENC_PRESET_P4_GUID; ip.tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
         ip.encodeWidth = w; ip.encodeHeight = h; ip.darWidth = w; ip.darHeight = h; ip.frameRateNum = fps; ip.frameRateDen = 1; ip.enablePTD = 1; ip.encodeConfig = &pc.presetCfg;
         if (nv.nvEncInitializeEncoder(enc, &ip) != NV_ENC_SUCCESS) return false;
         NV_ENC_CREATE_BITSTREAM_BUFFER cb{ NV_ENC_CREATE_BITSTREAM_BUFFER_VER }; nv.nvEncCreateBitstreamBuffer(enc, &cb); outBuf = cb.bitstreamBuffer; return true;
+    }
+    void setBitrate(int kbit) override {   // CBR-Bitrate live umstellen (nahtlos, kein Stream-Abriss)
+        pc.presetCfg.rcParams.averageBitRate = kbit * 1000; pc.presetCfg.rcParams.maxBitRate = kbit * 1000;
+        NV_ENC_RECONFIGURE_PARAMS rp{ NV_ENC_RECONFIGURE_PARAMS_VER }; rp.reInitEncodeParams = ip;
+        nv.nvEncReconfigureEncoder(enc, &rp);
     }
     void encode(ID3D11Texture2D* nv12, std::vector<std::vector<uint8_t>>& out) override {
         NV_ENC_REGISTER_RESOURCE rr{ NV_ENC_REGISTER_RESOURCE_VER }; rr.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX; rr.resourceToRegister = nv12; rr.width = W; rr.height = H; rr.pitch = 0; rr.bufferFormat = NV_ENC_BUFFER_FORMAT_NV12;
@@ -151,6 +158,7 @@ struct AmfEncoder : Encoder {
         amf::AMFDataPtr data;
         while (encoder->QueryOutput(&data) == AMF_OK && data) { amf::AMFBufferPtr b(data); if (b) out.emplace_back((uint8_t*)b->GetNative(), (uint8_t*)b->GetNative() + b->GetSize()); data = nullptr; }
     }
+    void setBitrate(int kbit) override { encoder->SetProperty(AMF_VIDEO_ENCODER_TARGET_BITRATE, (amf_int64)kbit * 1000); }   // AMF: Bitrate live (kbit)
 };
 
 // Intel-QSV via oneVPL (MFXVideoENCODE). Struktur wie NVENC/AMF. HINWEIS: kompiliert und
@@ -598,6 +606,10 @@ int main(int argc, char** argv) {
     static const uint8_t AUD[6] = { 0,0,0,1, 0x09, 0xF0 };
     FILE* tsf = nullptr; if (!tsout.empty()) fopen_s(&tsf, tsout.c_str(), "wb");
     const uint64_t basePts = 90000;                            // 1 s Vorlauf, gemeinsame Zeitbasis fuer Bild + Ton
+    // Live-Bitrate: Lumora schreibt die Ziel-kbit in %TEMP%\lumora-bitrate.txt; der Helfer stellt
+    // den Encoder ohne Neustart um (nahtlos, kein Stream-Abriss bei adaptiver Bitrate).
+    std::string brPath = std::string(getenv("TEMP") ? getenv("TEMP") : ".") + "\\lumora-bitrate.txt";
+    uint64_t brMtime = ~0ull; int curKbit = mbit * 1000;
     uint64_t inFrame = 0, outFrame = 0; int tries = 0; auto t0 = std::chrono::steady_clock::now();
     AudioCapture audio;
     if (g_withAudio) {
@@ -639,7 +651,12 @@ int main(int argc, char** argv) {
             for (size_t o = 0; o < ts.size(); o += 1316) { int len = (int)((ts.size() - o) < 1316 ? (ts.size() - o) : 1316); sendto(s, (const char*)ts.data() + o, len, 0, (sockaddr*)&dst, sizeof(dst)); }
             if (tsf) fwrite(ts.data(), 1, ts.size(), tsf);
             outFrame++;
-            if (outFrame % fps == 0) printf("  %llu Frames live (%.1fs, %s)%s\n", (unsigned long long)outFrame, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), encoder->name(), g_withAudio ? " +Ton" : "");
+            if (outFrame % fps == 0) {
+                WIN32_FILE_ATTRIBUTE_DATA fa{}; uint64_t mt = 0;   // Steuerdatei 1x/s pruefen
+                if (GetFileAttributesExA(brPath.c_str(), GetFileExInfoStandard, &fa)) mt = ((uint64_t)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime;
+                if (mt != brMtime) { brMtime = mt; FILE* bf = nullptr; fopen_s(&bf, brPath.c_str(), "r"); if (bf) { int k = 0; if (fscanf_s(bf, "%d", &k) == 1 && k >= 500 && k <= 200000 && k != curKbit) { curKbit = k; encoder->setBitrate(k); printf("  Bitrate live -> %d kbit\n", k); } fclose(bf); } }
+                printf("  %llu Frames live (%.1fs, %s)%s\n", (unsigned long long)outFrame, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), encoder->name(), g_withAudio ? " +Ton" : "");
+            }
         }
         // Fertige Ton-Frames (Opus) einmuxen (PID 0x101, PES stream_id 0xBD = private_stream_1).
         if (g_withAudio && !g_audioNoBytes) { AudioFrame af;
