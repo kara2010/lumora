@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
         interop->CreateForMonitor(hmon, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item)); printf("Quelle: Hauptmonitor\n");
     }
     auto sz = item.Size(); int W = sz.Width & ~1, H = sz.Height & ~1;
-    auto framePool = wg::Direct3D11CaptureFramePool::CreateFreeThreaded(d3dDevice, wg::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, sz);
+    auto framePool = wg::Direct3D11CaptureFramePool::CreateFreeThreaded(d3dDevice, wg::DirectXPixelFormat::B8G8R8A8UIntNormalized, 3, sz);
     auto session = framePool.CreateCaptureSession(item); session.StartCapture();
 
     auto vdev = dev.as<ID3D11VideoDevice>(); auto vctx = ctx.as<ID3D11VideoContext>();
@@ -185,6 +185,10 @@ int main(int argc, char** argv) {
     winrt::com_ptr<ID3D11Texture2D> nv12; dev->CreateTexture2D(&nd, nullptr, nv12.put());
     D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC ovd{}; ovd.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
     winrt::com_ptr<ID3D11VideoProcessorOutputView> outView; vdev->CreateVideoProcessorOutputView(nv12.get(), venum.get(), &ovd, outView.put());
+    // Eigene BGRA-Textur (W x H, volle Bind-Flags): die WGC-FramePool-Textur wird recycelt,
+    // darum sofort hierein kopieren, bevor der naechste Frame sie ueberschreibt.
+    D3D11_TEXTURE2D_DESC bd{}; bd.Width = W; bd.Height = H; bd.MipLevels = 1; bd.ArraySize = 1; bd.Format = DXGI_FORMAT_B8G8R8A8_UNORM; bd.SampleDesc.Count = 1; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    winrt::com_ptr<ID3D11Texture2D> bgraIn; dev->CreateTexture2D(&bd, nullptr, bgraIn.put());
 
     Encoder* encoder = useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder();
     if (!encoder->init(dev.get(), W, H, fps, mbit)) { printf("FEHLER: Encoder-Init (%s) fehlgeschlagen\n", encoder->name()); return 2; }
@@ -202,9 +206,9 @@ int main(int argc, char** argv) {
         if (!f) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); tries++; continue; }
         auto access = f.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
         winrt::com_ptr<ID3D11Texture2D> ft; access->GetInterface(winrt::guid_of<ID3D11Texture2D>(), ft.put_void());
+        ctx->CopyResource(bgraIn.get(), ft.get()); // sofort in eigene Textur, bevor WGC den FramePool-Buffer recycelt
         D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC ivd{}; ivd.FourCC = 0; ivd.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D; ivd.Texture2D.MipSlice = 0;
-        winrt::com_ptr<ID3D11VideoProcessorInputView> iv; if (FAILED(vdev->CreateVideoProcessorInputView(ft.get(), venum.get(), &ivd, iv.put()))) continue;
-        RECT srcRect{ 0,0,W,H }; vctx->VideoProcessorSetStreamSourceRect(vproc.get(), 0, TRUE, &srcRect); // Content-Bereich aus (evtl. gepaddeter) Fenster-Textur croppen
+        winrt::com_ptr<ID3D11VideoProcessorInputView> iv; if (FAILED(vdev->CreateVideoProcessorInputView(bgraIn.get(), venum.get(), &ivd, iv.put()))) continue;
         D3D11_VIDEO_PROCESSOR_STREAM st{}; st.Enable = TRUE; st.pInputSurface = iv.get();
         if (FAILED(vctx->VideoProcessorBlt(vproc.get(), outView.get(), 0, 1, &st))) continue;
         ctx->Flush(); inFrame++;
