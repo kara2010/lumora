@@ -175,7 +175,11 @@ int main(int argc, char** argv) {
     }
     auto sz = item.Size(); int W = sz.Width & ~1, H = sz.Height & ~1;
     auto framePool = wg::Direct3D11CaptureFramePool::CreateFreeThreaded(d3dDevice, wg::DirectXPixelFormat::B8G8R8A8UIntNormalized, 3, sz);
-    auto session = framePool.CreateCaptureSession(item); session.StartCapture();
+    auto session = framePool.CreateCaptureSession(item);
+    // Gelben WGC-Aufnahme-Rahmen abschalten (Borderless-Zugriff anfordern + Border aus).
+    try { wg::GraphicsCaptureAccess::RequestAccessAsync(wg::GraphicsCaptureAccessKind::Borderless).get(); } catch (...) {}
+    try { session.IsBorderRequired(false); } catch (...) {}
+    session.StartCapture();
 
     auto vdev = dev.as<ID3D11VideoDevice>(); auto vctx = ctx.as<ID3D11VideoContext>();
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd{}; cd.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE; cd.InputWidth = W; cd.InputHeight = H; cd.OutputWidth = W; cd.OutputHeight = H; cd.InputFrameRate = { (UINT)fps,1 }; cd.OutputFrameRate = { (UINT)fps,1 }; cd.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
