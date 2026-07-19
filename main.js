@@ -4724,9 +4724,9 @@ function bcAdaptTick() {
 // zeigen. Push statt Poll, weil das Zeitfenster (~80ms bei Fast-Restart) fuer
 // Polling zu knapp ist.
 const bcSwitchSseClients = new Set()
-function bcBroadcastSwitch(kind) {
-  if (bcStats) bcStats.switches++   // Qualitaets-/Bitratenwechsel fuer die Abschluss-Statistik
-  const line = 'data: ' + JSON.stringify({ kind }) + '\n\n'
+function bcBroadcastSwitch(kind, kbit) {
+  if (bcStats && kind !== 'bitrate') bcStats.switches++   // Qualitaets-/Bitratenwechsel fuer die Statistik (reine Live-Bitrate nicht als Neustart zaehlen)
+  const line = 'data: ' + JSON.stringify({ kind, kbit: kbit || 0 }) + '\n\n'   // kbit: Player zeigt die neue Qualitaet transparent an
   for (const res of bcSwitchSseClients) { try { res.write(line) } catch { bcSwitchSseClients.delete(res) } }
 }
 // HTTP-Server auf dem freigegebenen Port: liefert die Player-Seite und proxyt
@@ -6001,6 +6001,7 @@ function bcDoRestartFfmpeg() {
     const natKey = cfg.hwnd + '|' + cfg.fps + '|' + (cfg.scaleH || 0)
     if (natKey === bcCapKey) {
       bcWriteBitrateControl(cfg.kbit)
+      bcBroadcastSwitch('bitrate', cfg.kbit)   // Zuschauer transparent informieren (kein Freeze, nur Hinweis)
       broadcastState.adaptKbit = (bcAdaptLevel > 0 && appSettings.streamAdaptive !== false) ? cfg.kbit : 0
       bcPushState()
       bcLogStream('nat: Bitrate live -> ' + cfg.kbit + ' kbit (kein Neustart)')
@@ -6021,7 +6022,7 @@ function bcDoRestartFfmpeg() {
   // Bescheid geben, damit sie SOFORT einen Snapshot einfrieren. 'fast' = ~80ms
   // gemessen, 'full' = Helfer-/Encoder-Neustart, braucht laenger (s. bcBroadcastSwitch).
   sendToUi('switch-freeze', { kind: canFast ? 'fast' : 'full' })
-  bcBroadcastSwitch(canFast ? 'fast' : 'full')
+  bcBroadcastSwitch(canFast ? 'fast' : 'full', cfg.kbit)
   if (canFast) {
     if (bcFastRestartFfmpeg(cfg)) return
   }

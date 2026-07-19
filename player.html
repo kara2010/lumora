@@ -13,6 +13,9 @@
   #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 18px; transition: opacity .4s; padding: 20px; }
   #overlay.hidden { opacity: 0; pointer-events: none; }
   .badge { display: flex; align-items: center; gap: 11px; background: rgba(10,12,18,.72); padding: 14px 22px; border-radius: 12px; font-size: 15px; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); max-width: min(92vw, 460px); text-align: left; line-height: 1.35; }
+  /* Dezenter Qualitaets-Hinweis, wenn der Streamer die Bitrate anpasst (Transparenz fuer den Zuschauer). */
+  #brToast { position: fixed; left: 50%; bottom: 7%; transform: translateX(-50%); background: rgba(10,12,18,.82); color: #fff; padding: 9px 17px; border-radius: 20px; font-size: 14px; z-index: 6; opacity: 0; transition: opacity .35s; pointer-events: none; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); white-space: nowrap; }
+  #brToast.show { opacity: 1; }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: #f5b942; animation: pulse 1.2s infinite; flex-shrink: 0; }
   .dot.live { background: #4ade80; animation: none; }
   .dot.err { background: #f05a5a; animation: none; }
@@ -101,6 +104,7 @@
   <span><span class="val" id="sBitrate">–</span><span class="unit">Mbit/s</span></span>
 </div>
 <div id="overlay"><div class="badge"><span class="dot" id="dot"></span><span id="msg">Verbinde…</span></div></div>
+<div id="brToast"></div>
 <style>
   #gate { display:none; position:fixed; inset:0; z-index:9; align-items:center; justify-content:center;
     background:radial-gradient(120% 120% at 50% 30%, rgba(10,12,18,0.86), rgba(6,7,11,0.95)); backdrop-filter:blur(3px); }
@@ -347,12 +351,26 @@
     _freezeTimer = setTimeout(unfreeze, ms)
   }
   function unfreeze() { clearTimeout(_freezeTimer); freeze.style.display = 'none' }
+  // Dezenter Qualitaets-Hinweis (~2,8 s), wenn der Streamer die Bitrate anpasst - Transparenz.
+  var _brToastTimer = null
+  function showBitrateToast(kbit) {
+    if (!kbit) return
+    var el = document.getElementById('brToast'); if (!el) return
+    el.textContent = 'Qualität angepasst · ' + (kbit / 1000).toFixed(1).replace('.', ',') + ' Mbit'
+    el.classList.add('show')
+    clearTimeout(_brToastTimer)
+    _brToastTimer = setTimeout(function () { el.classList.remove('show') }, 2800)
+  }
   if (!RELAY) try {
     var switchEvents = new EventSource('/switch-events')
     var _sseWasOpen = false
     switchEvents.onopen = function () { _sseWasOpen = true }
     switchEvents.onmessage = function (e) {
-      try { var d = JSON.parse(e.data); doFreeze(d.kind === 'fast' ? 'fast' : 'full') } catch (e2) {}
+      try {
+        var d = JSON.parse(e.data)
+        if (d.kind === 'bitrate') { showBitrateToast(d.kbit) }   // reine Live-Bitrate: nur Hinweis, kein Freeze
+        else { doFreeze(d.kind === 'fast' ? 'fast' : 'full'); showBitrateToast(d.kbit) }
+      } catch (e2) {}
     }
     // EventSource verbindet bei Abbruch selbst neu - aber WAR sie ueberhaupt
     // schon offen? Meldet, falls die SSE-Verbindung (z.B. ueber Mobilfunk-NAT)
