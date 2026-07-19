@@ -547,7 +547,7 @@
               <div class="osd-field">
                 <span class="osd-field-label">Link</span>
                 <input type="text" id="streamLink" class="sort-select" style="flex:1; font-family:monospace" readonly onclick="this.select()">
-                <button class="btn-browse" onclick="copyStreamLink()">Kopieren</button>
+                <button class="btn-browse" id="streamCopyBtn" onclick="copyStreamLink()">Kopieren</button>
               </div>
               <div class="osd-field" style="flex-wrap:wrap; gap:8px">
                 <span class="osd-field-label">Teilen</span>
@@ -773,6 +773,16 @@
           <li><strong>Vortice.Windows</strong> — Direct3D-/Screen-Capture im Aufnahme-Helfer · Amer Koleci · MIT · <span class="about-link" onclick="openExternal('https://github.com/amerkoleci/Vortice.Windows')">GitHub</span></li>
           <li><strong>NAudio</strong> — System-Ton (WASAPI) fürs Streaming · Mark Heath · MIT · <span class="about-link" onclick="openExternal('https://github.com/naudio/NAudio')">GitHub</span></li>
           <li><strong>.NET-Runtime</strong> — Laufzeit des Aufnahme-Helfers · Microsoft · MIT · <span class="about-link" onclick="openExternal('https://dotnet.microsoft.com')">dotnet.microsoft.com</span></li>
+          <!-- VORBEREITET fuer den Release des nativen C++-Capture-Helfers (feature/cpp-capture):
+               Beim Ausliefern die vier <li> FFmpeg / Vortice.Windows / NAudio / .NET-Runtime ENTFERNEN
+               und die drei <li> unten aktivieren (auch die EN-Uebersetzungstabelle ergaenzen).
+               Capture (Windows.Graphics.Capture via C++/WinRT), Encoding (NVENC/AMF/QSV) und
+               MPEG-TS-Muxing macht der native Helfer selbst - externe Komponente ist nur der Opus-Encoder.
+          <li><strong>libopus</strong> — Opus-Encoding fuer den Stream-Ton (WebRTC-tauglich, patentfrei) · Xiph.Org u.&nbsp;a. · BSD-3 · <span class="about-link" onclick="openExternal('https://opus-codec.org')">opus-codec.org</span></li>
+          <li><strong>nv-codec-headers</strong> — NVENC-API-Header (NVIDIA-Encoding) · FFmpeg-Projekt · MIT · <span class="about-link" onclick="openExternal('https://github.com/FFmpeg/nv-codec-headers')">GitHub</span></li>
+          <li><strong>AMF SDK</strong> — AMD-Hardware-Encoding-API · AMD · MIT · <span class="about-link" onclick="openExternal('https://github.com/GPUOpen-LibrariesAndSDKs/AMF')">GitHub</span></li>
+          -->
+
           <li><strong>SteamGridDB</strong> — optionale Community-Artworks (eigener API-Key) · <span class="about-link" onclick="openExternal('https://www.steamgriddb.com')">steamgriddb.com</span></li>
         </ul>
         <p class="about-text">
@@ -1157,6 +1167,7 @@ const I18N_EN = {
   'Als Administrator starten': 'Run as administrator',
   'Speichern': 'Save',
   '📋 Stream-Link kopiert – einfach an Freunde schicken.': '📋 Stream link copied – just send it to your friends.',
+  '✓ Kopiert': '✓ Copied',
   '📊 Dein Stream in Zahlen': '📊 Your stream in numbers',
   'Dauer': 'Duration',
   'Zuschauer gleichzeitig': 'Peak viewers',
@@ -3169,6 +3180,21 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (_streamOpening || !el.value) { streamToast(window.tr('⏳ Link wird noch vorbereitet – gleich ist er da.')); return }
       el.select()
       navigator.clipboard.writeText(el.value).catch(() => { try { document.execCommand('copy') } catch {} })
+      flashCopied()
+    }
+    // Kopier-Rueckmeldung dort, wo der Blick ist: Knopf wird kurz gruen zu "Kopiert",
+    // das Link-Feld pulst gruen auf. Deutlicher als der kleine gamepadToast unten, den
+    // man beim Streamen (Spiel im Vordergrund) uebersieht. strong=true (Auto-Kopieren
+    // beim Start) pulst kraeftiger, damit klar wird "Link ist fertig und schon kopiert".
+    function flashCopied(strong) {
+      const el = document.getElementById('streamLink')
+      const btn = document.getElementById('streamCopyBtn')
+      if (el) { el.classList.remove('copied-flash', 'copied-flash-strong'); void el.offsetWidth; el.classList.add(strong ? 'copied-flash-strong' : 'copied-flash') }
+      if (btn) {
+        if (!btn._orig) btn._orig = btn.textContent
+        btn.classList.add('copied'); btn.textContent = window.tr('✓ Kopiert')
+        clearTimeout(btn._t); btn._t = setTimeout(() => { btn.classList.remove('copied'); btn.textContent = btn._orig }, 2400)
+      }
     }
     function streamToast(msg) {
       const t = document.getElementById('gamepadToast')
@@ -3363,7 +3389,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // Vermittlungs-Registrierung fuer den schoenen Link ist async).
     ipcRenderer.on('copy-stream-link', (e, link) => {
       if (!link) return
-      navigator.clipboard.writeText(link).then(() => streamToast(window.tr('📋 Stream-Link kopiert – einfach an Freunde schicken.'))).catch(() => {})
+      navigator.clipboard.writeText(link).then(() => { flashCopied(true); streamToast(window.tr('📋 Stream-Link kopiert – einfach an Freunde schicken.')) }).catch(() => {})
     })
     // Einmalige Stream-Statistik nach dem Beenden (main.js sammelt waehrend des
     // Streams: Dauer, Zuschauer-Spitze/-Gesamt, encodierte Datenmenge, Wechsel).
