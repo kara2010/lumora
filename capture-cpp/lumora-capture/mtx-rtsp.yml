@@ -1,0 +1,11 @@
+logLevel: info
+api: no
+rtsp: yes
+rtspAddress: 127.0.0.1:8555
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+paths:
+  test:
+    source: udp+mpegts://127.0.0.1:9998

@@ -1520,6 +1520,23 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
   color: var(--accent);
 }
 
+/* Kopier-Rueckmeldung am Link-Feld (deutlicher als der kleine Toast unten). */
+.btn-browse.copied {
+  border-color: #2fbf84;
+  color: #2fbf84;
+}
+@keyframes copiedRing {
+  0%   { box-shadow: 0 0 0 2px rgba(47,191,132,0.50); }
+  100% { box-shadow: 0 0 0 0 rgba(47,191,132,0); }
+}
+@keyframes copiedRingStrong {
+  0%   { box-shadow: 0 0 0 3px rgba(47,191,132,0.65); }
+  55%  { box-shadow: 0 0 0 3px rgba(47,191,132,0.35); }
+  100% { box-shadow: 0 0 0 0 rgba(47,191,132,0); }
+}
+#streamLink.copied-flash { animation: copiedRing 1.4s ease; }
+#streamLink.copied-flash-strong { animation: copiedRingStrong 2s ease; }
+
 /* Grosser, prominenter Stream-Start/Stop-Knopf - die Haupt-Aktion des Tabs.
    Grün = starten (klarer „Go Live"-Impuls), Rot = laufenden Stream stoppen. */
 .btn-stream-toggle {
