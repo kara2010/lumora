@@ -4279,7 +4279,7 @@ async function bcEnumSources() {
   // findet sie alle, und die HWND passt exakt zu dem, was er aufnehmen kann.
   const raw = await new Promise((res) => {
     try {
-      require('child_process').execFile(streamBin('lumora-capture.exe'), ['--list'],
+      require('child_process').execFile(streamBin(bcHelperBin()), ['--list'],
         { windowsHide: true, timeout: 6000, maxBuffer: 8 << 20 }, (e, so) => res(String(so || '')))
     } catch { res('') }
   })
@@ -4318,6 +4318,11 @@ ipcMain.handle('list-sources', async () => {
 // Pfad zu einer gebuendelten Binary (bin/ neben der App bzw. in resources/bin).
 function streamBin(name) {
   return app.isPackaged ? path.join(process.resourcesPath, 'bin', name) : path.join(__dirname, 'bin', name)
+}
+// Helfer fuer --list/--hdr-check: bevorzugt der C#-Helfer (bewaehrt); fehlt er (schlanker
+// FFmpeg-freier Installer), uebernimmt der native C++-Helfer (identisches Ausgabeformat).
+function bcHelperBin() {
+  return fs.existsSync(streamBin('lumora-capture.exe')) ? 'lumora-capture.exe' : 'lumora-capture-native.exe'
 }
 // Kurzzeile ins Stream-Log (Diagnose).
 let bcLogRotated = false
@@ -4384,6 +4389,15 @@ async function bcDetectEncoder() {
     else if (has('h264_amf')) { enc = 'h264_amf'; hw = true }
     else if (has('h264_qsv')) { enc = 'h264_qsv'; hw = true }
   } catch {}
+  // FFmpeg-freier Modus (schlanker Installer, nur nativer Helfer): FFmpeg diente hier nur
+  // der Faehigkeits-Abfrage - die HW-Encoder direkt aus dem GPU-Vendor ableiten; encodiert
+  // wird im nativen Helfer (NVENC/AMF/QSV), der bei 'auto' ohnehin selbst waehlt.
+  if (!enc && !fs.existsSync(streamBin('ffmpeg.exe'))) {
+    if (vendor === 'amd') enc = 'h264_amf'
+    else if (vendor === 'intel') { enc = 'h264_qsv'; hasQsv = true }
+    else enc = 'h264_nvenc'
+    hw = true
+  }
   bcEncoderCache = { vendor, encoder: enc, hw, hasQsv }
   osdDbg('[stream] Encoder: ' + enc + ' (GPU: ' + (vendor || '?') + ', hw=' + hw + ', qsv=' + hasQsv + ')')
   return bcEncoderCache
@@ -6206,7 +6220,7 @@ async function startBroadcast(opts) {
   // Zuschauer blass. Einmal pro Stream-Start pruefen und in der UI erklaeren
   // (der Fenster-Weg wandelt HDR sauber, dorthin verweist der Hinweis).
   if (cfg.mode === 'monitor') {
-    require('child_process').execFile(streamBin('lumora-capture.exe'), ['--hdr-check'], { windowsHide: true, timeout: 8000 }, (err, out) => {
+    require('child_process').execFile(streamBin(bcHelperBin()), ['--hdr-check'], { windowsHide: true, timeout: 8000 }, (err, out) => {
       if (err || !broadcastState.active) return
       if (new RegExp('^HDR ' + cfg.outputIdx + ' 1', 'm').test(String(out))) {
         broadcastState.hdrMonitor = true
