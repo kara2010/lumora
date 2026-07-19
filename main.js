@@ -5663,6 +5663,12 @@ function bcStartFfmpeg(cfg) {
 function bcWriteBitrateControl(kbit) {
   try { fs.writeFileSync(path.join(app.getPath('temp'), 'lumora-bitrate.txt'), String(Math.max(500, Math.round(kbit || 8000)))) } catch {}
 }
+// Aufnahme-Quelle fuer den nativen Helfer in die Steuerdatei schreiben ("monitor" |
+// "hwnd <id>"); er wechselt live - fuer Zuschauer ein nahtloser Schnitt ohne Reconnect.
+function bcWriteSourceControl(cfg) {
+  try { fs.writeFileSync(path.join(app.getPath('temp'), 'lumora-source.txt'), (cfg.mode === 'window' && cfg.hwnd) ? ('hwnd ' + cfg.hwnd) : 'monitor') } catch {}
+}
+let bcNatKbit = 0   // zuletzt an den nativen Helfer gemeldete Bitrate (nur echte Wechsel toasten)
 // Nativer Ein-Prozess-Weg (Test-Schalter streamNativeHelper): der C++-Helfer captured +
 // encodet selbst (HDR/Scale/NVENC/AMF/QSV) und published per UDP/MPEG-TS an mediamtx
 // (Pfad MTX_PATH, source: udp+mpegts). Ersetzt FFmpeg + C#-Capture + Audio-Helfer in EINEM
@@ -5681,8 +5687,10 @@ function bcStartNative(cfg) {
   if (cfg.scaleH) args.push('--scale', String(cfg.scaleH))
   if (cfg.mode === 'window' && cfg.hwnd) args.push('--window', '--hwnd', String(cfg.hwnd))
   bcWriteHdrControl()   // HDR-Tonemap-Werte bereitstellen; der Helfer liest sie live nach
-  bcCapKey = (cfg.hwnd || 0) + '|' + cfg.fps + '|' + (cfg.scaleH || 0)   // erkennt reine Bitrate-Aenderung (Live-Bitrate statt Neustart)
+  bcCapKey = ((cfg.mode === 'window' && cfg.hwnd) ? cfg.hwnd : 0) + '|' + cfg.fps + '|' + (cfg.scaleH || 0)   // Basis fuer Live-Bitrate/-Quellwechsel statt Neustart
   bcWriteBitrateControl(cfg.kbit)   // Start-Bitrate; adaptive Anpassung laeuft danach live ueber die Steuerdatei
+  bcNatKbit = cfg.kbit
+  bcWriteSourceControl(cfg)   // Startquelle festhalten (der Helfer wendet den Start-Stand nicht an, nur AENDERUNGEN danach)
   osdDbg('[stream] native ' + args.join(' '))
   let p
   // Eigener Binary-Name, damit der native C++-Helfer neben dem alten C#-Helfer
@@ -5993,18 +6001,28 @@ function bcDoRestartFfmpeg() {
   if (ffRestartTimer) { clearTimeout(ffRestartTimer); ffRestartTimer = null }
   const cfg = bcStreamCfg(bcEncoderCache || { encoder: 'h264_nvenc' })
   broadcastState.quality = bcQualityLabel(cfg)
-  // NATIVER MODUS: aendert sich NUR die Bitrate (hwnd/fps/scaleH = bcCapKey unveraendert),
-  // stellt der Helfer seinen Encoder LIVE um (Steuerdatei %TEMP%\lumora-bitrate.txt) -> KEIN
-  // Neustart, kein Aussetzer/Freeze. Nur bei echter Parameteraenderung faellt es unten durch
-  // zum Vollneustart (bcStartNative killt+startet den Helfer neu).
+  // NATIVER MODUS: Bitrate UND Quelle (Monitor/Fenster) stellt der Helfer LIVE um
+  // (Steuerdateien lumora-bitrate.txt / lumora-source.txt) -> KEIN Neustart, kein
+  // Aussetzer - fuer Zuschauer ein nahtloser Schnitt. Nur wenn sich fps/scaleH aendern
+  // (Encoder muesste neu), faellt es unten zum Vollneustart durch.
   if (appSettings.streamNativeHelper && ffProc) {
-    const natKey = cfg.hwnd + '|' + cfg.fps + '|' + (cfg.scaleH || 0)
-    if (natKey === bcCapKey) {
+    const parts = String(bcCapKey).split('|')                  // [hwnd, fps, scaleH] des laufenden Helfers
+    const hardNew = cfg.fps + '|' + (cfg.scaleH || 0)
+    if (parts.length === 3 && parts[1] + '|' + parts[2] === hardNew) {
+      const newHwnd = (cfg.mode === 'window' && cfg.hwnd) ? String(cfg.hwnd) : '0'
+      if (newHwnd !== parts[0]) {
+        bcWriteSourceControl(cfg)
+        bcCapKey = newHwnd + '|' + hardNew
+        bcLogStream('nat: Quelle live -> ' + (newHwnd === '0' ? 'Monitor' : 'Fenster ' + newHwnd) + ' (kein Neustart)')
+      }
       bcWriteBitrateControl(cfg.kbit)
-      bcBroadcastSwitch('bitrate', cfg.kbit)   // Zuschauer transparent informieren (kein Freeze, nur Hinweis)
+      if (cfg.kbit !== bcNatKbit) {   // Zuschauer nur bei ECHTEM Bitrate-Wechsel informieren
+        bcNatKbit = cfg.kbit
+        bcBroadcastSwitch('bitrate', cfg.kbit)
+        bcLogStream('nat: Bitrate live -> ' + cfg.kbit + ' kbit (kein Neustart)')
+      }
       broadcastState.adaptKbit = (bcAdaptLevel > 0 && appSettings.streamAdaptive !== false) ? cfg.kbit : 0
       bcPushState()
-      bcLogStream('nat: Bitrate live -> ' + cfg.kbit + ' kbit (kein Neustart)')
       return
     }
   }
