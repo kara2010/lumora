@@ -31,9 +31,12 @@
 #include <cmath>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <audioclientactivationparams.h>
+#include <wrl/implements.h>
 #include <d3dcompiler.h>
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "d3dcompiler.lib")
+#pragma comment(lib, "mmdevapi.lib")
 #include "opus.h"
 #include "nvEncodeAPI.h"
 #include "public/include/core/Factory.h"
@@ -162,9 +165,22 @@ static BOOL CALLBACK enumProc(HWND h, LPARAM lp) {
 // 90-kHz-PTS in eine Queue. Lueckenlos Wall-Clock-getaktet (stiller Endpoint liefert
 // gar nichts -> mit Stille fuellen), sonst puffert mediamtx den Ton-Track bis zum Limit.
 struct AudioFrame { uint64_t pts; std::vector<uint8_t> data; };  // data = Opus-Control-Header + Opus-Paket
+
+// Completion-Handler fuer ActivateAudioInterfaceAsync (Prozess-Loopback laeuft asynchron).
+// FtmBase liefert den Free-Threaded-Marshaller (IAgileObject), den die API verlangt.
+struct ActivateHandler : Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, Microsoft::WRL::FtmBase, IActivateAudioInterfaceCompletionHandler> {
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr); HRESULT actHr = E_FAIL; Microsoft::WRL::ComPtr<IAudioClient> client;
+    STDMETHOD(ActivateCompleted)(IActivateAudioInterfaceAsyncOperation* op) {
+        HRESULT ar = E_FAIL; Microsoft::WRL::ComPtr<IUnknown> iface;
+        op->GetActivateResult(&ar, iface.GetAddressOf());
+        actHr = ar; if (SUCCEEDED(ar) && iface) iface.As(&client);
+        SetEvent(ev); return S_OK;
+    }
+};
+
 struct AudioCapture {
     std::thread th; std::atomic<bool> stop{ false }; std::mutex mtx; std::deque<AudioFrame> q;
-    std::chrono::steady_clock::time_point epoch; uint64_t basePts = 0; int SR = 48000, CH = 2;
+    std::chrono::steady_clock::time_point epoch; uint64_t basePts = 0; int SR = 48000, CH = 2; DWORD targetPid = 0;
     void push(uint64_t pts, std::vector<uint8_t>&& d) { std::lock_guard<std::mutex> l(mtx); if (q.size() < 256) q.push_back({ pts, std::move(d) }); }
     bool pop(AudioFrame& f) { std::lock_guard<std::mutex> l(mtx); if (q.empty()) return false; f = std::move(q.front()); q.pop_front(); return true; }
     bool empty() { std::lock_guard<std::mutex> l(mtx); return q.empty(); }
@@ -173,17 +189,40 @@ struct AudioCapture {
 
     void run() {
         CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        winrt::com_ptr<IMMDeviceEnumerator> en;
-        if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), en.put_void()))) { printf("AUDIO: kein Enumerator\n"); return; }
-        winrt::com_ptr<IMMDevice> dev; if (FAILED(en->GetDefaultAudioEndpoint(eRender, eConsole, dev.put()))) { printf("AUDIO: kein Ausgabegeraet\n"); return; }
-        winrt::com_ptr<IAudioClient> ac; if (FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, ac.put_void()))) { printf("AUDIO: Activate fehlgeschlagen\n"); return; }
-        WAVEFORMATEX* mix = nullptr; ac->GetMixFormat(&mix);
-        if (!mix || FAILED(ac->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 2000000, 0, mix, nullptr))) { printf("AUDIO: Init fehlgeschlagen\n"); if (mix) CoTaskMemFree(mix); return; }
-        winrt::com_ptr<IAudioCaptureClient> cap; if (FAILED(ac->GetService(__uuidof(IAudioCaptureClient), cap.put_void()))) { CoTaskMemFree(mix); return; }
-        int devSR = mix->nSamplesPerSec, devCH = mix->nChannels; bool devFloat = (mix->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) || (mix->wFormatTag == WAVE_FORMAT_EXTENSIBLE && mix->wBitsPerSample == 32);
-        CoTaskMemFree(mix);
-        // Opus erlaubt 48/24/16/12/8 kHz. Der WASAPI-Mix ist praktisch immer 48 kHz; sonst
-        // Ton abschalten (Video laeuft weiter) - ein Resampler kann spaeter folgen.
+        winrt::com_ptr<IAudioClient> ac;
+        int devSR = 48000, devCH = 2; bool devFloat = true, procMode = false;
+        if (targetPid) {
+            // Prozess-Loopback: NUR der Ton dieses Prozesses (+ Kindprozesse). Virtuelles Geraet ->
+            // kein GetMixFormat, festes f32/48k/stereo. Faellt bei Fehler auf System-Ton zurueck.
+            WAVEFORMATEX wf{}; wf.wFormatTag = WAVE_FORMAT_IEEE_FLOAT; wf.nChannels = 2; wf.nSamplesPerSec = 48000; wf.wBitsPerSample = 32; wf.nBlockAlign = 8; wf.nAvgBytesPerSec = 48000 * 8;
+            AUDIOCLIENT_ACTIVATION_PARAMS ap{};
+            ap.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
+            ap.ProcessLoopbackParams.TargetProcessId = targetPid;
+            ap.ProcessLoopbackParams.ProcessLoopbackMode = PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+            PROPVARIANT pv{}; pv.vt = VT_BLOB; pv.blob.cbSize = sizeof(ap); pv.blob.pBlobData = (BYTE*)&ap;
+            auto handler = Microsoft::WRL::Make<ActivateHandler>();
+            Microsoft::WRL::ComPtr<IActivateAudioInterfaceAsyncOperation> op;
+            HRESULT hr = ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient), &pv, handler.Get(), op.GetAddressOf());
+            if (SUCCEEDED(hr)) WaitForSingleObject(handler->ev, 3000);
+            if (SUCCEEDED(hr) && SUCCEEDED(handler->actHr) && handler->client) {
+                handler->client.CopyTo(ac.put());
+                if (FAILED(ac->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 2000000, 0, &wf, nullptr))) { printf("AUDIO: Prozess-Loopback-Init fehlgeschlagen -> System-Ton\n"); ac = nullptr; }
+                else { procMode = true; printf("AUDIO: Prozess-Loopback (pid %lu, f32/48k/stereo)\n", targetPid); }
+            } else printf("AUDIO: Prozess-Loopback-Aktivierung fehlgeschlagen (hr 0x%08lX) -> System-Ton\n", hr);
+        }
+        if (!ac) {
+            // System-Loopback (Standard-Ausgabegeraet, ganzer System-Ton).
+            winrt::com_ptr<IMMDeviceEnumerator> en;
+            if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), en.put_void()))) { printf("AUDIO: kein Enumerator\n"); return; }
+            winrt::com_ptr<IMMDevice> mmdev; if (FAILED(en->GetDefaultAudioEndpoint(eRender, eConsole, mmdev.put()))) { printf("AUDIO: kein Ausgabegeraet\n"); return; }
+            if (FAILED(mmdev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, ac.put_void()))) { printf("AUDIO: Activate fehlgeschlagen\n"); return; }
+            WAVEFORMATEX* mix = nullptr; ac->GetMixFormat(&mix);
+            if (!mix || FAILED(ac->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 2000000, 0, mix, nullptr))) { printf("AUDIO: Init fehlgeschlagen\n"); if (mix) CoTaskMemFree(mix); return; }
+            devSR = mix->nSamplesPerSec; devCH = mix->nChannels; devFloat = (mix->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) || (mix->wFormatTag == WAVE_FORMAT_EXTENSIBLE && mix->wBitsPerSample == 32);
+            CoTaskMemFree(mix);
+        }
+        winrt::com_ptr<IAudioCaptureClient> cap; if (FAILED(ac->GetService(__uuidof(IAudioCaptureClient), cap.put_void()))) { printf("AUDIO: GetService fehlgeschlagen\n"); return; }
+        // Opus erlaubt 48/24/16/12/8 kHz. Mix ist praktisch immer 48 kHz; sonst Ton aus (Video laeuft weiter).
         if (devSR != 48000) { printf("AUDIO: Mischrate %d Hz != 48000 -> Ton deaktiviert (Resampler folgt)\n", devSR); return; }
         SR = 48000; CH = 2;
 
@@ -196,7 +235,7 @@ struct AudioCapture {
         const int FR = 960;                                   // 20 ms bei 48 kHz = ein Opus-Frame
         const uint64_t tickPerFrame = (uint64_t)FR * 90000 / SR;   // = 1800
         uint64_t inFrames = 0, produced = 0; long long captured = 0;
-        printf("AUDIO: System-Loopback 48000 Hz/2 ch (dev %d ch, %s) -> Opus 128k (WebRTC-tauglich)\n", devCH, devFloat ? "f32" : "int");
+        printf("AUDIO: %s 48000 Hz/2 ch (dev %d ch, %s) -> Opus 128k (WebRTC-tauglich)\n", procMode ? "Prozess-Loopback" : "System-Loopback", devCH, devFloat ? "f32" : "int");
         ac->Start();
 
         std::vector<int16_t> pending; pending.reserve(SR);    // s16-Stereo-Vorrat aus WASAPI
@@ -335,7 +374,7 @@ struct TonemapStage {
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     int fps = 60, mbit = 20, port = 9998, maxFrames = 0, scaleH = 0; std::string host = "127.0.0.1", tsout, encName = "auto";
-    HWND targetHwnd = nullptr; bool findWindow = false, forceHdr = false;
+    HWND targetHwnd = nullptr; bool findWindow = false, forceHdr = false; DWORD audioPid = 0;
     for (int i = 1; i < argc; ++i) { std::string a = argv[i];
         if (a == "--fps" && i + 1 < argc) fps = atoi(argv[++i]); else if (a == "--bitrate" && i + 1 < argc) mbit = atoi(argv[++i]);
         else if (a == "--mtx-host" && i + 1 < argc) host = argv[++i]; else if (a == "--mtx-port" && i + 1 < argc) port = atoi(argv[++i]);
@@ -345,6 +384,7 @@ int main(int argc, char** argv) {
         else if (a == "--window") findWindow = true;
         else if (a == "--scale" && i + 1 < argc) scaleH = atoi(argv[++i]);
         else if (a == "--hdr-force") forceHdr = true;   // Diagnose: HDR-Pfad (FP16+Tonemap) auch ohne aktives HDR erzwingen
+        else if (a == "--audio-pid" && i + 1 < argc) { audioPid = (DWORD)strtoul(argv[++i], nullptr, 0); g_withAudio = true; }
         else if (a == "--audio") g_withAudio = true;
         else if (a == "--audio-nobytes") { g_withAudio = true; g_audioNoBytes = true; } }
     if (findWindow && !targetHwnd) { FindCtx fc; fc.self = GetConsoleWindow(); EnumWindows(enumProc, (LPARAM)&fc); targetHwnd = fc.best; }
@@ -419,6 +459,9 @@ int main(int argc, char** argv) {
     uint64_t inFrame = 0, outFrame = 0; int tries = 0; auto t0 = std::chrono::steady_clock::now();
     AudioCapture audio;
     if (g_withAudio) {
+        // Im Fenster-Modus den Ton NUR dieses Prozesses aufnehmen (Prozess-Loopback); sonst System-Ton.
+        if (audioPid) audio.targetPid = audioPid;
+        else if (targetHwnd) GetWindowThreadProcessId(targetHwnd, &audio.targetPid);
         audio.start(t0, basePts);
         // Auf die erste Ton-Probe warten, BEVOR wir Video-Pakete senden: sonst sieht mediamtx
         // anfangs nur Video, puffert den deklarierten (noch leeren) Ton-Track und sprengt sein
