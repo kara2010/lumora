@@ -425,10 +425,12 @@ struct TonemapStage {
         if (mt != 0) { FILE* f = nullptr; fopen_s(&f, ctlPath.c_str(), "r"); if (f) { int m = 0; float e = 1; int n = fscanf_s(f, "%d %f", &m, &e); if (n >= 1) mode = m; if (n >= 2 && e > 0.01f && e < 20.0f) exposure = e; fclose(f); printf("HDR-TM mode=%d exp=%.2f\n", mode, exposure); } }
         updateBuffer(ctx);
     }
-    // FP16-Quelle tonemappen + auf Zielgroesse rendern -> sdrTex (BGRA, SDR).
-    void render(ID3D11DeviceContext* ctx, ID3D11Texture2D* srcFp16) {
+    // Neuen WGC-Frame uebernehmen (getrennt vom Rendern: beim Frame-Pacing wird der letzte
+    // Frame aus srcCopy erneut gerendert, wenn WGC bei ruhigem Bild nichts Neues liefert).
+    void update(ID3D11DeviceContext* ctx, ID3D11Texture2D* srcFp16) { ctx->CopyResource(srcCopy.get(), srcFp16); }
+    // srcCopy tonemappen + auf Zielgroesse rendern -> sdrTex (BGRA, SDR).
+    void render(ID3D11DeviceContext* ctx) {
         readControl(ctx, false);
-        ctx->CopyResource(srcCopy.get(), srcFp16);
         ctx->VSSetShader(vs.get(), nullptr, 0); ctx->PSSetShader(ps.get(), nullptr, 0);
         ID3D11ShaderResourceView* s = srv.get(); ctx->PSSetShaderResources(0, 1, &s);
         ID3D11SamplerState* sm = samp.get(); ctx->PSSetSamplers(0, 1, &sm);
@@ -624,21 +626,37 @@ int main(int argc, char** argv) {
         for (int w = 0; w < 400 && audio.empty(); ++w) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         if (audio.empty()) printf("AUDIO: keine Ton-Probe nach 4s - starte trotzdem (Stream evtl. ohne Ton)\n");
     }
-    while ((maxFrames == 0 || (int)outFrame < maxFrames) && tries < 200000) {
-        auto f = framePool.TryGetNextFrame();
-        if (!f) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); tries++; continue; }
-        auto access = f.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-        winrt::com_ptr<ID3D11Texture2D> ft; access->GetInterface(winrt::guid_of<ID3D11Texture2D>(), ft.put_void());
-        // HDR: FP16-Quelle tonemappen+skalieren -> sdrTex (BGRA); SDR: sofort in eigene BGRA-Textur kopieren
-        // (die WGC-FramePool-Textur wird recycelt). Beides liefert die BGRA-Quelle fuer den NV12-VideoProcessor.
+    // FRAME-PACING (fester fps-Takt): WGC liefert nur bei BILDAENDERUNG einen Frame - bei
+    // ruhigem Desktop kommen Frames unregelmaessig (30-60 schwankend) -> Ruckeln beim
+    // Zuschauer (real gemeldet; beim 25fps-Video passt es zufaellig). Darum entkoppelt:
+    // neue WGC-Frames werden uebernommen, WANN IMMER sie kommen; encodiert wird strikt im
+    // Wall-Clock-Takt (fps) - bei Stillstand wird der letzte Frame wiederholt (wie ddagrab).
+    bool haveFrame = false; uint64_t frameIdx = 0;
+    while ((maxFrames == 0 || (int)outFrame < maxFrames) && (haveFrame || tries < 3000)) {
+        // 1) alle bereitliegenden WGC-Frames abholen, den NEUESTEN uebernehmen.
+        for (;;) {
+            auto f = framePool.TryGetNextFrame(); if (!f) break;
+            auto access = f.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+            winrt::com_ptr<ID3D11Texture2D> ft; access->GetInterface(winrt::guid_of<ID3D11Texture2D>(), ft.put_void());
+            // sofort in eigene Textur (WGC recycelt den FramePool-Buffer): HDR -> FP16-Kopie
+            // der Tonemap-Stufe, SDR -> bgraIn. Von dort wird beim Takt-Tick gerendert/encodiert.
+            if (hdr) tonemap.update(ctx.get(), ft.get()); else ctx->CopyResource(bgraIn.get(), ft.get());
+            haveFrame = true; inFrame++;
+        }
+        if (!haveFrame) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); tries++; continue; }   // auf den ERSTEN Frame warten (max ~6s)
+        // 2) faellige Takt-Ticks encodieren (letzter Frame zaehlt - echt oder wiederholt).
+        uint64_t due = (uint64_t)(std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() * fps);
+        if (frameIdx + fps < due) frameIdx = due;   // nach Pause/Stau nicht in einem Burst aufholen
+        if (frameIdx >= due) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
+        frameIdx++;
         ID3D11Texture2D* vpIn;
-        if (hdr) { tonemap.render(ctx.get(), ft.get()); vpIn = tonemap.sdrTex.get(); }
-        else { ctx->CopyResource(bgraIn.get(), ft.get()); vpIn = bgraIn.get(); }
+        if (hdr) { tonemap.render(ctx.get()); vpIn = tonemap.sdrTex.get(); }
+        else vpIn = bgraIn.get();
         D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC ivd{}; ivd.FourCC = 0; ivd.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D; ivd.Texture2D.MipSlice = 0;
         winrt::com_ptr<ID3D11VideoProcessorInputView> iv; if (FAILED(vdev->CreateVideoProcessorInputView(vpIn, venum.get(), &ivd, iv.put()))) continue;
         D3D11_VIDEO_PROCESSOR_STREAM st{}; st.Enable = TRUE; st.pInputSurface = iv.get();
         if (FAILED(vctx->VideoProcessorBlt(vproc.get(), outView.get(), 0, 1, &st))) continue;
-        ctx->Flush(); inFrame++;
+        ctx->Flush();
         std::vector<std::vector<uint8_t>> aus; encoder->encode(nv12.get(), aus);
         for (auto& au : aus) {
             // Bild-PTS aus der gemeinsamen Wall-Clock (nicht dem Frame-Zaehler): haelt Bild
