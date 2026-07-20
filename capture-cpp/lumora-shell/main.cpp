@@ -1238,6 +1238,7 @@ static void bcUnregisterWatchLink() {
 #define WM_SHELL_TRAY (WM_APP + 2)
 #define HK_TOGGLE 1
 #define HK_STREAM 2
+#define HK_OSD 3
 static NOTIFYICONDATAW g_nid{};
 static bool g_trayOn = false, g_quitting = false;
 
@@ -1282,7 +1283,7 @@ static bool parseAccelerator(const std::string& acc, UINT& mods, UINT& vk) {
     return vk != 0;
 }
 static bool registerHotkeys() {
-    UnregisterHotKey(g_hwnd, HK_TOGGLE); UnregisterHotKey(g_hwnd, HK_STREAM);
+    UnregisterHotKey(g_hwnd, HK_TOGGLE); UnregisterHotKey(g_hwnd, HK_STREAM); UnregisterHotKey(g_hwnd, HK_OSD);
     json s = loadSettings();
     bool ok = true;
     UINT m, v;
@@ -1290,6 +1291,8 @@ static bool registerHotkeys() {
     if (!t.empty() && parseAccelerator(t, m, v)) ok = RegisterHotKey(g_hwnd, HK_TOGGLE, m | MOD_NOREPEAT, v) != FALSE;
     std::string st = s.value("streamHotkey", "");
     if (!st.empty() && parseAccelerator(st, m, v)) RegisterHotKey(g_hwnd, HK_STREAM, m | MOD_NOREPEAT, v);
+    std::string oh = s.value("osdHotkey", "");
+    if (!oh.empty() && parseAccelerator(oh, m, v)) RegisterHotKey(g_hwnd, HK_OSD, m | MOD_NOREPEAT, v);
     return ok;
 }
 // Autostart: HKCU-Run-Key "Lumora" + Legacy-/Doppel-Keys raeumen (der bekannte
@@ -1318,6 +1321,83 @@ static void handleDeepLink(const std::string& url) {
     }
 }
 
+// --- Modul: OSD-Overlay (zweites WebView2-Fenster mit osd.html; wie Electrons
+// frame:false/transparent/focusable:false-Overlay: click-through, hoechste Ebene,
+// stiehlt dem Spiel nie den Fokus). Sensorik (osd-data) folgt als eigener Schritt -
+// Fenster, Konfiguration (Ecke/Deckkraft/Theme/Felder/Zoom) und Kanaele sind komplett.
+#define WM_SHELL_OSDMSG (WM_APP + 3)
+static HWND g_osdHwnd = nullptr;
+static ComPtr<ICoreWebView2Controller> g_osdCtrl;
+static ComPtr<ICoreWebView2> g_osdWv;
+static bool g_osdLoaded = false;
+
+static void sendToOsd(const std::string& channel, const json& payload) {   // threadsicher wie sendToUi
+    if (!g_osdHwnd) return;
+    json m = { {"channel", channel}, {"payload", payload} };
+    PostMessageW(g_osdHwnd, WM_SHELL_OSDMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
+}
+static void applyOsdConfig() {
+    if (!g_osdWv) return;
+    json s = loadSettings();
+    double z = (std::max)(0.4, (std::min)(3.0, s.value("osdScale", 1.0)));
+    if (g_osdCtrl) g_osdCtrl->put_ZoomFactor(z);
+    sendToOsd("osd-config", { {"corner", s.value("osdCorner", "tl")}, {"opacity", s.value("osdOpacity", 0.55)},
+                              {"theme", s.value("osdTheme", "compact")}, {"fields", s.value("osdFields", json())},
+                              {"accent", s.value("osdAccent", "#74e857")} });
+}
+static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_osdWv) g_osdWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
+    case WM_SIZE: if (g_osdCtrl) { RECT rc; GetClientRect(h, &rc); g_osdCtrl->put_Bounds(rc); } return 0;
+    case WM_DESTROY: return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+static void createOsdWindow() {
+    if (g_osdHwnd) return;
+    static bool reg = false;
+    if (!reg) { WNDCLASSW wc{}; wc.lpfnWndProc = osdWndProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"LumoraOsd"; RegisterClassW(&wc); reg = true; }
+    // Hauptmonitor-Flaeche minus 1px unten (bricht die Vollbild-Erkennung von Windows nicht)
+    HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi);
+    int w = mi.rcMonitor.right - mi.rcMonitor.left, hgt = mi.rcMonitor.bottom - mi.rcMonitor.top - 1;
+    g_osdHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+        L"LumoraOsd", L"", WS_POPUP, mi.rcMonitor.left, mi.rcMonitor.top, w, hgt, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!g_osdHwnd) { bcLogStream("osd: CreateWindowExW fehlgeschlagen err=" + std::to_string(GetLastError())); return; }
+    SetLayeredWindowAttributes(g_osdHwnd, 0, 255, LWA_ALPHA);   // Layered aktivieren (Transparenz macht das WebView2 per Alpha)
+    bcLogStream("osd: Overlay-Fenster erstellt");
+    wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
+    std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(res) || !env || !g_osdHwnd) return res;
+                env->CreateCoreWebView2Controller(g_osdHwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [](HRESULT r2, ICoreWebView2Controller* ctrl) -> HRESULT {
+                            if (FAILED(r2) || !ctrl || !g_osdHwnd) return r2;
+                            g_osdCtrl = ctrl;
+                            g_osdCtrl->get_CoreWebView2(&g_osdWv);
+                            ComPtr<ICoreWebView2Controller2> c2; g_osdCtrl.As(&c2);
+                            if (c2) { COREWEBVIEW2_COLOR clr{ 0, 0, 0, 0 }; c2->put_DefaultBackgroundColor(clr); }   // durchsichtig
+                            RECT rc; GetClientRect(g_osdHwnd, &rc); g_osdCtrl->put_Bounds(rc);
+                            ComPtr<ICoreWebView2_3> wv3; g_osdWv.As(&wv3);
+                            if (wv3) wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            std::wstring shim = SHIM_JS; size_t vp = shim.find(L"%SHELL_VERSION%");
+                            if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
+                            g_osdWv->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
+                            g_osdWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { g_osdLoaded = true; applyOsdConfig(); return S_OK; }).Get(), nullptr);
+                            g_osdWv->Navigate(L"https://app.lumora/osd.html");
+                            return S_OK;
+                        }).Get());
+                return S_OK;
+            }).Get());
+}
+static void showOsd() { createOsdWindow(); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
+static void hideOsd() { if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
+static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
+
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
 // Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
 static json handleChannel(const std::string& channel, const json& args) {
@@ -1341,6 +1421,8 @@ static json handleChannel(const std::string& channel, const json& args) {
             // Systemseitige Einstellungen sofort anwenden (wie der Electron-Handler)
             if (args[0].contains("autostart") || args[0].contains("startMinimized")) applyAutostart();
             if (args[0].contains("minimizeToTray")) { if (args[0].value("minimizeToTray", false)) createTray(); else destroyTray(); }
+            // OSD-Einstellung dabei? Overlay-Sichtbarkeit + Konfiguration live nachziehen (wie Electron)
+            for (auto& [k, v] : args[0].items()) if (k.rfind("osd", 0) == 0) { syncOsdVisibility(); applyOsdConfig(); break; }
         }
         return true;
     }
@@ -1638,7 +1720,22 @@ static json handleChannel(const std::string& channel, const json& args) {
         // 2) Exe-/Datei-Icon
         return fileIconDataUrl(p);
     }
-    if (channel == "list-gpus") return json::array();   // OSD-Sensorik (nvml/adl) folgt mit dem OSD-Modul
+    if (channel == "list-gpus") return json::array();   // OSD-Sensorik (nvml/adl) folgt mit dem Sensor-Schritt
+    // ---- OSD (Overlay steht; Live-Justierung schreibt Settings + zieht sie sofort nach) ----
+    if (channel.rfind("osd-edit-", 0) == 0 && args.size() >= 1) {
+        json s = loadSettings();
+        if (channel == "osd-edit-corner" && args[0].is_string()) s["osdCorner"] = args[0];
+        else if (channel == "osd-edit-opacity" && args[0].is_number()) s["osdOpacity"] = args[0];
+        else if (channel == "osd-edit-scale" && args[0].is_number()) s["osdScale"] = args[0];
+        else if (channel == "osd-edit-theme" && args[0].is_string()) s["osdTheme"] = args[0];
+        else if (channel == "osd-edit-fields") s["osdFields"] = args[0];
+        else if (channel == "osd-edit-done") { sendToOsd("osd-edit", false); return true; }
+        writeFile(settingsPath(), s.dump(2));
+        applyOsdConfig();
+        return true;
+    }
+    if (channel == "setup-osd") { sendToUi("osd-setup-status", { {"state", "unavailable"} }); return false; }   // FPS-/CPU-Broker folgt mit dem Sensor-Schritt
+    if (channel == "osd-sources") return { {"gpu", "folgt (Sensor-Schritt)"}, {"cpu", "folgt (Sensor-Schritt)"}, {"fps", "folgt (Sensor-Schritt)"}, {"ram", "folgt (Sensor-Schritt)"} };
     if (channel == "minimize-window") { ShowWindow(g_hwnd, SW_MINIMIZE); return true; }
     if (channel == "toggle-maximize") { ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE); return true; }
     if (channel == "close-window")    { PostMessageW(g_hwnd, WM_CLOSE, 0, 0); return true; }
@@ -1789,6 +1886,12 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_HOTKEY:
         if (w == HK_TOGGLE) { toggleMainWindow(); return 0; }
+        if (w == HK_OSD) {   // OSD ein-/ausblenden (osdEnabled invertieren wie toggleOverlay)
+            json s = loadSettings(); s["osdEnabled"] = !s.value("osdEnabled", false);
+            writeFile(settingsPath(), s.dump(2));
+            syncOsdVisibility();
+            return 0;
+        }
         if (w == HK_STREAM) {   // Stream-Hotkey: an/aus (im Worker, blockiert den Hotkey nicht)
             std::thread([]() { if (g_bcState.value("active", false)) stopBroadcast(); else startBroadcast(); }).detach();
             return 0;
@@ -2022,6 +2125,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Deep-Link als Startargument (lumora://...) direkt verarbeiten
     for (int i = 1; i < argc; ++i) { std::string a = narrow(argv[i]); if (a.rfind("lumora://", 0) == 0) handleDeepLink(a); }
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
+    syncOsdVisibility();   // OSD-Overlay gemaess Einstellung anzeigen
 
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
     wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
