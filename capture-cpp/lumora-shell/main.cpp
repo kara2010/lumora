@@ -24,6 +24,7 @@
 #include "scan_games.h"
 #include "artwork.h"
 #include "launch_game.h"
+#include "http_server.h"
 #include <thread>
 #include <mutex>
 #include <map>
@@ -355,6 +356,117 @@ static json launchGame(const json& args) {
     }
 }
 
+// --- Modul: Streaming-HTTP-Server (Port 8787, Routen 1:1 aus bcStartServer/main.js) ---
+static const int BROADCAST_PORT = 8787;   // TCP: player.html + WHEP-Signalisierung (Proxy vor mediamtx)
+static const int MTX_WHEP_PORT = 8889;    // localhost: mediamtx WHEP-HTTP (hinter dem Proxy)
+static const char* MTX_PATH = "live";     // mediamtx-Pfadname
+static lusrv::HttpServer g_streamSrv;
+static bool g_streamSrvUp = false;
+static std::string g_playerHtmlCache;
+static std::mutex g_qosMx;
+struct QosEntry { ULONGLONG t; bool bad; double lossRate; int badStreak; };
+static std::map<std::string, QosEntry> g_qosMap;   // Zuschauer-QoS fuer die adaptive Bitrate
+
+static void bcLogStream(const std::string& msg) {   // gleiches Log wie die Electron-App
+    wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+    FILE* f = nullptr; _wfopen_s(&f, (std::wstring(tmp) + L"\\lumora-stream.log").c_str(), L"ab");
+    if (!f) return;
+    SYSTEMTIME st; GetLocalTime(&st);
+    fprintf(f, "%02d:%02d:%02d  %s\n", st.wHour, st.wMinute, st.wSecond, msg.c_str());
+    fclose(f);
+}
+// Zuschauer transparent informieren (Freeze-Frame/Bitrate-Toast) - wie bcBroadcastSwitch.
+static void bcBroadcastSwitch(const std::string& kind, int kbit) {
+    json d = { {"kind", kind}, {"kbit", kbit} };
+    g_streamSrv.sse.broadcast("data: " + d.dump() + "\n\n");
+}
+// QoS-Bericht eines Players (Logik 1:1 inkl. der Render-Metrik-Lehren: frz/drop
+// zaehlen nur bei echtem Paketverlust; badStreak gegen Einzel-Ruckler).
+static void bcQosReport(const std::string& ip, const json& q) {
+    if (!q.is_object()) return;
+    if (ip == "::1" || ip.rfind("127.", 0) == 0) return;   // eigene Vorschau
+    long long recv = (std::max)(0ll, q.value("recv", 0ll)), lost = (std::max)(0ll, q.value("lost", 0ll));
+    long long drop = (std::max)(0ll, q.value("drop", 0ll)), frz = (std::max)(0ll, q.value("frz", 0ll));
+    double lossRate = (lost + recv) > 0 ? (double)lost / (double)(lost + recv) : 0.0;
+    bool bad = lossRate > 0.02 || ((frz > 0 || drop > 15) && lossRate > 0.005);
+    std::string key = q.contains("id") && q["id"].is_string() ? q["id"].get<std::string>().substr(0, 40) : ip;
+    std::lock_guard<std::mutex> lk(g_qosMx);
+    auto prev = g_qosMap.find(key);
+    int streak = bad ? ((prev != g_qosMap.end() ? prev->second.badStreak : 0) + 1) : 0;
+    g_qosMap[key] = { GetTickCount64(), bad, lossRate, streak };
+    if (bad) bcLogStream("qos: " + key + " lost=" + std::to_string(lost) + "/" + std::to_string(lost + recv) + " !");
+}
+// Die 8 Routen des Streaming-Servers (CORS/OPTIONS erledigt der Transport).
+static lusrv::Response handleStreamHttp(const lusrv::Request& rq) {
+    lusrv::Response rs;
+    if (rq.method == "GET" && (rq.path == "/" || rq.path == "/index.html")) {
+        if (g_playerHtmlCache.empty()) g_playerHtmlCache = readFile(g_appDir + L"\\player.html");
+        rs.status = 200; rs.body = g_playerHtmlCache.empty() ? "<!doctype html><meta charset=utf-8>Player nicht gefunden." : g_playerHtmlCache;
+        rs.headers["Content-Type"] = "text/html; charset=utf-8"; rs.headers["Cache-Control"] = "no-store";
+        return rs;
+    }
+    if (rq.method == "GET" && rq.path == "/cfg") {
+        json s = loadSettings();
+        json ice = json::array({ { {"urls","stun:stun.l.google.com:19302"} }, { {"urls","stun:stun.cloudflare.com:3478"} } });
+        std::string turl = s.value("streamTurnUrl", ""); bool turnOn = s.value("streamTurnEnabled", false) && !turl.empty();
+        if (turnOn) {   // WebRTC verlangt bei turn: IMMER username+credential (Platzhalter bei auth-los)
+            if (turl.rfind("turn:", 0) != 0 && turl.rfind("turns:", 0) != 0) turl = "turn:" + turl;
+            std::string tu = s.value("streamTurnUser", ""), tp = s.value("streamTurnPass", "");
+            ice.push_back({ {"urls", turl}, {"username", tu.empty() ? "lumora" : tu}, {"credential", tp.empty() ? "lumora" : tp} });
+        }
+        json cfg = { {"buffer", (std::max)(0, s.value("streamBufferMs", 120))}, {"iceServers", ice},
+                     {"forceRelay", turnOn && s.value("streamTurnForce", false)} };
+        rs.status = 200; rs.body = cfg.dump();
+        rs.headers["Content-Type"] = "application/json"; rs.headers["Cache-Control"] = "no-store";
+        return rs;
+    }
+    if (rq.method == "GET" && rq.path == "/instanz") {
+        json r = { {"lumora", true}, {"id", nullptr}, {"group", nullptr} };   // id/group folgen mit dem Gruppen-Modul
+        rs.status = 200; rs.body = r.dump();
+        rs.headers["Content-Type"] = "application/json"; rs.headers["Cache-Control"] = "no-store";
+        return rs;
+    }
+    if (rq.path == "/whep" || rq.path.rfind("/whep/", 0) == 0) {
+        // Tuersteher: bis das Gruppen-/Roster-Modul portiert ist, fail-closed bei aktivierter Option.
+        bool local = rq.clientIp == "::1" || rq.clientIp.rfind("127.", 0) == 0 || rq.clientIp.empty();
+        if (rq.method == "POST" && !local && loadSettings().value("streamDoorman", false)) { rs.status = 401; rs.body = "unauthorized"; return rs; }
+        // Zuschauer-Name aus der Query (fuer "Wer schaut zu"); Auth-Query NICHT durchreichen.
+        std::string reqName;
+        size_t np = rq.query.find("name=");
+        if (np != std::string::npos) { reqName = rq.query.substr(np + 5); size_t amp = reqName.find('&'); if (amp != std::string::npos) reqName = reqName.substr(0, amp); if (reqName.size() > 72) reqName = reqName.substr(0, 72); }
+        std::string rest = rq.path.substr(5);   // '' oder '/<session>'
+        std::string target = std::string("/") + MTX_PATH + "/whep" + rest;
+        if (rq.method == "POST" && rest.empty() && !reqName.empty()) target += "?name=" + reqName;
+        auto pr = lusrv::proxyLocal(MTX_WHEP_PORT, rq.method, target,
+            rq.headers.count("content-type") ? rq.headers.at("content-type") : "",
+            rq.headers.count("user-agent") ? rq.headers.at("user-agent") : "", rq.body);
+        if (pr.status == 0) { rs.status = 502; rs.body = "mediamtx nicht erreichbar"; return rs; }
+        rs.status = pr.status; rs.body = pr.body;
+        for (auto& [k, v] : pr.headers) {
+            if (k == "Location") {   // http://127.0.0.1:8889/live/whep/<id> -> /whep/<id>
+                std::string loc = v; size_t h = loc.find("//");
+                if (h != std::string::npos) { size_t sl = loc.find('/', h + 2); loc = sl == std::string::npos ? "/" : loc.substr(sl); }
+                std::string pre = std::string("/") + MTX_PATH + "/whep"; size_t pp = loc.find(pre);
+                if (pp != std::string::npos) loc = loc.substr(0, pp) + "/whep" + loc.substr(pp + pre.size());
+                rs.headers["Location"] = loc;
+            } else rs.headers[k] = v;
+        }
+        return rs;
+    }
+    if (rq.method == "GET" && rq.path == "/switch-events") { rs.status = 200; rs.takeoverSse = true; return rs; }
+    if (rq.method == "POST" && rq.path == "/freeze-log") {
+        json d = json::parse(rq.body, nullptr, false);
+        if (d.is_object()) bcLogStream("freeze-client: kind=" + d.value("kind", "") + " reason=" + d.value("reason", "") + " ms=" + std::to_string(d.value("ms", 0)) + " von=" + rq.clientIp);
+        rs.status = 204; return rs;
+    }
+    if (rq.method == "POST" && rq.path == "/qos") {
+        bcQosReport(rq.clientIp, json::parse(rq.body, nullptr, false));
+        rs.status = 204; return rs;
+    }
+    rs.status = 404; rs.body = "not found";
+    return rs;
+}
+
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
 // Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
 static json handleChannel(const std::string& channel, const json& args) {
@@ -581,6 +693,25 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-http") == 0) {
+        // Selbsttest: Streaming-Server auf 8787 starten + per Selbstabfrage verifizieren.
+        wchar_t cwd[MAX_PATH] = {}; GetCurrentDirectoryW(MAX_PATH, cwd); g_appDir = cwd;   // player.html im Projektroot
+        std::string s;
+        if (g_streamSrv.start(BROADCAST_PORT, handleStreamHttp)) {
+            auto inst = luart::httpGet("http://127.0.0.1:8787/instanz");
+            auto cfg = luart::httpGet("http://127.0.0.1:8787/cfg");
+            auto ply = luart::httpGet("http://127.0.0.1:8787/");
+            auto nf = luart::httpGet("http://127.0.0.1:8787/gibtsnicht");
+            s = "instanz=" + std::to_string(inst.status) + ":" + inst.body +
+                "\ncfg=" + std::to_string(cfg.status) + ":" + cfg.body.substr(0, 120) +
+                "\nplayer=" + std::to_string(ply.status) + " " + std::to_string(ply.body.size()) + "B" +
+                "\n404=" + std::to_string(nf.status) + "\n";
+            g_streamSrv.stop();
+        } else s = "SERVER-START FEHLGESCHLAGEN (Port belegt? Electron-Lumora streamt gerade?)\n";
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-launch") == 0) {
         // Selbsttest der Spielstart-Bausteine mit ECHTEN Pfaden dieses Systems.
         std::string aid = lulaunch::steamAppIdForExe(L"c:/program files (x86)/steam\\steamapps\\common\\Teardown\\teardown.exe");
