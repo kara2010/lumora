@@ -138,6 +138,12 @@ static void sendToUi(const std::string& channel, const json& payload) {
     json m = { {"channel", channel}, {"payload", payload} };
     PostMessageW(g_hwnd, WM_SHELL_REPLY, 0, (LPARAM)new std::wstring(widen(m.dump())));
 }
+// Push mit MEHREREN Argumenten: Shim ruft dann f(event, a, b, ...). Fuer
+// Electron-kompatible Renderer-Handler wie osd-setup-status (e, msg, done).
+static void sendToUiMulti(const std::string& channel, const json& payloadsArr) {
+    json m = { {"channel", channel}, {"payloads", payloadsArr} };
+    PostMessageW(g_hwnd, WM_SHELL_REPLY, 0, (LPARAM)new std::wstring(widen(m.dump())));
+}
 
 // --- Modul: Datei-/Ordner-Dialoge (IFileOpenDialog, modal wie in Electron) ---
 static json pickPathDialog(const wchar_t* title, bool folder, const wchar_t* filterName, const wchar_t* filterSpec) {
@@ -1684,6 +1690,117 @@ static void brokersEnsure() {   // beide Aufgaben anstossen (idempotent, 4s-Spaw
     shmOpen(g_senseShm, "Local\\LumoraOSDSense"); shmWriteApp(g_senseShm, 1);
     std::thread([]() { runTask(L"LumoraOSD-FPS"); runTask(L"LumoraOSD-Sensors"); }).detach();
 }
+
+// --- OSD-Ersteinrichtung (EIN Erklaer-Dialog, EIN UAC) ------------------------
+// Beim OSD-Einschalten das einrichten, was fuer die Vollausstattung fehlt: FPS-Task
+// (PresentMon), PawnIO-Treiber (Download + Authenticode-Pruefung von der offiziellen
+// Quelle + Silent-Install) und Sensor-Task. Alles Elevated in EINEM Aufruf ueber
+// lumora-elevate.exe -> genau EIN UAC-Dialog (zeigt Lumora, nicht "PowerShell").
+// 1:1 aus main.js ensureOsdSetup portiert.
+static std::atomic<bool> g_osdSetupRunning{ false };
+static std::wstring pawnioDirW() {
+    wchar_t pf[MAX_PATH]; if (!GetEnvironmentVariableW(L"ProgramFiles", pf, MAX_PATH)) wcscpy_s(pf, L"C:\\Program Files");
+    return std::wstring(pf) + L"\\PawnIO";
+}
+static bool pawnioInstalled() { return GetFileAttributesW((pawnioDirW() + L"\\PawnIOLib.dll").c_str()) != INVALID_FILE_ATTRIBUTES; }
+static bool schtaskPresent(const wchar_t* task) {
+    std::string out = runCaptureOutput(std::wstring(L"schtasks /query /tn \"") + task + L"\"", 8000);
+    return !out.empty() && out.find("ERROR") == std::string::npos && out.find("FEHLER") == std::string::npos;
+}
+static bool fpsTaskPresent()   { return schtaskPresent(L"LumoraOSD-FPS"); }
+static bool senseTaskPresent() { return schtaskPresent(L"LumoraOSD-Sensors"); }
+static bool fpsNeedsSetup() {
+    std::string src = loadSettings().value("osdFpsSource", std::string("auto"));
+    bool useRtss = (src == "rtss");   // RTSS-Weg (Task #24) braucht keinen FPS-Task
+    return !useRtss && !fpsTaskPresent();
+}
+static bool sensorsNeedSetup() {
+    if (!lubroker::cpuSensorModule()) return false;   // CPU nicht von PawnIO abgedeckt
+    json m = readMahm();
+    if (!m.is_null() && m.contains("cpuTemp")) return false;   // Afterburner liefert bereits
+    return !pawnioInstalled() || !senseTaskPresent();
+}
+static void ensureOsdSetup() {
+    if (g_osdSetupRunning.load()) return;
+    if (loadSettings().value("osdSetupDeclined", false)) return;
+    bool needFps = fpsNeedsSetup();
+    bool sensorGap = sensorsNeedSetup();
+    bool needPawnio = sensorGap && !pawnioInstalled();
+    bool needSense = sensorGap && !senseTaskPresent();
+    if (!needFps && !needPawnio && !needSense) return;
+    g_osdSetupRunning = true;
+    std::thread([needFps, needPawnio, needSense]() {
+        auto q = [](std::wstring s) { size_t p = 0; while ((p = s.find(L'\'', p)) != std::wstring::npos) { s.insert(p, 1, L'\''); p += 2; } return s; };
+        // 0) Erklaer-Dialog - listet nur, was wirklich fehlt.
+        std::wstring parts;
+        if (needFps)        parts += L"• FPS-Messung: kleiner Hintergrunddienst (PresentMon, liegt Lumora bei)\n";
+        if (needPawnio)     parts += L"• CPU-Temperatur & -Verbrauch: signierter Open-Source-Treiber PawnIO (wird von der offiziellen Quelle geladen)\n";
+        else if (needSense) parts += L"• CPU-Temperatur & -Verbrauch: Hintergrunddienst fuer den PawnIO-Treiber\n";
+        std::wstring dlg = L"Damit das OSD alle Werte anzeigen kann, richtet Lumora einmalig ein:\n\n" + parts +
+            L"\nGleich fragt Windows EINMAL nach deiner Bestaetigung (Administratorrechte). Danach laeuft alles automatisch – ohne weitere Nachfragen.";
+        if (MessageBoxW(g_hwnd, dlg.c_str(), L"OSD einrichten", MB_OKCANCEL | MB_ICONINFORMATION | MB_SETFOREGROUND) != IDOK) {
+            json s = loadSettings(); s["osdSetupDeclined"] = true; writeFile(settingsPath(), s.dump(2));
+            sendToUi("osd-fps-off", nullptr);   // Schalter zurueck auf "aus", nicht staendig neu fragen
+            g_osdSetupRunning = false; return;
+        }
+        auto status     = [](const std::string& m) { sendToUiMulti("osd-setup-status", json::array({ m, false })); };
+        auto statusDone = [](const std::string& m) { sendToUiMulti("osd-setup-status", json::array({ m, true })); };
+        auto statusOff  = []()                      { sendToUiMulti("osd-setup-status", json::array({ nullptr, false })); };
+        // 1) PawnIO-Installer non-elevated laden + Authenticode-Signatur pruefen.
+        std::wstring setupExe;
+        if (needPawnio) {
+            status("OSD-Einrichtung: Lade PawnIO-Treiber herunter und pruefe die Signatur ...");
+            wchar_t tmp[MAX_PATH]; GetTempPathW(MAX_PATH, tmp);
+            setupExe = std::wstring(tmp) + L"PawnIO_setup.exe";
+            std::wstring dl = L"Invoke-WebRequest -Uri 'https://github.com/namazso/PawnIO.Setup/releases/latest/download/PawnIO_setup.exe' -OutFile '"
+                + q(setupExe) + L"' -UseBasicParsing; (Get-AuthenticodeSignature '" + q(setupExe) + L"').Status";
+            std::string out = runCaptureOutput(L"powershell -NoProfile -Command \"" + dl + L"\"", 180000);
+            if (out.find("Valid") == std::string::npos) {
+                statusOff();
+                MessageBoxW(g_hwnd, L"Der PawnIO-Treiber konnte nicht geladen oder verifiziert werden.\nBitte Internetverbindung pruefen - die Einrichtung wird beim naechsten Einschalten des OSD erneut angeboten.",
+                    L"PawnIO-Download fehlgeschlagen", MB_OK | MB_ICONERROR);
+                g_osdSetupRunning = false; return;
+            }
+        }
+        // 2) EIN elevated Aufruf: [PawnIO-Silent-Install] + [FPS-Task] + [Sensor-Task].
+        wchar_t exeW[MAX_PATH]; GetModuleFileNameW(nullptr, exeW, MAX_PATH);
+        std::wstring exe = q(exeW);
+        auto taskPs = [&](const std::wstring& task, const std::wstring& arg, const std::wstring& v) -> std::wstring {
+            return L"$a" + v + L"=New-ScheduledTaskAction -Execute '" + exe + L"' -Argument '" + arg + L"'; "
+                   L"$p" + v + L"=New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive; "
+                   L"$s" + v + L"=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew; "
+                   L"Register-ScheduledTask -TaskName '" + task + L"' -Action $a" + v + L" -Principal $p" + v + L" -Settings $s" + v + L" -Force";
+        };
+        std::vector<std::wstring> ps;
+        if (needPawnio) ps.push_back(L"Start-Process -FilePath '" + q(setupExe) + L"' -ArgumentList '-install','-silent' -Wait");
+        if (needFps)    ps.push_back(taskPs(L"LumoraOSD-FPS", L"--fps-broker", L""));
+        if (needSense || needPawnio) ps.push_back(taskPs(L"LumoraOSD-Sensors", L"--sensor-broker", L"2"));
+        std::wstring inner; for (size_t i = 0; i < ps.size(); ++i) { if (i) inner += L"; "; inner += ps[i]; }
+        std::string b64 = b64encode((const uint8_t*)inner.data(), inner.size() * 2);   // UTF-16LE wie PowerShell -EncodedCommand
+        std::wstring b64w = widen(b64);
+        std::wstring elevExe = binDir() + L"\\lumora-elevate.exe";
+        std::wstring outer = (GetFileAttributesW(elevExe.c_str()) != INVALID_FILE_ATTRIBUTES)
+            ? L"Start-Process -FilePath '" + q(elevExe) + L"' -Verb RunAs -WindowStyle Hidden -ArgumentList '--ps-encoded','" + b64w + L"'"
+            : L"Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand " + b64w + L"'";
+        status("OSD-Einrichtung: Warte auf deine Bestaetigung (Windows-Sicherheitsabfrage) ...");
+        runCaptureOutput(L"powershell -NoProfile -Command \"" + outer + L"\"", 20000);
+        // 3) Warten, bis alles da ist (Install braucht Momente), dann Broker anwerfen.
+        bool working = false, ok = false;
+        for (int tries = 0; tries < 90; ++tries) {
+            bool fpsOk = !needFps || fpsTaskPresent();
+            bool pioOk = !needPawnio || pawnioInstalled();
+            bool senseOk = (!needSense && !needPawnio) || senseTaskPresent();
+            bool progressed = (needPawnio && pawnioInstalled()) || (needFps && fpsTaskPresent()) || ((needSense || needPawnio) && senseTaskPresent());
+            if (!working && progressed) { working = true; status("OSD-Einrichtung: Installiere und richte Hintergrunddienste ein ..."); }
+            if (fpsOk && pioOk && senseOk) { ok = true; break; }
+            Sleep(1000);
+        }
+        statusDone(ok ? "OSD-Einrichtung abgeschlossen - alle Werte kommen gleich rein. ✓"
+                      : "OSD-Einrichtung nicht abgeschlossen - erneut ueber Einstellungen → Overlay.");
+        g_brokerSpawnAt = 0; brokersEnsure();   // Broker sofort anwerfen (Spawn-Sperre zuruecksetzen)
+        g_osdSetupRunning = false;
+    }).detach();
+}
 static json readGpuPdh();
 // --- NVML (NVIDIA-Treiber-API, nvml.dll): temp/power/clock/vram wie readNvmlHandle ---
 struct NvmlUtil { unsigned int gpu, mem; };
@@ -1905,7 +2022,7 @@ static void createOsdWindow() {
                 return S_OK;
             }).Get());
 }
-static void showOsd() { createOsdWindow(); sensorsInit(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 1000, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
+static void showOsd() { createOsdWindow(); sensorsInit(); ensureOsdSetup(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 1000, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
 static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
 // Live-Edit-Modus (Alt+Shift+O, wie Electrons setOsdEditMode): Overlay wird kurz
@@ -2283,7 +2400,11 @@ static json handleChannel(const std::string& channel, const json& args) {
         applyOsdConfig();
         return true;
     }
-    if (channel == "setup-osd") { sendToUi("osd-setup-status", { {"state", "unavailable"} }); return false; }   // FPS-/CPU-Broker folgt mit dem Sensor-Schritt
+    if (channel == "setup-osd") {   // Einstellungen -> Overlay -> "OSD einrichten": Dialog+UAC sofort anbieten
+        json s = loadSettings(); s["osdSetupDeclined"] = false; writeFile(settingsPath(), s.dump(2));
+        ensureOsdSetup();   // zeigt nur, was wirklich fehlt (FPS-Task/PawnIO/Sensor-Task)
+        return s;
+    }
     if (channel == "osd-sources") return { {"gpu", "folgt (Sensor-Schritt)"}, {"cpu", "folgt (Sensor-Schritt)"}, {"fps", "folgt (Sensor-Schritt)"}, {"ram", "folgt (Sensor-Schritt)"} };
     if (channel == "toggle-window") { toggleMainWindow(); return true; }
     if (channel == "toggle-osd") { toggleOsdSetting(); return true; }
@@ -2481,7 +2602,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         if (GetFileAttributesW((bd + L"\\PresentMon.exe").c_str()) == INVALID_FILE_ATTRIBUTES) bd = bd.substr(0, bd.find_last_of(L'\\'));   // Dev: exe-Ordner
         for (int i = 1; i < ac; ++i) {
             if (wcscmp(av[i], L"--fps-broker") == 0) { WSADATA w; WSAStartup(MAKEWORD(2, 2), &w); return lubroker::runFpsBroker(bd); }
-            // --sensor-broker folgt (PawnIO) im naechsten Baustein
+            if (wcscmp(av[i], L"--sensor-broker") == 0) return lubroker::runSensorBroker(bd);   // PawnIO CPU-Temp/-Power
         }
     }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
