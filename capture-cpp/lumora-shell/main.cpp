@@ -9,6 +9,7 @@
 // Aufruf: lumora-shell [--appdir <Ordner mit index.html>]   (Default: aktuelles Verzeichnis)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <windowsx.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <objidl.h>
@@ -257,9 +258,72 @@ static void onWebMessage(const std::wstring& raw) {
     }
 }
 
+// ---- Rahmenloses Fenster (wie Electrons frame:false, Titlebar/Knoepfe kommen aus dem UI) ----
+// Drag laeuft ueber -webkit-app-region:drag (styles.css) via WebView2-NonClientRegionSupport;
+// Resize ueber einen schmalen Host-Randstreifen (WebView2-Bounds leicht eingerueckt, Farbe =
+// App-Hintergrund #0f0f0f -> unsichtbar). window-state.json wie in Electron persistiert.
+static const int GRIP = 6;      // Seiten/unten
+static const int GRIP_TOP = 3;  // oben schmaler (darueber beginnt die Drag-Titlebar im UI)
+
+static std::wstring windowStatePath() { return dataDir() + L"\\window-state.json"; }
+// In DIP-Koordinaten speichern (wie Electron) - sonst laufen die Werte bei DPI-Skalierung
+// zwischen Shell und Electron-App auseinander (gleiche Datei, Parallelbetrieb).
+static void saveWindowState(HWND h) {
+    WINDOWPLACEMENT wp{ sizeof(wp) };
+    if (!GetWindowPlacement(h, &wp)) return;
+    RECT& r = wp.rcNormalPosition;
+    UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
+    json s = { {"x", MulDiv(r.left, 96, dpi)}, {"y", MulDiv(r.top, 96, dpi)},
+               {"width", MulDiv(r.right - r.left, 96, dpi)}, {"height", MulDiv(r.bottom - r.top, 96, dpi)},
+               {"maximized", wp.showCmd == SW_SHOWMAXIMIZED} };
+    writeFile(windowStatePath(), s.dump(2));
+}
+static void placeWebView(HWND h) {
+    if (!g_controller) return;
+    RECT rc; GetClientRect(h, &rc);
+    if (!IsZoomed(h)) { rc.left += GRIP; rc.right -= GRIP; rc.top += GRIP_TOP; rc.bottom -= GRIP; }
+    g_controller->put_Bounds(rc);
+}
+
 static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
-    case WM_SIZE: if (g_controller) { RECT rc; GetClientRect(h, &rc); g_controller->put_Bounds(rc); } return 0;
+    case WM_NCCALCSIZE:
+        if (w) {   // Client = ganzes Fenster (keine System-Titelleiste/-Knoepfe mehr);
+            auto* pr = (RECT*)l;   // maximiert die unsichtbaren Frame-Insets abziehen, sonst ragt das Fenster ueber den Monitor
+            if (IsZoomed(h)) {
+                int fx = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+                int fy = GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+                pr->left += fx; pr->right -= fx; pr->top += fy; pr->bottom -= fy;
+            }
+            return 0;
+        }
+        break;
+    case WM_NCHITTEST: {   // Resize-Griffe auf dem Host-Randstreifen (der Rest gehoert dem WebView2)
+        LRESULT def = DefWindowProcW(h, m, w, l);
+        if (def != HTCLIENT || IsZoomed(h)) return def;
+        POINT p{ GET_X_LPARAM(l), GET_Y_LPARAM(l) }; ScreenToClient(h, &p);
+        RECT rc; GetClientRect(h, &rc);
+        bool L = p.x < GRIP, R = p.x >= rc.right - GRIP, T = p.y < GRIP, B = p.y >= rc.bottom - GRIP;
+        if (T && L) return HTTOPLEFT; if (T && R) return HTTOPRIGHT;
+        if (B && L) return HTBOTTOMLEFT; if (B && R) return HTBOTTOMRIGHT;
+        if (T) return HTTOP; if (B) return HTBOTTOM; if (L) return HTLEFT; if (R) return HTRIGHT;
+        return HTCLIENT;
+    }
+    case WM_GETMINMAXINFO: {   // wie Electron: minWidth 700 / minHeight 500 (DPI-skaliert)
+        auto* mmi = (MINMAXINFO*)l;
+        UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
+        mmi->ptMinTrackSize.x = MulDiv(700, dpi, 96);
+        mmi->ptMinTrackSize.y = MulDiv(500, dpi, 96);
+        return 0;
+    }
+    case WM_SIZE:
+        placeWebView(h);
+        if (g_webview) {   // UI wechselt damit das Maximieren-/Wiederherstellen-Icon
+            if (w == SIZE_MAXIMIZED) sendToUi("window-maximized", nullptr);
+            else if (w == SIZE_RESTORED) sendToUi("window-unmaximized", nullptr);
+        }
+        return 0;
+    case WM_CLOSE: saveWindowState(h); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -314,12 +378,23 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
 
     WNDCLASSW wc{}; wc.lpfnWndProc = wndProc; wc.hInstance = hInst; wc.lpszClassName = L"LumoraShell";
     wc.hIcon = LoadIconW(hInst, L"IDI_ICON1"); wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = CreateSolidBrush(RGB(11, 13, 20));   // dunkler App-Hintergrund bis WebView2 gemalt hat
+    wc.hbrBackground = CreateSolidBrush(RGB(15, 15, 15));   // #0f0f0f wie Electron (auch Farbe der Resize-Randstreifen)
     RegisterClassW(&wc);
+    // Fensterzustand wie Electron aus window-state.json (Position nur, wenn noch auf einem Monitor sichtbar)
+    json st = json::parse(readFile(windowStatePath()), nullptr, false);
+    if (!st.is_object()) st = json::object();
+    UINT sdpi = GetDpiForSystem(); if (!sdpi) sdpi = 96;   // DIP -> physisch (Electron-kompatible Datei)
+    int wwidth = MulDiv(st.value("width", 900), sdpi, 96), wheight = MulDiv(st.value("height", 600), sdpi, 96);
+    int wx = CW_USEDEFAULT, wy = CW_USEDEFAULT;
+    if (st.contains("x") && st.contains("y")) {
+        RECT tr{ MulDiv(st["x"].get<int>(), sdpi, 96), MulDiv(st["y"].get<int>(), sdpi, 96), 0, 0 };
+        tr.right = tr.left + wwidth; tr.bottom = tr.top + wheight;
+        if (MonitorFromRect(&tr, MONITOR_DEFAULTTONULL)) { wx = tr.left; wy = tr.top; }
+    }
     HWND hwnd = CreateWindowExW(0, L"LumoraShell", L"Lumora", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1400, 900, nullptr, nullptr, hInst, nullptr);
+        wx, wy, wwidth, wheight, nullptr, nullptr, hInst, nullptr);
     g_hwnd = hwnd;
-    ShowWindow(hwnd, nShow);
+    ShowWindow(hwnd, st.value("maximized", false) ? SW_MAXIMIZE : nShow);
 
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
     wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
@@ -334,7 +409,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                             if (FAILED(res2) || !ctrl) { PostQuitMessage(3); return res2; }
                             g_controller = ctrl;
                             g_controller->get_CoreWebView2(&g_webview);
-                            RECT rc; GetClientRect(hwnd, &rc); g_controller->put_Bounds(rc);
+                            placeWebView(hwnd);
+                            // -webkit-app-region:drag aus styles.css aktivieren (Fenster ziehen,
+                            // Doppelklick-Maximieren, System-Menue - wie Electrons frame:false).
+                            { ComPtr<ICoreWebView2Settings> set0; g_webview->get_Settings(&set0);
+                              ComPtr<ICoreWebView2Settings9> set9; if (set0) set0.As(&set9);
+                              if (set9) set9->put_IsNonClientRegionSupportEnabled(TRUE); }
                             // Projektordner als https://app.lumora/, Datenordner (%APPDATA%\lumora)
                             // als https://data.lumora/ einblenden (sendSync-Emulation + spaeter Medien)
                             ComPtr<ICoreWebView2_3> wv3; g_webview.As(&wv3);
