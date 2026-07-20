@@ -33,6 +33,13 @@ inline std::string alnumLower(const std::string& s) {
     std::string o; for (char c : s) { if (isalnum((unsigned char)c)) o.push_back((char)tolower((unsigned char)c)); }
     return o;
 }
+// Pfad wie Electrons path.join normalisieren (alle / -> \): der Steam-Registry-Pfad
+// kommt mit Forward-Slashes - ohne Normalisierung matcht der Duplikat-Filter des UI
+// (path.toLowerCase()-Vergleich gegen games.json-Bestand) nicht (User-Befund 2026-07-20).
+inline std::string pathUtf8(const std::wstring& w) {
+    std::string s = toUtf8(w); for (auto& c : s) if (c == '/') c = '\\';
+    return s;
+}
 
 struct ExeCand { std::wstring name, full; unsigned long long size; };
 
@@ -105,7 +112,7 @@ inline json scanSteam() {
             sfs::path gameDir = lp / L"common" / sfs::u8path(inst);
             if (!sfs::exists(gameDir, ec)) continue;
             std::wstring exe = findMainExe(gameDir, sfs::u8path(name).wstring());
-            if (!exe.empty()) out.push_back({ {"name", name}, {"path", toUtf8(exe)}, {"source", "Steam"} });
+            if (!exe.empty()) out.push_back({ {"name", name}, {"path", pathUtf8(exe)}, {"source", "Steam"} });
         }
     }
     return out;
@@ -123,7 +130,7 @@ inline json scanXbox() {
             sfs::path content = e.path() / L"Content";
             sfs::path dir = sfs::exists(content, ec) ? content : e.path();
             std::wstring exe = findMainExe(dir, e.path().filename().wstring());
-            if (!exe.empty()) out.push_back({ {"name", toUtf8(e.path().filename().wstring())}, {"path", toUtf8(exe)}, {"source", "Xbox"} });
+            if (!exe.empty()) out.push_back({ {"name", toUtf8(e.path().filename().wstring())}, {"path", pathUtf8(exe)}, {"source", "Xbox"} });
         }
     }
     return out;
@@ -136,7 +143,7 @@ inline json scanFolder(const std::wstring& folder) {
         std::string dn = toUtf8(e.path().filename().wstring());
         if (std::regex_search(dn, SKIP_DIR_RE)) continue;
         std::wstring exe = findMainExe(e.path(), e.path().filename().wstring());
-        if (!exe.empty()) out.push_back({ {"name", dn}, {"path", toUtf8(exe)}, {"source", "Ordner"} });
+        if (!exe.empty()) out.push_back({ {"name", dn}, {"path", pathUtf8(exe)}, {"source", "Ordner"} });
     }
     return out;
 }
@@ -171,7 +178,7 @@ inline json scanFolderRoots(const std::vector<std::wstring>& roots, const char* 
             std::string dn = toUtf8(e.path().filename().wstring());
             if (std::regex_search(dn, SKIP_DIR_RE)) continue;
             std::wstring exe = findMainExe(e.path(), e.path().filename().wstring());
-            if (!exe.empty()) out.push_back({ {"name", dn}, {"path", toUtf8(exe)}, {"source", source} });
+            if (!exe.empty()) out.push_back({ {"name", dn}, {"path", pathUtf8(exe)}, {"source", source} });
         }
     }
     return out;
@@ -189,7 +196,7 @@ inline json scanEpic() {   // ProgramData-Manifeste (.item-JSON)
         if (name.empty() || loc.empty()) continue;
         std::wstring exe = lexe.empty() ? findMainExe(sfs::u8path(loc), sfs::u8path(name).wstring())
                                         : (sfs::u8path(loc) / sfs::u8path(lexe)).wstring();
-        if (!exe.empty() && sfs::exists(exe, ec)) out.push_back({ {"name", name}, {"path", toUtf8(exe)}, {"source", "Epic"} });
+        if (!exe.empty() && sfs::exists(exe, ec)) out.push_back({ {"name", name}, {"path", pathUtf8(exe)}, {"source", "Epic"} });
     }
     return out;
 }
@@ -207,7 +214,7 @@ inline json scanGOG() {   // Registry GOG.com\Games: gameName/exe/path
             if (exe.empty() || !sfs::exists(exe, ec)) continue;
             std::string k = toUtf8(exe); for (auto& c : k) c = (char)tolower((unsigned char)c);
             bool dup = false; for (auto& s : seen) if (s == k) { dup = true; break; }
-            if (!dup) { seen.push_back(k); out.push_back({ {"name", toUtf8(name)}, {"path", toUtf8(exe)}, {"source", "GOG"} }); }
+            if (!dup) { seen.push_back(k); out.push_back({ {"name", toUtf8(name)}, {"path", pathUtf8(exe)}, {"source", "GOG"} }); }
         }
     }
     return out;
@@ -221,7 +228,7 @@ inline json scanUbisoft() {   // Registry Ubisoft\Launcher\Installs: InstallDir
         while (!dir.empty() && (dir.back() == L'\\' || dir.back() == L'/')) dir.pop_back();
         std::wstring name = sfs::path(dir).filename().wstring();
         std::wstring exe = findMainExe(dir, name);
-        if (!exe.empty()) out.push_back({ {"name", toUtf8(name)}, {"path", toUtf8(exe)}, {"source", "Ubisoft"} });
+        if (!exe.empty()) out.push_back({ {"name", toUtf8(name)}, {"path", pathUtf8(exe)}, {"source", "Ubisoft"} });
     }
     return out;
 }
@@ -248,7 +255,7 @@ inline json scanRockstar() {   // Registry Rockstar Games: InstallFolder (Launch
             if (exe.empty()) continue;
             std::string k = toUtf8(exe); for (auto& c : k) c = (char)tolower((unsigned char)c);
             bool dup = false; for (auto& s : seen) if (s == k) { dup = true; break; }
-            if (!dup) { seen.push_back(k); out.push_back({ {"name", toUtf8(sub)}, {"path", toUtf8(exe)}, {"source", "Rockstar"} }); }
+            if (!dup) { seen.push_back(k); out.push_back({ {"name", toUtf8(sub)}, {"path", pathUtf8(exe)}, {"source", "Rockstar"} }); }
         }
     }
     return out;
@@ -271,7 +278,7 @@ inline json scanBattleNet() {   // Uninstall-Eintraege mit Publisher=Blizzard (B
             if (exe.empty()) continue;
             std::string k = toUtf8(exe); for (auto& c : k) c = (char)tolower((unsigned char)c);
             bool dup = false; for (auto& s : seen) if (s == k) { dup = true; break; }
-            if (!dup) { seen.push_back(k); out.push_back({ {"name", toUtf8(name.empty() ? sfs::path(dir).filename().wstring() : name)}, {"path", toUtf8(exe)}, {"source", "Battle.net"} }); }
+            if (!dup) { seen.push_back(k); out.push_back({ {"name", toUtf8(name.empty() ? sfs::path(dir).filename().wstring() : name)}, {"path", pathUtf8(exe)}, {"source", "Battle.net"} }); }
         }
     }
     return out;

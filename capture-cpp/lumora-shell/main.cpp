@@ -521,8 +521,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-scan") == 0) {
         // Selbsttest: echten Steam+Xbox-Scan laufen lassen, Anzahl + Beispiele in die Testdatei.
         json r = lushell::scanGames(json::array());
-        std::string s = "gefunden=" + std::to_string(r.size()) + "\n";
-        for (size_t k = 0; k < r.size() && k < 6; ++k) s += "  " + r[k].value("source", "?") + ": " + r[k].value("name", "?") + " -> " + r[k].value("path", "?") + "\n";
+        std::string per = "steam=" + std::to_string(lushell::scanSteam().size()) + " epic=" + std::to_string(lushell::scanEpic().size()) +
+            " gog=" + std::to_string(lushell::scanGOG().size()) + " ubi=" + std::to_string(lushell::scanUbisoft().size()) +
+            " xbox=" + std::to_string(lushell::scanXbox().size()) + " ea=" + std::to_string(lushell::scanEA().size()) +
+            " rock=" + std::to_string(lushell::scanRockstar().size()) + " bnet=" + std::to_string(lushell::scanBattleNet().size()) +
+            " amzn=" + std::to_string(lushell::scanAmazon().size()) + " riot=" + std::to_string(lushell::scanRiot().size()) + "\n";
+        std::string s = per + "gefunden=" + std::to_string(r.size()) + "\n";
+        for (size_t k = 0; k < r.size() && k < 40; ++k) s += "  " + r[k].value("source", "?") + ": " + r[k].value("name", "?") + " -> " + r[k].value("path", "?") + "\n";
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
         return 0;
