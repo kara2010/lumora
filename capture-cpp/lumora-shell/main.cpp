@@ -33,6 +33,8 @@
 #include <mutex>
 #include <map>
 #include <set>
+#include <atomic>
+#include <random>
 #pragma comment(lib, "gdiplus.lib")
 
 // Antworten aus Worker-Threads muessen vom UI-Thread gepostet werden (WebView2-Regel):
@@ -425,7 +427,8 @@ static lusrv::Response handleStreamHttp(const lusrv::Request& rq) {
         return rs;
     }
     if (rq.method == "GET" && rq.path == "/instanz") {
-        json r = { {"lumora", true}, {"id", nullptr}, {"group", nullptr} };   // id/group folgen mit dem Gruppen-Modul
+        extern std::string instanzId(); extern std::string instanzGroup();
+        json r = { {"lumora", true}, {"id", instanzId()}, {"group", instanzGroup().empty() ? json(nullptr) : json(instanzGroup())} };
         rs.status = 200; rs.body = r.dump();
         rs.headers["Content-Type"] = "application/json"; rs.headers["Cache-Control"] = "no-store";
         return rs;
@@ -488,6 +491,7 @@ static std::string g_bcCapKey; static int g_bcNatKbit = 0; static int g_capFastF
 static int g_adaptLevel = 0; static ULONGLONG g_adaptLastChange = 0, g_adaptBadSince = 0, g_adaptGoodSince = 0, g_adaptUpAt = 0, g_adaptUpHold = 0;
 static ULONGLONG g_bcSince = 0; static int g_bcPeakViewers = 0, g_bcSwitches = 0; static std::set<std::string> g_bcSessionIds;
 static std::vector<std::string> g_bcPinholeIds; static bool g_bcV4Mapped = false;   // Router-Phase (Teardown beim Stopp)
+static void bcRegisterWatchLink(); static void bcUnregisterWatchLink();   // (Gruppen-Modul weiter unten)
 
 static void bcPushState() { sendToUi("broadcast-status", g_bcState); }
 static std::wstring binDir() { return g_appDir + L"\\bin"; }
@@ -909,6 +913,7 @@ static json startBroadcast() {
         g_bcState["needsForward"] = !pubIp.empty() && !v4Reachable && l6.empty();
         g_bcState["opening"] = false;
         bcPushState();
+        if (g_bcState.value("internet", false)) bcRegisterWatchLink();   // schoene stream.php-Teilen-URL statt IP
     }).detach();
     return g_bcState;
 }
@@ -921,6 +926,7 @@ static json stopBroadcast() {
             {"quality", s.value("streamQuality", "auto")}, {"fps", s.value("streamFps", 60)}, {"kbit", s.value("streamUploadKbit", 8000)} });
     }
     g_bcStopping = true;
+    bcUnregisterWatchLink();   // Teilen-URL abmelden (5-Min-Karenz laeuft)
     KillTimer(g_hwnd, TIMER_VIEWER); KillTimer(g_hwnd, TIMER_ADAPT);
     { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_cap); killChild(g_mtx); }
     // Router-Teardown im Hintergrund (SOAP darf den Stopp nicht verzoegern)
@@ -938,6 +944,123 @@ static json stopBroadcast() {
     bcPushState();
     bcLogStream("stop: Stream beendet");
     return g_bcState;
+}
+
+// --- Modul: Gruppe + Vermittlung + Teilen-URL (1:1 aus main.js) ------------------
+#define TIMER_GROUP 105   // 8s-Anwesenheits-Heartbeat
+#define TIMER_WATCH 106   // 20s-Refresh der Einzelstream-Registrierung
+static const char* GROUP_RELAY_DEFAULT = "https://lumora-streaming.de/gruppe.php";
+static json g_group = nullptr;                       // {code, members, relayFails} oder null
+static std::string g_accessKey, g_watchCode, g_prevWatchCode;
+static ULONGLONG g_prevWatchAt = 0;
+static std::atomic<bool> g_groupTickBusy{ false };
+
+static std::string randHex(int bytes) {
+    static std::random_device rd; std::string o; char b[3];
+    for (int i = 0; i < bytes; ++i) { sprintf_s(b, "%02x", (unsigned)(rd() & 0xFF)); o += b; }
+    return o;
+}
+static std::string groupRelayUrl() {
+    std::string u = loadSettings().value("groupRelayUrl", "");
+    while (!u.empty() && (u.back() == ' ')) u.pop_back();
+    return u.empty() ? GROUP_RELAY_DEFAULT : u;
+}
+static std::string streamShareUrl() {
+    std::string u = groupRelayUrl();
+    size_t p = u.rfind("gruppe.php");
+    return p != std::string::npos ? u.substr(0, p) + "stream.php" : u;
+}
+static std::string groupMemberId() {
+    json s = loadSettings();
+    std::string id = s.value("groupMemberId", "");
+    if (id.empty()) { id = randHex(6); s["groupMemberId"] = id; writeFile(settingsPath(), s.dump(2)); }
+    return id;
+}
+static std::string groupDisplayName() {
+    wchar_t name[64] = {}; DWORD n = 64;
+    if (GetUserNameW(name, &n) && name[0]) { std::string s = narrow(name); return s.substr(0, 24); }
+    return "Spieler";
+}
+// Anfrage an die Vermittlung (GET ohne / POST mit Body); niemals werfen, null bei Fehler.
+static json groupRelay(const std::string& action, const json& params, const json* bodyObj) {
+    std::string url = groupRelayUrl() + "?a=" + action;
+    if (params.is_object()) for (auto& [k, v] : params.items()) url += "&" + k + "=" + luart::urlEnc(v.is_string() ? v.get<std::string>() : v.dump());
+    luart::HttpResp r = bodyObj ? luart::httpPost(url, bodyObj->dump(), 8000) : luart::httpGet(url, L"", 8000);
+    json j = json::parse(r.body, nullptr, false);
+    return j.is_object() ? j : json(nullptr);
+}
+static json groupSelfEntry() {
+    if (g_accessKey.empty()) g_accessKey = randHex(16);   // Tuersteher-Schluessel je Session
+    return { {"id", groupMemberId()}, {"name", groupDisplayName()},
+             {"linkV4", g_bcState.value("linkV4", "").empty() ? json(nullptr) : json(g_bcState.value("linkV4", ""))},
+             {"linkV6", g_bcState.value("linkV6", "").empty() ? json(nullptr) : json(g_bcState.value("linkV6", ""))},
+             {"streaming", g_bcState.value("active", false)}, {"vk", g_accessKey} };
+}
+static json groupPublicState() {
+    if (g_group.is_null()) return { {"active", false}, {"lastCode", loadSettings().value("groupLastCode", "")} };
+    json members = json::array();
+    for (auto& m : g_group.value("members", json::array()))
+        members.push_back({ {"id", m.value("id", "")}, {"name", m.value("name", "")},
+                            {"isSelf", m.value("id", "") == groupMemberId()}, {"streaming", m.value("streaming", true)} });
+    return { {"active", true}, {"code", g_group.value("code", "")},
+             {"link", groupRelayUrl() + "?code=" + g_group.value("code", "")},
+             {"members", members}, {"relayUnreachable", g_group.value("relayFails", 0) > 0} };
+}
+static void groupPushState() { sendToUi("group-status", groupPublicState()); }
+static std::string bcShareUrl() {
+    if (!g_group.is_null()) return groupRelayUrl() + "?code=" + g_group.value("code", "");
+    if (!g_watchCode.empty()) return streamShareUrl() + "?s=" + g_watchCode;
+    return "";
+}
+static void groupTickOnce() {
+    if (g_group.is_null()) return;
+    json self = groupSelfEntry();
+    json r = groupRelay("update", { {"code", g_group.value("code", "")} }, &self);
+    if (r.is_object() && r.value("ok", false)) {
+        g_group["relayFails"] = 0;
+        g_group["members"] = r.value("members", json::array());
+        groupPushState();
+        return;
+    }
+    if (r.is_object() && r.value("error", "") == "no-room") {   // TTL abgelaufen -> lokal beenden
+        KillTimer(g_hwnd, TIMER_GROUP);
+        g_group = nullptr;
+        groupPushState();
+        return;
+    }
+    g_group["relayFails"] = g_group.value("relayFails", 0) + 1;
+    groupPushState();
+}
+// Teilen-URL (stream.php?s=CODE) registrieren - Logik 1:1 inkl. 5-Min-Code-Karenz.
+static void bcRegisterWatchLink() {
+    if (!g_watchCode.empty()) { std::string su = bcShareUrl(); if (!su.empty()) { g_bcState["link"] = su; bcPushState(); } return; }
+    if (g_bcState.value("linkV4", "").empty() && g_bcState.value("linkV6", "").empty()) return;   // nur LAN
+    json params = json::object();
+    if (!g_prevWatchCode.empty() && GetTickCount64() - g_prevWatchAt < 300000) params["want"] = g_prevWatchCode;
+    json empty = json::object();
+    json c = groupRelay("create", params, &empty);
+    if (!c.is_object() || !c.value("ok", false) || c.value("code", "").empty()) { bcLogStream("watch-link: Vermittlung nicht erreichbar -> IP-Link bleibt"); return; }
+    json self = groupSelfEntry();
+    json r = groupRelay("update", { {"code", c.value("code", "")} }, &self);
+    if (!r.is_object() || !r.value("ok", false)) { bcLogStream("watch-link: Registrierung fehlgeschlagen -> IP-Link bleibt"); return; }
+    if (!g_bcState.value("active", false)) { json leave = { {"id", groupMemberId()} }; groupRelay("leave", { {"code", c.value("code", "")} }, &leave); return; }
+    g_watchCode = c.value("code", "");
+    g_bcState["link"] = streamShareUrl() + "?s=" + g_watchCode;
+    bcLogStream("watch-link: " + g_bcState.value("link", ""));
+    SetTimer(g_hwnd, TIMER_WATCH, 20000, nullptr);
+    bcPushState();
+}
+// /instanz-Identitaet (Vorwaertsdeklaration im HTTP-Handler; nicht-static wegen extern)
+std::string instanzId() { return groupMemberId(); }
+std::string instanzGroup() { return g_group.is_null() ? "" : g_group.value("code", ""); }
+static void bcUnregisterWatchLink() {
+    g_accessKey.clear();   // naechster Stream bekommt einen frischen Tuersteher-Schluessel
+    KillTimer(g_hwnd, TIMER_WATCH);
+    if (!g_watchCode.empty()) {
+        g_prevWatchCode = g_watchCode; g_prevWatchAt = GetTickCount64();   // 5-Min-Karenz
+        std::string code = g_watchCode; g_watchCode.clear();
+        std::thread([code]() { json leave = { {"id", groupMemberId()} }; groupRelay("leave", { {"code", code} }, &leave); }).detach();
+    }
 }
 
 // --- Modul: Tray + Hotkeys + Autostart + Deep-Link (1:1-Verhalten aus main.js) ---
@@ -1155,6 +1278,63 @@ static json handleChannel(const std::string& channel, const json& args) {
         return out;
     }
     if (channel == "test-connectivity") return nullptr;   // Router-Diagnose folgt mit der UPnP-Phase
+    // ---- Gruppe (gruppe.php-Vermittlung) ----
+    if (channel == "group-start") {
+        if (!g_group.is_null()) return groupPublicState();
+        if (!g_bcState.value("active", false)) {   // Ein-Klick: Stream automatisch mit hochziehen
+            startBroadcast();
+            if (!g_bcState.value("active", false)) return { {"active", false}, {"error", "stream-start-failed"} };
+        }
+        for (int i = 0; i < 40 && g_bcState.value("opening", true); ++i) Sleep(500);   // Router-Phase abwarten (linkV4/V6!)
+        json empty = json::object();
+        json c = groupRelay("create", json::object(), &empty);
+        if (!c.is_object() || !c.value("ok", false) || c.value("code", "").empty()) return { {"active", false}, {"error", "relay-unreachable"} };
+        g_group = { {"code", c.value("code", "")}, {"members", json::array()}, {"relayFails", 0} };
+        json self = groupSelfEntry();
+        json r = groupRelay("update", { {"code", c.value("code", "")} }, &self);
+        if (r.is_object() && r.value("ok", false)) g_group["members"] = r.value("members", json::array());
+        json s = loadSettings(); s["groupLastCode"] = c.value("code", ""); writeFile(settingsPath(), s.dump(2));
+        SetTimer(g_hwnd, TIMER_GROUP, 8000, nullptr);
+        groupPushState();
+        g_bcState["link"] = bcShareUrl(); bcPushState();   // Teilen-Link = Grid-Link (alle Streams)
+        return groupPublicState();
+    }
+    if (channel == "group-join" && args.size() >= 1 && args[0].is_string()) {
+        if (!g_group.is_null()) return { {"active", false}, {"error", "already-in-group"} };
+        std::string raw = args[0].get<std::string>(); for (auto& ch : raw) ch = (char)toupper((unsigned char)ch);
+        std::smatch m; std::string code;
+        if (std::regex_search(raw, m, std::regex("[?&]CODE=([A-Z2-9]{6})\\b"))) code = m[1];
+        else if (std::regex_match(raw, m, std::regex("\\s*([A-Z2-9]{6})\\s*"))) code = m[1];
+        if (code.empty()) return { {"active", false}, {"error", "bad-code"} };
+        if (!g_bcState.value("active", false)) {
+            startBroadcast();
+            if (!g_bcState.value("active", false)) return { {"active", false}, {"error", "stream-start-failed"} };
+        }
+        for (int i = 0; i < 40 && g_bcState.value("opening", true); ++i) Sleep(500);
+        json self = groupSelfEntry();
+        json r = groupRelay("update", { {"code", code} }, &self);
+        if (!r.is_object() || !r.value("ok", false)) return { {"active", false}, {"error", r.is_object() ? r.value("error", "relay-unreachable") : "relay-unreachable"} };
+        g_group = { {"code", code}, {"members", r.value("members", json::array())}, {"relayFails", 0} };
+        json s = loadSettings(); s["groupLastCode"] = code; writeFile(settingsPath(), s.dump(2));
+        SetTimer(g_hwnd, TIMER_GROUP, 8000, nullptr);
+        groupPushState();
+        g_bcState["link"] = bcShareUrl(); bcPushState();
+        return groupPublicState();
+    }
+    if (channel == "group-leave") {
+        if (g_group.is_null()) return groupPublicState();
+        std::string code = g_group.value("code", "");
+        KillTimer(g_hwnd, TIMER_GROUP);
+        g_group = nullptr;
+        json leave = { {"id", groupMemberId()} };
+        groupRelay("leave", { {"code", code} }, &leave);
+        groupPushState();
+        std::string su = bcShareUrl();
+        if (!su.empty()) g_bcState["link"] = su; else if (!g_bcState.value("linkV4", "").empty()) g_bcState["link"] = g_bcState["linkV4"];
+        bcPushState();
+        return groupPublicState();
+    }
+    if (channel == "group-status") return groupPublicState();
     // ---- Artwork/Netz (laufen im Worker-Thread, s. onWebMessage) ----
     if (channel == "fetch-cover") {
         std::string name = args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "";
@@ -1243,7 +1423,8 @@ static bool isSlowChannel(const std::string& c) {
            c == "fetch-image-url" || c == "search-steam" || c == "search-msstore" || c == "search-sgdb" ||
            c == "launch-game" ||   // HDR-Wartezeit (3s) + AUMID-Suche
            c == "start-broadcast" || c == "stop-broadcast" || c == "list-sources" ||   // Relay-Ready/Helfer-Lauf
-           c == "list-viewers" || c == "kick-viewer" || c == "preview-whep" || c == "preview-whep-stop";
+           c == "list-viewers" || c == "kick-viewer" || c == "preview-whep" || c == "preview-whep-stop" ||
+           c == "group-start" || c == "group-join" || c == "group-leave" || c == "group-status";   // Vermittlungs-Netz
 }
 static void onWebMessage(const std::wstring& raw) {
     json msg = json::parse(narrow(raw), nullptr, false);
@@ -1344,6 +1525,14 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_VIEWER) { bcViewerTick(); return 0; }
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
+        if (w == TIMER_GROUP) {   // Heartbeat im Worker (Netz, 8s-Timeout) - nie doppelt
+            if (!g_groupTickBusy.exchange(true)) std::thread([]() { groupTickOnce(); g_groupTickBusy = false; }).detach();
+            return 0;
+        }
+        if (w == TIMER_WATCH) {   // Einzelstream-Registrierung auffrischen
+            if (!g_watchCode.empty()) std::thread([]() { json self = groupSelfEntry(); groupRelay("update", { {"code", g_watchCode} }, &self); }).detach();
+            return 0;
+        }
         break;
     case WM_SHELL_TRAY:
         if (LOWORD(l) == WM_LBUTTONUP) { toggleMainWindow(); return 0; }
