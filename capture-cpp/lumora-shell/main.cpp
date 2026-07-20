@@ -287,17 +287,15 @@ static void placeWebView(HWND h) {
 
 static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
-    case WM_NCCALCSIZE:
-        if (w) {   // Client = ganzes Fenster (keine System-Titelleiste/-Knoepfe mehr);
-            auto* pr = (RECT*)l;   // maximiert die unsichtbaren Frame-Insets abziehen, sonst ragt das Fenster ueber den Monitor
-            if (IsZoomed(h)) {
-                int fx = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-                int fy = GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-                pr->left += fx; pr->right -= fx; pr->top += fy; pr->bottom -= fy;
-            }
-            return 0;
+    case WM_NCCALCSIZE: {   // BEIDE wParam-Faelle behandeln: beim initialen Fensteraufbau kommt
+        auto* pr = (RECT*)l;   // FALSE - unbehandelt blieb da die System-Titelleiste stehen (Start im Fenster-Modus)
+        if (IsZoomed(h)) {     // maximiert die unsichtbaren Frame-Insets abziehen, sonst ragt das Fenster ueber den Monitor
+            int fx = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            int fy = GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            pr->left += fx; pr->right -= fx; pr->top += fy; pr->bottom -= fy;
         }
-        break;
+        return 0;
+    }
     case WM_NCHITTEST: {   // Resize-Griffe auf dem Host-Randstreifen (der Rest gehoert dem WebView2)
         LRESULT def = DefWindowProcW(h, m, w, l);
         if (def != HTCLIENT || IsZoomed(h)) return def;
@@ -394,6 +392,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     HWND hwnd = CreateWindowExW(0, L"LumoraShell", L"Lumora", WS_OVERLAPPEDWINDOW,
         wx, wy, wwidth, wheight, nullptr, nullptr, hInst, nullptr);
     g_hwnd = hwnd;
+    // Frame-Neuberechnung erzwingen (WM_NCCALCSIZE greift sonst erst bei der naechsten Groessenaenderung)
+    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     ShowWindow(hwnd, st.value("maximized", false) ? SW_MAXIMIZE : nShow);
 
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
