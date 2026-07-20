@@ -40,6 +40,7 @@
 #include "http_server.h"
 #include "upnp.h"
 #include "osd_broker.h"
+#include "osd_rtss.h"
 #include <thread>
 #include <mutex>
 #include <map>
@@ -1345,6 +1346,7 @@ static void bcUnregisterWatchLink() {
 #define HK_STREAM 2
 #define HK_OSD 3
 #define HK_OSDEDIT 5
+#define HK_OSDAB 6
 static NOTIFYICONDATAW g_nid{};
 static bool g_trayOn = false, g_quitting = false;
 
@@ -1476,7 +1478,7 @@ static bool parseAccelerator(const std::string& acc, UINT& mods, UINT& vk) {
     return vk != 0;
 }
 static bool registerHotkeys() {
-    UnregisterHotKey(g_hwnd, HK_TOGGLE); UnregisterHotKey(g_hwnd, HK_STREAM); UnregisterHotKey(g_hwnd, HK_OSD); UnregisterHotKey(g_hwnd, HK_OSDEDIT);
+    UnregisterHotKey(g_hwnd, HK_TOGGLE); UnregisterHotKey(g_hwnd, HK_STREAM); UnregisterHotKey(g_hwnd, HK_OSD); UnregisterHotKey(g_hwnd, HK_OSDEDIT); UnregisterHotKey(g_hwnd, HK_OSDAB);
     json s = loadSettings();
     bool ok = true;
     UINT m, v;
@@ -1488,6 +1490,8 @@ static bool registerHotkeys() {
     if (!oh.empty() && parseAccelerator(oh, m, v)) RegisterHotKey(g_hwnd, HK_OSD, m | MOD_NOREPEAT, v);
     std::string oe = s.value("osdEditHotkey", "Alt+Shift+O");
     if (!oe.empty() && parseAccelerator(oe, m, v)) RegisterHotKey(g_hwnd, HK_OSDEDIT, m | MOD_NOREPEAT, v);
+    std::string ab = s.value("osdAbHotkey", "Alt+B");   // Alt+B: natives Afterburner-OSD (RTSS) an/aus
+    if (!ab.empty() && parseAccelerator(ab, m, v)) RegisterHotKey(g_hwnd, HK_OSDAB, m | MOD_NOREPEAT, v);
     return ok;
 }
 // Autostart: HKCU-Run-Key "Lumora" + Legacy-/Doppel-Keys raeumen (der bekannte
@@ -1636,6 +1640,19 @@ static json readBrokerFps() {
     }
     if (!g_lastFps.is_null() && GetTickCount64() - g_lastFpsAt < 1500) return g_lastFps;
     return nullptr;
+}
+// FPS-Quelle waehlen (osdFpsSource, 1:1 main.js): 'rtss' -> RTSS, 'presentmon' ->
+// PresentMon-Broker, 'auto' -> RTSS wenn verfuegbar, sonst Broker. g_fpsUseRtss
+// merkt sich die Wahl fuer osdDataTick (nur dann brokersEnsure).
+static bool g_fpsUseRtss = false;
+static json readFps() {
+    std::string src = loadSettings().value("osdFpsSource", std::string("auto"));
+    g_fpsUseRtss = (src == "rtss") ? true : (src == "presentmon") ? false : lurtss::available();
+    if (g_fpsUseRtss) {
+        lurtss::FpsOut r = lurtss::readFps();
+        return r.ok ? json{ {"fps", r.fps}, {"frametime", r.frametime} } : json(nullptr);
+    }
+    return readBrokerFps();
 }
 // MSI Afterburner "MAHMSharedMemory" (1:1 aus main.js readMahmRaw): laeuft Afterburner,
 // liefert es CPU-Temp/-Takt/-Watt. Header {sig 'MAHM', ver, headerSize, numEntries,
@@ -1916,9 +1933,9 @@ static void osdDataTick() {
     }
     PdhCollectQueryData(g_pdhQ);   // frisches Sample fuer die Delta-Zaehler
     json payload = { {"gpu", readGpuNative()}, {"cpu", readCpuNative()} };
-    json f = readBrokerFps();
+    json f = readFps();   // RTSS oder PresentMon-Broker je nach osdFpsSource
     if (f.is_object()) { payload["fps"] = f["fps"]; payload["frametime"] = f["frametime"]; }
-    else { payload["fps"] = "\xE2\x80\xA6"; brokersEnsure(); }   // "..." bis der Broker liefert
+    else { payload["fps"] = "\xE2\x80\xA6"; if (!g_fpsUseRtss) brokersEnsure(); }   // RTSS braucht keinen Broker
     sendToOsd("osd-data", payload);
 }
 static void sendToOsd(const std::string& channel, const json& payload) {   // threadsicher wie sendToUi
@@ -2569,6 +2586,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == HK_TOGGLE) { toggleMainWindow(); return 0; }
         if (w == HK_OSD) { toggleOsdSetting(); return 0; }
         if (w == HK_OSDEDIT) { setOsdEditMode(!g_osdEdit); return 0; }
+        if (w == HK_OSDAB) { lurtss::toggleAbOsd(); return 0; }   // Alt+B: Afterburner-OSD (RTSS) toggeln
         if (w == HK_STREAM) {   // Stream-Hotkey: an/aus (im Worker, blockiert den Hotkey nicht)
             std::thread([]() { if (g_bcState.value("active", false)) stopBroadcast(); else startBroadcast(); }).detach();
             return 0;
