@@ -28,6 +28,7 @@
 #include "artwork.h"
 #include "launch_game.h"
 #include "http_server.h"
+#include "upnp.h"
 #include <thread>
 #include <mutex>
 #include <map>
@@ -486,6 +487,7 @@ static bool g_bcStopping = false;
 static std::string g_bcCapKey; static int g_bcNatKbit = 0; static int g_capFastFails = 0;
 static int g_adaptLevel = 0; static ULONGLONG g_adaptLastChange = 0, g_adaptBadSince = 0, g_adaptGoodSince = 0, g_adaptUpAt = 0, g_adaptUpHold = 0;
 static ULONGLONG g_bcSince = 0; static int g_bcPeakViewers = 0, g_bcSwitches = 0; static std::set<std::string> g_bcSessionIds;
+static std::vector<std::string> g_bcPinholeIds; static bool g_bcV4Mapped = false;   // Router-Phase (Teardown beim Stopp)
 
 static void bcPushState() { sendToUi("broadcast-status", g_bcState); }
 static std::wstring binDir() { return g_appDir + L"\\bin"; }
@@ -848,11 +850,66 @@ static json startBroadcast() {
     json cfg = bcStreamCfg(enc);
     bcStartNative(cfg);
     g_bcState["quality"] = bcQualityLabel(cfg);
-    g_bcState["opening"] = false;   // V1: LAN sofort nutzbar; Router-Phase (UPnP/oeffentliche IPs) folgt als naechster Block
-    bcPushState();
+    bcPushState();   // Medien laufen, Vorschau kann verbinden (opening bleibt true bis Router-Phase durch)
     SetTimer(g_hwnd, TIMER_VIEWER, 2000, nullptr);
     SetTimer(g_hwnd, TIMER_ADAPT, 5000, nullptr);
     bcLogStream("start: nativ " + enc + " " + bcQualityLabel(cfg) + " " + lanLink);
+    // PHASE 2 - ROUTER, PARALLEL (1:1 aus main.js): oeffentliche IPs + Portfreigaben +
+    // IPv6-Pinholes; erst danach steht der oeffentliche Link fest -> opening=false.
+    std::thread([hosts]() {
+        ULONGLONG t0 = GetTickCount64();
+        json s = loadSettings();
+        bool forceV6 = s.value("streamForceIPv6", false);
+        std::string pubIp = luupnp::getExternalIp();
+        std::string pubIp6 = luupnp::publicIPv6();
+        bool tcpOk = false, udpOk = false, v6Ok = false, v4Occupied = false;
+        if (!pubIp6.empty()) {   // Pinholes (TCP-Signalisierung + UDP-Medien)
+            std::string t6 = luupnp::addPinhole(pubIp6, BROADCAST_PORT, "TCP");
+            std::string u6 = luupnp::addPinhole(pubIp6, MTX_ICE_UDP, "UDP");
+            if (!t6.empty()) g_bcPinholeIds.push_back(t6);
+            if (!u6.empty()) g_bcPinholeIds.push_back(u6);
+            v6Ok = !t6.empty() && !u6.empty();
+        }
+        if (!forceV6 && !pubIp.empty()) {
+            // Zweiter PC im selben Netz: antwortet unter der oeffentlichen IPv4 schon eine
+            // ANDERE Lumora-Instanz, deren Mapping NICHT stehlen (Hairpin-Check, 1.5s wie Electron).
+            auto r = luart::httpGet("http://" + pubIp + ":" + std::to_string(BROADCAST_PORT) + "/instanz", L"", 1500);
+            json j = json::parse(r.body, nullptr, false);
+            if (r.status == 200 && j.is_object() && j.value("lumora", false) && !j.value("id", json()).is_null()) v4Occupied = true;   // fremde (Electron-)Instanz mit Identitaet
+        }
+        if (!v4Occupied && !forceV6) {
+            tcpOk = luupnp::mapPort(BROADCAST_PORT, "TCP", "Lumora Stream");
+            udpOk = luupnp::mapPort(MTX_ICE_UDP, "UDP", "Lumora Stream Medien");
+            if (tcpOk || udpOk) g_bcV4Mapped = true;
+        }
+        if (!g_bcState.value("active", false)) {   // waehrend der Router-Phase gestoppt
+            for (auto& id : g_bcPinholeIds) luupnp::deletePinhole(id);
+            g_bcPinholeIds.clear();
+            return;
+        }
+        // Frische Hosts vom Cache abweichend? Config aktualisieren (mediamtx laedt selbst neu) + Cache speichern.
+        std::vector<std::string> fresh;
+        if (!forceV6 && !pubIp.empty()) fresh.push_back(pubIp);
+        if (!pubIp6.empty()) fresh.push_back(pubIp6);
+        if (fresh != hosts) {
+            bcWriteMtxConfig(fresh);
+            json s2 = loadSettings(); json arr = json::array(); for (auto& h : fresh) arr.push_back(h);
+            s2["streamLastHosts"] = arr; writeFile(settingsPath(), s2.dump(2));
+        }
+        bcLogStream("router-phase: " + std::to_string(GetTickCount64() - t0) + " ms (v4=" + ((tcpOk && udpOk) ? "ok" : "nein") + " v6=" + (v6Ok ? "ok" : "nein") + (v4Occupied ? ", IPv4 belegt von anderer Instanz" : "") + ")");
+        bool v4Reachable = tcpOk && udpOk && !pubIp.empty();
+        std::string l4 = v4Reachable ? ("http://" + pubIp + ":" + std::to_string(BROADCAST_PORT) + "/") : "";
+        std::string l6 = (v6Ok && !pubIp6.empty()) ? ("http://[" + pubIp6 + "]:" + std::to_string(BROADCAST_PORT) + "/") : "";
+        if (v4Reachable) g_bcState["link"] = l4;                       // Link-Prioritaet wie das Original
+        else if (!l6.empty()) g_bcState["link"] = l6;
+        else if (!pubIp.empty()) g_bcState["link"] = "http://" + pubIp + ":" + std::to_string(BROADCAST_PORT) + "/";
+        g_bcState["linkV4"] = l4; g_bcState["linkV6"] = l6;
+        g_bcState["internet"] = v4Reachable || !l6.empty();
+        g_bcState["ipv6Only"] = !v4Reachable && !l6.empty();
+        g_bcState["needsForward"] = !pubIp.empty() && !v4Reachable && l6.empty();
+        g_bcState["opening"] = false;
+        bcPushState();
+    }).detach();
     return g_bcState;
 }
 static json stopBroadcast() {
@@ -866,6 +923,15 @@ static json stopBroadcast() {
     g_bcStopping = true;
     KillTimer(g_hwnd, TIMER_VIEWER); KillTimer(g_hwnd, TIMER_ADAPT);
     { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_cap); killChild(g_mtx); }
+    // Router-Teardown im Hintergrund (SOAP darf den Stopp nicht verzoegern)
+    if (g_bcV4Mapped || !g_bcPinholeIds.empty()) {
+        std::vector<std::string> pins = g_bcPinholeIds; g_bcPinholeIds.clear();
+        bool unmap = g_bcV4Mapped; g_bcV4Mapped = false;
+        std::thread([pins, unmap]() {
+            if (unmap) { luupnp::unmapPort(BROADCAST_PORT, "TCP"); luupnp::unmapPort(MTX_ICE_UDP, "UDP"); }
+            for (auto& id : pins) luupnp::deletePinhole(id);
+        }).detach();
+    }
     if (g_streamSrvUp) { g_streamSrv.stop(); g_streamSrvUp = false; }
     g_bcState = { {"active", false}, {"port", BROADCAST_PORT}, {"link", ""}, {"linkV4", ""}, {"linkV6", ""},
                   {"lanLink", ""}, {"viewers", 0}, {"quality", ""}, {"internet", false}, {"opening", false} };
@@ -1197,17 +1263,38 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // COM (FileDialogs, WebView2) - GUI-Thread = STA
     Gdiplus::GdiplusStartupInput gsi; ULONG_PTR gtok = 0; Gdiplus::GdiplusStartup(&gtok, &gsi, nullptr);   // Datei-Icons (PNG)
+    { WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa); }   // Sockets frueh (bcLanIp/mtx-Probe/SSDP laufen VOR dem HTTP-Server)
     // App-Ordner (index.html) finden: --appdir > aktuelles Verzeichnis > exe-Ordner >
     // von dort aufwaerts (Doppelklick aus build/Release im Quellbaum). Im spaeteren
     // Installer liegt das UI direkt neben der exe - dann greift Stufe 3 sofort.
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-upnp") == 0) {
+        WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
+        std::string s;
+        ULONGLONG t0 = GetTickCount64();
+        auto locs = luupnp::discover(3000);
+        s += "discover: " + std::to_string(locs.size()) + " IGDs in " + std::to_string(GetTickCount64() - t0) + "ms";
+        for (auto& l : locs) s += " [" + l + "]";
+        s += "\n";
+        std::string ip = luupnp::getExternalIp();
+        s += "externalIp: " + (ip.empty() ? "FEHLT" : ip) + "\n";
+        std::string v6 = luupnp::publicIPv6();
+        s += "publicIPv6: " + (v6.empty() ? "FEHLT" : v6) + "\n";
+        bool m = luupnp::mapPort(48787, "TCP", "Lumora UPnP-Test");
+        s += "mapPort(48787): " + std::to_string(m) + "\n";
+        if (m) { luupnp::unmapPort(48787, "TCP"); s += "unmap: ok\n"; }
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-broadcast") == 0) {
         // E2E-Selbsttest: ECHTER Stream-Start (Relay + nativer Helfer) -> mediamtx-API
         // muss den Pfad mit H264+Opus 'ready' melden -> sauber stoppen.
         wchar_t cwd[MAX_PATH] = {}; GetCurrentDirectoryW(MAX_PATH, cwd); g_appDir = cwd;
         json st = startBroadcast();
+        Sleep(9000);   // Router-Phase (SSDP 3s + SOAP) abwarten
         std::string s = "start: active=" + std::to_string(st.value("active", false)) + " enc=" + st.value("encoder", "?") + " link=" + st.value("lanLink", "?") + "\n";
         Sleep(5000);
         auto r = luart::httpGet("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/paths/get/" + MTX_PATH);
