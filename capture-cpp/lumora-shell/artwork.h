@@ -45,8 +45,10 @@ inline std::string urlEnc(const std::string& s) {
 }
 
 struct HttpResp { int status = 0; std::string body; };
-// GET mit Redirect-Folge (WinHTTP-Default) + optionalen Zusatz-Headern.
-inline HttpResp httpGet(const std::string& url8, const std::wstring& extraHeaders = L"") {
+// GET mit Redirect-Folge (WinHTTP-Default) + optionalen Zusatz-Headern + Timeout
+// (Default 15s; kurze Werte fuer Erreichbarkeits-Proben wie den /instanz-Hairpin-Check,
+// der sonst mit dem 60s-WinHTTP-Default die ganze Router-Phase blockiert).
+inline HttpResp httpGet(const std::string& url8, const std::wstring& extraHeaders = L"", int timeoutMs = 15000) {
     HttpResp r; std::wstring url = toW(url8);
     URL_COMPONENTS uc{ sizeof(uc) }; wchar_t host[256] = {}, path[4096] = {};
     uc.lpszHostName = host; uc.dwHostNameLength = 255; uc.lpszUrlPath = path; uc.dwUrlPathLength = 4095;
@@ -56,6 +58,7 @@ inline HttpResp httpGet(const std::string& url8, const std::wstring& extraHeader
     HINTERNET con = WinHttpConnect(ses, host, uc.nPort, 0);
     HINTERNET req = con ? WinHttpOpenRequest(con, L"GET", path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
         (uc.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0) : nullptr;
+    if (req) WinHttpSetTimeouts(req, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
     if (req && WinHttpSendRequest(req, extraHeaders.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : extraHeaders.c_str(),
         extraHeaders.empty() ? 0 : (DWORD)-1, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(req, nullptr)) {
         DWORD st = 0, sz = sizeof(st);
