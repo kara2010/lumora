@@ -662,90 +662,6 @@ function readRtssFps() {
 // Afterburner/HWiNFO). Dadurch ist das OSD in Discord/OBS-Streams sichtbar und
 // funktioniert auch im exklusiven Vollbild. Wir belegen einen Slot (Owner
 // "Lumora"), aktualisieren dwOSDFrame und raeumen den Slot beim Deaktivieren.
-let rtssSlotIdx = -1
-let rtssOsdActive = false
-function rtssEnc(base, off, buf) {
-  rtss.koffi.encode(base, off, rtss.koffi.array('uint8', buf.length), Array.from(buf))
-}
-function rtssOsdMap(cb) {
-  if (!rtss) return false
-  const h = rtss.open(0x0006 /*READ|WRITE*/, 0, 'RTSSSharedMemoryV2')
-  if (!h) return false
-  let base = 0, ok = false
-  try {
-    base = rtss.map(h, 0x0006, 0, 0, 0)
-    if (base) {
-      const hdr = rtss.koffi.decode(base, rtss.HDR)
-      if (hdr.dwSignature === 0x52545353 /*'RTSS'*/) ok = cb(base, hdr) !== false
-    }
-  } catch (e) { osdDbg('[rtss-osd] map/write: ' + (e && e.message)) }
-  finally {
-    if (base) { try { rtss.unmap(base) } catch {} }
-    try { rtss.close(h) } catch {}
-  }
-  return ok
-}
-const RTSS_EX2_OFF = 256 + 256 + 4096 + 262144   // szOSDEx2 @266752 (Format v2.20+)
-function rtssOsdWrite(mainLines) {
-  const res = rtssResolution()
-  return rtssOsdMap((base, hdr) => {
-    const n = Math.min(hdr.dwOSDArrSize >>> 0, 32)
-    const es = hdr.dwOSDEntrySize >>> 0
-    const off0 = hdr.dwOSDArrOffset >>> 0
-    // Unseren Slot wiederfinden, sonst ersten freien belegen (Slot 0 gehoert
-    // traditionell Afterburner und bleibt tabu).
-    let mine = -1, free = -1
-    for (let i = 0; i < n; i++) {
-      const ob = rtss.koffi.decode(base, off0 + i * es + 256, rtss.koffi.array('uint8', 16))
-      const owner = Buffer.from(ob).toString('latin1').split('\0')[0]
-      if (owner === 'Lumora') { if (mine < 0) mine = i; continue }
-      if (!owner && free < 0 && i > 0) free = i
-    }
-    const slot = mine >= 0 ? mine : free
-    if (slot < 0) return false
-    rtssSlotIdx = slot
-    const so = off0 + slot * es
-    if (mine < 0) rtssEnc(base, so + 256, Buffer.from('Lumora\0', 'latin1'))
-    // RTSS rendert szOSD, szOSDEx UND szOSDEx2, wenn befuellt – also exakt EIN
-    // Textfeld beschreiben und die anderen leeren (sonst Doppelbild, gemessen).
-    const zero = Buffer.from([0])
-    if (es >= RTSS_EX2_OFF + 32768) {
-      // Modernes RTSS: Layout-Feld mit freier Positionierung (siehe unten).
-      rtssEnc(base, so + RTSS_EX2_OFF, Buffer.from(rtssComposeEx2(mainLines, res).slice(0, 32000) + '\0', 'latin1'))
-      rtssEnc(base, so + 512, zero)
-      rtssEnc(base, so, zero)
-    } else if (es >= 512 + 4096) {
-      rtssEnc(base, so + 512, Buffer.from(mainLines.join('\n').slice(0, 4000) + '\0', 'latin1'))
-      rtssEnc(base, so, zero)
-    } else {
-      rtssEnc(base, so, Buffer.from(mainLines.join('\n').slice(0, 255) + '\0', 'latin1'))
-    }
-    const frame = rtss.koffi.decode(base, 32, 'uint32')
-    rtss.koffi.encode(base, 32, 'uint32', (frame + 1) >>> 0)        // RTSS neu zeichnen lassen
-    return true
-  })
-}
-function rtssOsdClear() {
-  if (rtssSlotIdx < 0) return
-  rtssOsdMap((base, hdr) => {
-    const es = hdr.dwOSDEntrySize >>> 0
-    const so = (hdr.dwOSDArrOffset >>> 0) + rtssSlotIdx * es
-    const zero = Buffer.from([0])
-    rtssEnc(base, so, zero)
-    rtssEnc(base, so + 256, zero)
-    if (es >= 512 + 4096) rtssEnc(base, so + 512, zero)
-    if (es >= RTSS_EX2_OFF + 32768) rtssEnc(base, so + RTSS_EX2_OFF, zero)
-    const frame = rtss.koffi.decode(base, 32, 'uint32')
-    rtss.koffi.encode(base, 32, 'uint32', (frame + 1) >>> 0)
-  })
-  rtssSlotIdx = -1
-}
-
-// RTSS-Profil-API (RTSSHooks64.dll, gleiche Schnittstelle wie CapFrameX & Co.):
-// stellt beim Einschalten unseres Im-Spiel-OSD die GLOBALE OSD-Sichtbarkeit von
-// RTSS sicher. Ohne das haengt unser Block am Afterburner-OSD-Hotkey (der schaltet
-// den ganzen Kanal) – mit diesem Aufruf ist Lumoras Hotkey autark: AN heisst AN.
-let rtssHooks = null
 function setupRtssHooks() {
   if (rtssHooks !== null) return rtssHooks
   rtssHooks = false
@@ -777,163 +693,6 @@ function setupRtssHooks() {
 // geparst, aber verschluckt – deshalb schlugen fruehere <P>-Versuche fehl.)
 // Die Swapchain-Aufloesung liefert der App-Eintrag: dwResolutionX/Y ab Format
 // v2.20 bei Offset 9224 im pack(1)-Layout (per SDK-Header + Messung verifiziert).
-function readRtssResolution() {
-  if (!rtss) return null
-  const h = rtss.open(0x0004, 0, 'RTSSSharedMemoryV2')
-  if (!h) return null
-  let base = 0
-  try {
-    base = rtss.map(h, 0x0004, 0, 0, 0)
-    if (!base) return null
-    const hdr = rtss.koffi.decode(base, rtss.HDR)
-    if ((hdr.dwVersion >>> 0) < 0x20014 || hdr.dwAppEntrySize < 9232) return null
-    const bestA = rtssBestApp(base, hdr, rtss.ticks())
-    if (!bestA) return null
-    const rb = Buffer.from(rtss.koffi.decode(base, bestA.off + 9224, rtss.koffi.array('uint8', 8)))
-    const x = rb.readUInt32LE(0), y = rb.readUInt32LE(4)
-    return x >= 320 && x <= 16384 && y >= 240 && y <= 16384 ? { x, y } : null
-  } catch { return null }
-  finally {
-    if (base) { try { rtss.unmap(base) } catch {} }
-    try { rtss.close(h) } catch {}
-  }
-}
-// Aufloesung mit Gedaechtnis: Spiele in Menues/Dialogen praesentieren oft nur
-// sporadisch Frames – dann liefert der Live-Read nichts und das Panel wuerde
-// zwischen Ecke und Stapel-Fluss springen (gemessen in Groschengrab). Also die
-// letzte bekannte Aufloesung behalten; vor dem ersten Spielkontakt naehert der
-// Primaermonitor (physische Pixel) die Vollbild-Groesse an.
-let rtssResCache = null
-function rtssResolution() {
-  const r = readRtssResolution()
-  if (r) rtssResCache = r
-  if (rtssResCache) return rtssResCache
-  try {
-    const d = screen.getPrimaryDisplay()
-    return { x: Math.round(d.size.width * d.scaleFactor), y: Math.round(d.size.height * d.scaleFactor) }
-  } catch { return null }
-}
-// Setzt das Lumora-Panel frei positioniert an die Wunsch-Ecke. Ohne Aufloesung
-// (altes RTSS) faellt es in den klassischen Stapel-Fluss zurueck.
-function rtssComposeEx2(mainLines, res) {
-  const corner = appSettings.osdCorner || 'tl'
-  // Klassischer Stapel-Fluss (nativer Font, dockt automatisch UNTER fremde
-  // Anbieter wie ein aktives natives Afterburner-OSD -> keine Ueberlappung):
-  // wenn freie Positionierung nicht moeglich (altes RTSS) oder Ecke "oben links".
-  if (!res || corner === 'tl') return mainLines.join('\n')
-  const fh = Math.max(14, Math.round(res.y / 68))   // Fonthoehe skaliert mit der Spielaufloesung
-  const charW = fh * 0.55                           // Consolas-Vorschub (gemessen: 8.8 px bei -16)
-  const lineH = Math.round(fh * 1.3)
-  const margin = fh
-  const vis = (s) => String(s).replace(/<[^>]*>/g, '').length
-  let out = `<FNT=Consolas,${-fh},700,1>`
-  if (mainLines.length) {
-    const wMax = Math.max(...mainLines.map(vis)) * charW
-    const x = (corner === 'tr' || corner === 'br') ? Math.max(0, Math.round(res.x - margin - wMax)) : margin
-    const y0 = (corner === 'bl' || corner === 'br') ? Math.max(0, res.y - margin - mainLines.length * lineH) : margin
-    mainLines.forEach((l, i) => { out += `<P=${x},${y0 + i * lineH}>` + l })
-  }
-  return out
-}
-// Stellt die LAUFZEIT-Sichtbarkeit des RTSS-OSD sicher (RTSSHOOKSFLAG_OSD_VISIBLE,
-// Bit 0). GENAU dieses Flag schaltet Afterburners OSD-Hotkey um – nicht das
-// Profil-Setting "EnableOSD" (per Diagnose verifiziert: Profil stand auf 1,
-// waehrend das Flag 0 war und der Kanal dunkel blieb). Flags = (Flags & AND) ^ XOR.
-let rtssFlagWasOff = false   // wir haben das Master-Bit von 0 auf 1 gehoben
-function rtssEnsureOsdVisible() {
-  try {
-    const h = setupRtssHooks()
-    if (!h) return
-    const before = h.getFlags()
-    if (before & 1) return                        // schon sichtbar
-    rtssFlagWasOff = true                         // beim Ausschalten wiederherstellen
-    h.setFlags((~1) >>> 0, 1)
-    osdDbg('[rtss-osd] OSD_VISIBLE gesetzt (Flags 0x' + before.toString(16) + ' -> 0x' + h.getFlags().toString(16) + ')')
-  } catch (e) { osdDbg('[rtss-osd] SetFlags fehlgeschlagen: ' + (e && e.message)) }
-}
-// Gegenstueck: Hatten WIR das Master-Bit angehoben, stellen wir beim Ausschalten
-// den vorherigen Zustand wieder her – sonst bleibt z.B. ein zuvor per Hotkey
-// ausgeschaltetes Afterburner-OSD nach unserem Aus dauerhaft sichtbar (gemessen).
-function rtssReleaseVisible() {
-  if (!rtssFlagWasOff) return
-  rtssFlagWasOff = false
-  try {
-    const h = setupRtssHooks()
-    if (h && (h.getFlags() & 1)) {
-      h.setFlags((~1) >>> 0, 0)
-      osdDbg('[rtss-osd] OSD_VISIBLE restauriert (aus)')
-    }
-  } catch (e) { osdDbg('[rtss-osd] Restore fehlgeschlagen: ' + (e && e.message)) }
-}
-
-// Hypertext-Fassungen unserer Themes (Kompakt/Minimal/Balken) fuer den RTSS-Modus.
-// RTSS-Tags: <C=AARRGGBB> Farbe, <C> Reset, <S=..> Groesse (50/100/200 = native
-// Sprites, alles andere wird matschig skaliert -> nur native Stufen verwenden).
-// Der RTSS-Rasterfont ist MONOSPACE: saubere Spalten entstehen zuverlaessig durch
-// Zeichen-Padding, nicht durch fragile Alignment-Tags.
-const RTAG = { nv: '<C=FF74E857>', amd: '<C=FFFF8A1E>', val: '<C=FFFFE100>', dim: '<C=FF8A8A96>', fps: '<C=FFFFFFFF>', ft: '<C=FF6FE86F>', off: '<C>' }
-function rtssAsciiBar(pct, width) {
-  const p = Math.max(0, Math.min(100, Math.round(pct || 0)))
-  const full = Math.round(p / 100 * width)
-  return '='.repeat(full) + '-'.repeat(width - full)
-}
-function buildRtssOsd(theme, gpu, cpu, f, fields) {
-  const gf = (fields && fields.gpu) || [], cf = (fields && fields.cpu) || [], ff = (fields && fields.fps) || []
-  const num = (v, w) => String(v).padStart(w)
-  // Ein Messwert als feste Spalte: Zahl gelb, Einheit gedimmt. null -> Leerraum
-  // gleicher Breite, damit GPU-/CPU-Zeile spaltengenau untereinander stehen.
-  const cell = (on, v, unit, w) => (on && v != null)
-    ? `${RTAG.val}${num(v, w)}${RTAG.dim}${unit}${RTAG.off}`
-    : ' '.repeat(w + unit.length)
-  const mark = (tag, s) => `${tag}${s}${RTAG.off}`
-  const gcol = gpu && gpu.brand === 'AMD' ? RTAG.amd : RTAG.nv
-  const L = []
-
-  if (theme === 'min') {
-    const parts = []
-    if (gpu && gf.includes('load') && gpu.load != null) {
-      let s = `${gcol}GPU${RTAG.off} ${RTAG.val}${num(gpu.load, 3)}%${RTAG.off}`
-      if (gf.includes('temp') && gpu.temp != null) s += ` ${RTAG.val}${num(Math.round(gpu.temp), 3)}\xB0${RTAG.off}`
-      parts.push(s)
-    }
-    if (cpu && cf.includes('load') && cpu.load != null) {
-      let s = `${RTAG.amd}CPU${RTAG.off} ${RTAG.val}${num(cpu.load, 3)}%${RTAG.off}`
-      if (cf.includes('temp') && cpu.temp != null) s += ` ${RTAG.val}${num(Math.round(cpu.temp), 3)}\xB0${RTAG.off}`
-      parts.push(s)
-    }
-    if (f && ff.includes('fps')) parts.push(`${RTAG.fps}${num(f.fps, 4)} FPS${RTAG.off}`)
-    return [parts.join('  ')]
-  }
-
-  // 'compact'/'bar': Tabellenlayout – Markenspalte, dann spaltengenaue Werte.
-  // Dezente Kennzeile: trennt unseren Block sichtbar von anderen OSD-Lieferanten
-  // (z.B. Afterburner direkt darueber) und macht den A/B-Vergleich eindeutig.
-  L.push('<S=50>' + mark(gcol, 'LUMORA') + '<S>')
-  const gpuRow = gpu ? mark(gcol, 'GPU ') + mark(RTAG.dim, String(gpu.name || '').slice(0, 14).padEnd(14)) +
-    cell(gf.includes('load'), gpu.load, '%', 4) +
-    cell(gf.includes('temp'), gpu.temp != null ? Math.round(gpu.temp) : null, '\xB0C', 4) +
-    cell(gf.includes('power'), gpu.power != null ? Math.round(gpu.power) : null, 'W', 5) +
-    cell(gf.includes('clock'), gpu.clock, 'MHz', 5) +
-    cell(gf.includes('vram'), gpu.vram, 'MB', 6) : null
-  const cpuRow = cpu ? mark(RTAG.amd, 'CPU ') + mark(RTAG.dim, String(cpu.name || '').slice(0, 14).padEnd(14)) +
-    cell(cf.includes('load'), cpu.load, '%', 4) +
-    cell(cf.includes('temp'), cpu.temp != null ? Math.round(cpu.temp) : null, '\xB0C', 4) +
-    cell(cf.includes('power'), cpu.power != null ? Math.round(cpu.power) : null, 'W', 5) +
-    cell(cf.includes('clock'), cpu.clock, 'MHz', 5) +
-    cell(cf.includes('ram'), cpu.ram, 'MB', 6) : null
-  if (gpuRow) L.push(gpuRow)
-  if (theme === 'bar' && gpu && gf.includes('load') && gpu.load != null) L.push('    ' + mark(gcol, rtssAsciiBar(gpu.load, 28)))
-  if (cpuRow) L.push(cpuRow)
-  if (theme === 'bar' && cpu && cf.includes('load') && cpu.load != null) L.push('    ' + mark(RTAG.amd, rtssAsciiBar(cpu.load, 28)))
-  if (f && (ff.includes('fps') || ff.includes('frametime'))) {
-    let row = ''
-    if (ff.includes('fps')) row += `${RTAG.fps}${num(f.fps, 4)} FPS${RTAG.off}`
-    if (ff.includes('frametime') && f.frametime != null) row += `   ${RTAG.ft}${num(f.frametime.toFixed(1), 5)} ms${RTAG.off}`
-    L.push(row)
-  }
-  return L.filter(Boolean)
-}
-
 // --- CPU-Temp/Takt/Power aus MSI Afterburner ("MAHMSharedMemory") --------------
 // Treiberfrei bei uns: laeuft Afterburner, schreibt es alle Sensoren in ein Shared
 // Memory. Wir lesen die Aggregat-Eintraege "CPU temperature/clock/power" – exakt
@@ -1653,7 +1412,7 @@ function startFps() {
   if (fpsTimer) return
   // Im RTSS-Renderer-Modus kommen die FPS zwingend von RTSS (laeuft dort per
   // Definition) – kein PresentMon-Broker noetig, egal was die Quelle sagt.
-  const src = rtssOsdActive ? 'rtss' : (appSettings.osdFpsSource || 'auto')
+  const src = appSettings.osdFpsSource || 'auto'
   fpsUseRtss = src === 'rtss' ? true : src === 'presentmon' ? false : rtssAvailable()
   if (!fpsUseRtss) startBroker()
   console.log('[fps] Quelle:', fpsUseRtss ? 'RTSS' : 'PresentMon-Broker')
@@ -1673,7 +1432,7 @@ function stopFps() {
 // (Overlay sichtbar UND FPS aktiviert). Verhindert Spawn-/Kill-Stuerme, wenn
 // set-app-settings bei jeder Slider-Bewegung erneut aufgerufen wird.
 function syncFps() {
-  const vis = rtssOsdActive || (overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible())
+  const vis = (overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isVisible())
   const want = !!(appSettings.osdEnabled && !appSettings.osdSetupDeclined && vis)
   if (want && !fpsTimer) startFps()
   else if (!want && fpsTimer) stopFps()
@@ -1685,36 +1444,7 @@ let osdDataInterval = null
 function startOsdData() {
   if (osdDataInterval) return
   prevCpu = null
-  let lastRtssWrite = 0
   const tick = () => {
-    if (rtssOsdActive) {
-      // Im-Spiel-Rendering: FPS kommen direkt von RTSS (das laeuft hier per
-      // Definition). Auf ~2 Hz gedrosselt – ruhige Zahlen statt Flackern.
-      const now = Date.now()
-      if (now - lastRtssWrite < 450) return
-      lastRtssWrite = now
-      // Das globale OSD_VISIBLE-Bit ist RTSS' EINZIGER, GEMEINSAMER Sichtbarkeits-
-      // schalter: Afterburners OSD-Hotkey schaltet genau dieses Bit, sein Slot-
-      // Text bleibt dabei stehen (gemessen 04.07.2026). Wuerden wir es hier
-      // zurueckzwingen, waere der AB-Hotkey wirkungslos. Also respektieren:
-      // Bit extern aus -> unser OSD folgt sauber (Slot raeumen, Setting aus).
-      // Getrennt schalten: AB ueber seine eigene "Show OSD"-Option (leert den
-      // Slot), Lumora ueber Alt+O – dann funkt keiner dem anderen dazwischen.
-      try {
-        const h = setupRtssHooks()
-        if (h && (h.getFlags() & 1) === 0) {
-          osdDbg('[rtss-osd] Master-Bit extern ausgeschaltet -> Lumora-OSD folgt')
-          appSettings.osdEnabled = false
-          saveAppSettings()
-          hideOverlay()
-          return
-        }
-      } catch {}
-      const mainLines = appSettings.osdEnabled
-        ? buildRtssOsd(appSettings.osdTheme, readGpu(), readCpu(), readRtssFps(), appSettings.osdFields) : []
-      rtssOsdWrite(mainLines)
-      return
-    }
     if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return
     const payload = { gpu: readGpu(), cpu: readCpu() }
     if (appSettings.osdSetupDeclined) payload.fps = '—'   // Einrichtung abgelehnt; sonst sendet die FPS-Schleife
@@ -1817,24 +1547,9 @@ function applyOsdConfig() {
 }
 
 function showOverlay() {
-  // Im-Spiel-Rendering (RTSS): kein eigenes Fenster – wir beliefern den RTSS-Slot.
-  // Faellt automatisch auf das Overlay-Fenster zurueck, wenn RTSS nicht laeuft.
-  if (appSettings.osdRenderer === 'rtss' && rtssAvailable()) {
-    rtssOsdActive = true
-    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide()
-    // Beim bewussten Einschalten heben wir das globale Sichtbarkeits-Bit an
-    // (sonst koennten wir gar nicht rendern) und merken uns den Vorzustand.
-    // Systembedingt wird dabei auch ein per RTSS-Hotkey ausgeblendetes
-    // Afterburner-OSD wieder sichtbar, denn dessen Slot-Text bleibt stehen –
-    // wer AB getrennt aus haben will, schaltet es in Afterburner selbst aus.
-    rtssEnsureOsdVisible()
-    startOsdData()
-    syncFps()
-    ensureOsdSetup()
-    osdDbg('showOverlay: RTSS-Modus aktiv (im Spiel gerendert)')
-    return
-  }
-  if (rtssOsdActive) { rtssOsdActive = false; rtssOsdClear() }
+  // NUR noch Fenster-Overlay: der RTSS-Im-Spiel-Renderweg wurde komplett verworfen
+  // (2026-07-20, User-Entscheidung) - RTSS bleibt ausschliesslich als FPS-LESEQUELLE
+  // (readRtssFps) und fuer den Alt+B-Afterburner-Toggle (toggleAbOsd) erhalten.
   const w = createOverlayWindow()
   // Beim (Wieder-)Einblenden ALLE Overlay-Eigenschaften neu setzen: ein zuvor
   // verstecktes Fenster verliert ueber einem Vollbild-Spiel sonst Klick-
@@ -1852,7 +1567,6 @@ function showOverlay() {
 }
 
 function hideOverlay() {
-  if (rtssOsdActive) { rtssOsdActive = false; rtssOsdClear(); rtssReleaseVisible() }
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide()
   stopOsdData()
   syncFps()
@@ -1877,7 +1591,6 @@ function toggleOverlay() {
 // Sichtbarkeits-Kanal) -> dort bewusst kein Toggle, sonst killt Alt+B das
 // Lumora-OSD gleich mit (die Folgen-Logik in startOsdData schaltet es dann ab).
 function toggleAbOsd() {
-  if (rtssOsdActive) { osdDbg('toggleAbOsd: RTSS-Renderer aktiv – Lumora+Afterburner teilen sich den Kanal, kein getrenntes Schalten'); return }
   try {
     const h = setupRtssHooks()
     if (!h) { osdDbg('toggleAbOsd: RTSSHooks nicht verfuegbar (RTSS/Afterburner installiert?)'); return }
@@ -1895,7 +1608,6 @@ let osdEditActive = false
 function setOsdEditMode(on) {
   // Im RTSS-Modus gibt es kein anfassbares Overlay-Fenster – Layout/Position
   // steuert dort RTSS. Live-Edit gilt nur fuer den Fenster-Modus.
-  if (rtssOsdActive) { osdDbg('Live-Edit im RTSS-Modus nicht verfuegbar'); return }
   const w = createOverlayWindow()
   if (on) {
     if (!appSettings.osdEnabled) { appSettings.osdEnabled = true; saveAppSettings() }
