@@ -41,6 +41,7 @@
 #include "upnp.h"
 #include "osd_broker.h"
 #include "osd_rtss.h"
+#include "osd_adl.h"
 #include <thread>
 #include <mutex>
 #include <map>
@@ -1549,6 +1550,7 @@ static void sensorsInit() {
     // ging beim git-Reset verloren; readCpuNative nutzt g_pdhCpuPerf, es war aber nullptr.
     PdhAddEnglishCounterW(g_pdhQ, L"\\Processor Information(_Total)\\% Processor Performance", 0, &g_pdhCpuPerf);
     PdhCollectQueryData(g_pdhQ);   // Basissample (Delta-Zaehler)
+    luadl::setup();   // AMD-GPU-Sensoren (atiadlxx.dll) einmalig - inert ohne AMD-Treiber
 }
 static json readMahm();       // MSI-Afterburner-Sensoren (Definition weiter unten)
 static json readSenseCpu();   // PawnIO-Broker (Definition weiter unten)
@@ -1668,7 +1670,9 @@ static json readMahmRaw() {
         if (hdr[0] == 0x4D41484D && hdr[3]) {
             uint32_t headerSize = hdr[2], numEntries = hdr[3], entrySize = hdr[4];
             static const std::pair<const char*, const char*> WANT[] = {
-                {"cpuTemp", "CPU temperature"}, {"cpuClock", "CPU clock"}, {"cpuPower", "CPU power"} };
+                {"cpuTemp", "CPU temperature"}, {"cpuClock", "CPU clock"}, {"cpuPower", "CPU power"},
+                {"gpuTemp", "GPU temperature"}, {"gpuClock", "Core clock"}, {"gpuPower", "Power"},
+                {"gpuLoad", "GPU usage"}, {"gpuVram", "Memory usage"} };
             json o = json::object();
             for (uint32_t i = 0; i < numEntries; ++i) {
                 const char* e = (const char*)base + headerSize + (size_t)i * entrySize;
@@ -1871,17 +1875,76 @@ static json readNvmlHandle(void* h, const std::string& model) {
              {"power", (double)((int)(mw / 100.0 + 0.5)) / 10.0},   // W mit 1 Nachkommastelle wie main.js
              {"clock", c}, {"vram", (long long)(mem.used / 1048576)} };
 }
+// AMD-Namen bereinigen (wie main.js): (R)/(TM) raus, "AMD "-Prefix + " Graphics"-Suffix weg.
+static std::string cleanAmdName(const std::string& raw) {
+    std::string n = raw;
+    n = std::regex_replace(n, std::regex("\\((R|TM)\\)", std::regex::icase), "");
+    n = std::regex_replace(n, std::regex("^AMD\\s+", std::regex::icase), "");
+    n = std::regex_replace(n, std::regex("\\s+Graphics$", std::regex::icase), "");
+    size_t a = n.find_first_not_of(" \t"), b = n.find_last_not_of(" \t");
+    return a == std::string::npos ? std::string() : n.substr(a, b - a + 1);
+}
+// VRAM (MB) des ersten DXGI-Adapters einer VendorID - ADL-PMLog liefert kein VRAM.
+static json readVramMbForVendor(UINT vendorId) {
+    ComPtr<IDXGIFactory1> fac; CreateDXGIFactory1(IID_PPV_ARGS(&fac));
+    if (!fac) return nullptr;
+    for (UINT i = 0;; ++i) {
+        ComPtr<IDXGIAdapter1> ad; if (fac->EnumAdapters1(i, &ad) != S_OK) break;
+        DXGI_ADAPTER_DESC1 d; ad->GetDesc1(&d);
+        if (d.VendorId != vendorId) continue;
+        ComPtr<IDXGIAdapter3> a3; ad.As(&a3);
+        if (a3) { DXGI_QUERY_VIDEO_MEMORY_INFO mi{};
+            if (SUCCEEDED(a3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mi))) return (long long)(mi.CurrentUsage / 1048576); }
+        break;
+    }
+    return nullptr;
+}
+// Name des ersten echten (nicht Software-)DXGI-Adapters, fuer den MAHM-Zweig.
+static std::string gpuNameFirst() {
+    ComPtr<IDXGIFactory1> fac; CreateDXGIFactory1(IID_PPV_ARGS(&fac));
+    if (fac) for (UINT i = 0;; ++i) {
+        ComPtr<IDXGIAdapter1> ad; if (fac->EnumAdapters1(i, &ad) != S_OK) break;
+        DXGI_ADAPTER_DESC1 d; ad->GetDesc1(&d);
+        if (d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
+        return narrow(d.Description);
+    }
+    return "GPU";
+}
+// ADL-Sensoren eines Adapters -> GPU-JSON (temp/clock/power/load), VRAM via DXGI.
+static json readAdlGpu(int idx, const std::string& rawName) {
+    luadl::GpuVals v = luadl::read(idx, rawName);
+    if (!v.ok) return nullptr;
+    return { {"brand", "AMD"}, {"name", cleanAmdName(v.name)},
+             {"load", v.hasLoad ? json(v.load) : json(nullptr)},
+             {"temp", v.hasTemp ? json(v.temp) : json(nullptr)},
+             {"power", v.hasPower ? json(v.power) : json(nullptr)},
+             {"clock", v.hasClock ? json(v.clock) : json(nullptr)},
+             {"vram", readVramMbForVendor(0x1002)} };
+}
+// Automatik: NVIDIA (NVML) -> AMD (ADL) -> Afterburner (MAHM) -> DXGI/PDH.
+// Feste Auswahl (osdGpu nvml:N / adl:N) hat Vorrang, faellt sonst auf Automatik.
 static json readGpuNative() {
     nvmlInitOnce();
-    if (g_nvml.ok) {   // NVIDIA-Vollwerte (Automatik: erstes Geraet; manuelle Auswahl via osdGpu)
-        std::string sel = loadSettings().value("osdGpu", "auto");
-        std::smatch sm;
-        if (std::regex_match(sel, sm, std::regex("^nvml:(\\d+)$"))) {
-            size_t idx = (size_t)atoi(sm[1].str().c_str());
-            if (idx < g_nvml.devices.size()) { json r = readNvmlHandle(g_nvml.devices[idx].first, g_nvml.devices[idx].second); if (!r.is_null()) return r; }
+    std::string sel = loadSettings().value("osdGpu", "auto");
+    std::smatch sm;
+    if (sel != "auto" && std::regex_match(sel, sm, std::regex("^(nvml|adl):(\\d+)$"))) {
+        std::string kind = sm[1].str(); int n = atoi(sm[2].str().c_str());
+        if (kind == "nvml" && g_nvml.ok && (size_t)n < g_nvml.devices.size()) {
+            json r = readNvmlHandle(g_nvml.devices[n].first, g_nvml.devices[n].second); if (!r.is_null()) return r;
         }
-        json r = readNvmlHandle(g_nvml.devices[0].first, g_nvml.devices[0].second);
-        if (!r.is_null()) return r;
+        if (kind == "adl" && luadl::available()) {
+            std::string nm; for (auto& a : luadl::adapters()) if (a.idx == n) { nm = a.name; break; }
+            json r = readAdlGpu(n, nm); if (!r.is_null()) return r;
+        }
+    }
+    if (g_nvml.ok) { json r = readNvmlHandle(g_nvml.devices[0].first, g_nvml.devices[0].second); if (!r.is_null()) return r; }
+    if (luadl::available()) { json r = readAdlGpu(luadl::activeIdx(), luadl::activeName()); if (!r.is_null()) return r; }
+    json m = readMahm();
+    if (!m.is_null() && m.contains("gpuTemp")) {
+        return { {"brand", "GPU"}, {"name", gpuNameFirst()},
+                 {"load", m.value("gpuLoad", json(nullptr))}, {"temp", m["gpuTemp"]},
+                 {"power", m.value("gpuPower", json(nullptr))}, {"clock", m.value("gpuClock", json(nullptr))},
+                 {"vram", m.value("gpuVram", json(nullptr))} };
     }
     return readGpuPdh();
 }
@@ -2398,10 +2461,14 @@ static json handleChannel(const std::string& channel, const json& args) {
         // 2) Exe-/Datei-Icon
         return fileIconDataUrl(p);
     }
-    if (channel == "list-gpus") {   // NVML-Geraete (ADL folgt; Format {id,label} wie listGpus)
-        nvmlInitOnce();
+    if (channel == "list-gpus") {   // auslesbare GPUs (NVML + ADL), Format {id,label} wie listGpus
+        nvmlInitOnce(); luadl::setup();
         json out = json::array();
         for (size_t i = 0; i < g_nvml.devices.size(); ++i) out.push_back({ {"id", "nvml:" + std::to_string(i)}, {"label", g_nvml.devices[i].second} });
+        for (auto& a : luadl::adapters()) {
+            std::string nm = cleanAmdName(a.name);
+            out.push_back({ {"id", "adl:" + std::to_string(a.idx)}, {"label", nm + (a.dedicated ? "" : " (Onboard)")} });
+        }
         return out;
     }
     // ---- OSD (Overlay steht; Live-Justierung schreibt Settings + zieht sie sofort nach) ----
