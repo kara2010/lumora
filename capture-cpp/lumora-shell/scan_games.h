@@ -141,11 +141,167 @@ inline json scanFolder(const std::wstring& folder) {
     return out;
 }
 
-// scan-games-Handler: Steam + Xbox + Zusatzordner, nach Pfad dedupliziert (wie main.js).
+// ---- Registry-Helfer (HKLM-Stores) ----
+inline std::vector<std::wstring> regSubkeys(HKEY root, const std::wstring& path) {
+    std::vector<std::wstring> out; HKEY k = nullptr;
+    if (RegOpenKeyExW(root, path.c_str(), 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) return out;
+    wchar_t name[256]; DWORD len;
+    for (DWORD i = 0;; ++i) { len = 256; if (RegEnumKeyExW(k, i, name, &len, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break; out.push_back(name); }
+    RegCloseKey(k);
+    return out;
+}
+inline std::wstring regStr(HKEY root, const std::wstring& path, const std::wstring& value) {
+    wchar_t buf[1024] = {}; DWORD sz = sizeof(buf);
+    if (RegGetValueW(root, path.c_str(), value.c_str(), RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY, nullptr, buf, &sz) != ERROR_SUCCESS) return L"";
+    return buf;
+}
+inline std::vector<std::wstring> driveLetters() {
+    std::vector<std::wstring> out; DWORD drives = GetLogicalDrives();
+    for (int d = 2; d < 26; ++d) if (drives & (1u << d)) out.push_back(std::wstring(1, L'A' + d));   // C..Z
+    if (out.empty()) out.push_back(L"C");
+    return out;
+}
+// Mehrere Wurzelordner: jeder Unterordner = ein Spiel-Kandidat (Amazon/Riot/EA-Muster).
+inline json scanFolderRoots(const std::vector<std::wstring>& roots, const char* source) {
+    json out = json::array(); std::error_code ec;
+    for (auto& root : roots) {
+        if (!sfs::exists(root, ec)) continue;
+        for (auto& e : sfs::directory_iterator(root, ec)) {
+            if (!e.is_directory(ec)) continue;
+            std::string dn = toUtf8(e.path().filename().wstring());
+            if (std::regex_search(dn, SKIP_DIR_RE)) continue;
+            std::wstring exe = findMainExe(e.path(), e.path().filename().wstring());
+            if (!exe.empty()) out.push_back({ {"name", dn}, {"path", toUtf8(exe)}, {"source", source} });
+        }
+    }
+    return out;
+}
+
+// ---- Restliche Stores (Portierung 1:1 aus main.js) ----
+inline json scanEpic() {   // ProgramData-Manifeste (.item-JSON)
+    json out = json::array(); std::error_code ec;
+    sfs::path dir = L"C:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\Manifests";
+    for (auto& e : sfs::directory_iterator(dir, ec)) {
+        if (e.path().extension() != L".item") continue;
+        json d = json::parse(readTextFile(e.path()), nullptr, false);
+        if (!d.is_object() || !d.value("bIsApplication", false) || d.value("bIsIncompleteInstall", false)) continue;
+        std::string name = d.value("DisplayName", ""), loc = d.value("InstallLocation", ""), lexe = d.value("LaunchExecutable", "");
+        if (name.empty() || loc.empty()) continue;
+        std::wstring exe = lexe.empty() ? findMainExe(sfs::u8path(loc), sfs::u8path(name).wstring())
+                                        : (sfs::u8path(loc) / sfs::u8path(lexe)).wstring();
+        if (!exe.empty() && sfs::exists(exe, ec)) out.push_back({ {"name", name}, {"path", toUtf8(exe)}, {"source", "Epic"} });
+    }
+    return out;
+}
+inline json scanGOG() {   // Registry GOG.com\Games: gameName/exe/path
+    json out = json::array(); std::vector<std::string> seen; std::error_code ec;
+    for (const wchar_t* base : { L"SOFTWARE\\WOW6432Node\\GOG.com\\Games", L"SOFTWARE\\GOG.com\\Games" }) {
+        for (auto& sub : regSubkeys(HKEY_LOCAL_MACHINE, base)) {
+            std::wstring key = std::wstring(base) + L"\\" + sub;
+            std::wstring name = regStr(HKEY_LOCAL_MACHINE, key, L"gameName");
+            if (name.empty()) continue;
+            std::wstring exe = regStr(HKEY_LOCAL_MACHINE, key, L"exe");
+            std::wstring dir = regStr(HKEY_LOCAL_MACHINE, key, L"path");
+            if (!exe.empty() && exe.find(L'\\') == std::wstring::npos && !dir.empty()) exe = (sfs::path(dir) / exe).wstring();
+            if ((exe.empty() || !sfs::exists(exe, ec)) && !dir.empty() && sfs::exists(dir, ec)) exe = findMainExe(dir, name);
+            if (exe.empty() || !sfs::exists(exe, ec)) continue;
+            std::string k = toUtf8(exe); for (auto& c : k) c = (char)tolower((unsigned char)c);
+            bool dup = false; for (auto& s : seen) if (s == k) { dup = true; break; }
+            if (!dup) { seen.push_back(k); out.push_back({ {"name", toUtf8(name)}, {"path", toUtf8(exe)}, {"source", "GOG"} }); }
+        }
+    }
+    return out;
+}
+inline json scanUbisoft() {   // Registry Ubisoft\Launcher\Installs: InstallDir
+    json out = json::array(); std::error_code ec;
+    const wchar_t* base = L"SOFTWARE\\WOW6432Node\\Ubisoft\\Launcher\\Installs";
+    for (auto& sub : regSubkeys(HKEY_LOCAL_MACHINE, base)) {
+        std::wstring dir = regStr(HKEY_LOCAL_MACHINE, std::wstring(base) + L"\\" + sub, L"InstallDir");
+        if (dir.empty() || !sfs::exists(dir, ec)) continue;
+        while (!dir.empty() && (dir.back() == L'\\' || dir.back() == L'/')) dir.pop_back();
+        std::wstring name = sfs::path(dir).filename().wstring();
+        std::wstring exe = findMainExe(dir, name);
+        if (!exe.empty()) out.push_back({ {"name", toUtf8(name)}, {"path", toUtf8(exe)}, {"source", "Ubisoft"} });
+    }
+    return out;
+}
+inline json scanEA() {   // uebliche EA/Origin-Installationsordner
+    std::vector<std::wstring> roots;
+    for (auto& d : driveLetters()) {
+        roots.push_back(d + L":\\Program Files\\EA Games");
+        roots.push_back(d + L":\\Program Files (x86)\\EA Games");
+        roots.push_back(d + L":\\Program Files\\Origin Games");
+        roots.push_back(d + L":\\Program Files (x86)\\Origin Games");
+        roots.push_back(d + L":\\EA Games");
+    }
+    return scanFolderRoots(roots, "EA");
+}
+inline json scanRockstar() {   // Registry Rockstar Games: InstallFolder (Launcher/Social Club skippen)
+    json out = json::array(); std::vector<std::string> seen; std::error_code ec;
+    std::wregex skip(LR"(^(launcher|social club|rockstar games launcher)$)", std::regex::icase);
+    for (const wchar_t* base : { L"SOFTWARE\\WOW6432Node\\Rockstar Games", L"SOFTWARE\\Rockstar Games" }) {
+        for (auto& sub : regSubkeys(HKEY_LOCAL_MACHINE, base)) {
+            if (std::regex_match(sub, skip)) continue;
+            std::wstring dir = regStr(HKEY_LOCAL_MACHINE, std::wstring(base) + L"\\" + sub, L"InstallFolder");
+            if (dir.empty() || !sfs::exists(dir, ec)) continue;
+            std::wstring exe = findMainExe(dir, sub);
+            if (exe.empty()) continue;
+            std::string k = toUtf8(exe); for (auto& c : k) c = (char)tolower((unsigned char)c);
+            bool dup = false; for (auto& s : seen) if (s == k) { dup = true; break; }
+            if (!dup) { seen.push_back(k); out.push_back({ {"name", toUtf8(sub)}, {"path", toUtf8(exe)}, {"source", "Rockstar"} }); }
+        }
+    }
+    return out;
+}
+inline json scanBattleNet() {   // Uninstall-Eintraege mit Publisher=Blizzard (Battle.net/Agent skippen)
+    json out = json::array(); std::vector<std::string> seen; std::error_code ec;
+    std::wregex isBnet(LR"(battle\.?net|agent)", std::regex::icase);
+    for (const wchar_t* base : { L"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall", L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall" }) {
+        for (auto& sub : regSubkeys(HKEY_LOCAL_MACHINE, base)) {
+            std::wstring key = std::wstring(base) + L"\\" + sub;
+            std::wstring pub = regStr(HKEY_LOCAL_MACHINE, key, L"Publisher");
+            std::wstring publow = pub; for (auto& c : publow) c = towlower(c);
+            if (publow.find(L"blizzard") == std::wstring::npos) continue;
+            std::wstring name = regStr(HKEY_LOCAL_MACHINE, key, L"DisplayName");
+            std::wstring dir = regStr(HKEY_LOCAL_MACHINE, key, L"InstallLocation");
+            while (!dir.empty() && iswspace(dir.back())) dir.pop_back();
+            if (dir.empty() || !sfs::exists(dir, ec)) continue;
+            if (!name.empty() && std::regex_search(name, isBnet)) continue;
+            std::wstring exe = findMainExe(dir, name.empty() ? sfs::path(dir).filename().wstring() : name);
+            if (exe.empty()) continue;
+            std::string k = toUtf8(exe); for (auto& c : k) c = (char)tolower((unsigned char)c);
+            bool dup = false; for (auto& s : seen) if (s == k) { dup = true; break; }
+            if (!dup) { seen.push_back(k); out.push_back({ {"name", toUtf8(name.empty() ? sfs::path(dir).filename().wstring() : name)}, {"path", toUtf8(exe)}, {"source", "Battle.net"} }); }
+        }
+    }
+    return out;
+}
+inline json scanAmazon() {
+    std::vector<std::wstring> roots;
+    for (auto& d : driveLetters()) roots.push_back(d + L":\\Amazon Games\\Library");
+    wchar_t up[MAX_PATH] = {}; GetEnvironmentVariableW(L"USERPROFILE", up, MAX_PATH);
+    if (up[0]) roots.push_back(std::wstring(up) + L"\\Amazon Games\\Library");
+    return scanFolderRoots(roots, "Amazon");
+}
+inline json scanRiot() {
+    std::vector<std::wstring> roots;
+    for (auto& d : driveLetters()) { roots.push_back(d + L":\\Riot Games"); roots.push_back(d + L":\\Program Files\\Riot Games"); }
+    return scanFolderRoots(roots, "Riot");
+}
+
+// scan-games-Handler: alle 10 Stores + Zusatzordner, nach Pfad dedupliziert (wie main.js).
 inline json scanGames(const json& extraFolders) {
     json all = json::array();
     for (auto& g : scanSteam()) all.push_back(g);
+    for (auto& g : scanEpic()) all.push_back(g);
+    for (auto& g : scanGOG()) all.push_back(g);
+    for (auto& g : scanUbisoft()) all.push_back(g);
     for (auto& g : scanXbox()) all.push_back(g);
+    for (auto& g : scanEA()) all.push_back(g);
+    for (auto& g : scanRockstar()) all.push_back(g);
+    for (auto& g : scanBattleNet()) all.push_back(g);
+    for (auto& g : scanAmazon()) all.push_back(g);
+    for (auto& g : scanRiot()) all.push_back(g);
     if (extraFolders.is_array())
         for (auto& f : extraFolders)
             if (f.is_string()) { std::wstring w(f.get<std::string>().begin(), f.get<std::string>().end());
