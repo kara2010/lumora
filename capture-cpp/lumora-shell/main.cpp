@@ -1399,7 +1399,7 @@ static void sendToOsd(const std::string& channel, const json& payload);
 // --- OSD-Sensorik Teil 1 (treiberfrei): PDH-CPU/GPU-Last, RAM, DXGI-VRAM.
 // Temp/Takt/Power (NVML/ADL/PawnIO) + FPS (PresentMon) folgen als Teil 2.
 static PDH_HQUERY g_pdhQ = nullptr;
-static PDH_HCOUNTER g_pdhCpu = nullptr, g_pdhGpu = nullptr;
+static PDH_HCOUNTER g_pdhCpu = nullptr, g_pdhGpu = nullptr, g_pdhCpuPerf = nullptr;
 static bool g_pdhInit = false;
 static void sensorsInit() {
     if (g_pdhInit) return;
@@ -1426,11 +1426,83 @@ static json readCpuNative() {
     if (g_pdhCpu && PdhGetFormattedCounterValue(g_pdhCpu, PDH_FMT_DOUBLE, nullptr, &v) == ERROR_SUCCESS)
         load = (int)(std::min)(100.0, v.doubleValue + 0.5);
     MEMORYSTATUSEX ms{ sizeof(ms) }; GlobalMemoryStatusEx(&ms);
+    json clock = nullptr;   // Ist-Takt = Basis-MHz (Registry ~MHz) * % Processor Performance
+    DWORD baseMhz = 0, msz = sizeof(baseMhz);
+    RegGetValueW(HKEY_LOCAL_MACHINE, L"HARDWARE\DESCRIPTION\System\CentralProcessor\0", L"~MHz", RRF_RT_REG_DWORD, nullptr, &baseMhz, &msz);
+    if (g_pdhCpuPerf && baseMhz && PdhGetFormattedCounterValue(g_pdhCpuPerf, PDH_FMT_DOUBLE, nullptr, &v) == ERROR_SUCCESS && v.doubleValue > 0)
+        clock = (int)(baseMhz * v.doubleValue / 100.0 + 0.5);
     return { {"brand", brand}, {"name", model}, {"load", load},
              {"ram", (long long)((ms.ullTotalPhys - ms.ullAvailPhys) / 1048576)},
-             {"temp", nullptr}, {"clock", nullptr}, {"power", nullptr} };   // Teil 2 (NVML/ADL/PawnIO)
+             {"temp", nullptr}, {"clock", clock}, {"power", nullptr} };   // temp/power: PawnIO-Broker (Teil 2b)
+}
+static json readGpuPdh();
+// --- NVML (NVIDIA-Treiber-API, nvml.dll): temp/power/clock/vram wie readNvmlHandle ---
+struct NvmlUtil { unsigned int gpu, mem; };
+struct NvmlMem { unsigned long long total, freeB, used; };
+static struct {
+    bool tried = false, ok = false;
+    int (*init)() = nullptr;
+    int (*count)(unsigned int*) = nullptr;
+    int (*byIndex)(unsigned int, void**) = nullptr;
+    int (*name)(void*, char*, unsigned int) = nullptr;
+    int (*util)(void*, NvmlUtil*) = nullptr;
+    int (*temp)(void*, int, unsigned int*) = nullptr;
+    int (*power)(void*, unsigned int*) = nullptr;
+    int (*clock)(void*, int, unsigned int*) = nullptr;
+    int (*mem)(void*, NvmlMem*) = nullptr;
+    std::vector<std::pair<void*, std::string>> devices;   // handle + Modellname
+} g_nvml;
+static void nvmlInitOnce() {
+    if (g_nvml.tried) return;
+    g_nvml.tried = true;
+    HMODULE m = LoadLibraryW(L"nvml.dll");
+    if (!m) m = LoadLibraryW(L"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll");
+    if (!m) return;
+    g_nvml.init = (int(*)())GetProcAddress(m, "nvmlInit_v2");
+    g_nvml.count = (int(*)(unsigned int*))GetProcAddress(m, "nvmlDeviceGetCount_v2");
+    g_nvml.byIndex = (int(*)(unsigned int, void**))GetProcAddress(m, "nvmlDeviceGetHandleByIndex_v2");
+    g_nvml.name = (int(*)(void*, char*, unsigned int))GetProcAddress(m, "nvmlDeviceGetName");
+    g_nvml.util = (int(*)(void*, NvmlUtil*))GetProcAddress(m, "nvmlDeviceGetUtilizationRates");
+    g_nvml.temp = (int(*)(void*, int, unsigned int*))GetProcAddress(m, "nvmlDeviceGetTemperature");
+    g_nvml.power = (int(*)(void*, unsigned int*))GetProcAddress(m, "nvmlDeviceGetPowerUsage");
+    g_nvml.clock = (int(*)(void*, int, unsigned int*))GetProcAddress(m, "nvmlDeviceGetClockInfo");
+    g_nvml.mem = (int(*)(void*, NvmlMem*))GetProcAddress(m, "nvmlDeviceGetMemoryInfo");
+    if (!g_nvml.init || !g_nvml.count || !g_nvml.byIndex || !g_nvml.util || g_nvml.init() != 0) return;
+    unsigned int n = 0; g_nvml.count(&n);
+    for (unsigned int i = 0; i < n; ++i) {
+        void* h = nullptr;
+        if (g_nvml.byIndex(i, &h) != 0 || !h) continue;
+        char nm[96] = {}; if (g_nvml.name) g_nvml.name(h, nm, sizeof(nm));
+        g_nvml.devices.push_back({ h, nm[0] ? nm : "NVIDIA" });
+    }
+    g_nvml.ok = !g_nvml.devices.empty();
+}
+static json readNvmlHandle(void* h, const std::string& model) {
+    NvmlUtil u{}; if (g_nvml.util(h, &u) != 0) return nullptr;
+    unsigned int t = 0, mw = 0, c = 0; NvmlMem mem{};
+    if (g_nvml.temp) g_nvml.temp(h, 0, &t);          // 0 = NVML_TEMPERATURE_GPU
+    if (g_nvml.power) g_nvml.power(h, &mw);
+    if (g_nvml.clock) g_nvml.clock(h, 0, &c);        // 0 = NVML_CLOCK_GRAPHICS
+    if (g_nvml.mem) g_nvml.mem(h, &mem);
+    return { {"brand", "NVIDIA"}, {"name", model}, {"load", u.gpu}, {"temp", t},
+             {"power", (double)((int)(mw / 100.0 + 0.5)) / 10.0},   // W mit 1 Nachkommastelle wie main.js
+             {"clock", c}, {"vram", (long long)(mem.used / 1048576)} };
 }
 static json readGpuNative() {
+    nvmlInitOnce();
+    if (g_nvml.ok) {   // NVIDIA-Vollwerte (Automatik: erstes Geraet; manuelle Auswahl via osdGpu)
+        std::string sel = loadSettings().value("osdGpu", "auto");
+        std::smatch sm;
+        if (std::regex_match(sel, sm, std::regex("^nvml:(\\d+)$"))) {
+            size_t idx = (size_t)atoi(sm[1].str().c_str());
+            if (idx < g_nvml.devices.size()) { json r = readNvmlHandle(g_nvml.devices[idx].first, g_nvml.devices[idx].second); if (!r.is_null()) return r; }
+        }
+        json r = readNvmlHandle(g_nvml.devices[0].first, g_nvml.devices[0].second);
+        if (!r.is_null()) return r;
+    }
+    return readGpuPdh();
+}
+static json readGpuPdh() {
     ComPtr<IDXGIFactory1> fac; CreateDXGIFactory1(IID_PPV_ARGS(&fac));
     ComPtr<IDXGIAdapter1> pick; DXGI_ADAPTER_DESC1 pd{};
     if (fac) { ComPtr<IDXGIAdapter1> nv, amd, intel;
@@ -1857,7 +1929,12 @@ static json handleChannel(const std::string& channel, const json& args) {
         // 2) Exe-/Datei-Icon
         return fileIconDataUrl(p);
     }
-    if (channel == "list-gpus") return json::array();   // OSD-Sensorik (nvml/adl) folgt mit dem Sensor-Schritt
+    if (channel == "list-gpus") {   // NVML-Geraete (ADL folgt; Format {id,label} wie listGpus)
+        nvmlInitOnce();
+        json out = json::array();
+        for (size_t i = 0; i < g_nvml.devices.size(); ++i) out.push_back({ {"id", "nvml:" + std::to_string(i)}, {"label", g_nvml.devices[i].second} });
+        return out;
+    }
     // ---- OSD (Overlay steht; Live-Justierung schreibt Settings + zieht sie sofort nach) ----
     if (channel.rfind("osd-edit-", 0) == 0 && args.size() >= 1) {
         json s = loadSettings();
