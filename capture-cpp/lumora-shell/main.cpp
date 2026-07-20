@@ -1308,6 +1308,7 @@ static void bcUnregisterWatchLink() {
 #define HK_TOGGLE 1
 #define HK_STREAM 2
 #define HK_OSD 3
+#define HK_OSDEDIT 5
 static NOTIFYICONDATAW g_nid{};
 static bool g_trayOn = false, g_quitting = false;
 
@@ -1323,6 +1324,7 @@ static void toggleMainWindow() {
 // fokusunabhaengig, auch waehrend ein Spiel im Vordergrund ist) ---
 #define TIMER_XINPUT 108
 static void toggleOsdSetting();   // (unten definiert)
+static void setOsdEditMode(bool on);
 // Standard-Gamepad-API-Index -> XINPUT_GAMEPAD-Pruefung (Masken 1:1 aus main.js XI_MASK)
 static bool xiButtonDown(const XINPUT_GAMEPAD& g, int idx) {
     switch (idx) {
@@ -1391,7 +1393,7 @@ static bool parseAccelerator(const std::string& acc, UINT& mods, UINT& vk) {
     return vk != 0;
 }
 static bool registerHotkeys() {
-    UnregisterHotKey(g_hwnd, HK_TOGGLE); UnregisterHotKey(g_hwnd, HK_STREAM); UnregisterHotKey(g_hwnd, HK_OSD);
+    UnregisterHotKey(g_hwnd, HK_TOGGLE); UnregisterHotKey(g_hwnd, HK_STREAM); UnregisterHotKey(g_hwnd, HK_OSD); UnregisterHotKey(g_hwnd, HK_OSDEDIT);
     json s = loadSettings();
     bool ok = true;
     UINT m, v;
@@ -1399,8 +1401,10 @@ static bool registerHotkeys() {
     if (!t.empty() && parseAccelerator(t, m, v)) ok = RegisterHotKey(g_hwnd, HK_TOGGLE, m | MOD_NOREPEAT, v) != FALSE;
     std::string st = s.value("streamHotkey", "");
     if (!st.empty() && parseAccelerator(st, m, v)) RegisterHotKey(g_hwnd, HK_STREAM, m | MOD_NOREPEAT, v);
-    std::string oh = s.value("osdHotkey", "");
+    std::string oh = s.value("osdHotkey", "Alt+O");
     if (!oh.empty() && parseAccelerator(oh, m, v)) RegisterHotKey(g_hwnd, HK_OSD, m | MOD_NOREPEAT, v);
+    std::string oe = s.value("osdEditHotkey", "Alt+Shift+O");
+    if (!oe.empty() && parseAccelerator(oe, m, v)) RegisterHotKey(g_hwnd, HK_OSDEDIT, m | MOD_NOREPEAT, v);
     return ok;
 }
 // Autostart: HKCU-Run-Key "Lumora" + Legacy-/Doppel-Keys raeumen (der bekannte
@@ -1674,23 +1678,33 @@ static void applyOsdConfig() {
                               {"theme", s.value("osdTheme", "compact")}, {"fields", s.value("osdFields", json())},
                               {"accent", s.value("osdAccent", "#74e857")} });
 }
+static ComPtr<IDCompositionDevice> g_dcompDev;
+static ComPtr<IDCompositionTarget> g_dcompTarget;
+static ComPtr<IDCompositionVisual> g_dcompVisual;
+static ComPtr<ICoreWebView2CompositionController> g_osdComp;
+static bool g_osdEdit = false;   // Live-Edit (Alt+Shift+O): Overlay faengt die Maus
 static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    // Live-Edit: Maus-Ereignisse ans WebView2 durchreichen - der Composition-Modus
+    // bekommt sie NICHT automatisch (SendMouseInput ist Pflicht, MS-Doku).
+    if (g_osdEdit && g_osdComp && ((m >= WM_MOUSEMOVE && m <= WM_MBUTTONDBLCLK) || m == WM_MOUSEWHEEL || m == WM_MOUSELEAVE)) {
+        POINT pt{ GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+        UINT32 mouseData = 0;
+        if (m == WM_MOUSEWHEEL) { mouseData = (UINT32)GET_WHEEL_DELTA_WPARAM(w); ScreenToClient(h, &pt); }   // Wheel liefert Screen-Koordinaten
+        g_osdComp->SendMouseInput((COREWEBVIEW2_MOUSE_EVENT_KIND)m, (COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS)LOWORD(w), mouseData, pt);
+        return 0;
+    }
     switch (m) {
-    // CLICK-THROUGH: WS_EX_TRANSPARENT wirkt OHNE WS_EX_LAYERED nicht auf Hit-Tests
-    // (User-Befund: OSD blockierte Maus, Hand-Cursor). HTTRANSPARENT reicht alle
-    // Maus-Ereignisse ans darunterliegende Fenster durch - wie setIgnoreMouseEvents.
-    case WM_NCHITTEST: return HTTRANSPARENT;
-    case WM_SETCURSOR: return TRUE;   // nie einen eigenen Cursor setzen
+    // CLICK-THROUGH (ausser im Edit-Modus): WS_EX_TRANSPARENT wirkt OHNE WS_EX_LAYERED
+    // nicht auf Hit-Tests (User-Befund: OSD blockierte Maus, Hand-Cursor). HTTRANSPARENT
+    // reicht alle Maus-Ereignisse ans darunterliegende Fenster durch.
+    case WM_NCHITTEST: return g_osdEdit ? HTCLIENT : HTTRANSPARENT;
+    case WM_SETCURSOR: if (!g_osdEdit) return TRUE; SetCursor(LoadCursorW(nullptr, IDC_ARROW)); return TRUE;
     case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_osdWv) g_osdWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
     case WM_SIZE: if (g_osdCtrl) { RECT rc; GetClientRect(h, &rc); g_osdCtrl->put_Bounds(rc); } return 0;
     case WM_DESTROY: return 0;
     }
     return DefWindowProcW(h, m, w, l);
 }
-static ComPtr<IDCompositionDevice> g_dcompDev;
-static ComPtr<IDCompositionTarget> g_dcompTarget;
-static ComPtr<IDCompositionVisual> g_dcompVisual;
-static ComPtr<ICoreWebView2CompositionController> g_osdComp;
 static void createOsdWindow() {
     if (g_osdHwnd) return;
     static bool reg = false;
@@ -1749,6 +1763,29 @@ static void createOsdWindow() {
 static void showOsd() { createOsdWindow(); sensorsInit(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 1000, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
 static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
+// Live-Edit-Modus (Alt+Shift+O, wie Electrons setOsdEditMode): Overlay wird kurz
+// interaktiv (Ecke ziehen, Mausrad = Groesse, Editbar-Buttons); "Fertig" schaltet zurueck.
+static void setOsdEditMode(bool on) {
+    if (on) {
+        json s = loadSettings();
+        if (!s.value("osdEnabled", false)) { s["osdEnabled"] = true; writeFile(settingsPath(), s.dump(2)); }
+        showOsd();
+        if (!g_osdHwnd) return;
+        g_osdEdit = true;
+        // fokussier-/anklickbar machen: NOACTIVATE+TRANSPARENT temporaer entfernen
+        LONG_PTR ex = GetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex & ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE));
+        SetForegroundWindow(g_osdHwnd);
+        sendToOsd("osd-edit", true);
+    } else {
+        g_osdEdit = false;
+        if (g_osdHwnd) {
+            LONG_PTR ex = GetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+        }
+        sendToOsd("osd-edit", false);
+    }
+}
 static void toggleOsdSetting() {   // wie Electrons toggleOverlay (Hotkey/Gamepad/Kanal)
     json s = loadSettings(); s["osdEnabled"] = !s.value("osdEnabled", false);
     writeFile(settingsPath(), s.dump(2));
@@ -2092,7 +2129,7 @@ static json handleChannel(const std::string& channel, const json& args) {
         else if (channel == "osd-edit-scale" && args[0].is_number()) s["osdScale"] = args[0];
         else if (channel == "osd-edit-theme" && args[0].is_string()) s["osdTheme"] = args[0];
         else if (channel == "osd-edit-fields") s["osdFields"] = args[0];
-        else if (channel == "osd-edit-done") { sendToOsd("osd-edit", false); return true; }
+        else if (channel == "osd-edit-done") { setOsdEditMode(false); return true; }
         writeFile(settingsPath(), s.dump(2));
         applyOsdConfig();
         return true;
@@ -2260,6 +2297,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_HOTKEY:
         if (w == HK_TOGGLE) { toggleMainWindow(); return 0; }
         if (w == HK_OSD) { toggleOsdSetting(); return 0; }
+        if (w == HK_OSDEDIT) { setOsdEditMode(!g_osdEdit); return 0; }
         if (w == HK_STREAM) {   // Stream-Hotkey: an/aus (im Worker, blockiert den Hotkey nicht)
             std::thread([]() { if (g_bcState.value("active", false)) stopBroadcast(); else startBroadcast(); }).detach();
             return 0;
