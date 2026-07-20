@@ -26,6 +26,8 @@
 #include "launch_game.h"
 #include <thread>
 #include <mutex>
+#include <map>
+#include <set>
 #pragma comment(lib, "gdiplus.lib")
 
 // Antworten aus Worker-Threads muessen vom UI-Thread gepostet werden (WebView2-Regel):
@@ -175,12 +177,87 @@ static json fileIconDataUrl(const std::wstring& path) {
 
 // --- Modul: Spielstart (Vollversion, Logik 1:1 aus main.js - s. launch_game.h) ---
 #define TIMER_LAUNCH 100
+#define TIMER_EXTWATCH 101
 static std::mutex g_launchMx;
 static std::vector<lulaunch::LaunchSession> g_launches;
+static bool g_hdrByLauncher = false;                       // wer HDR gerade verwaltet (Eigen- ODER Fremdstart)
+static std::vector<std::string> g_activeLaunchExes;        // exe(lower) der Eigenstart-Monitore
+struct ExtSession { std::string gamePath, name; ULONGLONG startTs; int absent; bool hdrOn; };
+static std::map<std::string, ExtSession> g_extSessions;    // exe(lower) -> Fremdstart-Session
+static std::map<std::wstring, std::string> g_lnkExeCache;  // .lnk-Pfad -> Ziel-exe(lower)
+
+// Alle laufenden Exe-Namen (lowercase) in einem Toolhelp-Schnappschuss (<1 ms).
+static std::set<std::string> listRunningExes() {
+    std::set<std::string> out;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return out;
+    PROCESSENTRY32W pe{ sizeof(pe) };
+    if (Process32FirstW(snap, &pe)) do {
+        std::wstring n = pe.szExeFile; for (auto& c : n) c = towlower(c);
+        out.insert(narrow(n));
+    } while (Process32NextW(snap, &pe));
+    CloseHandle(snap);
+    return out;
+}
+static json readLibraryGames() {
+    json j = json::parse(readFile(dataDir() + L"\\games.json"), nullptr, false);
+    return j.is_array() ? j : json::array();
+}
+static void sendExternalRunning() {   // Start-Knopf zeigt "laeuft" fuer Fremd-Sessions
+    json arr = json::array();
+    for (auto& [k, s] : g_extSessions) arr.push_back(s.gamePath);
+    sendToUi("external-running", arr);
+}
+// Fremdstart-Watcher (2s-Takt wie Electron-Nachruestung: HDR geht an, BEVOR das Spiel
+// seine Display-Faehigkeiten prueft; Ende nach 3 leeren Scans ~6s gegen DRM-Handoff).
+static void extWatchTick() {
+    std::lock_guard<std::mutex> lk(g_launchMx);
+    auto running = listRunningExes();
+    if (running.empty()) return;                      // Scan-Aussetzer -> nichts beenden
+    // 1) Neue fremd gestartete Bibliotheksspiele erkennen
+    for (auto& g : readLibraryGames()) {
+        std::string p = g.value("path", ""); if (p.empty()) continue;
+        std::string exe; std::string plow = p; for (auto& c : plow) c = (char)tolower((unsigned char)c);
+        if (plow.size() > 4 && plow.rfind(".exe") == plow.size() - 4) { size_t sl = p.find_last_of("\\/"); exe = plow.substr(sl == std::string::npos ? 0 : sl + 1); }
+        else if (plow.size() > 4 && plow.rfind(".lnk") == plow.size() - 4) {
+            std::wstring wp = widen(p);
+            auto it = g_lnkExeCache.find(wp);
+            if (it == g_lnkExeCache.end()) {          // einmalig aufloesen (IShellLink, UI-Thread-STA)
+                std::wstring n = lulaunch::resolveProcessName(wp); for (auto& c : n) c = towlower(c);
+                g_lnkExeCache[wp] = narrow(n); continue;   // ab dem naechsten Tick beruecksichtigt
+            }
+            exe = it->second;
+        }
+        if (exe.empty() || exe.rfind(".exe") != exe.size() - 4) continue;
+        bool activeLaunch = false; for (auto& a : g_activeLaunchExes) if (a == exe) { activeLaunch = true; break; }
+        if (activeLaunch || g_extSessions.count(exe) || !running.count(exe)) continue;
+        ExtSession s{ p, g.value("name", ""), GetTickCount64(), 0, false };
+        lulaunch::playLog(dataDir(), "EXTERN erkannt: " + exe + " (" + s.name + ") hdr=" + (g.value("hdr", false) ? "true" : "false"));
+        // HDR wie beim Eigenstart - nur wenn nicht schon eine andere Session HDR verwaltet
+        if (g.value("hdr", false) && !g_hdrByLauncher) {
+            lulaunch::setHDR(g_appDir, true); g_hdrByLauncher = true; s.hdrOn = true;
+            sendToUi("hdr-status", true);
+        }
+        g_extSessions[exe] = s;
+        sendExternalRunning();
+    }
+    // 2) Laufende Fremd-Sessions pruefen / beenden
+    for (auto it = g_extSessions.begin(); it != g_extSessions.end();) {
+        if (running.count(it->first)) { it->second.absent = 0; ++it; continue; }
+        if (++it->second.absent < 3) { ++it; continue; }
+        ExtSession s = it->second; it = g_extSessions.erase(it);
+        sendExternalRunning();
+        lulaunch::playLog(dataDir(), "EXTERN beendet: " + s.gamePath + " Dauer " + std::to_string((GetTickCount64() - s.startTs) / 1000) + "s");
+        if (s.hdrOn) { lulaunch::setHDR(g_appDir, false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
+        sendToUi("play-session", { {"gamePath", s.gamePath}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
+    }
+}
 
 // Ende einer Session: HDR ggf. aus, Spielzeit verbuchen, Button freigeben (wie endSession in main.js).
 static void launchEndSession(lulaunch::LaunchSession& s, bool credit) {
-    if (s.useHdr) { lulaunch::setHDR(g_appDir, false); sendToUi("hdr-status", false); }
+    std::string exeLow = narrow(s.exeName); for (auto& c : exeLow) c = (char)tolower((unsigned char)c);
+    g_activeLaunchExes.erase(std::remove(g_activeLaunchExes.begin(), g_activeLaunchExes.end(), exeLow), g_activeLaunchExes.end());   // Watcher darf wieder uebernehmen
+    if (s.useHdr) { lulaunch::setHDR(g_appDir, false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
     if (credit && s.startTs) sendToUi("play-session", { {"gamePath", narrow(s.gamePath)}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
     sendToUi("launch-status", "idle");
     s.done = true;
@@ -255,8 +332,20 @@ static json launchGame(const json& args) {
         s.gamePath = gamePath; s.gameDir = gameDir; s.isLnk = isLnk; s.useHdr = useHdr;
         s.appId = appId; s.launchTs = GetTickCount64();
         s.exeName = lulaunch::resolveProcessName(gamePath);
+        if (useHdr) g_hdrByLauncher = true;
         lulaunch::playLog(dataDir(), "LAUNCH " + narrow(s.exeName) + " kind=" + (isXbox ? "xbox" : (!appId.empty() ? "steam" : (isLnk ? "lnk" : "direct"))) + " appid=" + (appId.empty() ? "-" : appId));
-        { std::lock_guard<std::mutex> lk(g_launchMx); g_launches.push_back(std::move(s)); }
+        {
+            std::lock_guard<std::mutex> lk(g_launchMx);
+            std::string exeLow = narrow(s.exeName); for (auto& c : exeLow) c = (char)tolower((unsigned char)c);
+            g_activeLaunchExes.push_back(exeLow);         // Fremdstart-Watcher: dieses Spiel gehoert jetzt dem Eigenstart-Monitor
+            auto ext = g_extSessions.find(exeLow);        // lief es schon fremd? Dort sauber abschliessen (keine Doppelzaehlung)
+            if (ext != g_extSessions.end()) {
+                sendToUi("play-session", { {"gamePath", ext->second.gamePath}, {"durationMs", (long long)(GetTickCount64() - ext->second.startTs)} });
+                g_extSessions.erase(ext);
+                sendExternalRunning();
+            }
+            g_launches.push_back(std::move(s));
+        }
         SetTimer(g_hwnd, TIMER_LAUNCH, 4000, nullptr);   // Tick im UI-Thread
         return { {"success", true} };
     } catch (...) {
@@ -474,6 +563,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_TIMER:
         if (w == TIMER_LAUNCH) { launchTick(); return 0; }
+        if (w == TIMER_EXTWATCH) { extWatchTick(); return 0; }
         break;
     case WM_CLOSE: saveWindowState(h); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
@@ -581,6 +671,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Frame-Neuberechnung erzwingen (WM_NCCALCSIZE greift sonst erst bei der naechsten Groessenaenderung)
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     ShowWindow(hwnd, st.value("maximized", false) ? SW_MAXIMIZE : nShow);
+    SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
 
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
     wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
