@@ -1574,6 +1574,7 @@ static bool g_osdLoaded = false;
 
 static void sendToOsd(const std::string& channel, const json& payload);
 #define TIMER_OSDDATA 107
+#define TIMER_OSDFPS 110   // schneller Frametime-Graph-Tick (~30 Hz), getrennt von den 5-Hz-Sensoren
 // --- OSD-Sensorik Teil 1 (treiberfrei): PDH-CPU/GPU-Last, RAM, DXGI-VRAM.
 // Temp/Takt/Power (NVML/ADL/PawnIO) + FPS (PresentMon) folgen als Teil 2.
 static PDH_HQUERY g_pdhQ = nullptr;
@@ -1688,9 +1689,14 @@ static json readBrokerFps() {
 // PresentMon-Broker, 'auto' -> RTSS wenn verfuegbar, sonst Broker. g_fpsUseRtss
 // merkt sich die Wahl fuer osdDataTick (nur dann brokersEnsure).
 static bool g_fpsUseRtss = false;
-static json readFps() {
-    std::string src = loadSettings().value("osdFpsSource", std::string("auto"));
-    g_fpsUseRtss = (src == "rtss") ? true : (src == "presentmon") ? false : lurtss::available();
+static ULONGLONG g_fpsSrcAt = 0;
+static json readFps() {   // ~30 Hz aufrufbar: Quelle nur 2x/s aus den Settings lesen (kein Datei-I/O je Frame)
+    ULONGLONG now = GetTickCount64();
+    if (!g_fpsSrcAt || now - g_fpsSrcAt > 500) {
+        std::string src = loadSettings().value("osdFpsSource", std::string("auto"));
+        g_fpsUseRtss = (src == "rtss") ? true : (src == "presentmon") ? false : lurtss::available();
+        g_fpsSrcAt = now;
+    }
     if (g_fpsUseRtss) {
         lurtss::FpsOut r = lurtss::readFps();
         return r.ok ? json{ {"fps", r.fps}, {"frametime", r.frametime} } : json(nullptr);
@@ -2037,10 +2043,18 @@ static void osdDataTick() {
     }
     PdhCollectQueryData(g_pdhQ);   // frisches Sample fuer die Delta-Zaehler
     json payload = { {"gpu", readGpuNative()}, {"cpu", readCpuNative()} };
-    json f = readFps();   // RTSS oder PresentMon-Broker je nach osdFpsSource
-    if (f.is_object()) { payload["fps"] = f["fps"]; payload["frametime"] = f["frametime"]; }
-    else { payload["fps"] = "\xE2\x80\xA6"; if (!g_fpsUseRtss) brokersEnsure(); }   // RTSS braucht keinen Broker
+    // Bei abgelehnter Einrichtung sendet der schnelle FPS-Tick nichts -> hier "—".
+    if (loadSettings().value("osdSetupDeclined", false)) payload["fps"] = "\xE2\x80\x94";
     sendToOsd("osd-data", payload);
+}
+// Schneller FPS/Frametime-Tick (~30 Hz) fuer den lebendigen Frametime-Graphen; die
+// Zahlen drosselt osd.html selbst auf lesbare ~4 Hz (1:1 aus main.js startFps).
+static void osdFpsTick() {
+    if (!g_osdHwnd || !IsWindowVisible(g_osdHwnd)) return;
+    if (loadSettings().value("osdSetupDeclined", false)) return;   // dann liefert der Sensor-Tick fps:"—"
+    json f = readFps();   // RTSS oder PresentMon-Broker je nach osdFpsSource (Quelle gecacht)
+    if (f.is_object()) sendToOsd("osd-data", { {"fps", f["fps"]}, {"frametime", f["frametime"]} });
+    else { sendToOsd("osd-data", { {"fps", "\xE2\x80\xA6"} }); if (!g_fpsUseRtss) brokersEnsure(); }
 }
 static void sendToOsd(const std::string& channel, const json& payload) {   // threadsicher wie sendToUi
     if (!g_osdHwnd) return;
@@ -2143,8 +2157,8 @@ static void createOsdWindow() {
                 return S_OK;
             }).Get());
 }
-static void showOsd() { createOsdWindow(); sensorsInit(); ensureOsdSetup(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 1000, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
-static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
+static void showOsd() { createOsdWindow(); sensorsInit(); ensureOsdSetup(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 200, nullptr); SetTimer(g_hwnd, TIMER_OSDFPS, 33, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
+static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); KillTimer(g_hwnd, TIMER_OSDFPS); shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
 // Live-Edit-Modus (Alt+Shift+O, wie Electrons setOsdEditMode): Overlay wird kurz
 // interaktiv (Ecke ziehen, Mausrad = Groesse, Editbar-Buttons); "Fertig" schaltet zurueck.
@@ -2536,7 +2550,11 @@ static json handleChannel(const std::string& channel, const json& args) {
         json s = loadSettings();
         if (channel == "osd-edit-corner" && args[0].is_string()) s["osdCorner"] = args[0];
         else if (channel == "osd-edit-opacity" && args[0].is_number()) s["osdOpacity"] = args[0];
-        else if (channel == "osd-edit-scale" && args[0].is_number()) s["osdScale"] = args[0];
+        else if (channel == "osd-edit-scale" && args[0].is_number()) {   // osd.html sendet ein DELTA (+1/-1), nicht den Wert
+            double z = s.value("osdScale", 1.0) + (args[0].get<double>() > 0 ? 0.05 : -0.05);
+            z = (std::max)(0.5, (std::min)(2.0, (double)(int)(z * 100 + 0.5) / 100.0));   // klemmen + auf 2 Dezimalen runden
+            s["osdScale"] = z;
+        }
         else if (channel == "osd-edit-theme" && args[0].is_string()) s["osdTheme"] = args[0];
         else if (channel == "osd-edit-fields") s["osdFields"] = args[0];
         else if (channel == "osd-edit-done") { setOsdEditMode(false); return true; }
@@ -2684,6 +2702,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
         if (w == TIMER_XINPUT) { xinputTick(); return 0; }
         if (w == TIMER_OSDDATA) { osdDataTick(); return 0; }
+        if (w == TIMER_OSDFPS) { osdFpsTick(); return 0; }
         if (w == TIMER_GROUP) {   // Heartbeat im Worker (Netz, 8s-Timeout) - nie doppelt
             if (!g_groupTickBusy.exchange(true)) std::thread([]() { groupTickOnce(); g_groupTickBusy = false; }).detach();
             return 0;
