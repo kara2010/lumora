@@ -15,6 +15,8 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <dxgi1_4.h>
+#include <dcomp.h>
+#pragma comment(lib, "dcomp.lib")
 #include <bcrypt.h>
 #include <pdh.h>
 #pragma comment(lib, "pdh.lib")
@@ -1634,34 +1636,52 @@ static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     return DefWindowProcW(h, m, w, l);
 }
+static ComPtr<IDCompositionDevice> g_dcompDev;
+static ComPtr<IDCompositionTarget> g_dcompTarget;
+static ComPtr<IDCompositionVisual> g_dcompVisual;
+static ComPtr<ICoreWebView2CompositionController> g_osdComp;
 static void createOsdWindow() {
     if (g_osdHwnd) return;
     static bool reg = false;
     if (!reg) { WNDCLASSW wc{}; wc.lpfnWndProc = osdWndProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"LumoraOsd"; RegisterClassW(&wc); reg = true; }
-    // Hauptmonitor-Flaeche minus 1px unten (bricht die Vollbild-Erkennung von Windows nicht)
+    // Hauptmonitor-Flaeche minus 1px unten (bricht die Vollbild-Erkennung von Windows nicht).
+    // WS_EX_NOREDIRECTIONBITMAP: keine eigene Redirection-Surface -> DirectComposition scheint
+    // per-pixel-transparent durch (Voraussetzung fuer echte WebView2-Transparenz). KEIN
+    // WS_EX_LAYERED (das killte das WebView2-Rendering); click-through via WS_EX_TRANSPARENT.
     HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi);
     int w = mi.rcMonitor.right - mi.rcMonitor.left, hgt = mi.rcMonitor.bottom - mi.rcMonitor.top - 1;
-    g_osdHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    g_osdHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
         L"LumoraOsd", L"", WS_POPUP, mi.rcMonitor.left, mi.rcMonitor.top, w, hgt, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!g_osdHwnd) { bcLogStream("osd: CreateWindowExW fehlgeschlagen err=" + std::to_string(GetLastError())); return; }
-    SetLayeredWindowAttributes(g_osdHwnd, 0, 255, LWA_ALPHA);   // Layered aktivieren (Transparenz macht das WebView2 per Alpha)
-    bcLogStream("osd: Overlay-Fenster erstellt");
+    bcLogStream("osd: Overlay-Fenster erstellt (Composition)");
     wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
     std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
     CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
-                if (FAILED(res) || !env || !g_osdHwnd) return res;
-                env->CreateCoreWebView2Controller(g_osdHwnd,
-                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                        [](HRESULT r2, ICoreWebView2Controller* ctrl) -> HRESULT {
-                            if (FAILED(r2) || !ctrl || !g_osdHwnd) return r2;
-                            g_osdCtrl = ctrl;
+                ComPtr<ICoreWebView2Environment3> env3;
+                if (FAILED(res) || !env || !g_osdHwnd || FAILED(env->QueryInterface(IID_PPV_ARGS(&env3))) || !env3) { bcLogStream("osd: Environment3 fehlt"); return res; }
+                env3->CreateCoreWebView2CompositionController(g_osdHwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2CompositionControllerCompletedHandler>(
+                        [](HRESULT r2, ICoreWebView2CompositionController* comp) -> HRESULT {
+                            if (FAILED(r2) || !comp || !g_osdHwnd) { bcLogStream("osd: CompositionController-Init " + std::to_string(r2)); return r2; }
+                            g_osdComp = comp;
+                            comp->QueryInterface(IID_PPV_ARGS(&g_osdCtrl));   // gleiches Objekt als ICoreWebView2Controller
+                            if (!g_osdCtrl) return E_NOINTERFACE;
                             g_osdCtrl->get_CoreWebView2(&g_osdWv);
                             ComPtr<ICoreWebView2Controller2> c2; g_osdCtrl.As(&c2);
-                            if (c2) { COREWEBVIEW2_COLOR clr{ 0, 0, 0, 0 }; c2->put_DefaultBackgroundColor(clr); }   // durchsichtig
+                            if (c2) { COREWEBVIEW2_COLOR clr{ 0, 0, 0, 0 }; c2->put_DefaultBackgroundColor(clr); }   // voll transparent (nur mit Composition!)
+                            // DirectComposition-Baum: Device -> Target(hwnd) -> Visual(WebView2-Inhalt)
+                            if (SUCCEEDED(DCompositionCreateDevice(nullptr, IID_PPV_ARGS(&g_dcompDev))) && g_dcompDev) {
+                                g_dcompDev->CreateTargetForHwnd(g_osdHwnd, TRUE, &g_dcompTarget);
+                                g_dcompDev->CreateVisual(&g_dcompVisual);
+                                if (g_dcompVisual) { g_osdComp->put_RootVisualTarget(g_dcompVisual.Get());
+                                    if (g_dcompTarget) g_dcompTarget->SetRoot(g_dcompVisual.Get());
+                                    g_dcompDev->Commit(); }
+                            } else bcLogStream("osd: DCompositionCreateDevice fehlgeschlagen");
                             RECT rc; GetClientRect(g_osdHwnd, &rc); g_osdCtrl->put_Bounds(rc);
+                            g_osdCtrl->put_IsVisible(TRUE);
                             ComPtr<ICoreWebView2_3> wv3; g_osdWv.As(&wv3);
                             if (wv3) wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
                             std::wstring shim = SHIM_JS; size_t vp = shim.find(L"%SHELL_VERSION%");

@@ -352,24 +352,6 @@
             </div>
             <p class="settings-hint" id="osdGpuHint" style="display:none"></p>
             <div class="osd-field">
-              <span class="osd-field-label">Anzeige-Art</span>
-              <select id="setOsdRenderer" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
-                <option value="window">Overlay-Fenster (Standard)</option>
-                <option value="rtss">Im Spiel gerendert via RTSS – streambar</option>
-              </select>
-            </div>
-            <p class="settings-hint">„Im Spiel" zeichnet die Werte direkt in den Spiel-Frame – sichtbar in Aufnahmen und Streams und auch im exklusiven Vollbild. Benötigt laufendes RTSS bzw. MSI Afterburner (sonst automatisch Overlay-Fenster). Vereinfachte Designs (Kompakt/Minimal/Balken); Position folgt der Ecken-Wahl unten. Tipp: Wirkt eine große Fläche hinter den Anzeigen störend, in RTSS die Option „Bildschirmfüllung" (Fill) abschalten.</p>
-            <div class="setting-toggle-row">
-              <span class="setting-toggle-label">Afterburner-OSD ein-/ausblenden</span>
-            </div>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Tastatur">⌨️</span>
-              <span class="hotkey-display" id="osdAbHotkeyDisplay">Alt+B</span>
-              <button class="btn-browse" id="osdAbHotkeyBtn" onclick="toggleHotkeyCapture('osdAb')">Ändern</button>
-              <button class="btn-cancel" onclick="clearHotkey('osdAb')">Aus</button>
-            </div>
-            <p class="settings-hint">Blendet das OSD von MSI Afterburner aus bzw. wieder ein – derselbe Schalter, den auch Afterburners eigener OSD-Hotkey nutzt. Das Lumora-Panel (eigener Hotkey oben) bleibt davon <b>unabhängig</b>: Afterburner z. B. links, Lumora rechts. Hinweis: Bei Anzeige-Art „Im Spiel" teilen sich beide Anzeigen denselben RTSS-Kanal – getrennt schalten geht nur mit dem Overlay-Fenster.</p>
-            <div class="osd-field">
               <span class="osd-field-label">Design</span>
               <select id="setOsdTheme" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
                 <option value="compact">Kompakt</option>
@@ -388,14 +370,6 @@
               <span class="osd-field-label">Einrichtung</span>
               <span class="settings-hint" style="flex:1;margin:0">Abgelehnt – FPS und CPU-Sensorwerte fehlen.</span>
               <button class="btn-browse" onclick="setupOsdNow()">Jetzt einrichten</button>
-            </div>
-            <div class="osd-field">
-              <span class="osd-field-label">FPS-Quelle</span>
-              <select id="setOsdFpsSource" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
-                <option value="auto">Automatisch (RTSS, sonst PresentMon)</option>
-                <option value="rtss">Nur RTSS/Afterburner</option>
-                <option value="presentmon">Nur PresentMon (ohne RTSS)</option>
-              </select>
             </div>
             <div class="osd-field">
               <span class="osd-field-label">Größe</span>
@@ -2521,7 +2495,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setTray').checked = !!s.minimizeToTray
       document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
       document.getElementById('setOsdEnabled').checked = !!s.osdEnabled
-      document.getElementById('setOsdRenderer').value = s.osdRenderer || 'window'
       document.getElementById('setOsdTheme').value = s.osdTheme || 'compact'
       renderGpuOptions(s.osdGpu || 'auto')
       renderOsdFields(s.osdFields)
@@ -2531,7 +2504,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         const el = document.getElementById('osdSourcesInfo')
         if (el && q) { el.textContent = window.tr('Datenquellen — GPU: ') + q.gpu + ' · CPU: ' + q.cpu + ' · FPS: ' + q.fps; el.style.display = 'block' }
       }).catch(() => {})
-      document.getElementById('setOsdFpsSource').value = s.osdFpsSource || 'auto'
       const oScale = s.osdScale || 1, oOp = s.osdOpacity != null ? s.osdOpacity : 0.55
       document.getElementById('setOsdScale').value = oScale
       document.getElementById('osdScaleVal').textContent = Math.round(oScale * 100) + '%'
@@ -2637,10 +2609,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     function onOsdSettingChange() {
       ipcRenderer.invoke('set-app-settings', {
         osdEnabled: document.getElementById('setOsdEnabled').checked,
-        osdRenderer: document.getElementById('setOsdRenderer').value,
+        osdRenderer: 'window',
         osdTheme: document.getElementById('setOsdTheme').value,
         osdFields: osdFieldsState,
-        osdFpsSource: document.getElementById('setOsdFpsSource').value,
+        osdFpsSource: 'presentmon',
         osdScale: parseFloat(document.getElementById('setOsdScale').value),
         osdOpacity: parseFloat(document.getElementById('setOsdOpacity').value),
         osdCorner: osdCorner,
