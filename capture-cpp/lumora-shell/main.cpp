@@ -39,6 +39,7 @@
 #include "launch_game.h"
 #include "http_server.h"
 #include "upnp.h"
+#include "osd_broker.h"
 #include <thread>
 #include <mutex>
 #include <map>
@@ -2389,6 +2390,19 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
+    // BROKER-MODI (elevated, via geplante Aufgabe, KEIN Fenster): PresentMon-FPS bzw.
+    // PawnIO-Sensoren sammeln und ins Shared Memory schreiben (wie Electrons Lumora.exe
+    // --fps-broker/--sensor-broker). Muss VOR jeder Fenster-/COM-Init laufen.
+    {
+        int ac = 0; LPWSTR* av = CommandLineToArgvW(GetCommandLineW(), &ac);
+        wchar_t exe[MAX_PATH] = {}; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        std::wstring bd = exe; bd = bd.substr(0, bd.find_last_of(L'\\')) + L"\\bin";
+        if (GetFileAttributesW((bd + L"\\PresentMon.exe").c_str()) == INVALID_FILE_ATTRIBUTES) bd = bd.substr(0, bd.find_last_of(L'\\'));   // Dev: exe-Ordner
+        for (int i = 1; i < ac; ++i) {
+            if (wcscmp(av[i], L"--fps-broker") == 0) { WSADATA w; WSAStartup(MAKEWORD(2, 2), &w); return lubroker::runFpsBroker(bd); }
+            // --sensor-broker folgt (PawnIO) im naechsten Baustein
+        }
+    }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // COM (FileDialogs, WebView2) - GUI-Thread = STA
     Gdiplus::GdiplusStartupInput gsi; ULONG_PTR gtok = 0; Gdiplus::GdiplusStartup(&gtok, &gsi, nullptr);   // Datei-Icons (PNG)
