@@ -20,6 +20,7 @@
 #include <sstream>
 #include "WebView2.h"
 #include "json.hpp"
+#include "scan_games.h"
 #pragma comment(lib, "gdiplus.lib")
 
 using Microsoft::WRL::Callback;
@@ -193,6 +194,36 @@ static json handleChannel(const std::string& channel, const json& args) {
         ShellExecuteW(nullptr, L"open", L"explorer.exe", param.c_str(), nullptr, SW_SHOWNORMAL);
         return true;
     }
+    if (channel == "scan-games") return lushell::scanGames(args.size() >= 1 ? args[0] : json::array());   // Steam+Xbox+Ordner (weitere Stores folgen)
+    if (channel == "store-media" && args.size() >= 1 && args[0].is_object()) {
+        // {id, kind, dataUrl:"data:image/x;base64,..."} -> Datei im media-Ordner, alte Varianten weg,
+        // eindeutiger Stempel-Name gegen Browser-Cache (wie main.js). Rueckgabe: absoluter Pfad.
+        std::string id = args[0].value("id", ""), kind = args[0].value("kind", ""), durl = args[0].value("dataUrl", "");
+        size_t c = durl.find(";base64,");
+        if (id.empty() || kind.empty() || durl.rfind("data:image/", 0) != 0 || c == std::string::npos) return nullptr;
+        std::string ext = durl.substr(11, c - 11);
+        if (ext == "jpeg") ext = "jpg"; else if (ext == "x-icon") ext = "ico"; else if (ext == "svg+xml") ext = "svg";
+        std::string b64 = durl.substr(c + 8);
+        // Base64 -> Bytes
+        static const auto dec = []() { std::array<int8_t, 256> t; t.fill(-1); const char* a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"; for (int i = 0; i < 64; ++i) t[(uint8_t)a[i]] = (int8_t)i; return t; }();
+        std::string bytes; bytes.reserve(b64.size() * 3 / 4); uint32_t acc = 0; int bits = 0;
+        for (char ch : b64) { int8_t v = dec[(uint8_t)ch]; if (v < 0) continue; acc = (acc << 6) | v; bits += 6; if (bits >= 8) { bits -= 8; bytes.push_back((char)((acc >> bits) & 0xFF)); } }
+        std::wstring mdir = dataDir() + L"\\media";
+        CreateDirectoryW(mdir.c_str(), nullptr);
+        std::wstring wid = widen(id), wkind = widen(kind);
+        WIN32_FIND_DATAW fd{}; HANDLE h = FindFirstFileW((mdir + L"\\" + wid + L"-" + wkind + L"*").c_str(), &fd);   // alte Varianten desselben Typs entfernen
+        if (h != INVALID_HANDLE_VALUE) { do { std::wstring fn = fd.cFileName; if (fn.rfind(wid + L"-" + wkind + L".", 0) == 0 || fn.rfind(wid + L"-" + wkind + L"-", 0) == 0) DeleteFileW((mdir + L"\\" + fn).c_str()); } while (FindNextFileW(h, &fd)); FindClose(h); }
+        wchar_t stamp[32]; _ui64tow_s(GetTickCount64(), stamp, 32, 36);
+        std::wstring file = mdir + L"\\" + wid + L"-" + wkind + L"-" + stamp + L"." + widen(ext);
+        if (!writeFile(file, bytes)) return nullptr;
+        return narrow(file);
+    }
+    if (channel == "delete-media" && args.size() >= 1 && args[0].is_string()) {
+        std::wstring mdir = dataDir() + L"\\media", wid = widen(args[0].get<std::string>());
+        WIN32_FIND_DATAW fd{}; HANDLE h = FindFirstFileW((mdir + L"\\" + wid + L"-*").c_str(), &fd);
+        if (h != INVALID_HANDLE_VALUE) { do { DeleteFileW((mdir + L"\\" + fd.cFileName).c_str()); } while (FindNextFileW(h, &fd)); FindClose(h); }
+        return true;
+    }
     if (channel == "browse-game")        return pickPathDialog(L"Spiel auswaehlen", false, L"Spiele", L"*.exe;*.lnk");
     if (channel == "browse-icon")        return pickPathDialog(L"Icon auswaehlen (.exe oder .ico)", false, L"Icon-Dateien", L"*.ico;*.exe");
     if (channel == "browse-scan-folder") return pickPathDialog(L"Ordner scannen", true, nullptr, nullptr);
@@ -244,6 +275,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-scan") == 0) {
+        // Selbsttest: echten Steam+Xbox-Scan laufen lassen, Anzahl + Beispiele in die Testdatei.
+        json r = lushell::scanGames(json::array());
+        std::string s = "gefunden=" + std::to_string(r.size()) + "\n";
+        for (size_t k = 0; k < r.size() && k < 6; ++k) s += "  " + r[k].value("source", "?") + ": " + r[k].value("name", "?") + " -> " + r[k].value("path", "?") + "\n";
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-ipc") == 0) {
         json s = handleChannel("get-app-settings", json::array());
         json m = s; m.update(json{ {"__testfeld", 42} });
