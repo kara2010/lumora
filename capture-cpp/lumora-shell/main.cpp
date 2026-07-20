@@ -61,7 +61,7 @@ static const wchar_t* SHIM_JS = LR"JS(
   window.chrome.webview.addEventListener('message', (e) => {
     const d = e.data;
     if (d && d.id && pending.has(d.id)) { const p = pending.get(d.id); pending.delete(d.id); p.resolve(d.result); }
-    else if (d && d.channel) { (listeners[d.channel] || []).forEach((f) => { try { f({}, d.payload) } catch {} }); }
+    else if (d && d.channel) { const as = Array.isArray(d.payloads) ? d.payloads : [d.payload]; (listeners[d.channel] || []).forEach((f) => { try { f({}, ...as) } catch {} }); }
   });
   const syncGet = (u) => { try { const x = new XMLHttpRequest(); x.open('GET', u + '?t=' + Date.now(), false); x.send(); return x.status === 200 ? x.responseText : null; } catch (e) { return null; } };
   const ipcRenderer = {
@@ -529,11 +529,72 @@ static bool bcVerifyDoormanSig(const std::string& body, const std::string& sig, 
     for (size_t i = 0; i < expect.size(); ++i) diff |= (unsigned char)(expect[i] ^ sig[i]);
     return diff == 0;
 }
-static void bcSyncDoorman() {   // pending-Anfragen an die UI (Freigabe-Dialog im Haupt-UI; eigenes Fenster spaeter)
+// --- Tuersteher-Freigabefenster (kleines Always-on-top mit doorman.html, wie Electron) ---
+#define WM_SHELL_DOORMSG (WM_APP + 4)
+#define WM_SHELL_DOORSYNC (WM_APP + 5)
+static HWND g_doorHwnd = nullptr;
+static ComPtr<ICoreWebView2Controller> g_doorCtrl;
+static ComPtr<ICoreWebView2> g_doorWv;
+static void onWebMessage(const std::wstring& raw, HWND replyWnd);   // (weiter unten)
+static LRESULT CALLBACK doorWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_SHELL_DOORMSG: { auto* s = (std::wstring*)l; if (s) { if (g_doorWv) g_doorWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
+    case WM_SIZE: if (g_doorCtrl) { RECT rc; GetClientRect(h, &rc); g_doorCtrl->put_Bounds(rc); } return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+static void createDoormanWindow() {
+    if (g_doorHwnd) return;
+    static bool reg = false;
+    if (!reg) { WNDCLASSW wc{}; wc.lpfnWndProc = doorWndProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"LumoraDoor"; wc.hbrBackground = CreateSolidBrush(RGB(15, 15, 15)); RegisterClassW(&wc); reg = true; }
+    HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi);
+    UINT dpi = GetDpiForSystem(); if (!dpi) dpi = 96;
+    int w = MulDiv(360, dpi, 96), hgt = MulDiv(220, dpi, 96);
+    g_doorHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        L"LumoraDoor", L"Lumora", WS_POPUP, mi.rcWork.right - w - 16, mi.rcWork.top + 16, w, hgt, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!g_doorHwnd) return;
+    wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
+    std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(res) || !env || !g_doorHwnd) return res;
+                env->CreateCoreWebView2Controller(g_doorHwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [](HRESULT r2, ICoreWebView2Controller* ctrl) -> HRESULT {
+                            if (FAILED(r2) || !ctrl || !g_doorHwnd) return r2;
+                            g_doorCtrl = ctrl; g_doorCtrl->get_CoreWebView2(&g_doorWv);
+                            RECT rc; GetClientRect(g_doorHwnd, &rc); g_doorCtrl->put_Bounds(rc);
+                            ComPtr<ICoreWebView2_3> wv3; g_doorWv.As(&wv3);
+                            if (wv3) wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            std::wstring shim = SHIM_JS; size_t vp = shim.find(L"%SHELL_VERSION%");
+                            if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
+                            g_doorWv->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
+                            g_doorWv->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* a) -> HRESULT {
+                                    LPWSTR j = nullptr;
+                                    if (SUCCEEDED(a->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_doorHwnd); CoTaskMemFree(j); }
+                                    return S_OK;
+                                }).Get(), nullptr);
+                            g_doorWv->Navigate(L"https://app.lumora/doorman.html");
+                            return S_OK;
+                        }).Get());
+                return S_OK;
+            }).Get());
+}
+static void bcSyncDoorman() {   // pending-Anfragen ans Freigabefenster; zeigen OHNE Fokus, leer -> verstecken
     json pend = json::array();
     { std::lock_guard<std::mutex> lk(g_doorMx);
       for (auto& [vid, k] : g_knocks) if (k.status == "pending") pend.push_back({ {"vid", vid}, {"name", k.name}, {"at", (long long)k.at} }); }
-    sendToUi("doorman-list", pend);
+    bool de = true;   // Sprachwahl wie mainLang (V1: de; language-Setting folgt)
+    if (g_doorHwnd) {
+        json m = { {"channel", "doorman-list"}, {"payloads", json::array({ pend, de })} };
+        PostMessageW(g_doorHwnd, WM_SHELL_DOORMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
+        if (pend.empty()) ShowWindow(g_doorHwnd, SW_HIDE);
+        else ShowWindow(g_doorHwnd, SW_SHOWNOACTIVATE);
+    }
+    sendToUi("doorman-list", pend);   // Haupt-UI weiter mitinformieren
 }
 static std::string bcApproveGate(const std::string& vid, const std::string& nameRaw) {
     if (vid.empty()) return "denied";
@@ -557,7 +618,7 @@ static std::string bcApproveGate(const std::string& vid, const std::string& name
     if (nm.empty()) return "pending";                                   // ohne Namen KEIN Popup (nur Link geoeffnet)
     if (it == g_knocks.end()) { g_knocks[vid] = { nm, GetTickCount64(), 0, "pending" }; }
     else if (it->second.status == "pending" && it->second.name != nm) it->second.name = nm;
-    std::thread(bcSyncDoorman).detach();   // ausserhalb des Locks pushen
+    PostMessageW(g_hwnd, WM_SHELL_DOORSYNC, 0, 0);   // Fenster-Erstellung+Sync im UI-Thread
     return "pending";
 }
 
@@ -1760,28 +1821,30 @@ static bool isSlowChannel(const std::string& c) {
            c == "group-start" || c == "group-join" || c == "group-leave" || c == "group-status" ||
            c == "test-connectivity";   // STUN+UPnP-Proben ~10s   // Vermittlungs-Netz
 }
-static void onWebMessage(const std::wstring& raw) {
+static void onWebMessage(const std::wstring& raw, HWND replyWnd) {
     json msg = json::parse(narrow(raw), nullptr, false);
     if (!msg.is_object()) return;
     long long id = msg.value("id", 0ll);
     std::string channel = msg.value("channel", "");
     json args = msg.contains("args") && msg["args"].is_array() ? msg["args"] : json::array();
+    // Antwort ans QUELL-Fenster (Haupt-UI oder Doorman) ueber dessen Marshalling-Message
+    UINT replyMsg = (replyWnd == g_doorHwnd) ? WM_SHELL_DOORMSG : WM_SHELL_REPLY;
     if (isSlowChannel(channel)) {
-        std::thread([id, channel, args]() {
+        std::thread([id, channel, args, replyWnd, replyMsg]() {
             CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // ShellLink/AppsFolder im Worker
             json result = nullptr;
             try { result = handleChannel(channel, args); } catch (...) {}
             json resp = { {"id", id}, {"result", result} };
-            PostMessageW(g_hwnd, WM_SHELL_REPLY, 0, (LPARAM)new std::wstring(widen(resp.dump())));
+            PostMessageW(replyWnd, replyMsg, 0, (LPARAM)new std::wstring(widen(resp.dump())));
             CoUninitialize();
         }).detach();
         return;
     }
     json result = nullptr;
     try { result = handleChannel(channel, args); } catch (...) {}
-    if (id > 0 && g_webview) {
+    if (id > 0) {
         json resp = { {"id", id}, {"result", result} };
-        g_webview->PostWebMessageAsJson(widen(resp.dump()).c_str());
+        PostMessageW(replyWnd, replyMsg, 0, (LPARAM)new std::wstring(widen(resp.dump())));
     }
 }
 
@@ -1847,6 +1910,10 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if (w == SIZE_MAXIMIZED) sendToUi("window-maximized", nullptr);
             else if (w == SIZE_RESTORED) sendToUi("window-unmaximized", nullptr);
         }
+        return 0;
+    case WM_SHELL_DOORSYNC:
+        createDoormanWindow();
+        bcSyncDoorman();
         return 0;
     case WM_SHELL_REPLY: {   // fertige Worker-Antwort im UI-Thread an das WebView2 posten
         auto* s = (std::wstring*)l;
@@ -2165,7 +2232,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                                 Callback<ICoreWebView2WebMessageReceivedEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
                                         LPWSTR j = nullptr;
-                                        if (SUCCEEDED(args->get_WebMessageAsJson(&j)) && j) { onWebMessage(j); CoTaskMemFree(j); }
+                                        if (SUCCEEDED(args->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_hwnd); CoTaskMemFree(j); }
                                         return S_OK;
                                     }).Get(), nullptr);
                             g_webview->Navigate(L"https://app.lumora/index.html");
