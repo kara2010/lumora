@@ -1611,8 +1611,33 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "browse-game")        return pickPathDialog(L"Spiel auswaehlen", false, L"Spiele", L"*.exe;*.lnk");
     if (channel == "browse-icon")        return pickPathDialog(L"Icon auswaehlen (.exe oder .ico)", false, L"Icon-Dateien", L"*.ico;*.exe");
     if (channel == "browse-scan-folder") return pickPathDialog(L"Ordner scannen", true, nullptr, nullptr);
-    if (channel == "get-file-icon" && args.size() >= 1 && args[0].is_string())
-        return fileIconDataUrl(widen(args[0].get<std::string>()));   // Erstversion: Datei-Icon (Steam-Original folgt mit dem Library-Modul)
+    if (channel == "get-file-icon" && args.size() >= 1 && args[0].is_string()) {
+        std::wstring p = widen(args[0].get<std::string>());
+        std::wstring plow = p; for (auto& c : plow) c = towlower(c);
+        // 1) Steam-Spiel: echtes Store-Icon aus dem librarycache (kleinste 40-Hex-JPG, wie main.js)
+        if (plow.find(L"steamapps") != std::wstring::npos) {
+            std::string appId = lulaunch::steamAppIdForExe(p);
+            if (!appId.empty()) {
+                wchar_t sp[MAX_PATH] = {}; DWORD sz = sizeof(sp);
+                if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath", RRF_RT_REG_SZ, nullptr, sp, &sz) == ERROR_SUCCESS) {
+                    std::wstring dir = std::wstring(sp) + L"\\appcache\\librarycache\\" + widen(appId);
+                    std::error_code ec; uintmax_t best = UINT64_MAX; std::filesystem::path bestP;
+                    static const std::wregex hexjpg(LR"(^[0-9a-f]{40}\.jpg$)", std::regex::icase);
+                    for (auto& e : std::filesystem::directory_iterator(dir, ec)) {
+                        if (!std::regex_match(e.path().filename().wstring(), hexjpg)) continue;
+                        uintmax_t s2 = e.file_size(ec); if (ec) { ec.clear(); continue; }
+                        if (s2 < best) { best = s2; bestP = e.path(); }
+                    }
+                    if (!bestP.empty()) {
+                        std::string jpg = readFile(bestP.wstring());
+                        if (!jpg.empty()) return "data:image/jpeg;base64," + b64encode((const uint8_t*)jpg.data(), jpg.size());
+                    }
+                }
+            }
+        }
+        // 2) Exe-/Datei-Icon
+        return fileIconDataUrl(p);
+    }
     if (channel == "list-gpus") return json::array();   // OSD-Sensorik (nvml/adl) folgt mit dem OSD-Modul
     if (channel == "minimize-window") { ShowWindow(g_hwnd, SW_MINIMIZE); return true; }
     if (channel == "toggle-maximize") { ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE); return true; }
