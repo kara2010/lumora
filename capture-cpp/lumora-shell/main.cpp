@@ -23,7 +23,9 @@
 #include "json.hpp"
 #include "scan_games.h"
 #include "artwork.h"
+#include "launch_game.h"
 #include <thread>
+#include <mutex>
 #pragma comment(lib, "gdiplus.lib")
 
 // Antworten aus Worker-Threads muessen vom UI-Thread gepostet werden (WebView2-Regel):
@@ -110,10 +112,11 @@ static std::string shellVersion() {
     return std::to_string(HIWORD(ffi->dwProductVersionMS)) + "." + std::to_string(LOWORD(ffi->dwProductVersionMS)) + "." + std::to_string(HIWORD(ffi->dwProductVersionLS));
 }
 // Push an das UI (der Shim verteilt {channel,payload} an ipcRenderer.on-Listener).
+// THREADSICHER: immer ueber PostMessage in den UI-Thread (WebView2 verlangt das) -
+// damit koennen auch Worker-Threads (launch-Monitor, Netz) direkt pushen.
 static void sendToUi(const std::string& channel, const json& payload) {
-    if (!g_webview) return;
     json m = { {"channel", channel}, {"payload", payload} };
-    g_webview->PostWebMessageAsJson(widen(m.dump()).c_str());
+    PostMessageW(g_hwnd, WM_SHELL_REPLY, 0, (LPARAM)new std::wstring(widen(m.dump())));
 }
 
 // --- Modul: Datei-/Ordner-Dialoge (IFileOpenDialog, modal wie in Electron) ---
@@ -170,6 +173,99 @@ static json fileIconDataUrl(const std::wstring& path) {
     return out;
 }
 
+// --- Modul: Spielstart (Vollversion, Logik 1:1 aus main.js - s. launch_game.h) ---
+#define TIMER_LAUNCH 100
+static std::mutex g_launchMx;
+static std::vector<lulaunch::LaunchSession> g_launches;
+
+// Ende einer Session: HDR ggf. aus, Spielzeit verbuchen, Button freigeben (wie endSession in main.js).
+static void launchEndSession(lulaunch::LaunchSession& s, bool credit) {
+    if (s.useHdr) { lulaunch::setHDR(g_appDir, false); sendToUi("hdr-status", false); }
+    if (credit && s.startTs) sendToUi("play-session", { {"gamePath", narrow(s.gamePath)}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
+    sendToUi("launch-status", "idle");
+    s.done = true;
+}
+// 4s-Tick (UI-Timer): Start-Erkennung, 30s-Freigabe, 120s-Aufgabe, Ende nach 2 leeren Checks.
+static void launchTick() {
+    std::lock_guard<std::mutex> lk(g_launchMx);
+    for (auto& s : g_launches) {
+        if (s.done) continue;
+        bool running = lulaunch::probeRunning(s);
+        if (!s.started) {
+            if (running) {
+                s.started = true; s.startTs = GetTickCount64(); s.absent = 0;
+                sendToUi("launch-status", "running");
+                lulaunch::playLog(dataDir(), "STARTED nach +" + std::to_string((GetTickCount64() - s.launchTs) / 1000) + "s");
+            } else {
+                ULONGLONG waited = GetTickCount64() - s.launchTs;
+                if (!s.reenabled && waited > 30000) { s.reenabled = true; sendToUi("launch-status", "idle"); }
+                if (waited > 120000) { lulaunch::playLog(dataDir(), "TIMEOUT - nie erkannt nach " + std::to_string(waited / 1000) + "s."); launchEndSession(s, false); }
+            }
+        } else if (running) s.absent = 0;
+        else if (++s.absent >= 2) {
+            lulaunch::playLog(dataDir(), "ENDED - Dauer " + std::to_string((GetTickCount64() - s.startTs) / 1000) + "s");
+            launchEndSession(s, true);
+        }
+    }
+    g_launches.erase(std::remove_if(g_launches.begin(), g_launches.end(), [](const lulaunch::LaunchSession& s) { return s.done; }), g_launches.end());
+    if (g_launches.empty()) KillTimer(g_hwnd, TIMER_LAUNCH);
+}
+
+// launch-game-Handler (laeuft im Worker-Thread: HDR-Wartezeit + AUMID-Suche blockieren das UI nicht).
+static json launchGame(const json& args) {
+    std::wstring gamePath = widen(args[0].get<std::string>());
+    json opts = args.size() >= 2 && args[1].is_object() ? args[1] : json::object();
+    bool useHdr = opts.value("useHdr", false);
+    bool admin = opts.value("admin", false);
+    std::vector<std::wstring> largs = lulaunch::tokenizeArgs(widen(opts.value("args", "")));
+    try {
+        if (useHdr) {
+            lulaunch::setHDR(g_appDir, true);
+            sendToUi("hdr-status", true);
+            sendToUi("launch-status", "hdr-wait");
+            Sleep(3000);   // HDR-Umschaltzeit wie im Original
+        }
+        sendToUi("launch-status", "launching");
+        std::wstring low = gamePath; for (auto& c : low) c = towlower(c);
+        bool isLnk = low.size() > 4 && low.rfind(L".lnk") == low.size() - 4;
+        bool isXbox = std::regex_search(gamePath, std::wregex(LR"(\\XboxGames\\)", std::regex::icase));
+        std::string appId = isXbox ? "" : lulaunch::steamAppIdForExe(gamePath);
+        std::wstring gameDir = gamePath.substr(0, gamePath.find_last_of(L'\\'));
+        std::wstring argStr; for (auto& a : largs) { if (!argStr.empty()) argStr += L' '; argStr += a; }
+
+        if (isXbox) {
+            // UWP: Exe ist gesperrt -> Start ueber die AUMID (shell:appsFolder)
+            std::wstring aumid = lulaunch::xboxAumidForGame(gamePath);
+            if (!aumid.empty()) ShellExecuteW(nullptr, L"open", (L"shell:appsFolder\\" + aumid).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            else ShellExecuteW(nullptr, L"open", gamePath.c_str(), argStr.empty() ? nullptr : argStr.c_str(), gameDir.c_str(), SW_SHOWNORMAL);
+        } else if (!appId.empty() && !admin) {
+            // Steam-Spiel UEBER Steam (DRM + Steam-Spielzeit); Argumente via steam://run
+            std::wstring url = largs.empty() ? (L"steam://rungameid/" + luart::toW(appId))
+                : (L"steam://run/" + luart::toW(appId) + L"//" + luart::toW(luart::urlEnc(narrow(argStr))));
+            ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        } else if (isLnk) {
+            ShellExecuteW(nullptr, L"open", gamePath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        } else if (admin) {
+            ShellExecuteW(nullptr, L"runas", gamePath.c_str(), argStr.empty() ? nullptr : argStr.c_str(), gameDir.c_str(), SW_SHOWNORMAL);   // UAC
+        } else {
+            ShellExecuteW(nullptr, L"open", gamePath.c_str(), argStr.empty() ? nullptr : argStr.c_str(), gameDir.c_str(), SW_SHOWNORMAL);
+        }
+
+        lulaunch::LaunchSession s;
+        s.gamePath = gamePath; s.gameDir = gameDir; s.isLnk = isLnk; s.useHdr = useHdr;
+        s.appId = appId; s.launchTs = GetTickCount64();
+        s.exeName = lulaunch::resolveProcessName(gamePath);
+        lulaunch::playLog(dataDir(), "LAUNCH " + narrow(s.exeName) + " kind=" + (isXbox ? "xbox" : (!appId.empty() ? "steam" : (isLnk ? "lnk" : "direct"))) + " appid=" + (appId.empty() ? "-" : appId));
+        { std::lock_guard<std::mutex> lk(g_launchMx); g_launches.push_back(std::move(s)); }
+        SetTimer(g_hwnd, TIMER_LAUNCH, 4000, nullptr);   // Tick im UI-Thread
+        return { {"success", true} };
+    } catch (...) {
+        if (useHdr) { lulaunch::setHDR(g_appDir, false); sendToUi("hdr-status", false); }
+        sendToUi("launch-status", "idle");
+        return { {"success", false}, {"error", "Startfehler"} };
+    }
+}
+
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
 // Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
 static json handleChannel(const std::string& channel, const json& args) {
@@ -187,14 +283,7 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "save-prefs" && args.size() >= 1 && args[0].is_string()) {
         writeFile(dataDir() + L"\\prefs.json", args[0].get<std::string>()); return true;
     }
-    if (channel == "launch-game" && args.size() >= 1 && args[0].is_string()) {
-        // Erstversion: Basis-Start (HDR-Schalter/Steam-Erkennung/Prozess-Watch folgen mit dem HDR-Modul).
-        std::wstring p = widen(args[0].get<std::string>());
-        sendToUi("launch-status", "launching");
-        std::wstring dir = p.substr(0, p.find_last_of(L'\\'));
-        ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, dir.c_str(), SW_SHOWNORMAL);
-        return true;
-    }
+    if (channel == "launch-game" && args.size() >= 1 && args[0].is_string()) return launchGame(args);
     if (channel == "open-game-folder" && args.size() >= 1 && args[0].is_string()) {
         std::wstring p = widen(args[0].get<std::string>());
         std::wstring param = L"/select,\"" + p + L"\"";
@@ -287,7 +376,8 @@ static json handleChannel(const std::string& channel, const json& args) {
 // sie laufen in einem Worker-Thread; die Antwort kommt per WM_SHELL_REPLY zurueck.
 static bool isSlowChannel(const std::string& c) {
     return c == "scan-games" || c == "fetch-cover" || c == "fetch-hero" || c == "fetch-game-info" ||
-           c == "fetch-image-url" || c == "search-steam" || c == "search-msstore" || c == "search-sgdb";
+           c == "fetch-image-url" || c == "search-steam" || c == "search-msstore" || c == "search-sgdb" ||
+           c == "launch-game";   // HDR-Wartezeit (3s) + AUMID-Suche
 }
 static void onWebMessage(const std::wstring& raw) {
     json msg = json::parse(narrow(raw), nullptr, false);
@@ -297,10 +387,12 @@ static void onWebMessage(const std::wstring& raw) {
     json args = msg.contains("args") && msg["args"].is_array() ? msg["args"] : json::array();
     if (isSlowChannel(channel)) {
         std::thread([id, channel, args]() {
+            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // ShellLink/AppsFolder im Worker
             json result = nullptr;
             try { result = handleChannel(channel, args); } catch (...) {}
             json resp = { {"id", id}, {"result", result} };
             PostMessageW(g_hwnd, WM_SHELL_REPLY, 0, (LPARAM)new std::wstring(widen(resp.dump())));
+            CoUninitialize();
         }).detach();
         return;
     }
@@ -380,6 +472,9 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (s) { if (g_webview) g_webview->PostWebMessageAsJson(s->c_str()); delete s; }
         return 0;
     }
+    case WM_TIMER:
+        if (w == TIMER_LAUNCH) { launchTick(); return 0; }
+        break;
     case WM_CLOSE: saveWindowState(h); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -396,6 +491,21 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-launch") == 0) {
+        // Selbsttest der Spielstart-Bausteine mit ECHTEN Pfaden dieses Systems.
+        std::string aid = lulaunch::steamAppIdForExe(L"c:/program files (x86)/steam\\steamapps\\common\\Teardown\\teardown.exe");
+        std::wstring aumid = lulaunch::xboxAumidForGame(L"C:\\XboxGames\\Forza Horizon 6\\Content\\forzahorizon6.exe");
+        bool pn = lulaunch::processByName(L"explorer.exe");
+        bool pf = lulaunch::anyProcessInFolder(L"C:\\Windows");
+        int sr = lulaunch::steamAppRunning("1167630");
+        std::string s = "steamAppId(Teardown)=" + (aid.empty() ? "FEHLT" : aid) +
+            " aumid(FH6)=" + (aumid.empty() ? "FEHLT" : narrow(aumid)) +
+            " procByName(explorer)=" + (pn ? "1" : "0") + " procInFolder(Windows)=" + (pf ? "1" : "0") +
+            " steamRunning=" + std::to_string(sr) + "\n";
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-art") == 0) {
         // Selbsttest: echte Netz-Kette (Steam-Suche -> AppId -> GetItems -> Cover-Download).
         std::string id = luart::resolveSteamAppId("Teardown");
