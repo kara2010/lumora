@@ -1351,13 +1351,38 @@ static void bcUnregisterWatchLink() {
 static NOTIFYICONDATAW g_nid{};
 static bool g_trayOn = false, g_quitting = false;
 
+// Fenster, dem wir beim Hochholen den Fokus genommen haben (i.d.R. das Spiel) -
+// beim Verstecken geben wir ihn exakt dorthin zurueck (1:1 aus main.js).
+static HWND g_prevGameHwnd = nullptr;
+static HWND g_osdHwnd = nullptr;   // OSD-Overlay-Fenster (nicht als "Vorgaenger" merken)
+static void restoreGameFocus() {
+    if (!g_prevGameHwnd) return;
+    if (!IsWindow(g_prevGameHwnd)) { g_prevGameHwnd = nullptr; return; }   // Spiel inzwischen beendet
+    if (IsIconic(g_prevGameHwnd)) ShowWindow(g_prevGameHwnd, SW_RESTORE);   // Vollbild kickte sich beim Fokusverlust
+    SetForegroundWindow(g_prevGameHwnd);
+    g_prevGameHwnd = nullptr;
+}
 static void showMainWindow() {
-    ShowWindow(g_hwnd, IsIconic(g_hwnd) ? SW_RESTORE : SW_SHOW);
+    HWND fg = GetForegroundWindow();
+    if (fg && fg != g_hwnd && fg != g_osdHwnd) g_prevGameHwnd = fg;   // merken, wem wir den Fokus nehmen
+    if (IsIconic(g_hwnd)) ShowWindow(g_hwnd, SW_RESTORE); else ShowWindow(g_hwnd, SW_SHOW);
+    // Kurzes TOPMOST-Anheben erzwingt das echte Nach-vorn (Hintergrund-Aufruf per
+    // Hotkey/Tray wuerde sonst nur in der Taskleiste blinken); danach zuruecknehmen.
+    SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     SetForegroundWindow(g_hwnd);
+    SetWindowPos(g_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    // Fallback: Vollbild-Spiel mit Input-Besitz blockt die Windows-Foreground-Sperre
+    // (Lumora wirkt "abgestuerzt"). Dann per synthetischem Alt-Tipp entsperren + erzwingen.
+    if (GetForegroundWindow() != g_hwnd) {
+        keybd_event(VK_MENU, 0, 0, 0); keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+        SetForegroundWindow(g_hwnd); ShowWindow(g_hwnd, SW_SHOW);
+    }
 }
 static void toggleMainWindow() {
-    if (IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd) && GetForegroundWindow() == g_hwnd) ShowWindow(g_hwnd, SW_HIDE);
-    else showMainWindow();
+    if (IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd) && GetForegroundWindow() == g_hwnd) {
+        restoreGameFocus();   // ERST dem Spiel den Vordergrund sauber zurueckgeben, DANN verstecken
+        ShowWindow(g_hwnd, SW_HIDE);
+    } else showMainWindow();
 }
 // --- Gamepad-Hotkeys (nativer XInput-Poll wie Electrons pollNativeHotkeys: laeuft
 // fokusunabhaengig, auch waehrend ein Spiel im Vordergrund ist) ---
@@ -1390,14 +1415,39 @@ static bool gamepadComboDown(const json& combo) {
     }
     return false;
 }
+// Tastatur-Hotkeys: fokusunabhaengiger GetAsyncKeyState-Poll (wie main.js
+// pollNativeHotkeys) - greift auch im Vollbild-Spiel, wo RegisterHotKey/globaler
+// Shortcut vom Spiel/UIPI abgefangen wird. Die Liste baut rebuildKbHotkeys().
+struct KbHotkey { UINT vk; bool alt, ctrl, shift; std::function<void()> action; bool down; };
+static std::vector<KbHotkey> g_kbHotkeys;
+static std::mutex g_kbMx;
+static const ULONGLONG GP_RELEASE_MS = 150;   // Read-Aussetzer einer gehaltenen Gamepad-Kombi ueberbruecken
 static bool g_gpMainWas = false, g_gpOsdWas = false;
+static ULONGLONG g_gpMainSeen = 0, g_gpOsdSeen = 0;
 static void xinputTick() {   // 25 Hz; Flanke = einmal ausloesen pro Druck
     json s = loadSettings();
-    bool m = gamepadComboDown(s.value("gamepadHotkey", json::array()));
-    bool o = gamepadComboDown(s.value("gamepadOsdHotkey", json::array()));
+    ULONGLONG now = GetTickCount64();
+    // 1) Gamepad-Kombis (XInput) mit Release-Debounce gegen Read-Aussetzer.
+    bool rawM = gamepadComboDown(s.value("gamepadHotkey", json::array()));
+    if (rawM) g_gpMainSeen = now;
+    bool m = rawM || (g_gpMainSeen && now - g_gpMainSeen < GP_RELEASE_MS);
+    bool rawO = gamepadComboDown(s.value("gamepadOsdHotkey", json::array()));
+    if (rawO) g_gpOsdSeen = now;
+    bool o = rawO || (g_gpOsdSeen && now - g_gpOsdSeen < GP_RELEASE_MS);
     if (m && !g_gpMainWas) toggleMainWindow();
     if (o && !g_gpOsdWas) toggleOsdSetting();
     g_gpMainWas = m; g_gpOsdWas = o;
+    // 2) Tastatur-Hotkeys (steigende Flanke, EXAKTE Modifier wie main.js).
+    std::lock_guard<std::mutex> lk(g_kbMx);
+    if (!g_kbHotkeys.empty()) {
+        auto dn = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+        bool alt = dn(VK_MENU), ctrl = dn(VK_CONTROL), shift = dn(VK_SHIFT);
+        for (auto& h : g_kbHotkeys) {
+            bool on = dn((int)h.vk) && h.alt == alt && h.ctrl == ctrl && h.shift == shift;
+            if (on && !h.down) h.action();
+            h.down = on;
+        }
+    }
 }
 // IP-Wechsel-Watcher (5-min-Tick, 1:1 aus main.js bcIpWatchTick): DSL-Zwangstrennung/
 // IP-Wechsel mitten im Stream nachziehen (mtx-Config, Portfreigaben, Links, Roster) +
@@ -1478,22 +1528,14 @@ static bool parseAccelerator(const std::string& acc, UINT& mods, UINT& vk) {
         else if (r == "home") vk = VK_HOME; else if (r == "end") vk = VK_END; else if (r == "pageup") vk = VK_PRIOR; else if (r == "pagedown") vk = VK_NEXT; }
     return vk != 0;
 }
+static void rebuildKbHotkeys();   // Poll-Liste (unten definiert; nutzt startBroadcast etc.)
 static bool registerHotkeys() {
+    // Die Shell pollt die Tastatur-Hotkeys fokusunabhaengig (xinputTick/GetAsyncKeyState),
+    // damit sie AUCH im Vollbild-Spiel greifen - RegisterHotKey/globaler Shortcut wird
+    // dort vom Spiel/UIPI abgefangen. Alte RegisterHotKey-Bindungen sicherheitshalber loesen.
     UnregisterHotKey(g_hwnd, HK_TOGGLE); UnregisterHotKey(g_hwnd, HK_STREAM); UnregisterHotKey(g_hwnd, HK_OSD); UnregisterHotKey(g_hwnd, HK_OSDEDIT); UnregisterHotKey(g_hwnd, HK_OSDAB);
-    json s = loadSettings();
-    bool ok = true;
-    UINT m, v;
-    std::string t = s.value("toggleHotkey", "Alt+L");
-    if (!t.empty() && parseAccelerator(t, m, v)) ok = RegisterHotKey(g_hwnd, HK_TOGGLE, m | MOD_NOREPEAT, v) != FALSE;
-    std::string st = s.value("streamHotkey", "");
-    if (!st.empty() && parseAccelerator(st, m, v)) RegisterHotKey(g_hwnd, HK_STREAM, m | MOD_NOREPEAT, v);
-    std::string oh = s.value("osdHotkey", "Alt+O");
-    if (!oh.empty() && parseAccelerator(oh, m, v)) RegisterHotKey(g_hwnd, HK_OSD, m | MOD_NOREPEAT, v);
-    std::string oe = s.value("osdEditHotkey", "Alt+Shift+O");
-    if (!oe.empty() && parseAccelerator(oe, m, v)) RegisterHotKey(g_hwnd, HK_OSDEDIT, m | MOD_NOREPEAT, v);
-    std::string ab = s.value("osdAbHotkey", "Alt+B");   // Alt+B: natives Afterburner-OSD (RTSS) an/aus
-    if (!ab.empty() && parseAccelerator(ab, m, v)) RegisterHotKey(g_hwnd, HK_OSDAB, m | MOD_NOREPEAT, v);
-    return ok;
+    rebuildKbHotkeys();
+    return true;
 }
 // Autostart: HKCU-Run-Key "Lumora" + Legacy-/Doppel-Keys raeumen (der bekannte
 // "Autostart startet im Vordergrund"-Bug entstand durch ZWEI Run-Keys derselben App).
@@ -1526,7 +1568,6 @@ static void handleDeepLink(const std::string& url) {
 // stiehlt dem Spiel nie den Fokus). Sensorik (osd-data) folgt als eigener Schritt -
 // Fenster, Konfiguration (Ecke/Deckkraft/Theme/Felder/Zoom) und Kanaele sind komplett.
 #define WM_SHELL_OSDMSG (WM_APP + 3)
-static HWND g_osdHwnd = nullptr;
 static ComPtr<ICoreWebView2Controller> g_osdCtrl;
 static ComPtr<ICoreWebView2> g_osdWv;
 static bool g_osdLoaded = false;
@@ -2137,6 +2178,25 @@ static void toggleOsdSetting() {   // wie Electrons toggleOverlay (Hotkey/Gamepa
     writeFile(settingsPath(), s.dump(2));
     syncOsdVisibility();
     sendToUi("osd-config", nullptr);   // UI-Checkbox darf nachziehen (liest Settings neu)
+}
+// Poll-Hotkey-Liste aus den Settings bauen (1:1 aus main.js rebuildHotkeys). Wird
+// von registerHotkeys aufgerufen (Start + nach jeder Hotkey-Aenderung).
+static void rebuildKbHotkeys() {
+    json s = loadSettings();
+    std::vector<KbHotkey> list;
+    auto add = [&](const std::string& accel, std::function<void()> action) {
+        if (accel.empty()) return;
+        UINT mods = 0, vk = 0;
+        if (!parseAccelerator(accel, mods, vk)) return;
+        list.push_back({ vk, (mods & MOD_ALT) != 0, (mods & MOD_CONTROL) != 0, (mods & MOD_SHIFT) != 0, action, false });
+    };
+    add(s.value("toggleHotkey", "Alt+L"), toggleMainWindow);
+    add(s.value("osdHotkey", "Alt+O"), toggleOsdSetting);
+    add(s.value("osdEditHotkey", "Alt+Shift+O"), []() { setOsdEditMode(!g_osdEdit); });
+    add(s.value("osdAbHotkey", "Alt+B"), []() { lurtss::toggleAbOsd(); });
+    add(s.value("streamHotkey", ""), []() { std::thread([]() { if (g_bcState.value("active", false)) stopBroadcast(); else startBroadcast(); }).detach(); });
+    std::lock_guard<std::mutex> lk(g_kbMx);
+    g_kbHotkeys = std::move(list);
 }
 
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
