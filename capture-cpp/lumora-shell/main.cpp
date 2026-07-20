@@ -475,6 +475,7 @@ static lusrv::Response handleStreamHttp(const lusrv::Request& rq) {
 // stirbt mit Electron). Prozesse: Lumora Media-Relay (mediamtx) + lumora-capture-native.
 #define TIMER_VIEWER 102
 #define TIMER_ADAPT  103
+#define TIMER_BCAPPLY 104   // debounced: Stream-Settings-Aenderung live anwenden
 static const int MTX_RTSP_PORT = 8554, MTX_API_PORT = 9997, MTX_ICE_UDP = 8189;
 static const int MTX_RTP_UDP = 8556, MTX_RTCP_UDP = 8557, MTX_TS_UDP = 8558;
 static const int BC_ADAPT_F[] = { 100, 70, 50, 35, 24, 16 };   // Stufen-Faktoren (25 Mbit -> 17,5/12,5/8,8/6,0/4,0)
@@ -881,6 +882,18 @@ static json handleChannel(const std::string& channel, const json& args) {
         if (args.size() >= 1 && args[0].is_object()) {
             json s = loadSettings(); s.update(args[0]);
             writeFile(settingsPath(), s.dump(2));
+            // Stream-Einstellung geaendert, waehrend gestreamt wird: Encoder-Parameter live
+            // nachziehen (bcApplyCfg = nahtlose Bitrate/Quelle; Vollneustart nur fps/scaleH).
+            // AUSGENOMMEN die Nicht-Encoder-Keys (Audit-Lehre: TURN/IPv6 rissen den Stream grundlos ab).
+            static const std::set<std::string> noRestart = { "streamBufferMs", "streamAdaptive", "streamTurnEnabled",
+                "streamTurnUrl", "streamTurnUser", "streamTurnPass", "streamTurnForce", "streamForceIPv6",
+                "streamLastHosts", "streamHotkey", "streamFastRestart", "streamDoorman" };
+            bool touch = false;
+            for (auto& [k, v] : args[0].items()) if (k.rfind("stream", 0) == 0 && !noRestart.count(k)) touch = true;
+            if (args[0].value("streamAdaptive", true) == false && g_adaptLevel > 0 && g_bcState.value("active", false)) {
+                g_adaptLevel = 0; g_adaptUpAt = 0; g_adaptUpHold = 0; touch = true;   // zurueck zur vollen Bitrate
+            }
+            if (touch && g_bcState.value("active", false)) SetTimer(g_hwnd, TIMER_BCAPPLY, 500, nullptr);   // debounced
         }
         return true;
     }
@@ -974,7 +987,10 @@ static json handleChannel(const std::string& channel, const json& args) {
             std::string title = t2 == std::string::npos ? line.substr(t1 + 1) : line.substr(t1 + 1, t2 - t1 - 1);
             std::string icon = t2 == std::string::npos ? "" : line.substr(t2 + 1);
             if (hwnd.empty() || title.empty()) continue;
-            out.push_back({ {"value", "window:" + hwnd}, {"label", title}, {"icon", icon}, {"kind", "window"} });
+            std::string tl = title; for (auto& c : tl) c = (char)tolower((unsigned char)c);
+            if (tl == "lumora" || title == "Program Manager") continue;   // eigene App/Desktop ausblenden (wie Electron)
+            // Helfer liefert ROHES PNG-Base64 - das data-URL-Praefix ergaenzt die App (User-Befund: Icons kaputt)
+            out.push_back({ {"value", "window:" + hwnd}, {"label", title}, {"icon", icon.empty() ? "" : "data:image/png;base64," + icon}, {"kind", "window"} });
         }
         return out;
     }
@@ -1167,6 +1183,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_EXTWATCH) { extWatchTick(); return 0; }
         if (w == TIMER_VIEWER) { bcViewerTick(); return 0; }
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
+        if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
         break;
     case WM_CLOSE:
         if (g_bcState.value("active", false)) stopBroadcast();   // Stream + Kindprozesse sauber beenden
