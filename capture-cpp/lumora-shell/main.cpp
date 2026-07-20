@@ -1688,7 +1688,7 @@ static void createOsdWindow() {
                             if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
                             g_osdWv->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
                             g_osdWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { g_osdLoaded = true; applyOsdConfig(); return S_OK; }).Get(), nullptr);
+                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { g_osdLoaded = true; bcLogStream("osd: osd.html geladen"); applyOsdConfig(); return S_OK; }).Get(), nullptr);
                             g_osdWv->Navigate(L"https://app.lumora/osd.html");
                             return S_OK;
                         }).Get());
