@@ -22,7 +22,13 @@
 #include "WebView2.h"
 #include "json.hpp"
 #include "scan_games.h"
+#include "artwork.h"
+#include <thread>
 #pragma comment(lib, "gdiplus.lib")
+
+// Antworten aus Worker-Threads muessen vom UI-Thread gepostet werden (WebView2-Regel):
+// Worker verpackt das fertige Antwort-JSON und stellt es per PostMessage zu.
+#define WM_SHELL_REPLY (WM_APP + 1)
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -196,6 +202,39 @@ static json handleChannel(const std::string& channel, const json& args) {
         return true;
     }
     if (channel == "scan-games") return lushell::scanGames(args.size() >= 1 ? args[0] : json::array());   // Steam+Xbox+Ordner (weitere Stores folgen)
+    // ---- Artwork/Netz (laufen im Worker-Thread, s. onWebMessage) ----
+    if (channel == "fetch-cover") {
+        std::string name = args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "";
+        std::string appId = args.size() >= 2 && args[1].is_string() ? args[1].get<std::string>() : "";
+        json steam = luart::fetchCoverSteam(name, appId);
+        if (steam.is_string()) return steam;
+        return appId.empty() ? luart::fetchCoverMSStore(name) : json(nullptr);   // wie main.js: MS Store nur ohne feste appId
+    }
+    if (channel == "fetch-hero") {
+        std::string name = args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "";
+        std::string appId = args.size() >= 2 && args[1].is_string() ? args[1].get<std::string>() : "";
+        return luart::fetchSteamHero(name, appId);
+    }
+    if (channel == "fetch-game-info") {
+        std::string name = args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "";
+        std::string appId = args.size() >= 2 && args[1].is_string() ? args[1].get<std::string>() : "";
+        return luart::fetchGameInfo(name, appId);
+    }
+    if (channel == "fetch-image-url")
+        return luart::fetchImageUrl(args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "");
+    if (channel == "search-steam")
+        return luart::searchSteamArt(args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "",
+                                     args.size() >= 2 && args[1].is_string() && args[1] == "hero");
+    if (channel == "search-msstore") {
+        if (args.size() >= 2 && args[1].is_string() && args[1] == "hero") return json::array();   // MS Store hat keine Hero-Banner
+        return luart::searchMsArt(args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "");
+    }
+    if (channel == "search-sgdb") {
+        std::string key = loadSettings().value("steamGridDbKey", "");
+        if (key.empty()) return json::array();
+        return luart::sgdbArtwork(args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "",
+                                  (args.size() >= 2 && args[1].is_string() && args[1] == "hero") ? "hero" : "cover", key);
+    }
     if (channel == "store-media" && args.size() >= 1 && args[0].is_object()) {
         // {id, kind, dataUrl:"data:image/x;base64,..."} -> Datei im media-Ordner, alte Varianten weg,
         // eindeutiger Stempel-Name gegen Browser-Cache (wie main.js). Rueckgabe: absoluter Pfad.
@@ -244,12 +283,27 @@ static json handleChannel(const std::string& channel, const json& args) {
     return nullptr;
 }
 
+// Netz-/Scan-Kanaele blockieren den UI-Thread nicht (in Electron waren sie async):
+// sie laufen in einem Worker-Thread; die Antwort kommt per WM_SHELL_REPLY zurueck.
+static bool isSlowChannel(const std::string& c) {
+    return c == "scan-games" || c == "fetch-cover" || c == "fetch-hero" || c == "fetch-game-info" ||
+           c == "fetch-image-url" || c == "search-steam" || c == "search-msstore" || c == "search-sgdb";
+}
 static void onWebMessage(const std::wstring& raw) {
     json msg = json::parse(narrow(raw), nullptr, false);
     if (!msg.is_object()) return;
     long long id = msg.value("id", 0ll);
     std::string channel = msg.value("channel", "");
     json args = msg.contains("args") && msg["args"].is_array() ? msg["args"] : json::array();
+    if (isSlowChannel(channel)) {
+        std::thread([id, channel, args]() {
+            json result = nullptr;
+            try { result = handleChannel(channel, args); } catch (...) {}
+            json resp = { {"id", id}, {"result", result} };
+            PostMessageW(g_hwnd, WM_SHELL_REPLY, 0, (LPARAM)new std::wstring(widen(resp.dump())));
+        }).detach();
+        return;
+    }
     json result = nullptr;
     try { result = handleChannel(channel, args); } catch (...) {}
     if (id > 0 && g_webview) {
@@ -321,6 +375,11 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             else if (w == SIZE_RESTORED) sendToUi("window-unmaximized", nullptr);
         }
         return 0;
+    case WM_SHELL_REPLY: {   // fertige Worker-Antwort im UI-Thread an das WebView2 posten
+        auto* s = (std::wstring*)l;
+        if (s) { if (g_webview) g_webview->PostWebMessageAsJson(s->c_str()); delete s; }
+        return 0;
+    }
     case WM_CLOSE: saveWindowState(h); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -337,6 +396,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-art") == 0) {
+        // Selbsttest: echte Netz-Kette (Steam-Suche -> AppId -> GetItems -> Cover-Download).
+        std::string id = luart::resolveSteamAppId("Teardown");
+        json cover = luart::fetchCoverSteam("Teardown", "");
+        json info = luart::fetchGameInfo("Teardown", "");
+        std::string s = "appId=" + (id.empty() ? "FEHLT" : id) +
+            " cover=" + (cover.is_string() ? std::to_string(cover.get<std::string>().size()) + "B" : "FEHLT") +
+            " info=" + (info.is_object() ? info.value("releaseYear", "?") + "/" + info.value("developer", "?") : "FEHLT") + "\n";
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-scan") == 0) {
         // Selbsttest: echten Steam+Xbox-Scan laufen lassen, Anzahl + Beispiele in die Testdatei.
         json r = lushell::scanGames(json::array());
