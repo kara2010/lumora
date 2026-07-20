@@ -15,8 +15,10 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <dxgi.h>
+#include <bcrypt.h>
 #include <ctime>
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "bcrypt.lib")
 #include <wrl.h>
 #include <string>
 #include <vector>
@@ -402,6 +404,73 @@ static void bcQosReport(const std::string& ip, const json& q) {
     g_qosMap[key] = { GetTickCount64(), bad, lossRate, streak };
     if (bad) bcLogStream("qos: " + key + " lost=" + std::to_string(lost) + "/" + std::to_string(lost + recv) + " !");
 }
+// --- Tuersteher (Knock->Approve->Token, Logik 1:1; Freigabe-UI: doorman-list-Push) ---
+extern std::string doormanAccessKey();   // = g_accessKey (Gruppen-Modul weiter unten)
+struct Knock { std::string name; ULONGLONG at = 0, deniedAt = 0; std::string status; };
+static std::mutex g_doorMx;
+static std::map<std::string, Knock> g_knocks;              // vid -> Anfrage
+static std::map<std::string, ULONGLONG> g_prevGrants;      // 15-Min-Karenz nach Stream-Neustart
+static std::set<std::string> g_blockedIps;                 // kick mit Sperre (bis App-Ende)
+// HMAC-SHA256 (BCrypt) als Hex - fuer den Vermittlungs-Nachweis ueber (SDP + '|' + ts).
+static std::string hmacSha256Hex(const std::string& key, const std::string& data) {
+    BCRYPT_ALG_HANDLE alg = nullptr; BCRYPT_HASH_HANDLE h = nullptr;
+    std::string out;
+    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG) == 0) {
+        UCHAR digest[32];
+        if (BCryptCreateHash(alg, &h, nullptr, 0, (PUCHAR)key.data(), (ULONG)key.size(), 0) == 0 &&
+            BCryptHashData(h, (PUCHAR)data.data(), (ULONG)data.size(), 0) == 0 &&
+            BCryptFinishHash(h, digest, 32, 0) == 0) {
+            char hex[3];
+            for (int i = 0; i < 32; ++i) { sprintf_s(hex, "%02x", digest[i]); out += hex; }
+        }
+        if (h) BCryptDestroyHash(h);
+        BCryptCloseAlgorithmProvider(alg, 0);
+    }
+    return out;
+}
+static bool bcVerifyDoormanSig(const std::string& body, const std::string& sig, const std::string& ts) {
+    std::string key = doormanAccessKey();
+    if (key.empty() || sig.empty() || ts.empty()) return false;
+    long long t = atoll(ts.c_str());
+    if (!t || llabs((long long)time(nullptr) - t) > 60) return false;   // Replay-Schutz
+    std::string expect = hmacSha256Hex(key, body + "|" + ts);
+    if (expect.size() != sig.size()) return false;
+    unsigned char diff = 0;                                             // zeitkonstanter Vergleich
+    for (size_t i = 0; i < expect.size(); ++i) diff |= (unsigned char)(expect[i] ^ sig[i]);
+    return diff == 0;
+}
+static void bcSyncDoorman() {   // pending-Anfragen an die UI (Freigabe-Dialog im Haupt-UI; eigenes Fenster spaeter)
+    json pend = json::array();
+    { std::lock_guard<std::mutex> lk(g_doorMx);
+      for (auto& [vid, k] : g_knocks) if (k.status == "pending") pend.push_back({ {"vid", vid}, {"name", k.name}, {"at", (long long)k.at} }); }
+    sendToUi("doorman-list", pend);
+}
+static std::string bcApproveGate(const std::string& vid, const std::string& nameRaw) {
+    if (vid.empty()) return "denied";
+    json s = loadSettings();
+    if (s.value("streamBanned", json::object()).contains(vid)) return "banned";     // dauerhaft gesperrt
+    if (s.value("streamRegulars", json::object()).contains(vid)) return "granted";  // Stammgast
+    std::lock_guard<std::mutex> lk(g_doorMx);
+    auto it = g_knocks.find(vid);
+    if (it != g_knocks.end() && it->second.status == "granted") return "granted";
+    auto pg = g_prevGrants.find(vid);                                   // 15-Min-Karenz
+    if (pg != g_prevGrants.end() && GetTickCount64() - pg->second < 15 * 60 * 1000ull) {
+        g_knocks[vid] = { nameRaw.empty() ? "Gast" : nameRaw.substr(0, 24), GetTickCount64(), 0, "granted" };
+        return "granted";
+    }
+    if (it != g_knocks.end() && it->second.status == "denied") {        // 60s-Ablehnungs-Cooldown
+        if (GetTickCount64() - it->second.deniedAt < 60000) return "denied";
+        g_knocks.erase(it); it = g_knocks.end();
+    }
+    std::string nm = nameRaw.substr(0, 24);
+    size_t a = nm.find_first_not_of(' '); if (a == std::string::npos) nm.clear(); else { size_t b = nm.find_last_not_of(' '); nm = nm.substr(a, b - a + 1); }
+    if (nm.empty()) return "pending";                                   // ohne Namen KEIN Popup (nur Link geoeffnet)
+    if (it == g_knocks.end()) { g_knocks[vid] = { nm, GetTickCount64(), 0, "pending" }; }
+    else if (it->second.status == "pending" && it->second.name != nm) it->second.name = nm;
+    std::thread(bcSyncDoorman).detach();   // ausserhalb des Locks pushen
+    return "pending";
+}
+
 // Die 8 Routen des Streaming-Servers (CORS/OPTIONS erledigt der Transport).
 static lusrv::Response handleStreamHttp(const lusrv::Request& rq) {
     lusrv::Response rs;
@@ -434,9 +503,16 @@ static lusrv::Response handleStreamHttp(const lusrv::Request& rq) {
         return rs;
     }
     if (rq.path == "/whep" || rq.path.rfind("/whep/", 0) == 0) {
-        // Tuersteher: bis das Gruppen-/Roster-Modul portiert ist, fail-closed bei aktivierter Option.
         bool local = rq.clientIp == "::1" || rq.clientIp.rfind("127.", 0) == 0 || rq.clientIp.empty();
-        if (rq.method == "POST" && !local && loadSettings().value("streamDoorman", false)) { rs.status = 401; rs.body = "unauthorized"; return rs; }
+        if (rq.method == "POST" && g_blockedIps.count(rq.clientIp)) { rs.status = 403; rs.body = "blocked"; return rs; }
+        // Tuersteher (1:1): POST braucht HMAC-Nachweis der Vermittlung (?sig=&ts=) + individuelle Freigabe (?vid=).
+        if (rq.method == "POST" && !local && loadSettings().value("streamDoorman", false)) {
+            auto qget = [&](const char* k) { std::string pat = std::string(k) + "="; size_t p = rq.query.find(pat);
+                if (p != std::string::npos && (p == 0 || rq.query[p - 1] == '&')) { std::string v = rq.query.substr(p + pat.size()); size_t amp = v.find('&'); return amp == std::string::npos ? v : v.substr(0, amp); } return std::string(); };
+            if (!bcVerifyDoormanSig(rq.body, qget("sig"), qget("ts"))) { rs.status = 401; rs.body = "unauthorized"; return rs; }
+            std::string gate = bcApproveGate(qget("vid"), qget("name"));
+            if (gate != "granted") { rs.status = 403; rs.body = gate; return rs; }
+        }
         // Zuschauer-Name aus der Query (fuer "Wer schaut zu"); Auth-Query NICHT durchreichen.
         std::string reqName;
         size_t np = rq.query.find("name=");
@@ -927,6 +1003,11 @@ static json stopBroadcast() {
     }
     g_bcStopping = true;
     bcUnregisterWatchLink();   // Teilen-URL abmelden (5-Min-Karenz laeuft)
+    {   // Freigegebene Zuschauer in die 15-Min-Karenz uebernehmen (Neustart fragt nicht erneut)
+        std::lock_guard<std::mutex> lk(g_doorMx);
+        for (auto& [vid, k] : g_knocks) if (k.status == "granted") g_prevGrants[vid] = GetTickCount64();
+        g_knocks.clear();
+    }
     KillTimer(g_hwnd, TIMER_VIEWER); KillTimer(g_hwnd, TIMER_ADAPT);
     { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_cap); killChild(g_mtx); }
     // Router-Teardown im Hintergrund (SOAP darf den Stopp nicht verzoegern)
@@ -1050,9 +1131,10 @@ static void bcRegisterWatchLink() {
     SetTimer(g_hwnd, TIMER_WATCH, 20000, nullptr);
     bcPushState();
 }
-// /instanz-Identitaet (Vorwaertsdeklaration im HTTP-Handler; nicht-static wegen extern)
+// /instanz-Identitaet + Tuersteher-Schluessel (Vorwaertsdeklarationen; nicht-static wegen extern)
 std::string instanzId() { return groupMemberId(); }
 std::string instanzGroup() { return g_group.is_null() ? "" : g_group.value("code", ""); }
+std::string doormanAccessKey() { if (g_accessKey.empty() && g_bcState.value("active", false)) g_accessKey = randHex(16); return g_accessKey; }
 static void bcUnregisterWatchLink() {
     g_accessKey.clear();   // naechster Stream bekommt einen frischen Tuersteher-Schluessel
     KillTimer(g_hwnd, TIMER_WATCH);
@@ -1210,8 +1292,48 @@ static json handleChannel(const std::string& channel, const json& args) {
         return out;
     }
     if (channel == "kick-viewer" && args.size() >= 1 && args[0].is_string()) {
+        // (id, ip, block): bei block die IP fuer diese Sitzung sperren (wie Electron)
+        if (args.size() >= 3 && args[2].is_boolean() && args[2].get<bool>() && args.size() >= 2 && args[1].is_string()) {
+            std::string ip = args[1].get<std::string>();
+            if (!ip.empty() && ip.find("verbindet") == std::string::npos) g_blockedIps.insert(ip);
+        }
         auto r = lusrv::proxyLocal(MTX_API_PORT, "POST", "/v3/webrtcsessions/kick/" + args[0].get<std::string>(), "", "", "");
         return { {"ok", r.status >= 200 && r.status < 300} };
+    }
+    // ---- Tuersteher-Verwaltung (1:1) ----
+    if (channel == "doorman-decide" && args.size() >= 2 && args[0].is_string() && args[1].is_string()) {
+        std::string vid = args[0].get<std::string>(), mode = args[1].get<std::string>();
+        if (vid.empty()) return false;
+        std::string nm = "Gast";
+        { std::lock_guard<std::mutex> lk(g_doorMx);
+          auto it = g_knocks.find(vid);
+          if (it != g_knocks.end() && !it->second.name.empty()) nm = it->second.name;
+          if (mode == "allow") { if (it != g_knocks.end()) it->second.status = "granted"; }
+          else if (mode == "deny") { if (it != g_knocks.end()) { it->second.status = "denied"; it->second.deniedAt = GetTickCount64(); } }
+          else if (mode == "always" || mode == "ban") {
+              json s = loadSettings();
+              if (mode == "always") { s["streamRegulars"][vid] = { {"name", nm}, {"since", (long long)time(nullptr) * 1000} }; if (s.contains("streamBanned")) s["streamBanned"].erase(vid); if (it != g_knocks.end()) it->second.status = "granted"; }
+              else { s["streamBanned"][vid] = { {"name", nm}, {"since", (long long)time(nullptr) * 1000} }; if (s.contains("streamRegulars")) s["streamRegulars"].erase(vid); if (it != g_knocks.end()) { it->second.status = "denied"; it->second.deniedAt = GetTickCount64(); } }
+              writeFile(settingsPath(), s.dump(2));
+          }
+        }
+        bcSyncDoorman();
+        return true;
+    }
+    if (channel == "doorman-lists") {
+        json s = loadSettings();
+        auto toArr = [](const json& o) { json a = json::array();
+            if (o.is_object()) for (auto& [vid, v] : o.items()) a.push_back({ {"vid", vid}, {"name", v.value("name", "Gast")}, {"since", v.value("since", 0ll)} });
+            return a; };
+        return { {"regulars", toArr(s.value("streamRegulars", json::object()))}, {"banned", toArr(s.value("streamBanned", json::object()))} };
+    }
+    if (channel == "doorman-remove" && args.size() >= 2 && args[0].is_string() && args[1].is_string()) {
+        json s = loadSettings();
+        std::string kind = args[0].get<std::string>(), vid = args[1].get<std::string>();
+        if (kind == "regular" && s.contains("streamRegulars")) s["streamRegulars"].erase(vid);
+        else if (kind == "banned" && s.contains("streamBanned")) s["streamBanned"].erase(vid);
+        writeFile(settingsPath(), s.dump(2));
+        return true;
     }
     if (channel == "preview-whep" && args.size() >= 1 && args[0].is_string()) {
         // Vorschau direkt an den eigenen /whep-Weg (User-Agent markiert -> nicht als Zuschauer gezaehlt)
@@ -1598,6 +1720,25 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-doorman") == 0) {
+        // HMAC gegen den bekannten RFC-Testvektor + Gate-Logik pruefen. Einzigartige vid je
+        // Lauf; der ban-Eintrag wird am Ende wieder aus den ECHTEN Settings entfernt.
+        std::string testVid = "testvid-" + std::to_string(GetTickCount64());
+        std::string mac = hmacSha256Hex("key", "The quick brown fox jumps over the lazy dog");
+        bool macOk = mac == "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8";
+        std::string g1 = bcApproveGate(testVid, "");        // ohne Name -> pending, KEIN Eintrag
+        std::string g2 = bcApproveGate(testVid, "Karsten"); // mit Name -> pending + Anfrage
+        json dec = handleChannel("doorman-decide", json::array({ testVid, "allow" }));
+        std::string g3 = bcApproveGate(testVid, "Karsten"); // nach allow -> granted
+        json dec2 = handleChannel("doorman-decide", json::array({ testVid, "ban" }));
+        std::string g4 = bcApproveGate(testVid, "Karsten"); // nach ban -> banned
+        handleChannel("doorman-remove", json::array({ "banned", testVid }));   // Settings sauber hinterlassen
+        std::string s = std::string("hmac=") + (macOk ? "OK" : ("FALSCH:" + mac)) +
+            " gate:" + g1 + "/" + g2 + "/" + g3 + "/" + g4 + " (erwartet pending/pending/granted/banned)\n";
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-upnp") == 0) {
         WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
         std::string s;
