@@ -940,6 +940,90 @@ static json stopBroadcast() {
     return g_bcState;
 }
 
+// --- Modul: Tray + Hotkeys + Autostart + Deep-Link (1:1-Verhalten aus main.js) ---
+#define WM_SHELL_TRAY (WM_APP + 2)
+#define HK_TOGGLE 1
+#define HK_STREAM 2
+static NOTIFYICONDATAW g_nid{};
+static bool g_trayOn = false, g_quitting = false;
+
+static void showMainWindow() {
+    ShowWindow(g_hwnd, IsIconic(g_hwnd) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(g_hwnd);
+}
+static void toggleMainWindow() {
+    if (IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd) && GetForegroundWindow() == g_hwnd) ShowWindow(g_hwnd, SW_HIDE);
+    else showMainWindow();
+}
+static void createTray() {
+    if (g_trayOn) return;
+    g_nid = {}; g_nid.cbSize = sizeof(g_nid); g_nid.hWnd = g_hwnd; g_nid.uID = 1;
+    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    g_nid.uCallbackMessage = WM_SHELL_TRAY;
+    g_nid.hIcon = LoadIconW(GetModuleHandleW(nullptr), L"IDI_ICON1");
+    wcscpy_s(g_nid.szTip, L"Lumora");
+    g_trayOn = Shell_NotifyIconW(NIM_ADD, &g_nid) != FALSE;
+}
+static void destroyTray() {
+    if (!g_trayOn) return;
+    Shell_NotifyIconW(NIM_DELETE, &g_nid);
+    g_trayOn = false;
+}
+// Accelerator "Alt+L" / "Ctrl+Shift+F1" -> RegisterHotKey-Parameter.
+static bool parseAccelerator(const std::string& acc, UINT& mods, UINT& vk) {
+    mods = 0; vk = 0;
+    std::string rest = acc; size_t p;
+    while ((p = rest.find('+')) != std::string::npos) {
+        std::string part = rest.substr(0, p); rest = rest.substr(p + 1);
+        for (auto& c : part) c = (char)tolower((unsigned char)c);
+        if (part == "alt") mods |= MOD_ALT; else if (part == "ctrl" || part == "control" || part == "commandorcontrol" || part == "cmdorctrl") mods |= MOD_CONTROL;
+        else if (part == "shift") mods |= MOD_SHIFT; else if (part == "super" || part == "win") mods |= MOD_WIN;
+    }
+    if (rest.empty()) return false;
+    if (rest.size() == 1) { char c = (char)toupper((unsigned char)rest[0]); vk = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ? c : VkKeyScanA(rest[0]) & 0xFF; }
+    else if ((rest[0] == 'F' || rest[0] == 'f') && rest.size() <= 3) { int f = atoi(rest.c_str() + 1); if (f >= 1 && f <= 24) vk = VK_F1 + f - 1; }
+    else { std::string r = rest; for (auto& c : r) c = (char)tolower((unsigned char)c);
+        if (r == "space") vk = VK_SPACE; else if (r == "tab") vk = VK_TAB; else if (r == "escape" || r == "esc") vk = VK_ESCAPE;
+        else if (r == "home") vk = VK_HOME; else if (r == "end") vk = VK_END; else if (r == "pageup") vk = VK_PRIOR; else if (r == "pagedown") vk = VK_NEXT; }
+    return vk != 0;
+}
+static bool registerHotkeys() {
+    UnregisterHotKey(g_hwnd, HK_TOGGLE); UnregisterHotKey(g_hwnd, HK_STREAM);
+    json s = loadSettings();
+    bool ok = true;
+    UINT m, v;
+    std::string t = s.value("toggleHotkey", "Alt+L");
+    if (!t.empty() && parseAccelerator(t, m, v)) ok = RegisterHotKey(g_hwnd, HK_TOGGLE, m | MOD_NOREPEAT, v) != FALSE;
+    std::string st = s.value("streamHotkey", "");
+    if (!st.empty() && parseAccelerator(st, m, v)) RegisterHotKey(g_hwnd, HK_STREAM, m | MOD_NOREPEAT, v);
+    return ok;
+}
+// Autostart: HKCU-Run-Key "Lumora" + Legacy-/Doppel-Keys raeumen (der bekannte
+// "Autostart startet im Vordergrund"-Bug entstand durch ZWEI Run-Keys derselben App).
+// PARALLELBETRIEB-SCHUTZ: Im Beta-Betrieb NEBEN der Electron-App bleibt das ein No-op -
+// sonst wuerde die Shell den Electron-Key com.lumora.app loeschen und sich selbst
+// eintragen (beim User real autostart=true!). SCHARF erst mit dem Installer (Phase 4):
+// dann Legacy-Keys ('electron.app.HDR Launcher','electron.app.Lumora','com.lumora.app')
+// loeschen + eigenen Key "Lumora" -> "<exe>" [--minimized] setzen/entfernen.
+static void applyAutostart() {
+    // bewusst leer bis Phase 4 (s.o.); --minimized-Start und Tray funktionieren schon.
+}
+// Deep-Link (lumora://...) verarbeiten. Die PROTOKOLL-Registrierung uebernimmt erst der
+// Installer (Phase 4) - sonst wuerde die Beta-Shell der produktiven Electron-App den
+// lumora://-Handler wegnehmen. Verarbeiten kann die Shell die Links aber schon (Argument
+// beim Start bzw. WM_COPYDATA einer Zweitinstanz).
+static void handleDeepLink(const std::string& url) {
+    std::smatch m;
+    if (std::regex_search(url, m, std::regex("^lumora://join/([A-Za-z0-9]+)", std::regex::icase))) {
+        std::string code = m[1]; for (auto& c : code) c = (char)toupper((unsigned char)c);
+        showMainWindow();
+        sendToUi("deep-join", { {"code", code} });
+    } else if (url.rfind("lumora://forward-help", 0) == 0) {
+        showMainWindow();
+        sendToUi("show-forward-help", nullptr);
+    }
+}
+
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
 // Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
 static json handleChannel(const std::string& channel, const json& args) {
@@ -960,8 +1044,18 @@ static json handleChannel(const std::string& channel, const json& args) {
                 g_adaptLevel = 0; g_adaptUpAt = 0; g_adaptUpHold = 0; touch = true;   // zurueck zur vollen Bitrate
             }
             if (touch && g_bcState.value("active", false)) SetTimer(g_hwnd, TIMER_BCAPPLY, 500, nullptr);   // debounced
+            // Systemseitige Einstellungen sofort anwenden (wie der Electron-Handler)
+            if (args[0].contains("autostart") || args[0].contains("startMinimized")) applyAutostart();
+            if (args[0].contains("minimizeToTray")) { if (args[0].value("minimizeToTray", false)) createTray(); else destroyTray(); }
         }
         return true;
+    }
+    if (channel == "set-hotkey") {   // (accelerator, which) wie Electron; Rueckgabe {ok}
+        std::string acc = args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "";
+        std::string which = args.size() >= 2 && args[1].is_string() ? args[1].get<std::string>() : "";
+        std::string key = which == "osd" ? "osdHotkey" : which == "osdEdit" ? "osdEditHotkey" : which == "osdAb" ? "osdAbHotkey" : which == "stream" ? "streamHotkey" : "toggleHotkey";
+        json s = loadSettings(); s[key] = acc; writeFile(settingsPath(), s.dump(2));
+        return { {"ok", registerHotkeys()} };
     }
     if (channel == "save-games" && args.size() >= 1 && args[0].is_string()) {   // UI liefert fertigen JSON-String
         writeFile(dataDir() + L"\\games.json", args[0].get<std::string>()); return true;
@@ -1251,8 +1345,40 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
         break;
+    case WM_SHELL_TRAY:
+        if (LOWORD(l) == WM_LBUTTONUP) { toggleMainWindow(); return 0; }
+        if (LOWORD(l) == WM_RBUTTONUP) {
+            HMENU menu = CreatePopupMenu();
+            AppendMenuW(menu, MF_STRING, 1, L"Öffnen");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, 2, L"Beenden");
+            POINT pt; GetCursorPos(&pt);
+            SetForegroundWindow(h);   // Pflicht, sonst schliesst das Menue nicht (MS-Doku)
+            int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, h, nullptr);
+            DestroyMenu(menu);
+            if (cmd == 1) showMainWindow();
+            else if (cmd == 2) { g_quitting = true; PostMessageW(h, WM_CLOSE, 0, 0); }
+            return 0;
+        }
+        return 0;
+    case WM_HOTKEY:
+        if (w == HK_TOGGLE) { toggleMainWindow(); return 0; }
+        if (w == HK_STREAM) {   // Stream-Hotkey: an/aus (im Worker, blockiert den Hotkey nicht)
+            std::thread([]() { if (g_bcState.value("active", false)) stopBroadcast(); else startBroadcast(); }).detach();
+            return 0;
+        }
+        break;
+    case WM_COPYDATA: {   // Zweitinstanz reicht ihre Kommandozeile durch (Deep-Link/Fokus)
+        auto* cds = (COPYDATASTRUCT*)l;
+        std::string arg = cds && cds->lpData ? std::string((const char*)cds->lpData, cds->cbData) : "";
+        if (arg.find("lumora://") != std::string::npos) handleDeepLink(arg.substr(arg.find("lumora://")));
+        else if (arg.find("--minimized") == std::string::npos) showMainWindow();   // wie Electron: --minimized-Zweitstart holt NICHT nach vorne
+        return TRUE;
+    }
     case WM_CLOSE:
+        if (loadSettings().value("minimizeToTray", false) && !g_quitting) { ShowWindow(h, SW_HIDE); return 0; }   // in den Infobereich statt beenden
         if (g_bcState.value("active", false)) stopBroadcast();   // Stream + Kindprozesse sauber beenden
+        destroyTray();
         saveWindowState(h); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -1264,6 +1390,19 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // COM (FileDialogs, WebView2) - GUI-Thread = STA
     Gdiplus::GdiplusStartupInput gsi; ULONG_PTR gtok = 0; Gdiplus::GdiplusStartup(&gtok, &gsi, nullptr);   // Datei-Icons (PNG)
     { WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa); }   // Sockets frueh (bcLanIp/mtx-Probe/SSDP laufen VOR dem HTTP-Server)
+    // Single-Instance (wie Electron requestSingleInstanceLock): Zweitstart reicht seine
+    // Kommandozeile per WM_COPYDATA an die erste Instanz durch (Deep-Link/Fokus) und endet.
+    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\LumoraShellSingleton");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        HWND other = FindWindowW(L"LumoraShell", nullptr);
+        if (other) {
+            std::string cmd; int ac = 0; LPWSTR* av = CommandLineToArgvW(GetCommandLineW(), &ac);
+            for (int i = 1; i < ac; ++i) { if (i > 1) cmd += " "; int n = WideCharToMultiByte(CP_UTF8, 0, av[i], -1, nullptr, 0, nullptr, nullptr); std::string a(n ? n - 1 : 0, 0); WideCharToMultiByte(CP_UTF8, 0, av[i], -1, &a[0], n, nullptr, nullptr); cmd += a; }
+            COPYDATASTRUCT cds{ 1, (DWORD)cmd.size(), (void*)cmd.data() };
+            SendMessageW(other, WM_COPYDATA, 0, (LPARAM)&cds);
+        }
+        return 0;
+    }
     // App-Ordner (index.html) finden: --appdir > aktuelles Verzeichnis > exe-Ordner >
     // von dort aufwaerts (Doppelklick aus build/Release im Quellbaum). Im spaeteren
     // Installer liegt das UI direkt neben der exe - dann greift Stufe 3 sofort.
@@ -1417,7 +1556,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     g_hwnd = hwnd;
     // Frame-Neuberechnung erzwingen (WM_NCCALCSIZE greift sonst erst bei der naechsten Groessenaenderung)
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-    ShowWindow(hwnd, st.value("maximized", false) ? SW_MAXIMIZE : nShow);
+    // --minimized (Autostart): versteckt starten (Tray uebernimmt); sonst normal/maximiert.
+    bool startMin = false;
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--minimized") == 0) startMin = true;
+    if (startMin) createTray();
+    else ShowWindow(hwnd, st.value("maximized", false) ? SW_MAXIMIZE : nShow);
+    if (loadSettings().value("minimizeToTray", false)) createTray();
+    registerHotkeys();
+    applyAutostart();
+    // Deep-Link als Startargument (lumora://...) direkt verarbeiten
+    for (int i = 1; i < argc; ++i) { std::string a = narrow(argv[i]); if (a.rfind("lumora://", 0) == 0) handleDeepLink(a); }
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
 
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
