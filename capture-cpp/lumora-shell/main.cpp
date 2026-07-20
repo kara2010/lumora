@@ -1716,7 +1716,13 @@ static void createOsdWindow() {
     HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi);
     int w = mi.rcMonitor.right - mi.rcMonitor.left, hgt = mi.rcMonitor.bottom - mi.rcMonitor.top - 1;
-    g_osdHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+    // Click-through zu FREMDEN Fenstern verlangt WS_EX_LAYERED|WS_EX_TRANSPARENT
+    // (HTTRANSPARENT wirkt nur thread-intern - MS-Doku; User-Befund: nichts mehr
+    // anklickbar). Mit WS_EX_NOREDIRECTIONBITMAP ist LAYERED unkritisch: es gibt
+    // keine Redirection-Surface, SetLayeredWindowAttributes ENTFAELLT (dessen
+    // Aufruf hatte frueher das HWND-Controller-Rendering gekillt) - der DComp-
+    // Visual-Baum wird unabhaengig composited (Standard-Overlay-Kombi).
+    g_osdHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
         L"LumoraOsd", L"", WS_POPUP, mi.rcMonitor.left, mi.rcMonitor.top, w, hgt, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!g_osdHwnd) { bcLogStream("osd: CreateWindowExW fehlgeschlagen err=" + std::to_string(GetLastError())); return; }
     bcLogStream("osd: Overlay-Fenster erstellt (Composition)");
@@ -1774,14 +1780,14 @@ static void setOsdEditMode(bool on) {
         g_osdEdit = true;
         // fokussier-/anklickbar machen: NOACTIVATE+TRANSPARENT temporaer entfernen
         LONG_PTR ex = GetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE);
-        SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex & ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE));
+        SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex & ~(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE));
         SetForegroundWindow(g_osdHwnd);
         sendToOsd("osd-edit", true);
     } else {
         g_osdEdit = false;
         if (g_osdHwnd) {
             LONG_PTR ex = GetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE);
-            SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+            SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
         }
         sendToOsd("osd-edit", false);
     }
