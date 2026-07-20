@@ -14,6 +14,9 @@
 #include <shobjidl.h>
 #include <objidl.h>
 #include <gdiplus.h>
+#include <dxgi.h>
+#include <ctime>
+#pragma comment(lib, "dxgi.lib")
 #include <wrl.h>
 #include <string>
 #include <vector>
@@ -467,6 +470,409 @@ static lusrv::Response handleStreamHttp(const lusrv::Request& rq) {
     return rs;
 }
 
+// --- Modul: Broadcast-Orchestrierung (nativer Weg; Logik 1:1 aus main.js) ------------
+// Die Shell streamt AUSSCHLIESSLICH ueber den nativen C++-Helfer (der FFmpeg-Weg
+// stirbt mit Electron). Prozesse: Lumora Media-Relay (mediamtx) + lumora-capture-native.
+#define TIMER_VIEWER 102
+#define TIMER_ADAPT  103
+static const int MTX_RTSP_PORT = 8554, MTX_API_PORT = 9997, MTX_ICE_UDP = 8189;
+static const int MTX_RTP_UDP = 8556, MTX_RTCP_UDP = 8557, MTX_TS_UDP = 8558;
+static const int BC_ADAPT_F[] = { 100, 70, 50, 35, 24, 16 };   // Stufen-Faktoren (25 Mbit -> 17,5/12,5/8,8/6,0/4,0)
+static json g_bcState = { {"active", false} };
+struct ChildProc { HANDLE proc = nullptr; HANDLE outRd = nullptr; DWORD pid = 0; bool intentional = false; };
+static ChildProc g_mtx, g_cap;
+static bool g_bcStopping = false;
+static std::string g_bcCapKey; static int g_bcNatKbit = 0; static int g_capFastFails = 0;
+static int g_adaptLevel = 0; static ULONGLONG g_adaptLastChange = 0, g_adaptBadSince = 0, g_adaptGoodSince = 0, g_adaptUpAt = 0, g_adaptUpHold = 0;
+static ULONGLONG g_bcSince = 0; static int g_bcPeakViewers = 0, g_bcSwitches = 0; static std::set<std::string> g_bcSessionIds;
+
+static void bcPushState() { sendToUi("broadcast-status", g_bcState); }
+static std::wstring binDir() { return g_appDir + L"\\bin"; }
+static std::wstring tempPath(const wchar_t* name) { wchar_t t[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", t, MAX_PATH); return std::wstring(t) + L"\\" + name; }
+static void bcWriteBitrateControl(int kbit) { writeFile(tempPath(L"lumora-bitrate.txt"), std::to_string((std::max)(500, kbit))); }
+static void bcWriteSourceControl(const json& cfg) {
+    writeFile(tempPath(L"lumora-source.txt"), (cfg.value("mode", "") == "window" && cfg.value("hwnd", 0) != 0) ? ("hwnd " + std::to_string(cfg.value("hwnd", 0))) : "monitor");
+}
+static void bcWriteHdrControl() {
+    json s = loadSettings();
+    int mode = (std::max)(0, (std::min)(3, s.value("streamHdrMode", 0)));
+    double exp = (std::max)(0.05, (std::min)(3.0, s.value("streamHdrExposure", 0.3937)));
+    char buf[32]; sprintf_s(buf, "%d %.4f", mode, exp);
+    writeFile(tempPath(L"lumora-hdr.txt"), buf);
+}
+static std::string bcLanIp() {
+    // bevorzugte lokale IPv4 ueber einen (nie gesendeten) UDP-connect ermitteln
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) return "127.0.0.1";
+    sockaddr_in dst{}; dst.sin_family = AF_INET; dst.sin_port = htons(53); inet_pton(AF_INET, "8.8.8.8", &dst.sin_addr);
+    std::string ip = "127.0.0.1";
+    if (connect(s, (sockaddr*)&dst, sizeof(dst)) == 0) {
+        sockaddr_in loc{}; int ll = sizeof(loc);
+        if (getsockname(s, (sockaddr*)&loc, &ll) == 0) { char b[64] = {}; inet_ntop(AF_INET, &loc.sin_addr, b, sizeof(b)); ip = b; }
+    }
+    closesocket(s);
+    return ip;
+}
+// Prozess ausfuehren und stdout ROH zurueckgeben (fuer --list/--hdr-check des Helfers).
+static std::string runCaptureOutput(const std::wstring& cmdLine, DWORD timeoutMs) {
+    SECURITY_ATTRIBUTES sa{ sizeof(sa) }; sa.bInheritHandle = TRUE;
+    HANDLE rd = nullptr, wr = nullptr;
+    CreatePipe(&rd, &wr, &sa, 0); SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOW si{ sizeof(si) }; si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
+    si.hStdOutput = wr; si.hStdError = nullptr;
+    PROCESS_INFORMATION pi{};
+    std::wstring mcmd = cmdLine; std::string out;
+    if (CreateProcessW(nullptr, &mcmd[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(wr); CloseHandle(pi.hThread);
+        ULONGLONG t0 = GetTickCount64();
+        char buf[8192]; DWORD got = 0;
+        while (ReadFile(rd, buf, sizeof(buf), &got, nullptr) && got) {
+            out.append(buf, got);
+            if (GetTickCount64() - t0 > timeoutMs || out.size() > 16 * 1024 * 1024) break;
+        }
+        WaitForSingleObject(pi.hProcess, 2000);
+        TerminateProcess(pi.hProcess, 0);   // haengt er noch (altes --frames-Verhalten), hart beenden
+        CloseHandle(pi.hProcess);
+    } else CloseHandle(wr);
+    CloseHandle(rd);
+    return out;
+}
+// Kindprozess mit stdout/stderr-Capture starten; Reader-Thread schreibt ins Stream-Log.
+static bool spawnChild(ChildProc& cp, const std::wstring& cmdLine, const char* logPrefix) {
+    SECURITY_ATTRIBUTES sa{ sizeof(sa) }; sa.bInheritHandle = TRUE;
+    HANDLE rd = nullptr, wr = nullptr;
+    CreatePipe(&rd, &wr, &sa, 0); SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOW si{ sizeof(si) }; si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
+    si.hStdOutput = wr; si.hStdError = wr; si.hStdInput = nullptr;
+    PROCESS_INFORMATION pi{};
+    std::wstring mcmd = cmdLine;
+    if (!CreateProcessW(nullptr, &mcmd[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(rd); CloseHandle(wr); return false;
+    }
+    CloseHandle(wr); CloseHandle(pi.hThread);
+    cp.proc = pi.hProcess; cp.outRd = rd; cp.pid = pi.dwProcessId; cp.intentional = false;
+    std::string pfx = logPrefix;
+    std::thread([rd, pfx]() {   // Ausgaben zeilenweise ins Log (wie die on-data-Handler)
+        std::string acc; char buf[2048]; DWORD got = 0;
+        while (ReadFile(rd, buf, sizeof(buf), &got, nullptr) && got) {
+            acc.append(buf, got);
+            size_t nl;
+            while ((nl = acc.find('\n')) != std::string::npos) {
+                std::string line = acc.substr(0, nl); acc = acc.substr(nl + 1);
+                while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+                if (!line.empty()) bcLogStream(pfx + line);
+            }
+        }
+        CloseHandle(rd);
+    }).detach();
+    return true;
+}
+static void killChild(ChildProc& cp) {
+    if (!cp.proc) return;
+    cp.intentional = true;
+    TerminateProcess(cp.proc, 0); CloseHandle(cp.proc); cp.proc = nullptr; cp.pid = 0;
+}
+// mediamtx-Config (nativer Zweig 1:1: UDP/MPEG-TS-Ingest + alwaysAvailable-Ueberbrueckung).
+static std::wstring bcWriteMtxConfig(const std::vector<std::string>& hosts) {
+    json s = loadSettings();
+    std::string y;
+    y += "logLevel: error\n";
+    y += "rtspAddress: 127.0.0.1:" + std::to_string(MTX_RTSP_PORT) + "\n";
+    y += "rtspTransports: [udp, tcp]\n";
+    y += "rtpAddress: 127.0.0.1:" + std::to_string(MTX_RTP_UDP) + "\nrtcpAddress: 127.0.0.1:" + std::to_string(MTX_RTCP_UDP) + "\n";
+    y += "udpReadBufferSize: 26214400\n";
+    y += "rtmp: no\nhls: no\nsrt: no\nplayback: no\nmetrics: no\npprof: no\n";
+    y += "api: yes\napiAddress: 127.0.0.1:" + std::to_string(MTX_API_PORT) + "\n";
+    y += "webrtcAddress: 127.0.0.1:" + std::to_string(MTX_WHEP_PORT) + "\n";
+    y += "webrtcLocalUDPAddress: :" + std::to_string(MTX_ICE_UDP) + "\nwebrtcLocalTCPAddress: ''\nwebrtcIPsFromInterfaces: yes\n";
+    y += "writeQueueSize: 2048\n";
+    if (!hosts.empty()) {   // IPv6 MUSS gequotet werden
+        y += "webrtcAdditionalHosts: [";
+        for (size_t i = 0; i < hosts.size(); ++i) y += std::string(i ? ", " : "") + "'" + hosts[i] + "'";
+        y += "]\n";
+    }
+    y += "webrtcHandshakeTimeout: 10s\n";
+    std::string turl = s.value("streamTurnUrl", "");
+    if (s.value("streamTurnEnabled", false) && !turl.empty()) {
+        if (turl.rfind("turn:", 0) != 0 && turl.rfind("turns:", 0) != 0) turl = "turn:" + turl;
+        y += "webrtcICEServers2:\n  - url: " + turl + "\n";
+        if (!s.value("streamTurnUser", "").empty()) y += "    username: " + s.value("streamTurnUser", "") + "\n";
+        if (!s.value("streamTurnPass", "").empty()) y += "    password: " + s.value("streamTurnPass", "") + "\n";
+    }
+    y += "paths:\n  "; y += MTX_PATH; y += ":\n";
+    y += "    source: udp+mpegts://127.0.0.1:" + std::to_string(MTX_TS_UDP) + "\n";   // nativer Helfer publisht per UDP/MPEG-TS
+    y += "    alwaysAvailable: yes\n    alwaysAvailableTracks:\n      - codec: H264\n      - codec: Opus\n";
+    std::wstring p = tempPath(L"lumora-mediamtx.yml");
+    writeFile(p, y);
+    return p;
+}
+// Relay starten + aktiver Ready-Check (TCP-Probe auf den RTSP-Port, wie das Original).
+static bool bcStartMtx(const std::wstring& cfgPath) {
+    std::wstring relay = binDir() + L"\\lumora-media-relay.exe";
+    if (GetFileAttributesW(relay.c_str()) == INVALID_FILE_ATTRIBUTES) relay = binDir() + L"\\mediamtx.exe";
+    if (!spawnChild(g_mtx, L"\"" + relay + L"\" \"" + cfgPath + L"\"", "mtx: ")) return false;
+    for (int i = 0; i < 14; ++i) {   // ~840 ms Fallback, typisch nach ~150 ms bereit
+        SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in a{}; a.sin_family = AF_INET; a.sin_port = htons(MTX_RTSP_PORT); inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+        bool ok = connect(s, (sockaddr*)&a, sizeof(a)) == 0;
+        closesocket(s);
+        if (ok) return true;
+        Sleep(60);
+    }
+    DWORD ec = 0;   // nie bereit geworden: lebt der Prozess ueberhaupt noch? (Port belegt etc.)
+    return g_mtx.proc && GetExitCodeProcess(g_mtx.proc, &ec) && ec == STILL_ACTIVE;
+}
+// Stream-Konfiguration aus den Einstellungen (bcStreamCfg 1:1; native Monitorhoehe via Win32).
+static json bcStreamCfg(const std::string& encoder) {
+    json s = loadSettings();
+    std::string q = s.value("streamQuality", "1080");
+    int scaleH = q == "720" ? 720 : q == "1080" ? 1080 : q == "1440" ? 1440 : q == "2160" ? 0 : 0;   // 4K = nativ
+    int base = (std::max)(1000, s.value("streamUploadKbit", 8000));
+    int kbit = base;
+    if (g_adaptLevel > 0 && s.value("streamAdaptive", true)) kbit = (std::max)(3000, (int)(base * BC_ADAPT_F[g_adaptLevel] / 100.0 / 100.0 + 0.5) * 100);
+    std::string src = s.value("streamSource", "");
+    std::string mode = "monitor"; int outputIdx = 0; long long hwnd = 0;
+    if (src.rfind("window:", 0) == 0) { hwnd = atoll(src.c_str() + 7); if (hwnd) mode = "window"; }
+    else if (src.rfind("screen:", 0) == 0) outputIdx = atoi(src.c_str() + 7);
+    if (mode == "monitor" && scaleH) {   // Preset >= native Monitorhoehe -> nicht skalieren (Audit-Lehre)
+        HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);   // V1: Hauptmonitor (outputIdx-Multi folgt)
+        MONITORINFO mi{ sizeof(mi) };
+        if (GetMonitorInfoW(hm, &mi) && scaleH >= (mi.rcMonitor.bottom - mi.rcMonitor.top)) scaleH = 0;
+    }
+    return { {"encoder", encoder}, {"fps", s.value("streamFps", 60)}, {"kbit", kbit}, {"scaleH", scaleH},
+             {"mode", mode}, {"outputIdx", outputIdx}, {"hwnd", hwnd} };
+}
+static std::string bcQualityLabel(const json& cfg) {
+    std::string h = cfg.value("scaleH", 0) ? std::to_string(cfg.value("scaleH", 0)) + "p" : "nativ";
+    std::string enc = cfg.value("encoder", ""); size_t us = enc.find('_'); if (us != std::string::npos) enc = enc.substr(us + 1);
+    for (auto& c : enc) c = (char)toupper((unsigned char)c);
+    return h + " \xC2\xB7 " + std::to_string(cfg.value("fps", 60)) + " fps \xC2\xB7 " + std::to_string((int)(cfg.value("kbit", 8000) / 1000)) + " Mbit \xC2\xB7 " + enc;
+}
+// Nativen Capture-Helfer starten (Args + Steuerdateien + Exit-Watch mit Auto-Neustart).
+static void bcStartNative(const json& cfg);
+static void bcNativeExitWatch(HANDLE proc, ULONGLONG startedAt) {
+    std::thread([proc, startedAt]() {
+        WaitForSingleObject(proc, INFINITE);
+        DWORD code = 0; GetExitCodeProcess(proc, &code);
+        bool intentional; { std::lock_guard<std::mutex> lk(g_launchMx); intentional = g_cap.intentional || g_cap.proc != proc; }
+        CloseHandle(proc);
+        if (intentional || g_bcStopping || !g_bcState.value("active", false)) return;
+        { std::lock_guard<std::mutex> lk(g_launchMx); if (g_cap.proc == proc) g_cap.proc = nullptr; }
+        if (GetTickCount64() - startedAt < 4000) g_capFastFails++; else g_capFastFails = 0;
+        int delay = g_capFastFails > 3 ? 4000 : 500;
+        bcLogStream("nat beendet (" + std::to_string(code) + ") -> Neustart in " + std::to_string(delay) + "ms");
+        Sleep(delay);
+        if (g_bcState.value("active", false) && !g_bcStopping)
+            bcStartNative(bcStreamCfg(g_bcState.value("encoder", "")));
+    }).detach();
+}
+static void bcStartNative(const json& cfg) {
+    static const std::map<std::string, std::wstring> encMap = { {"h264_nvenc", L"nvenc"}, {"h264_amf", L"amf"}, {"h264_qsv", L"qsv"} };
+    auto em = encMap.find(cfg.value("encoder", ""));
+    std::wstring args = L"--encoder " + (em != encMap.end() ? em->second : L"auto") +
+        L" --fps " + std::to_wstring(cfg.value("fps", 60)) +
+        L" --bitrate " + std::to_wstring((std::max)(1, (int)(cfg.value("kbit", 8000) / 1000.0 + 0.5))) +
+        L" --mtx-host 127.0.0.1 --mtx-port " + std::to_wstring(MTX_TS_UDP) + L" --audio";
+    if (cfg.value("scaleH", 0)) args += L" --scale " + std::to_wstring(cfg.value("scaleH", 0));
+    if (cfg.value("mode", "") == "window" && cfg.value("hwnd", 0ll)) args += L" --window --hwnd " + std::to_wstring(cfg.value("hwnd", 0ll));
+    bcWriteHdrControl();
+    g_bcCapKey = std::to_string(cfg.value("mode", "") == "window" ? cfg.value("hwnd", 0ll) : 0) + "|" + std::to_string(cfg.value("fps", 60)) + "|" + std::to_string(cfg.value("scaleH", 0));
+    bcWriteBitrateControl(cfg.value("kbit", 8000));
+    g_bcNatKbit = cfg.value("kbit", 8000);
+    bcWriteSourceControl(cfg);
+    ChildProc cp;
+    if (!spawnChild(cp, L"\"" + binDir() + L"\\lumora-capture-native.exe\" " + args, "nat: ")) { bcLogStream("nat: Start fehlgeschlagen"); return; }
+    { std::lock_guard<std::mutex> lk(g_launchMx); g_cap = cp; }
+    bcNativeExitWatch(cp.proc, GetTickCount64());
+}
+// mediamtx-Sessions: echte Zuschauer (state=read, keine 127.x-Vorschau) aus der API.
+static json bcMtxReaders() {
+    auto r = luart::httpGet("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/webrtcsessions/list");
+    json out = json::array();
+    if (r.status != 200) return out;
+    json j = json::parse(r.body, nullptr, false);
+    if (!j.is_object()) return out;
+    for (auto& s : j.value("items", json::array())) {
+        if (s.value("path", "") != MTX_PATH || s.value("state", "") != "read") continue;
+        std::string rc = s.value("remoteCandidate", "");
+        if (rc.find("127.0.0.1") != std::string::npos || rc.find("::1") != std::string::npos) continue;   // eigene Vorschau
+        if (s.value("userAgent", "").find("LumoraPreview") != std::string::npos) continue;                // markierte Vorschau-Session
+        out.push_back(s);
+    }
+    return out;
+}
+static std::string bcExtractIp(const std::string& cand) {   // "1.2.3.4:56" | "[v6]:56"
+    if (cand.empty()) return "";
+    size_t b = cand.find('[');
+    if (b != std::string::npos) { size_t e = cand.find(']', b); return e == std::string::npos ? "" : cand.substr(b + 1, e - b - 1); }
+    size_t c = cand.rfind(':');
+    return c == std::string::npos ? cand : cand.substr(0, c);
+}
+static void bcViewerTick() {
+    if (!g_bcState.value("active", false)) return;
+    json readers = bcMtxReaders();
+    int n = (int)readers.size();
+    if (n > g_bcPeakViewers) g_bcPeakViewers = n;
+    for (auto& s : readers) if (s.contains("id")) g_bcSessionIds.insert(s.value("id", ""));
+    int prev = g_bcState.value("viewers", 0);
+    if (n != prev) {
+        g_bcState["viewers"] = n;
+        bcLogStream("viewer: " + std::to_string(prev) + " -> " + std::to_string(n));
+        bcPushState();
+        if (n > prev) sendToUi("viewer-joined", n);
+    }
+}
+// Live-Umstellung (bcDoRestartFfmpeg-Kern): Bitrate + Quelle ueber die Steuerdateien,
+// Vollneustart des Helfers nur bei fps/scaleH-Aenderung.
+static void bcApplyCfg(const json& cfg) {
+    std::string hardNew = std::to_string(cfg.value("fps", 60)) + "|" + std::to_string(cfg.value("scaleH", 0));
+    size_t p1 = g_bcCapKey.find('|');
+    std::string hardOld = p1 == std::string::npos ? "" : g_bcCapKey.substr(p1 + 1);
+    bool capAlive; { std::lock_guard<std::mutex> lk(g_launchMx); capAlive = g_cap.proc != nullptr; }
+    if (capAlive && hardOld == hardNew) {
+        std::string newHwnd = std::to_string(cfg.value("mode", "") == "window" ? cfg.value("hwnd", 0ll) : 0);
+        std::string oldHwnd = g_bcCapKey.substr(0, p1);
+        if (newHwnd != oldHwnd) {
+            bcWriteSourceControl(cfg);
+            g_bcCapKey = newHwnd + "|" + hardNew;
+            bcLogStream("nat: Quelle live -> " + (newHwnd == "0" ? "Monitor" : "Fenster " + newHwnd) + " (kein Neustart)");
+        }
+        bcWriteBitrateControl(cfg.value("kbit", 8000));
+        if (cfg.value("kbit", 8000) != g_bcNatKbit) {
+            g_bcNatKbit = cfg.value("kbit", 8000);
+            bcBroadcastSwitch("bitrate", g_bcNatKbit);
+            bcLogStream("nat: Bitrate live -> " + std::to_string(g_bcNatKbit) + " kbit (kein Neustart)");
+        }
+        g_bcState["quality"] = bcQualityLabel(cfg);
+        bcPushState();
+        return;
+    }
+    // Vollneustart (fps/scaleH geaendert): Zuschauer einfrieren, Helfer neu.
+    g_bcSwitches++;
+    bcBroadcastSwitch("full", cfg.value("kbit", 8000));
+    { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_cap); }
+    bcStartNative(cfg);
+    g_bcState["quality"] = bcQualityLabel(cfg);
+    bcPushState();
+}
+// Adaptive Bitrate (bcAdaptTick 1:1: Notabstieg >=12%, runter nach 8s schlecht,
+// rauf nach 90s sauber, 20s-Ruhe, gescheiterte Rauf-Probe = 10 min Sperre).
+static void bcAdaptTick() {
+    if (!g_bcState.value("active", false)) return;
+    json s = loadSettings();
+    if (!s.value("streamAdaptive", true)) return;
+    ULONGLONG now = GetTickCount64();
+    bool bad = false; double worstLoss = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_qosMx);
+        for (auto it = g_qosMap.begin(); it != g_qosMap.end();) {
+            if (now - it->second.t > 15000) { it = g_qosMap.erase(it); continue; }
+            if (it->second.badStreak >= 2) bad = true;
+            if (now - it->second.t <= 8000 && it->second.lossRate > worstLoss) worstLoss = it->second.lossRate;
+            ++it;
+        }
+    }
+    const int maxLevel = (int)(sizeof(BC_ADAPT_F) / sizeof(int)) - 1;
+    int base = (std::max)(1000, s.value("streamUploadKbit", 8000));
+    auto lvKbit = [&](int lv) { return lv <= 0 ? base : (std::max)(3000, (int)(base * BC_ADAPT_F[lv] / 100.0 / 100.0 + 0.5) * 100); };
+    if (worstLoss >= 0.12 && g_adaptLevel < maxLevel && now - g_adaptLastChange >= 6000) {   // NOTABSTIEG
+        int target = (std::min)(maxLevel, g_adaptLevel + (worstLoss >= 0.30 ? 3 : 2));
+        if (lvKbit(target) < lvKbit(g_adaptLevel)) {
+            g_adaptLevel = target; g_adaptLastChange = now; g_adaptBadSince = 0; g_adaptGoodSince = 0;
+            { std::lock_guard<std::mutex> lk(g_qosMx); g_qosMap.clear(); }
+            bcLogStream("adapt: NOTABSTIEG bei " + std::to_string((int)(worstLoss * 100)) + "% Verlust -> Stufe " + std::to_string(target) + " -> " + std::to_string(lvKbit(target)) + " kbit");
+            bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", "")));
+        }
+        return;
+    }
+    if (bad) { if (!g_adaptBadSince) g_adaptBadSince = now; g_adaptGoodSince = 0; }
+    else { g_adaptBadSince = 0; if (!g_adaptGoodSince) g_adaptGoodSince = now; }
+    int next = g_adaptLevel;
+    if (bad && g_adaptBadSince && now - g_adaptBadSince >= 8000 && g_adaptLevel < maxLevel) next = g_adaptLevel + 1;
+    else if (!bad && g_adaptGoodSince && now - g_adaptGoodSince >= 90000 && g_adaptLevel > 0 && now >= g_adaptUpHold) next = g_adaptLevel - 1;
+    if (next == g_adaptLevel || now - g_adaptLastChange < 20000) return;
+    bool goingDown = next > g_adaptLevel;
+    if (goingDown && g_adaptUpAt && now - g_adaptUpAt < 60000) {   // Rauf-Probe gescheitert
+        g_adaptUpHold = now + 600000;
+        bcLogStream("adapt: Rauf-Probe gescheitert -> naechster Versuch in 10 min");
+    }
+    if (!goingDown) g_adaptUpAt = now;
+    g_adaptLevel = next; g_adaptLastChange = now;
+    bcLogStream("adapt: Stufe " + std::to_string(next) + " -> " + std::to_string(lvKbit(next)) + " kbit");
+    bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", "")));
+    g_bcState["adaptKbit"] = next > 0 ? lvKbit(next) : 0;
+    bcPushState();
+}
+// Encoder-Vendor fuer die Shell (immer nativer Helfer; ohne ffmpeg-Abfrage).
+static std::string bcShellEncoder() {
+    json s = loadSettings();
+    std::string ov = s.value("streamEncoder", "auto");
+    if (ov == "nvenc" || ov == "amf" || ov == "qsv") return "h264_" + ov;
+    // Vendor via DXGI (wie der Helfer selbst: NVIDIA > AMD > Intel)
+    ComPtr<IDXGIFactory1> fac; CreateDXGIFactory1(IID_PPV_ARGS(&fac));
+    bool nv = false, amd = false, intel = false;
+    if (fac) for (UINT i = 0;; ++i) { ComPtr<IDXGIAdapter1> a; if (fac->EnumAdapters1(i, &a) != S_OK) break; DXGI_ADAPTER_DESC1 d; a->GetDesc1(&d); if (d.VendorId == 0x10DE) nv = true; else if (d.VendorId == 0x1002) amd = true; else if (d.VendorId == 0x8086) intel = true; }
+    return nv ? "h264_nvenc" : amd ? "h264_amf" : intel ? "h264_qsv" : "h264_nvenc";
+}
+static json startBroadcast() {
+    if (g_bcState.value("active", false)) return g_bcState;
+    g_bcStopping = false; g_adaptLevel = 0; g_adaptLastChange = 0; g_adaptBadSince = 0; g_adaptGoodSince = 0; g_adaptUpAt = 0; g_adaptUpHold = 0;
+    { std::lock_guard<std::mutex> lk(g_qosMx); g_qosMap.clear(); }
+    g_bcSince = GetTickCount64(); g_bcPeakViewers = 0; g_bcSwitches = 0; g_bcSessionIds.clear();
+    std::string enc = bcShellEncoder();
+    std::string lanLink = "http://" + bcLanIp() + ":" + std::to_string(BROADCAST_PORT) + "/";
+    g_bcState = { {"active", true}, {"port", BROADCAST_PORT}, {"link", lanLink}, {"linkV4", ""}, {"linkV6", ""},
+                  {"lanLink", lanLink}, {"viewers", 0}, {"quality", ""}, {"internet", false}, {"opening", true},
+                  {"encoder", enc}, {"since", (long long)time(nullptr) * 1000} };
+    bcPushState();
+    // PHASE 1 - LOKAL, SOFORT (gecachte oeffentliche Hosts der letzten Session als ICE-Hosts)
+    json s = loadSettings();
+    std::vector<std::string> hosts;
+    for (auto& h : s.value("streamLastHosts", json::array())) if (h.is_string()) hosts.push_back(h.get<std::string>());
+    std::wstring cfgPath = bcWriteMtxConfig(hosts);
+    if (!bcStartMtx(cfgPath)) {
+        bcLogStream("start: FEHLGESCHLAGEN (Relay startet nicht - Port belegt? Electron-Lumora aktiv?)");
+        sendToUi("stream-error", "Stream-Start fehlgeschlagen: Relay startet nicht. Laeuft Lumora doppelt (Electron-Version streamt)?");
+        g_bcState = { {"active", false} }; bcPushState();
+        { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_mtx); }
+        return g_bcState;
+    }
+    if (!g_streamSrvUp) g_streamSrvUp = g_streamSrv.start(BROADCAST_PORT, handleStreamHttp);
+    if (!g_streamSrvUp) {
+        sendToUi("stream-error", "Stream-Start fehlgeschlagen: Port 8787 wird von einem anderen Programm belegt.");
+        { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_mtx); }
+        g_bcState = { {"active", false} }; bcPushState();
+        return g_bcState;
+    }
+    json cfg = bcStreamCfg(enc);
+    bcStartNative(cfg);
+    g_bcState["quality"] = bcQualityLabel(cfg);
+    g_bcState["opening"] = false;   // V1: LAN sofort nutzbar; Router-Phase (UPnP/oeffentliche IPs) folgt als naechster Block
+    bcPushState();
+    SetTimer(g_hwnd, TIMER_VIEWER, 2000, nullptr);
+    SetTimer(g_hwnd, TIMER_ADAPT, 5000, nullptr);
+    bcLogStream("start: nativ " + enc + " " + bcQualityLabel(cfg) + " " + lanLink);
+    return g_bcState;
+}
+static json stopBroadcast() {
+    bool wasActive = g_bcState.value("active", false);
+    if (wasActive && GetTickCount64() - g_bcSince >= 10000) {   // Abschluss-Statistik (V1: ohne Byte-Zaehler)
+        json s = loadSettings();
+        sendToUi("stream-summary", { {"durMs", (long long)(GetTickCount64() - g_bcSince)}, {"peakViewers", g_bcPeakViewers},
+            {"totalViewers", (int)g_bcSessionIds.size()}, {"bytes", 0}, {"avgMbit", 0}, {"switches", g_bcSwitches},
+            {"quality", s.value("streamQuality", "auto")}, {"fps", s.value("streamFps", 60)}, {"kbit", s.value("streamUploadKbit", 8000)} });
+    }
+    g_bcStopping = true;
+    KillTimer(g_hwnd, TIMER_VIEWER); KillTimer(g_hwnd, TIMER_ADAPT);
+    { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_cap); killChild(g_mtx); }
+    if (g_streamSrvUp) { g_streamSrv.stop(); g_streamSrvUp = false; }
+    g_bcState = { {"active", false}, {"port", BROADCAST_PORT}, {"link", ""}, {"linkV4", ""}, {"linkV6", ""},
+                  {"lanLink", ""}, {"viewers", 0}, {"quality", ""}, {"internet", false}, {"opening", false} };
+    bcPushState();
+    bcLogStream("stop: Stream beendet");
+    return g_bcState;
+}
+
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
 // Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
 static json handleChannel(const std::string& channel, const json& args) {
@@ -492,6 +898,87 @@ static json handleChannel(const std::string& channel, const json& args) {
         return true;
     }
     if (channel == "scan-games") return lushell::scanGames(args.size() >= 1 ? args[0] : json::array());   // Steam+Xbox+Ordner (weitere Stores folgen)
+    // ---- Streaming (nativer Weg; V1 = LAN-Phase, Router-Phase folgt) ----
+    if (channel == "start-broadcast") return startBroadcast();
+    if (channel == "stop-broadcast") return stopBroadcast();
+    if (channel == "broadcast-status") return g_bcState;
+    if (channel == "list-viewers") {
+        json out = json::array();
+        for (auto& s : bcMtxReaders()) {
+            std::string ip = bcExtractIp(s.value("remoteCandidate", ""));
+            std::string name; std::string q = s.value("query", "");
+            size_t np = q.find("name="); if (np != std::string::npos) { name = q.substr(np + 5); size_t amp = name.find('&'); if (amp != std::string::npos) name = name.substr(0, amp); }
+            out.push_back({ {"id", s.value("id", "")}, {"ip", ip.empty() ? "(verbindet\xE2\x80\xA6)" : ip}, {"ua", s.value("userAgent", "").substr(0, 60)},
+                            {"since", (long long)time(nullptr) * 1000}, {"bytes", s.value("bytesSent", 0ll)}, {"name", name} });
+        }
+        return out;
+    }
+    if (channel == "kick-viewer" && args.size() >= 1 && args[0].is_string()) {
+        auto r = lusrv::proxyLocal(MTX_API_PORT, "POST", "/v3/webrtcsessions/kick/" + args[0].get<std::string>(), "", "", "");
+        return { {"ok", r.status >= 200 && r.status < 300} };
+    }
+    if (channel == "preview-whep" && args.size() >= 1 && args[0].is_string()) {
+        // Vorschau direkt an den eigenen /whep-Weg (User-Agent markiert -> nicht als Zuschauer gezaehlt)
+        auto r = lusrv::proxyLocal(MTX_WHEP_PORT, "POST", std::string("/") + MTX_PATH + "/whep", "application/sdp", "LumoraPreview", args[0].get<std::string>());
+        json out = { {"ok", r.status >= 200 && r.status < 300}, {"answer", r.body}, {"session", nullptr} };
+        if (r.headers.count("Location")) {
+            std::string loc = r.headers["Location"]; size_t h = loc.find("//");
+            if (h != std::string::npos) { size_t sl = loc.find('/', h + 2); loc = sl == std::string::npos ? "/" : loc.substr(sl); }
+            std::string pre = std::string("/") + MTX_PATH + "/whep"; size_t pp = loc.find(pre);
+            if (pp != std::string::npos) loc = loc.substr(0, pp) + "/whep" + loc.substr(pp + pre.size());
+            out["session"] = loc;
+        }
+        return out;
+    }
+    if (channel == "preview-whep-stop" && args.size() >= 1 && args[0].is_string()) {
+        std::string sess = args[0].get<std::string>();   // '/whep/<id>' -> mediamtx-Pfad
+        std::string pre = "/whep"; size_t pp = sess.find(pre);
+        std::string target = std::string("/") + MTX_PATH + "/whep" + (pp != std::string::npos ? sess.substr(pp + pre.size()) : sess);
+        lusrv::proxyLocal(MTX_WHEP_PORT, "DELETE", target, "", "", "");
+        return true;
+    }
+    if (channel == "set-hdr-tonemap") {
+        if (args.size() >= 1 && args[0].is_object()) {
+            json s = loadSettings(); json u;
+            if (args[0].contains("mode")) u["streamHdrMode"] = (std::max)(0, (std::min)(3, args[0].value("mode", 0)));
+            if (args[0].contains("exposure")) u["streamHdrExposure"] = (std::max)(0.05, (std::min)(3.0, args[0].value("exposure", 0.3937)));
+            s.update(u); writeFile(settingsPath(), s.dump(2));
+            bcWriteHdrControl();
+        }
+        json s2 = loadSettings();
+        return { {"mode", s2.value("streamHdrMode", 0)}, {"exposure", s2.value("streamHdrExposure", 0.3937)} };
+    }
+    if (channel == "list-sources") {
+        // Monitore nativ (Label wie Electron: "Bildschirm N - WxH [· Haupt]") + Fenster via Helfer --list
+        json out = json::array();
+        struct MonCtx { json* out; int i; };
+        MonCtx mc{ &out, 0 };
+        EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR hm, HDC, LPRECT, LPARAM lp) -> BOOL {
+            auto* c = (MonCtx*)lp;
+            MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi);
+            std::string label = "Bildschirm " + std::to_string(c->i + 1) + " \xE2\x80\x93 " +
+                std::to_string(mi.rcMonitor.right - mi.rcMonitor.left) + "\xC3\x97" + std::to_string(mi.rcMonitor.bottom - mi.rcMonitor.top);
+            if (mi.dwFlags & MONITORINFOF_PRIMARY) label += " \xC2\xB7 Haupt";
+            c->out->push_back({ {"value", "screen:" + std::to_string(c->i)}, {"label", label}, {"icon", ""}, {"kind", "screen"} });
+            c->i++;
+            return TRUE;
+        }, (LPARAM)&mc);
+        // Fenster: Helfer --list (Zeilen "hwnd\ttitel\ticonDataUrl")
+        std::string raw = runCaptureOutput(L"\"" + binDir() + L"\\lumora-capture-native.exe\" --list", 15000);
+        std::istringstream ls(raw); std::string line;
+        while (std::getline(ls, line)) {
+            while (!line.empty() && (line.back() == '\r')) line.pop_back();
+            size_t t1 = line.find('\t'); if (t1 == std::string::npos) continue;
+            size_t t2 = line.find('\t', t1 + 1);
+            std::string hwnd = line.substr(0, t1);
+            std::string title = t2 == std::string::npos ? line.substr(t1 + 1) : line.substr(t1 + 1, t2 - t1 - 1);
+            std::string icon = t2 == std::string::npos ? "" : line.substr(t2 + 1);
+            if (hwnd.empty() || title.empty()) continue;
+            out.push_back({ {"value", "window:" + hwnd}, {"label", title}, {"icon", icon}, {"kind", "window"} });
+        }
+        return out;
+    }
+    if (channel == "test-connectivity") return nullptr;   // Router-Diagnose folgt mit der UPnP-Phase
     // ---- Artwork/Netz (laufen im Worker-Thread, s. onWebMessage) ----
     if (channel == "fetch-cover") {
         std::string name = args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "";
@@ -578,7 +1065,9 @@ static json handleChannel(const std::string& channel, const json& args) {
 static bool isSlowChannel(const std::string& c) {
     return c == "scan-games" || c == "fetch-cover" || c == "fetch-hero" || c == "fetch-game-info" ||
            c == "fetch-image-url" || c == "search-steam" || c == "search-msstore" || c == "search-sgdb" ||
-           c == "launch-game";   // HDR-Wartezeit (3s) + AUMID-Suche
+           c == "launch-game" ||   // HDR-Wartezeit (3s) + AUMID-Suche
+           c == "start-broadcast" || c == "stop-broadcast" || c == "list-sources" ||   // Relay-Ready/Helfer-Lauf
+           c == "list-viewers" || c == "kick-viewer" || c == "preview-whep" || c == "preview-whep-stop";
 }
 static void onWebMessage(const std::wstring& raw) {
     json msg = json::parse(narrow(raw), nullptr, false);
@@ -676,8 +1165,12 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_TIMER:
         if (w == TIMER_LAUNCH) { launchTick(); return 0; }
         if (w == TIMER_EXTWATCH) { extWatchTick(); return 0; }
+        if (w == TIMER_VIEWER) { bcViewerTick(); return 0; }
+        if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
         break;
-    case WM_CLOSE: saveWindowState(h); DestroyWindow(h); return 0;
+    case WM_CLOSE:
+        if (g_bcState.value("active", false)) stopBroadcast();   // Stream + Kindprozesse sauber beenden
+        saveWindowState(h); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -693,6 +1186,25 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-broadcast") == 0) {
+        // E2E-Selbsttest: ECHTER Stream-Start (Relay + nativer Helfer) -> mediamtx-API
+        // muss den Pfad mit H264+Opus 'ready' melden -> sauber stoppen.
+        wchar_t cwd[MAX_PATH] = {}; GetCurrentDirectoryW(MAX_PATH, cwd); g_appDir = cwd;
+        json st = startBroadcast();
+        std::string s = "start: active=" + std::to_string(st.value("active", false)) + " enc=" + st.value("encoder", "?") + " link=" + st.value("lanLink", "?") + "\n";
+        Sleep(5000);
+        auto r = luart::httpGet("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/paths/get/" + MTX_PATH);
+        json j = json::parse(r.body, nullptr, false);
+        s += "paths/get: status=" + std::to_string(r.status) + " ready=" + (j.is_object() ? std::to_string(j.value("ready", false)) : "?") +
+             " tracks=" + (j.is_object() && j.contains("tracks") ? j["tracks"].dump() : "?") + "\n";
+        auto ply = luart::httpGet("http://127.0.0.1:8787/");
+        s += "player: " + std::to_string(ply.status) + " " + std::to_string(ply.body.size()) + "B\n";
+        stopBroadcast();
+        s += "stop: ok\n";
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-http") == 0) {
         // Selbsttest: Streaming-Server auf 8787 starten + per Selbstabfrage verifizieren.
         wchar_t cwd[MAX_PATH] = {}; GetCurrentDirectoryW(MAX_PATH, cwd); g_appDir = cwd;   // player.html im Projektroot
