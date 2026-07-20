@@ -20,6 +20,10 @@
 #include <bcrypt.h>
 #include <pdh.h>
 #pragma comment(lib, "pdh.lib")
+#include <Xinput.h>
+#include <timeapi.h>
+#pragma comment(lib, "xinput9_1_0.lib")
+#pragma comment(lib, "winmm.lib")
 #include <ctime>
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "bcrypt.lib")
@@ -1315,6 +1319,45 @@ static void toggleMainWindow() {
     if (IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd) && GetForegroundWindow() == g_hwnd) ShowWindow(g_hwnd, SW_HIDE);
     else showMainWindow();
 }
+// --- Gamepad-Hotkeys (nativer XInput-Poll wie Electrons pollNativeHotkeys: laeuft
+// fokusunabhaengig, auch waehrend ein Spiel im Vordergrund ist) ---
+#define TIMER_XINPUT 108
+static void toggleOsdSetting();   // (unten definiert)
+// Standard-Gamepad-API-Index -> XINPUT_GAMEPAD-Pruefung (Masken 1:1 aus main.js XI_MASK)
+static bool xiButtonDown(const XINPUT_GAMEPAD& g, int idx) {
+    switch (idx) {
+    case 0: return (g.wButtons & 0x1000) != 0; case 1: return (g.wButtons & 0x2000) != 0;
+    case 2: return (g.wButtons & 0x4000) != 0; case 3: return (g.wButtons & 0x8000) != 0;
+    case 4: return (g.wButtons & 0x0100) != 0; case 5: return (g.wButtons & 0x0200) != 0;
+    case 6: return g.bLeftTrigger > 40;        case 7: return g.bRightTrigger > 40;
+    case 8: return (g.wButtons & 0x0020) != 0; case 9: return (g.wButtons & 0x0010) != 0;
+    case 10: return (g.wButtons & 0x0040) != 0; case 11: return (g.wButtons & 0x0080) != 0;
+    case 12: return (g.wButtons & 0x0001) != 0; case 13: return (g.wButtons & 0x0002) != 0;
+    case 14: return (g.wButtons & 0x0004) != 0; case 15: return (g.wButtons & 0x0008) != 0;
+    }
+    return false;
+}
+// Kombi auf irgendeinem der 4 XInput-Slots vollstaendig gedrueckt?
+static bool gamepadComboDown(const json& combo) {
+    if (!combo.is_array() || combo.empty()) return false;
+    for (DWORD slot = 0; slot < 4; ++slot) {
+        XINPUT_STATE st{};
+        if (XInputGetState(slot, &st) != ERROR_SUCCESS) continue;
+        bool all = true;
+        for (auto& b : combo) { if (!b.is_number_integer() || !xiButtonDown(st.Gamepad, b.get<int>())) { all = false; break; } }
+        if (all) return true;
+    }
+    return false;
+}
+static bool g_gpMainWas = false, g_gpOsdWas = false;
+static void xinputTick() {   // 25 Hz; Flanke = einmal ausloesen pro Druck
+    json s = loadSettings();
+    bool m = gamepadComboDown(s.value("gamepadHotkey", json::array()));
+    bool o = gamepadComboDown(s.value("gamepadOsdHotkey", json::array()));
+    if (m && !g_gpMainWas) toggleMainWindow();
+    if (o && !g_gpOsdWas) toggleOsdSetting();
+    g_gpMainWas = m; g_gpOsdWas = o;
+}
 static void createTray() {
     if (g_trayOn) return;
     g_nid = {}; g_nid.cbSize = sizeof(g_nid); g_nid.hWnd = g_hwnd; g_nid.uID = 1;
@@ -1607,6 +1650,9 @@ static json readGpuPdh() {
 }
 static void osdDataTick() {
     if (!g_osdHwnd || !IsWindowVisible(g_osdHwnd)) return;
+    // Oberste Lage NACHDRUECKEN (wie Electrons moveTop je Anzeige): ein startendes
+    // Spiel setzt sich sonst ueber das TOPMOST-Overlay (User-Befund: OSD weg im Spiel).
+    SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     PdhCollectQueryData(g_pdhQ);   // frisches Sample fuer die Delta-Zaehler
     json payload = { {"gpu", readGpuNative()}, {"cpu", readCpuNative()} };
     json f = readBrokerFps();
@@ -1630,6 +1676,11 @@ static void applyOsdConfig() {
 }
 static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
+    // CLICK-THROUGH: WS_EX_TRANSPARENT wirkt OHNE WS_EX_LAYERED nicht auf Hit-Tests
+    // (User-Befund: OSD blockierte Maus, Hand-Cursor). HTTRANSPARENT reicht alle
+    // Maus-Ereignisse ans darunterliegende Fenster durch - wie setIgnoreMouseEvents.
+    case WM_NCHITTEST: return HTTRANSPARENT;
+    case WM_SETCURSOR: return TRUE;   // nie einen eigenen Cursor setzen
     case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_osdWv) g_osdWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
     case WM_SIZE: if (g_osdCtrl) { RECT rc; GetClientRect(h, &rc); g_osdCtrl->put_Bounds(rc); } return 0;
     case WM_DESTROY: return 0;
@@ -1698,6 +1749,12 @@ static void createOsdWindow() {
 static void showOsd() { createOsdWindow(); sensorsInit(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 1000, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
 static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
+static void toggleOsdSetting() {   // wie Electrons toggleOverlay (Hotkey/Gamepad/Kanal)
+    json s = loadSettings(); s["osdEnabled"] = !s.value("osdEnabled", false);
+    writeFile(settingsPath(), s.dump(2));
+    syncOsdVisibility();
+    sendToUi("osd-config", nullptr);   // UI-Checkbox darf nachziehen (liest Settings neu)
+}
 
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
 // Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
@@ -2042,6 +2099,8 @@ static json handleChannel(const std::string& channel, const json& args) {
     }
     if (channel == "setup-osd") { sendToUi("osd-setup-status", { {"state", "unavailable"} }); return false; }   // FPS-/CPU-Broker folgt mit dem Sensor-Schritt
     if (channel == "osd-sources") return { {"gpu", "folgt (Sensor-Schritt)"}, {"cpu", "folgt (Sensor-Schritt)"}, {"fps", "folgt (Sensor-Schritt)"}, {"ram", "folgt (Sensor-Schritt)"} };
+    if (channel == "toggle-window") { toggleMainWindow(); return true; }
+    if (channel == "toggle-osd") { toggleOsdSetting(); return true; }
     if (channel == "minimize-window") { ShowWindow(g_hwnd, SW_MINIMIZE); return true; }
     if (channel == "toggle-maximize") { ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE); return true; }
     if (channel == "close-window")    { PostMessageW(g_hwnd, WM_CLOSE, 0, 0); return true; }
@@ -2171,6 +2230,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_VIEWER) { bcViewerTick(); return 0; }
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
+        if (w == TIMER_XINPUT) { xinputTick(); return 0; }
         if (w == TIMER_OSDDATA) { osdDataTick(); return 0; }
         if (w == TIMER_GROUP) {   // Heartbeat im Worker (Netz, 8s-Timeout) - nie doppelt
             if (!g_groupTickBusy.exchange(true)) std::thread([]() { groupTickOnce(); g_groupTickBusy = false; }).detach();
@@ -2199,12 +2259,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_HOTKEY:
         if (w == HK_TOGGLE) { toggleMainWindow(); return 0; }
-        if (w == HK_OSD) {   // OSD ein-/ausblenden (osdEnabled invertieren wie toggleOverlay)
-            json s = loadSettings(); s["osdEnabled"] = !s.value("osdEnabled", false);
-            writeFile(settingsPath(), s.dump(2));
-            syncOsdVisibility();
-            return 0;
-        }
+        if (w == HK_OSD) { toggleOsdSetting(); return 0; }
         if (w == HK_STREAM) {   // Stream-Hotkey: an/aus (im Worker, blockiert den Hotkey nicht)
             std::thread([]() { if (g_bcState.value("active", false)) stopBroadcast(); else startBroadcast(); }).detach();
             return 0;
@@ -2454,6 +2509,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Deep-Link als Startargument (lumora://...) direkt verarbeiten
     for (int i = 1; i < argc; ++i) { std::string a = narrow(argv[i]); if (a.rfind("lumora://", 0) == 0) handleDeepLink(a); }
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
+    timeBeginPeriod(1);                              // praeziser Hintergrund-Poll (wie Electron/RTSS)
+    SetTimer(hwnd, TIMER_XINPUT, 40, nullptr);       // nativer Gamepad-Hotkey-Poll (25 Hz)
     syncOsdVisibility();   // OSD-Overlay gemaess Einstellung anzeigen
 
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
