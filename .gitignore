@@ -55,3 +55,7 @@ _testlab/tools/
 website/stream-neu.png
 website/stream-stats.png
 _testlab/mediamtx-src/
+capture-cpp/lumora-shell/stage/
+capture-cpp/lumora-shell/build/
+capture-cpp/lumora-shell/*.exe
+capture-cpp/lumora-shell/MicrosoftEdgeWebview2Setup.exe
