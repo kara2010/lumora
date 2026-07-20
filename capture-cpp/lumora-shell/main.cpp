@@ -1458,6 +1458,10 @@ static void sensorsInit() {
     // % Processor Utility = die Taskmanager-Metrik (turbo-normiert); GPU-3D-Summe aller Engines
     PdhAddEnglishCounterW(g_pdhQ, L"\\Processor Information(_Total)\\% Processor Utility", 0, &g_pdhCpu);
     PdhAddEnglishCounterW(g_pdhQ, L"\\GPU Engine(*engtype_3D)\\Utilization Percentage", 0, &g_pdhGpu);
+    // % Processor Performance = Ist-Takt-Faktor (kann >100 = Boost) * Basis-MHz -> CPU-Takt
+    // OHNE Afterburner (genau der vom User gemeldete fehlende clock-Wert). Registrierung
+    // ging beim git-Reset verloren; readCpuNative nutzt g_pdhCpuPerf, es war aber nullptr.
+    PdhAddEnglishCounterW(g_pdhQ, L"\\Processor Information(_Total)\\% Processor Performance", 0, &g_pdhCpuPerf);
     PdhCollectQueryData(g_pdhQ);   // Basissample (Delta-Zaehler)
 }
 static json readMahm();       // MSI-Afterburner-Sensoren (Definition weiter unten)
@@ -1481,7 +1485,7 @@ static json readCpuNative() {
     MEMORYSTATUSEX ms{ sizeof(ms) }; GlobalMemoryStatusEx(&ms);
     json clock = nullptr;   // Ist-Takt = Basis-MHz (Registry ~MHz) * % Processor Performance
     DWORD baseMhz = 0, msz = sizeof(baseMhz);
-    RegGetValueW(HKEY_LOCAL_MACHINE, L"HARDWARE\DESCRIPTION\System\CentralProcessor\0", L"~MHz", RRF_RT_REG_DWORD, nullptr, &baseMhz, &msz);
+    RegGetValueW(HKEY_LOCAL_MACHINE, L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", L"~MHz", RRF_RT_REG_DWORD, nullptr, &baseMhz, &msz);
     if (g_pdhCpuPerf && baseMhz && PdhGetFormattedCounterValue(g_pdhCpuPerf, PDH_FMT_DOUBLE, nullptr, &v) == ERROR_SUCCESS && v.doubleValue > 0)
         clock = (int)(baseMhz * v.doubleValue / 100.0 + 0.5);
     // CPU-Temp/Takt/Power-Kette 1:1 wie Electrons readCpu: Afterburner (MAHM) hat
@@ -2428,9 +2432,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-sensors") == 0) {
         // Sensor-Teil 1 am echten System: 2 Samples (Delta-Zaehler), dann Werte.
-        sensorsInit(); shmOpen(g_fpsShm, "Local\LumoraOSDFps"); shmOpen(g_senseShm, "Local\LumoraOSDSense"); brokersEnsure();
-        PdhCollectQueryData(g_pdhQ); Sleep(1100); PdhCollectQueryData(g_pdhQ);
+        sensorsInit(); shmOpen(g_fpsShm, "Local\\LumoraOSDFps"); shmOpen(g_senseShm, "Local\\LumoraOSDSense"); brokersEnsure();
+        PdhCollectQueryData(g_pdhQ); Sleep(1100);
         for (int w = 0; w < 8; ++w) { shmWriteApp(g_fpsShm, 1); shmWriteApp(g_senseShm, 1); Sleep(1000); }   // Broker hochkommen lassen
+        PdhCollectQueryData(g_pdhQ);   // FRISCHES Sample direkt vor dem Lesen (wie osdDataTick)
         json cpu = readCpuNative(), gpu = readGpuNative();
         json fps = readBrokerFps(), sense = readSenseCpu();
         for (int w = 0; w < 12 && fps.is_null(); ++w) { Sleep(1000); shmWriteApp(g_fpsShm, 1); shmWriteApp(g_senseShm, 1); fps = readBrokerFps(); if (sense.is_null()) sense = readSenseCpu(); }
