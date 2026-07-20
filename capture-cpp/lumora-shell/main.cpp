@@ -14,8 +14,10 @@
 #include <shobjidl.h>
 #include <objidl.h>
 #include <gdiplus.h>
-#include <dxgi.h>
+#include <dxgi1_4.h>
 #include <bcrypt.h>
+#include <pdh.h>
+#pragma comment(lib, "pdh.lib")
 #include <ctime>
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "bcrypt.lib")
@@ -1392,6 +1394,80 @@ static ComPtr<ICoreWebView2Controller> g_osdCtrl;
 static ComPtr<ICoreWebView2> g_osdWv;
 static bool g_osdLoaded = false;
 
+static void sendToOsd(const std::string& channel, const json& payload);
+#define TIMER_OSDDATA 107
+// --- OSD-Sensorik Teil 1 (treiberfrei): PDH-CPU/GPU-Last, RAM, DXGI-VRAM.
+// Temp/Takt/Power (NVML/ADL/PawnIO) + FPS (PresentMon) folgen als Teil 2.
+static PDH_HQUERY g_pdhQ = nullptr;
+static PDH_HCOUNTER g_pdhCpu = nullptr, g_pdhGpu = nullptr;
+static bool g_pdhInit = false;
+static void sensorsInit() {
+    if (g_pdhInit) return;
+    g_pdhInit = true;
+    if (PdhOpenQueryW(nullptr, 0, &g_pdhQ) != ERROR_SUCCESS) return;
+    // % Processor Utility = die Taskmanager-Metrik (turbo-normiert); GPU-3D-Summe aller Engines
+    PdhAddEnglishCounterW(g_pdhQ, L"\\Processor Information(_Total)\\% Processor Utility", 0, &g_pdhCpu);
+    PdhAddEnglishCounterW(g_pdhQ, L"\\GPU Engine(*engtype_3D)\\Utilization Percentage", 0, &g_pdhGpu);
+    PdhCollectQueryData(g_pdhQ);   // Basissample (Delta-Zaehler)
+}
+static json readCpuNative() {
+    // Marke/Modell aus der Registry, Bereinigung wie readCpu in main.js
+    wchar_t nm[128] = {}; DWORD sz = sizeof(nm);
+    RegGetValueW(HKEY_LOCAL_MACHINE, L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", L"ProcessorNameString", RRF_RT_REG_SZ, nullptr, nm, &sz);
+    std::string raw = narrow(nm), low = raw; for (auto& c : low) c = (char)tolower((unsigned char)c);
+    std::string brand = low.find("intel") != std::string::npos ? "INTEL" : (low.find("amd") != std::string::npos || low.find("ryzen") != std::string::npos) ? "AMD" : "CPU";
+    std::string model = std::regex_replace(raw, std::regex("\\((R|TM)\\)", std::regex::icase), "");
+    model = std::regex_replace(model, std::regex("^AMD\\s+|^Intel\\s+", std::regex::icase), "");
+    model = std::regex_replace(model, std::regex("\\s+w/.*$|\\s+with\\s+.*$|\\s+\\d+-Core Processor.*$|\\s+CPU.*$", std::regex::icase), "");
+    size_t a = model.find_first_not_of(' '), b2 = model.find_last_not_of(' ');
+    if (a != std::string::npos) model = model.substr(a, b2 - a + 1);
+    json load = nullptr;
+    PDH_FMT_COUNTERVALUE v;
+    if (g_pdhCpu && PdhGetFormattedCounterValue(g_pdhCpu, PDH_FMT_DOUBLE, nullptr, &v) == ERROR_SUCCESS)
+        load = (int)(std::min)(100.0, v.doubleValue + 0.5);
+    MEMORYSTATUSEX ms{ sizeof(ms) }; GlobalMemoryStatusEx(&ms);
+    return { {"brand", brand}, {"name", model}, {"load", load},
+             {"ram", (long long)((ms.ullTotalPhys - ms.ullAvailPhys) / 1048576)},
+             {"temp", nullptr}, {"clock", nullptr}, {"power", nullptr} };   // Teil 2 (NVML/ADL/PawnIO)
+}
+static json readGpuNative() {
+    ComPtr<IDXGIFactory1> fac; CreateDXGIFactory1(IID_PPV_ARGS(&fac));
+    ComPtr<IDXGIAdapter1> pick; DXGI_ADAPTER_DESC1 pd{};
+    if (fac) { ComPtr<IDXGIAdapter1> nv, amd, intel;
+        for (UINT i = 0;; ++i) { ComPtr<IDXGIAdapter1> ad; if (fac->EnumAdapters1(i, &ad) != S_OK) break; DXGI_ADAPTER_DESC1 d; ad->GetDesc1(&d);
+            if (d.VendorId == 0x10DE && !nv) nv = ad; else if (d.VendorId == 0x1002 && !amd) amd = ad; else if (d.VendorId == 0x8086 && !intel) intel = ad; }
+        pick = nv ? nv : amd ? amd : intel;
+    }
+    if (!pick) return nullptr;
+    pick->GetDesc1(&pd);
+    std::string name = narrow(pd.Description);
+    std::string brand = pd.VendorId == 0x10DE ? "NVIDIA" : pd.VendorId == 0x1002 ? "AMD" : pd.VendorId == 0x8086 ? "INTEL" : "GPU";
+    json load = nullptr, vram = nullptr;
+    // GPU-3D-Last: Summe aller 3D-Engine-Instanzen (Wildcard-Counter -> Array)
+    if (g_pdhGpu) {
+        DWORD bs = 0, cnt = 0;
+        PdhGetFormattedCounterArrayW(g_pdhGpu, PDH_FMT_DOUBLE, &bs, &cnt, nullptr);
+        if (bs) { std::vector<uint8_t> buf(bs);
+            auto* items = (PDH_FMT_COUNTERVALUE_ITEM_W*)buf.data();
+            if (PdhGetFormattedCounterArrayW(g_pdhGpu, PDH_FMT_DOUBLE, &bs, &cnt, items) == ERROR_SUCCESS) {
+                double sum = 0; for (DWORD i = 0; i < cnt; ++i) sum += items[i].FmtValue.doubleValue;
+                load = (int)(std::min)(100.0, sum + 0.5);
+            }
+        }
+    }
+    ComPtr<IDXGIAdapter3> a3; pick.As(&a3);   // echter VRAM-Verbrauch (wie Taskmanager)
+    if (a3) { DXGI_QUERY_VIDEO_MEMORY_INFO mi{};
+        if (SUCCEEDED(a3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mi))) vram = (long long)(mi.CurrentUsage / 1048576);
+    }
+    return { {"brand", brand}, {"name", name}, {"load", load}, {"temp", nullptr}, {"power", nullptr}, {"clock", nullptr}, {"vram", vram} };
+}
+static void osdDataTick() {
+    if (!g_osdHwnd || !IsWindowVisible(g_osdHwnd)) return;
+    PdhCollectQueryData(g_pdhQ);   // frisches Sample fuer die Delta-Zaehler
+    json payload = { {"gpu", readGpuNative()}, {"cpu", readCpuNative()} };
+    payload["fps"] = "\xE2\x80\x94";   // FPS-Quelle (PresentMon/RTSS) folgt mit Sensor-Teil 2
+    sendToOsd("osd-data", payload);
+}
 static void sendToOsd(const std::string& channel, const json& payload) {   // threadsicher wie sendToUi
     if (!g_osdHwnd) return;
     json m = { {"channel", channel}, {"payload", payload} };
@@ -1455,8 +1531,8 @@ static void createOsdWindow() {
                 return S_OK;
             }).Get());
 }
-static void showOsd() { createOsdWindow(); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
-static void hideOsd() { if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
+static void showOsd() { createOsdWindow(); sensorsInit(); SetTimer(g_hwnd, TIMER_OSDDATA, 1000, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
+static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
 
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
@@ -1926,6 +2002,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_VIEWER) { bcViewerTick(); return 0; }
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
+        if (w == TIMER_OSDDATA) { osdDataTick(); return 0; }
         if (w == TIMER_GROUP) {   // Heartbeat im Worker (Netz, 8s-Timeout) - nie doppelt
             if (!g_groupTickBusy.exchange(true)) std::thread([]() { groupTickOnce(); g_groupTickBusy = false; }).detach();
             return 0;
@@ -2005,6 +2082,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-sensors") == 0) {
+        // Sensor-Teil 1 am echten System: 2 Samples (Delta-Zaehler), dann Werte.
+        sensorsInit(); PdhCollectQueryData(g_pdhQ); Sleep(1100); PdhCollectQueryData(g_pdhQ);
+        json cpu = readCpuNative(), gpu = readGpuNative();
+        std::string s = "cpu=" + cpu.dump() + "\ngpu=" + gpu.dump() + "\n";
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-conn") == 0) {
         // Verbindungstest am ECHTEN Anschluss (STUN + UPnP-Proben + IPv6-Pinhole).
         json r = runConnectivityTest();
