@@ -73,6 +73,33 @@ inline HttpResp httpGet(const std::string& url8, const std::wstring& extraHeader
     return r;
 }
 
+// POST mit JSON-Body (http UND https; fuer die gruppe.php-Vermittlung).
+inline HttpResp httpPost(const std::string& url8, const std::string& body, int timeoutMs = 8000) {
+    HttpResp r; std::wstring url = toW(url8);
+    URL_COMPONENTS uc{ sizeof(uc) }; wchar_t host[256] = {}, path[4096] = {};
+    uc.lpszHostName = host; uc.dwHostNameLength = 255; uc.lpszUrlPath = path; uc.dwUrlPathLength = 4095;
+    if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc)) return r;
+    HINTERNET ses = WinHttpOpen(L"Lumora/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET con = ses ? WinHttpConnect(ses, host, uc.nPort, 0) : nullptr;
+    HINTERNET req = con ? WinHttpOpenRequest(con, L"POST", path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+        (uc.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0) : nullptr;
+    if (req) {
+        WinHttpSetTimeouts(req, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
+        std::wstring hdrs = L"Content-Type: application/json\r\n";
+        if (WinHttpSendRequest(req, hdrs.c_str(), (DWORD)-1, (LPVOID)(body.empty() ? nullptr : body.data()), (DWORD)body.size(), (DWORD)body.size(), 0) && WinHttpReceiveResponse(req, nullptr)) {
+            DWORD st = 0, sz = sizeof(st);
+            WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &st, &sz, WINHTTP_NO_HEADER_INDEX);
+            r.status = (int)st;
+            for (;;) { DWORD avail = 0; if (!WinHttpQueryDataAvailable(req, &avail) || !avail) break;
+                size_t off = r.body.size(); r.body.resize(off + avail); DWORD got = 0;
+                if (!WinHttpReadData(req, &r.body[off], avail, &got)) { r.body.resize(off); break; }
+                r.body.resize(off + got); if (!got) break; }
+        }
+    }
+    if (req) WinHttpCloseHandle(req); if (con) WinHttpCloseHandle(con); if (ses) WinHttpCloseHandle(ses);
+    return r;
+}
+
 // ---- Namensabgleich (1:1 aus main.js) ----
 inline std::string cleanGameName(const std::string& name) {
     std::string s = std::regex_replace(name, std::regex("[\xE2\x84\xA2\xC2\xAE\xC2\xA9]"), " ");   // TM/(R)/(C) als UTF-8-Bytes
