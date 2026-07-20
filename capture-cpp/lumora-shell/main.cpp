@@ -726,6 +726,8 @@ static std::string g_bcCapKey; static int g_bcNatKbit = 0; static int g_capFastF
 static int g_adaptLevel = 0; static ULONGLONG g_adaptLastChange = 0, g_adaptBadSince = 0, g_adaptGoodSince = 0, g_adaptUpAt = 0, g_adaptUpHold = 0;
 static ULONGLONG g_bcSince = 0; static int g_bcPeakViewers = 0, g_bcSwitches = 0; static std::set<std::string> g_bcSessionIds;
 static std::vector<std::string> g_bcPinholeIds; static bool g_bcV4Mapped = false;   // Router-Phase (Teardown beim Stopp)
+static ULONGLONG g_bcPinholeSetAt = 0;   // fuer die 12h-IPv6-Pinhole-Erneuerung (24h-Lease)
+#define TIMER_IPWATCH 109   // IP-Wechsel-Watcher (5 min): Zwangstrennung/IP-Wechsel nachziehen
 static void bcRegisterWatchLink(); static void bcUnregisterWatchLink();   // (Gruppen-Modul weiter unten)
 
 static void bcPushState() { sendToUi("broadcast-status", g_bcState); }
@@ -849,10 +851,29 @@ static std::wstring bcWriteMtxConfig(const std::vector<std::string>& hosts) {
     return p;
 }
 // Relay starten + aktiver Ready-Check (TCP-Probe auf den RTSP-Port, wie das Original).
-static bool bcStartMtx(const std::wstring& cfgPath) {
+static std::wstring g_mtxCfgPath;   // fuer den Crash-Neustart gemerkt
+// Relay-Absturz mitten im Stream (nicht gewollt beendet): neu starten - der native
+// Helfer publisht per UDP/MPEG-TS weiter, mediamtx zieht nach dem Neustart wieder an
+// (wie main.js: mtxProc-exit -> bcStartMtx). Ohne das bleibt der Stream tot.
+static void bcMtxExitWatch(HANDLE proc) {
+    std::thread([proc]() {
+        WaitForSingleObject(proc, INFINITE);
+        bool intentional; { std::lock_guard<std::mutex> lk(g_launchMx); intentional = g_mtx.intentional || g_mtx.proc != proc; }
+        if (intentional || g_bcStopping || !g_bcState.value("active", false)) return;
+        { std::lock_guard<std::mutex> lk(g_launchMx); if (g_mtx.proc == proc) g_mtx.proc = nullptr; }
+        bcLogStream("mtx: unerwartet beendet -> Neustart in 800ms");
+        Sleep(800);
+        if (!g_bcState.value("active", false) || g_bcStopping) return;
+        extern bool bcStartMtx(const std::wstring&);
+        bcStartMtx(g_mtxCfgPath);
+    }).detach();
+}
+bool bcStartMtx(const std::wstring& cfgPath) {
+    g_mtxCfgPath = cfgPath;
     std::wstring relay = binDir() + L"\\lumora-media-relay.exe";
     if (GetFileAttributesW(relay.c_str()) == INVALID_FILE_ATTRIBUTES) relay = binDir() + L"\\mediamtx.exe";
     if (!spawnChild(g_mtx, L"\"" + relay + L"\" \"" + cfgPath + L"\"", "mtx: ")) return false;
+    bcMtxExitWatch(g_mtx.proc);
     for (int i = 0; i < 14; ++i) {   // ~840 ms Fallback, typisch nach ~150 ms bereit
         SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         sockaddr_in a{}; a.sin_family = AF_INET; a.sin_port = htons(MTX_RTSP_PORT); inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
@@ -943,12 +964,18 @@ static json bcMtxReaders() {
     }
     return out;
 }
-static std::string bcExtractIp(const std::string& cand) {   // "1.2.3.4:56" | "[v6]:56"
+// mediamtx-ICE-Kandidat ist SLASH-getrennt "<typ>/<proto>/<ip>/<port>" -> IP = vorletztes
+// Segment (1:1 aus main.js bcExtractIp). Fallback: nackte IPv4 per Regex. Der fruehere
+// ip:port-Parser lieferte die falsche Zuschauer-IP + machte die IP-Sperre unwirksam.
+static std::string bcExtractIp(const std::string& cand) {
     if (cand.empty()) return "";
-    size_t b = cand.find('[');
-    if (b != std::string::npos) { size_t e = cand.find(']', b); return e == std::string::npos ? "" : cand.substr(b + 1, e - b - 1); }
-    size_t c = cand.rfind(':');
-    return c == std::string::npos ? cand : cand.substr(0, c);
+    std::vector<std::string> parts; size_t s = 0, c;
+    while ((c = cand.find('/', s)) != std::string::npos) { parts.push_back(cand.substr(s, c - s)); s = c + 1; }
+    parts.push_back(cand.substr(s));
+    if (parts.size() >= 4 && !parts[parts.size() - 2].empty()) return parts[parts.size() - 2];
+    std::smatch m;
+    if (std::regex_search(cand, m, std::regex("(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})"))) return m[1];
+    return "";
 }
 static void bcViewerTick() {
     if (!g_bcState.value("active", false)) return;
@@ -1092,6 +1119,7 @@ static json startBroadcast() {
     bcPushState();   // Medien laufen, Vorschau kann verbinden (opening bleibt true bis Router-Phase durch)
     SetTimer(g_hwnd, TIMER_VIEWER, 2000, nullptr);
     SetTimer(g_hwnd, TIMER_ADAPT, 5000, nullptr);
+    SetTimer(g_hwnd, TIMER_IPWATCH, 300000, nullptr);   // 5min: IP-Wechsel/Pinhole-Erneuerung
     bcLogStream("start: nativ " + enc + " " + bcQualityLabel(cfg) + " " + lanLink);
     // PHASE 2 - ROUTER, PARALLEL (1:1 aus main.js): oeffentliche IPs + Portfreigaben +
     // IPv6-Pinholes; erst danach steht der oeffentliche Link fest -> opening=false.
@@ -1108,6 +1136,7 @@ static json startBroadcast() {
             if (!t6.empty()) g_bcPinholeIds.push_back(t6);
             if (!u6.empty()) g_bcPinholeIds.push_back(u6);
             v6Ok = !t6.empty() && !u6.empty();
+            if (v6Ok) g_bcPinholeSetAt = GetTickCount64();   // Startzeit fuer die 12h-Erneuerung
         }
         if (!forceV6 && !pubIp.empty()) {
             // Zweiter PC im selben Netz: antwortet unter der oeffentlichen IPv4 schon eine
@@ -1167,7 +1196,7 @@ static json stopBroadcast() {
         for (auto& [vid, k] : g_knocks) if (k.status == "granted") g_prevGrants[vid] = GetTickCount64();
         g_knocks.clear();
     }
-    KillTimer(g_hwnd, TIMER_VIEWER); KillTimer(g_hwnd, TIMER_ADAPT);
+    KillTimer(g_hwnd, TIMER_VIEWER); KillTimer(g_hwnd, TIMER_ADAPT); KillTimer(g_hwnd, TIMER_IPWATCH);
     { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_cap); killChild(g_mtx); }
     // Router-Teardown im Hintergrund (SOAP darf den Stopp nicht verzoegern)
     if (g_bcV4Mapped || !g_bcPinholeIds.empty()) {
@@ -1360,6 +1389,53 @@ static void xinputTick() {   // 25 Hz; Flanke = einmal ausloesen pro Druck
     if (m && !g_gpMainWas) toggleMainWindow();
     if (o && !g_gpOsdWas) toggleOsdSetting();
     g_gpMainWas = m; g_gpOsdWas = o;
+}
+// IP-Wechsel-Watcher (5-min-Tick, 1:1 aus main.js bcIpWatchTick): DSL-Zwangstrennung/
+// IP-Wechsel mitten im Stream nachziehen (mtx-Config, Portfreigaben, Links, Roster) +
+// IPv6-Pinhole-12h-Erneuerung (24h-Lease). Laeuft im Worker (SOAP blockiert nicht).
+// Steht hinter dem Gruppen-Modul, weil es bcShareUrl/groupSelfEntry/g_watchCode nutzt.
+static void bcIpWatchTick() {
+    if (!g_bcState.value("active", false) || g_bcState.value("opening", true)) return;
+    std::thread([]() {
+        std::string ip = luupnp::getExternalIp();
+        std::string ip6 = luupnp::publicIPv6();
+        json s = loadSettings();
+        bool forceV6 = s.value("streamForceIPv6", false);
+        std::vector<std::string> hosts;
+        if (!forceV6 && !ip.empty()) hosts.push_back(ip);
+        if (!ip6.empty()) hosts.push_back(ip6);
+        if (hosts.empty()) return;   // gerade kein Netz -> nichts anfassen
+        std::vector<std::string> cur;
+        for (auto& h : s.value("streamLastHosts", json::array())) if (h.is_string()) cur.push_back(h.get<std::string>());
+        bool changed = hosts != cur;
+        bool renewPinholes = !ip6.empty() && g_bcPinholeSetAt > 0 && GetTickCount64() - g_bcPinholeSetAt > 12ull * 3600 * 1000;
+        if (!changed && !renewPinholes) return;
+        if (changed) {
+            bcLogStream("ipwatch: oeffentliche Adresse geaendert");
+            bcWriteMtxConfig(hosts);   // mediamtx-Hot-Reload
+            json s2 = loadSettings(); json arr = json::array(); for (auto& h : hosts) arr.push_back(h);
+            s2["streamLastHosts"] = arr; writeFile(settingsPath(), s2.dump(2));
+            if (!forceV6 && !ip.empty()) { luupnp::mapPort(BROADCAST_PORT, "TCP", "Lumora Stream"); luupnp::mapPort(MTX_ICE_UDP, "UDP", "Lumora Stream Medien"); }
+            std::string l4 = ip.empty() ? g_bcState.value("linkV4", "") : ("http://" + ip + ":" + std::to_string(BROADCAST_PORT) + "/");
+            std::string l6 = ip6.empty() ? g_bcState.value("linkV6", "") : ("http://[" + ip6 + "]:" + std::to_string(BROADCAST_PORT) + "/");
+            g_bcState["linkV4"] = l4; g_bcState["linkV6"] = l6;
+            std::string su = bcShareUrl(); g_bcState["link"] = !su.empty() ? su : (!l4.empty() ? l4 : l6);   // Watch-URL bewahren (haengt am Code)
+            if (!g_watchCode.empty()) { json self = groupSelfEntry(); groupRelay("update", { {"code", g_watchCode} }, &self); }
+            else if (g_bcState.value("internet", false)) bcRegisterWatchLink();
+            bcPushState();
+            if (!g_group.is_null()) { groupPushState(); groupTickOnce(); }
+        }
+        if (!ip6.empty() && (changed || renewPinholes)) {   // Pinholes neu/erneuern
+            for (auto& id : g_bcPinholeIds) luupnp::deletePinhole(id);
+            g_bcPinholeIds.clear();
+            std::string t6 = luupnp::addPinhole(ip6, BROADCAST_PORT, "TCP");
+            std::string u6 = luupnp::addPinhole(ip6, MTX_ICE_UDP, "UDP");
+            if (!t6.empty()) g_bcPinholeIds.push_back(t6);
+            if (!u6.empty()) g_bcPinholeIds.push_back(u6);
+            if (!t6.empty() && !u6.empty()) g_bcPinholeSetAt = GetTickCount64();
+            bcLogStream("ipwatch: IPv6-Pinholes " + std::string(changed ? "neu gesetzt" : "erneuert"));
+        }
+    }).detach();
 }
 static void createTray() {
     if (g_trayOn) return;
@@ -2339,6 +2415,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_EXTWATCH) { extWatchTick(); return 0; }
         if (w == TIMER_VIEWER) { bcViewerTick(); return 0; }
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
+        if (w == TIMER_IPWATCH) { bcIpWatchTick(); return 0; }
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
         if (w == TIMER_XINPUT) { xinputTick(); return 0; }
         if (w == TIMER_OSDDATA) { osdDataTick(); return 0; }
