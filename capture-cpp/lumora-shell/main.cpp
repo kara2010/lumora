@@ -368,6 +368,8 @@ static json launchGame(const json& args) {
 static const int BROADCAST_PORT = 8787;   // TCP: player.html + WHEP-Signalisierung (Proxy vor mediamtx)
 static const int MTX_WHEP_PORT = 8889;    // localhost: mediamtx WHEP-HTTP (hinter dem Proxy)
 static const char* MTX_PATH = "live";     // mediamtx-Pfadname
+static const int MTX_RTSP_PORT = 8554, MTX_API_PORT = 9997, MTX_ICE_UDP = 8189;
+static const int MTX_RTP_UDP = 8556, MTX_RTCP_UDP = 8557, MTX_TS_UDP = 8558;
 static lusrv::HttpServer g_streamSrv;
 static bool g_streamSrvUp = false;
 static std::string g_playerHtmlCache;
@@ -404,6 +406,94 @@ static void bcQosReport(const std::string& ip, const json& q) {
     g_qosMap[key] = { GetTickCount64(), bad, lossRate, streak };
     if (bad) bcLogStream("qos: " + key + " lost=" + std::to_string(lost) + "/" + std::to_string(lost + recv) + " !");
 }
+// --- Verbindungstest (STUN-NAT-Erkennung + UPnP-/IPv6-Proben, 1:1 aus main.js) ---
+struct StunResult { std::string ip; int port = 0; };
+static bool stunQuery(SOCKET s, const char* host, int port, StunResult& out) {
+    addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_DGRAM;
+    addrinfo* ai = nullptr;
+    if (getaddrinfo(host, std::to_string(port).c_str(), &hints, &ai) != 0 || !ai) return false;
+    unsigned char req[20] = {}; req[0] = 0x00; req[1] = 0x01;   // Binding Request
+    req[4] = 0x21; req[5] = 0x12; req[6] = 0xa4; req[7] = 0x42; // Magic Cookie
+    static std::random_device rd; for (int i = 8; i < 20; ++i) req[i] = (unsigned char)(rd() & 0xFF);
+    sendto(s, (const char*)req, 20, 0, ai->ai_addr, (int)ai->ai_addrlen);
+    freeaddrinfo(ai);
+    DWORD to = 3000; setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
+    unsigned char buf[512];
+    int n = recv(s, (char*)buf, sizeof(buf), 0);
+    if (n < 24) return false;
+    int off = 20;
+    while (off + 4 <= n) {   // XOR-MAPPED-ADDRESS (0x0020) bzw. MAPPED-ADDRESS (0x0001)
+        int type = (buf[off] << 8) | buf[off + 1], len = (buf[off + 2] << 8) | buf[off + 3];
+        const unsigned char* v = buf + off + 4;
+        if ((type == 0x0020 || type == 0x0001) && len >= 8) {
+            bool x = type == 0x0020;
+            out.port = ((v[2] << 8) | v[3]) ^ (x ? 0x2112 : 0);
+            unsigned char b[4] = { v[4], v[5], v[6], v[7] };
+            if (x) { b[0] ^= 0x21; b[1] ^= 0x12; b[2] ^= 0xa4; b[3] ^= 0x42; }
+            char ip[20]; sprintf_s(ip, "%d.%d.%d.%d", b[0], b[1], b[2], b[3]);
+            out.ip = ip;
+            return true;
+        }
+        off += 4 + len + ((4 - (len % 4)) % 4);
+    }
+    return false;
+}
+// Mehrere STUN-Server am SELBEN Socket: gleiche IP, verschiedene Ports = symmetrisches NAT.
+static json detectNat() {
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) return { {"ok", false} };
+    sockaddr_in b{}; b.sin_family = AF_INET; bind(s, (sockaddr*)&b, sizeof(b));
+    std::vector<StunResult> res;
+    for (auto& [h, p] : std::vector<std::pair<const char*, int>>{ {"stun.l.google.com", 19302}, {"stun1.l.google.com", 19302}, {"stun.cloudflare.com", 3478} }) {
+        StunResult r; if (stunQuery(s, h, p, r)) res.push_back(r);
+    }
+    closesocket(s);
+    if (res.empty()) return { {"ok", false} };
+    std::string ip = res[0].ip;
+    int o0 = atoi(ip.c_str()); int o1 = atoi(ip.c_str() + ip.find('.') + 1);
+    bool cgn = o0 == 100 && o1 >= 64 && o1 <= 127;
+    bool priv = o0 == 10 || (o0 == 172 && o1 >= 16 && o1 <= 31) || (o0 == 192 && o1 == 168);
+    std::set<int> ports; for (auto& r : res) ports.insert(r.port);
+    return { {"ok", true}, {"ip", ip}, {"cgn", cgn}, {"priv", priv}, {"symmetric", ports.size() > 1} };
+}
+// Kompletter Verbindungstest (Texte 1:1 aus main.js - die UI zeigt sie unveraendert).
+static json runConnectivityTest() {
+    json steps = json::array();
+    json nat = detectNat();
+    if (!nat.value("ok", false)) {
+        steps.push_back({ {"key","ip"},{"state","error"},{"label","\xC3\x96""ffentliche Adresse"},{"detail","Keine Antwort vom STUN-Server \xE2\x80\x93 ausgehendes UDP scheint blockiert (Firewall/Netzwerk). Streaming ist so nicht m\xC3\xB6glich."} });
+        return { {"verdict","error"}, {"steps", steps} };
+    }
+    std::string ip = nat.value("ip", "");
+    std::string v6 = luupnp::publicIPv6();
+    bool v6Ok = false;
+    if (!v6.empty()) { std::string id = luupnp::addPinhole(v6, MTX_ICE_UDP, "UDP"); if (!id.empty()) { v6Ok = true; luupnp::deletePinhole(id); } }
+    if (nat.value("cgn", false) || nat.value("priv", false)) {
+        if (v6Ok) steps.push_back({ {"key","ip"},{"state","warn"},{"label","\xC3\x96""ffentliche IPv4"},{"detail","Kein eigenes \xC3\xB6""ffentliches IPv4 (DS-Lite / Carrier-NAT, " + ip + "). Das ist aber ok \xE2\x80\x93 \xC3\xBC""ber IPv6 (siehe unten) bist du trotzdem direkt erreichbar."} });
+        else steps.push_back({ {"key","ip"},{"state","error"},{"label","\xC3\x96""ffentliche IPv4"},{"detail","Dein Anschluss hat keine eigene \xC3\xB6""ffentliche IPv4 (DS-Lite / Carrier-NAT, " + ip + ") und auch kein nutzbares IPv6. Direktes Streaming ist so nicht m\xC3\xB6glich \xE2\x80\x93 ein Relay-Server w\xC3\xA4re n\xC3\xB6tig, oder beim Provider echtes IPv4 anfragen (oft kostenlos)."} });
+    } else steps.push_back({ {"key","ip"},{"state","ok"},{"label","\xC3\x96""ffentliche IPv4"},{"detail", ip} });
+    if (nat.value("symmetric", false))
+        steps.push_back({ {"key","nat"},{"state","warn"},{"label","NAT-Typ"},{"detail","Symmetrisches NAT \xE2\x80\x93 manche Zuschauer erreichen dich evtl. nur \xC3\xBC""ber eine feste Portfreigabe oder einen Relay."} });
+    else steps.push_back({ {"key","nat"},{"state","ok"},{"label","NAT-Typ"},{"detail","Cone-NAT \xE2\x80\x93 direkte Verbindung m\xC3\xB6glich."} });
+    bool tcpOk = luupnp::mapPort(BROADCAST_PORT, "TCP", "Lumora Verbindungstest"); if (tcpOk) luupnp::unmapPort(BROADCAST_PORT, "TCP");
+    bool udpOk = luupnp::mapPort(MTX_ICE_UDP, "UDP", "Lumora Verbindungstest"); if (udpOk) luupnp::unmapPort(MTX_ICE_UDP, "UDP");
+    if (tcpOk && udpOk)
+        steps.push_back({ {"key","upnp"},{"state","ok"},{"label","Router-Portfreigabe (UPnP)"},{"detail","Lumora kann die n\xC3\xB6tigen IPv4-Ports beim Streamstart automatisch \xC3\xB6""ffnen."} });
+    else {
+        std::string found = luupnp::routerName().empty() ? "" : ("Erkannter Router: " + luupnp::routerName() + ". ");
+        std::string alt = v6Ok ? " (Zur Not l\xC3\xA4uft es aber \xC3\xBC""ber den IPv6-Direktweg \xE2\x80\x93 siehe unten.)" : "";
+        steps.push_back({ {"key","upnp"},{"state","warn"},{"label","Router-Portfreigabe (UPnP)"},{"detail","Der Router \xC3\xB6""ffnet die IPv4-Ports nicht selbst. " + found + "Die genaue Schritt-f\xC3\xBCr-Schritt-Anleitung f\xC3\xBCr deinen Router bekommst du beim Streamstart im Stream-Tab." + alt} });
+    }
+    if (!v6.empty() && v6Ok)
+        steps.push_back({ {"key","ipv6"},{"state","ok"},{"label","IPv6-Direktweg"},{"detail","Globales IPv6 vorhanden und die Firewall l\xC3\xA4sst sich automatisch \xC3\xB6""ffnen. Zuschauer mit IPv6 (Mobilfunk, moderne Anschl\xC3\xBCsse) erreichen dich direkt \xE2\x80\x93 auch ohne IPv4-Portfreigabe."} });
+    else if (!v6.empty())
+        steps.push_back({ {"key","ipv6"},{"state","warn"},{"label","IPv6-Direktweg"},{"detail","Globales IPv6 ist da, aber die Firewall l\xC3\xA4sst sich nicht automatisch \xC3\xB6""ffnen. " + (luupnp::routerName().empty() ? "" : ("Router: " + luupnp::routerName() + ". ")) + "Erlaube im Router die selbstst\xC3\xA4ndigen (IPv6-)Freigaben f\xC3\xBCr diesen PC."} });
+    else steps.push_back({ {"key","ipv6"},{"state","warn"},{"label","IPv6-Direktweg"},{"detail","Kein globales IPv6 an diesem Anschluss \xE2\x80\x93 dieser Weg steht nicht zur Verf\xC3\xBC""gung."} });
+    bool hasError = false, hasWarn = false;
+    for (auto& st : steps) { if (st.value("state", "") == "error") hasError = true; if (st.value("state", "") == "warn") hasWarn = true; }
+    return { {"verdict", hasError ? "error" : hasWarn ? "warn" : "ok"}, {"publicIp", ip}, {"steps", steps} };
+}
+
 // --- Tuersteher (Knock->Approve->Token, Logik 1:1; Freigabe-UI: doorman-list-Push) ---
 extern std::string doormanAccessKey();   // = g_accessKey (Gruppen-Modul weiter unten)
 struct Knock { std::string name; ULONGLONG at = 0, deniedAt = 0; std::string status; };
@@ -556,8 +646,7 @@ static lusrv::Response handleStreamHttp(const lusrv::Request& rq) {
 #define TIMER_VIEWER 102
 #define TIMER_ADAPT  103
 #define TIMER_BCAPPLY 104   // debounced: Stream-Settings-Aenderung live anwenden
-static const int MTX_RTSP_PORT = 8554, MTX_API_PORT = 9997, MTX_ICE_UDP = 8189;
-static const int MTX_RTP_UDP = 8556, MTX_RTCP_UDP = 8557, MTX_TS_UDP = 8558;
+// (MTX_*-Portkonstanten stehen beim Streaming-HTTP-Server weiter oben)
 static const int BC_ADAPT_F[] = { 100, 70, 50, 35, 24, 16 };   // Stufen-Faktoren (25 Mbit -> 17,5/12,5/8,8/6,0/4,0)
 static json g_bcState = { {"active", false} };
 struct ChildProc { HANDLE proc = nullptr; HANDLE outRd = nullptr; DWORD pid = 0; bool intentional = false; };
@@ -1399,7 +1488,7 @@ static json handleChannel(const std::string& channel, const json& args) {
         }
         return out;
     }
-    if (channel == "test-connectivity") return nullptr;   // Router-Diagnose folgt mit der UPnP-Phase
+    if (channel == "test-connectivity") return runConnectivityTest();
     // ---- Gruppe (gruppe.php-Vermittlung) ----
     if (channel == "group-start") {
         if (!g_group.is_null()) return groupPublicState();
@@ -1546,7 +1635,8 @@ static bool isSlowChannel(const std::string& c) {
            c == "launch-game" ||   // HDR-Wartezeit (3s) + AUMID-Suche
            c == "start-broadcast" || c == "stop-broadcast" || c == "list-sources" ||   // Relay-Ready/Helfer-Lauf
            c == "list-viewers" || c == "kick-viewer" || c == "preview-whep" || c == "preview-whep-stop" ||
-           c == "group-start" || c == "group-join" || c == "group-leave" || c == "group-status";   // Vermittlungs-Netz
+           c == "group-start" || c == "group-join" || c == "group-leave" || c == "group-status" ||
+           c == "test-connectivity";   // STUN+UPnP-Proben ~10s   // Vermittlungs-Netz
 }
 static void onWebMessage(const std::wstring& raw) {
     json msg = json::parse(narrow(raw), nullptr, false);
@@ -1720,6 +1810,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     int argc = 0; LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     // Selbsttest ohne UI: Settings laden + Merge IN-MEMORY (echte Datei bleibt unberuehrt),
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-conn") == 0) {
+        // Verbindungstest am ECHTEN Anschluss (STUN + UPnP-Proben + IPv6-Pinhole).
+        json r = runConnectivityTest();
+        std::string s = "verdict=" + r.value("verdict", "?") + " ip=" + r.value("publicIp", "?") + "\n";
+        for (auto& st : r.value("steps", json::array()))
+            s += "  [" + st.value("state", "?") + "] " + st.value("label", "?") + ": " + st.value("detail", "").substr(0, 90) + "\n";
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-doorman") == 0) {
         // HMAC gegen den bekannten RFC-Testvektor + Gate-Logik pruefen. Einzigartige vid je
         // Lauf; der ban-Eintrag wird am Ende wieder aus den ECHTEN Settings entfernt.

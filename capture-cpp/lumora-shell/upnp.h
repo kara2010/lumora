@@ -17,6 +17,7 @@
 namespace luupnp {
 
 struct Ctrl { std::string controlURL, serviceType, localIp; };
+inline std::string& routerName() { static std::string n; return n; }   // friendlyName aus der IGD-Beschreibung
 
 inline std::string lanIpFor() {
     SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -119,6 +120,7 @@ inline Ctrl* resolveControl() {
     for (auto& loc : discover(3000)) {
         auto desc = luart::httpGet(loc);
         if (desc.status != 200 || !std::regex_search(desc.body, std::regex("InternetGatewayDevice", std::regex::icase))) continue;
+        if (routerName().empty()) routerName() = xmlTag(desc.body, "friendlyName");
         static const std::regex svcRe("<service>([\\s\\S]*?)</service>");
         std::sregex_iterator it(desc.body.begin(), desc.body.end(), svcRe), end;
         for (; it != end; ++it) {
