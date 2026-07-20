@@ -1459,6 +1459,9 @@ static void sensorsInit() {
     PdhAddEnglishCounterW(g_pdhQ, L"\\GPU Engine(*engtype_3D)\\Utilization Percentage", 0, &g_pdhGpu);
     PdhCollectQueryData(g_pdhQ);   // Basissample (Delta-Zaehler)
 }
+static json readMahm();       // MSI-Afterburner-Sensoren (Definition weiter unten)
+static json readSenseCpu();   // PawnIO-Broker (Definition weiter unten)
+static bool g_osdEdit = false; // Live-Edit (Alt+Shift+O): Overlay faengt die Maus
 static json readCpuNative() {
     // Marke/Modell aus der Registry, Bereinigung wie readCpu in main.js
     wchar_t nm[128] = {}; DWORD sz = sizeof(nm);
@@ -1480,9 +1483,21 @@ static json readCpuNative() {
     RegGetValueW(HKEY_LOCAL_MACHINE, L"HARDWARE\DESCRIPTION\System\CentralProcessor\0", L"~MHz", RRF_RT_REG_DWORD, nullptr, &baseMhz, &msz);
     if (g_pdhCpuPerf && baseMhz && PdhGetFormattedCounterValue(g_pdhCpuPerf, PDH_FMT_DOUBLE, nullptr, &v) == ERROR_SUCCESS && v.doubleValue > 0)
         clock = (int)(baseMhz * v.doubleValue / 100.0 + 0.5);
+    // CPU-Temp/Takt/Power-Kette 1:1 wie Electrons readCpu: Afterburner (MAHM) hat
+    // Vorrang und liefert alle drei; sonst PawnIO-Broker (temp/power) + PDH-Takt.
+    json temp = nullptr, power = nullptr;
+    json m = readMahm();
+    if (m.is_object() && m.contains("cpuTemp")) {
+        temp = m["cpuTemp"];
+        if (m.contains("cpuClock")) clock = m["cpuClock"];
+        if (m.contains("cpuPower")) power = m["cpuPower"];
+    } else {
+        json sense = readSenseCpu();
+        if (sense.is_object()) { temp = sense["temp"]; power = sense["power"]; }
+    }
     return { {"brand", brand}, {"name", model}, {"load", load},
              {"ram", (long long)((ms.ullTotalPhys - ms.ullAvailPhys) / 1048576)},
-             {"temp", nullptr}, {"clock", clock}, {"power", nullptr} };   // temp/power: PawnIO-Broker (Teil 2b)
+             {"temp", temp}, {"clock", clock}, {"power", power} };
 }
 // --- FPS-/Sensor-Broker-Anbindung (Shared Memory, Layout 1:1 aus main.js) ---
 // Die elevated Broker (geplante Aufgaben LumoraOSD-FPS / LumoraOSD-Sensors)
@@ -1534,6 +1549,40 @@ static json readBrokerFps() {
     }
     if (!g_lastFps.is_null() && GetTickCount64() - g_lastFpsAt < 1500) return g_lastFps;
     return nullptr;
+}
+// MSI Afterburner "MAHMSharedMemory" (1:1 aus main.js readMahmRaw): laeuft Afterburner,
+// liefert es CPU-Temp/-Takt/-Watt. Header {sig 'MAHM', ver, headerSize, numEntries,
+// entrySize}; Eintrag = 5x char[260] (Name zuerst), float bei +5*260. 150ms-Cache.
+static json g_mahmVal = nullptr; static ULONGLONG g_mahmValAt = 0;
+static json readMahmRaw() {
+    HANDLE h = OpenFileMappingA(FILE_MAP_READ, FALSE, "MAHMSharedMemory");
+    if (!h) return nullptr;
+    json out = nullptr;
+    void* base = MapViewOfFile(h, FILE_MAP_READ, 0, 0, 0);
+    if (base) {
+        const uint32_t* hdr = (const uint32_t*)base;
+        if (hdr[0] == 0x4D41484D && hdr[3]) {
+            uint32_t headerSize = hdr[2], numEntries = hdr[3], entrySize = hdr[4];
+            static const std::pair<const char*, const char*> WANT[] = {
+                {"cpuTemp", "CPU temperature"}, {"cpuClock", "CPU clock"}, {"cpuPower", "CPU power"} };
+            json o = json::object();
+            for (uint32_t i = 0; i < numEntries; ++i) {
+                const char* e = (const char*)base + headerSize + (size_t)i * entrySize;
+                for (auto& [key, name] : WANT)
+                    if (strncmp(e, name, 260) == 0) { float f = *(const float*)(e + 5 * 260); o[key] = (int)(f >= 0 ? f + 0.5f : f - 0.5f); }
+            }
+            if (!o.empty()) out = o;
+        }
+        UnmapViewOfFile(base);
+    }
+    CloseHandle(h);
+    return out;
+}
+static json readMahm() {
+    ULONGLONG now = GetTickCount64();
+    if (g_mahmValAt && now - g_mahmValAt < 150) return g_mahmVal;
+    g_mahmVal = readMahmRaw(); g_mahmValAt = now;
+    return g_mahmVal;
 }
 static json readSenseCpu() {   // CPU-Temp/-Watt vom PawnIO-Broker
     if (!shmOpen(g_senseShm, "Local\\LumoraOSDSense")) return nullptr;
@@ -1656,7 +1705,17 @@ static void osdDataTick() {
     if (!g_osdHwnd || !IsWindowVisible(g_osdHwnd)) return;
     // Oberste Lage NACHDRUECKEN (wie Electrons moveTop je Anzeige): ein startendes
     // Spiel setzt sich sonst ueber das TOPMOST-Overlay (User-Befund: OSD weg im Spiel).
-    SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (!g_osdEdit) SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    {   // DIAGNOSE "OSD weg im Spiel": Vordergrund-Fenster bei Wechsel protokollieren
+        static HWND lastFg = nullptr; HWND fg = GetForegroundWindow();
+        if (fg && fg != lastFg && fg != g_osdHwnd) { lastFg = fg;
+            RECT fr{}; GetWindowRect(fg, &fr);
+            HMONITOR hm2 = MonitorFromWindow(fg, MONITOR_DEFAULTTOPRIMARY); MONITORINFO mi2{ sizeof(mi2) }; GetMonitorInfoW(hm2, &mi2);
+            bool full = fr.left <= mi2.rcMonitor.left && fr.top <= mi2.rcMonitor.top && fr.right >= mi2.rcMonitor.right && fr.bottom >= mi2.rcMonitor.bottom;
+            wchar_t cls[64] = {}, ti[64] = {}; GetClassNameW(fg, cls, 63); GetWindowTextW(fg, ti, 63);
+            bcLogStream("osd-fg: '" + narrow(ti) + "' klasse=" + narrow(cls) + " vollbild=" + std::to_string(full) + " osdSichtbar=" + std::to_string(IsWindowVisible(g_osdHwnd) != 0));
+        }
+    }
     PdhCollectQueryData(g_pdhQ);   // frisches Sample fuer die Delta-Zaehler
     json payload = { {"gpu", readGpuNative()}, {"cpu", readCpuNative()} };
     json f = readBrokerFps();
@@ -1682,7 +1741,6 @@ static ComPtr<IDCompositionDevice> g_dcompDev;
 static ComPtr<IDCompositionTarget> g_dcompTarget;
 static ComPtr<IDCompositionVisual> g_dcompVisual;
 static ComPtr<ICoreWebView2CompositionController> g_osdComp;
-static bool g_osdEdit = false;   // Live-Edit (Alt+Shift+O): Overlay faengt die Maus
 static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     // Live-Edit: Maus-Ereignisse ans WebView2 durchreichen - der Composition-Modus
     // bekommt sie NICHT automatisch (SendMouseInput ist Pflicht, MS-Doku).
@@ -1778,9 +1836,13 @@ static void setOsdEditMode(bool on) {
         showOsd();
         if (!g_osdHwnd) return;
         g_osdEdit = true;
-        // fokussier-/anklickbar machen: NOACTIVATE+TRANSPARENT temporaer entfernen
+        // Anklickbar machen: NUR TRANSPARENT+NOACTIVATE weg (LAYERED MUSS bleiben - es
+        // traegt die DComp-Transparenz). OHNE SWP_FRAMECHANGED wird der Style-Wechsel
+        // nicht wirksam -> Fenster faengt die Maus nicht -> KEIN Klick erreicht das
+        // WebView (weder "Fertig" noch Design-Wahl; genau der User-Befund).
         LONG_PTR ex = GetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE);
-        SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex & ~(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE));
+        SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex & ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE));
+        SetWindowPos(g_osdHwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
         SetForegroundWindow(g_osdHwnd);
         sendToOsd("osd-edit", true);
     } else {
