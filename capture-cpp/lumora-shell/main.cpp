@@ -1435,6 +1435,76 @@ static json readCpuNative() {
              {"ram", (long long)((ms.ullTotalPhys - ms.ullAvailPhys) / 1048576)},
              {"temp", nullptr}, {"clock", clock}, {"power", nullptr} };   // temp/power: PawnIO-Broker (Teil 2b)
 }
+// --- FPS-/Sensor-Broker-Anbindung (Shared Memory, Layout 1:1 aus main.js) ---
+// Die elevated Broker (geplante Aufgaben LumoraOSD-FPS / LumoraOSD-Sensors)
+// existieren bereits (Electron-Infrastruktur); die Shell liest dieselben Sections
+// und sendet denselben Heartbeat (appTick@24, wanted@28). Eigene Broker-Modi der
+// Shell folgen mit Phase 4 - bis dahin teilen sich beide Apps die Datenquelle.
+#pragma pack(push, 1)
+struct FpsShmFull { uint32_t magic, brokerTick, fps, frametimeX100, apiCode, pid, appTick, wanted; };
+struct SenseShmFull { uint32_t magic, brokerTick; int32_t tempX10, powerX10; uint32_t pid, _r, appTick, wanted; };
+#pragma pack(pop)
+static const uint32_t FPS_MAGIC = 0x4C4F5344, SENSE_MAGIC = 0x4C4F5345;   // 'LOSD'/'LOSE'
+struct ShmMap { HANDLE h = nullptr; };
+static ShmMap g_fpsShm, g_senseShm;
+static ULONGLONG g_brokerSpawnAt = 0;
+static bool shmOpen(ShmMap& m, const char* name) {
+    if (m.h) return true;
+    m.h = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 64, name);
+    return m.h != nullptr;
+}
+template<typename T> static bool shmRead(ShmMap& m, T& out) {   // frisches Mapping je Zugriff (Kohaerenz-Lehre)
+    if (!m.h) return false;
+    void* p = MapViewOfFile(m.h, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    if (!p) return false;
+    memcpy(&out, p, sizeof(T)); UnmapViewOfFile(p);
+    return true;
+}
+static void shmWriteApp(ShmMap& m, uint32_t wanted) {   // Heartbeat @24 (appTick, wanted)
+    if (!m.h) return;
+    void* p = MapViewOfFile(m.h, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    if (!p) return;
+    ((uint32_t*)p)[6] = GetTickCount(); ((uint32_t*)p)[7] = wanted;
+    UnmapViewOfFile(p);
+}
+static bool runTask(const wchar_t* task) {   // geplante Broker-Aufgabe starten (elevated ohne UAC)
+    std::string out = runCaptureOutput(std::wstring(L"schtasks /run /tn \"") + task + L"\"", 8000);
+    return out.find("ERROR") == std::string::npos && out.find("FEHLER") == std::string::npos;
+}
+// FPS lesen (Frische: magic + brokerTick-Alter <= 1500ms; 1,5s-Ueberbrueckung wie main.js)
+static json g_lastFps = nullptr; static ULONGLONG g_lastFpsAt = 0;
+static json readBrokerFps() {
+    if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps")) return nullptr;
+    uint32_t now = GetTickCount();
+    shmWriteApp(g_fpsShm, 1);
+    FpsShmFull s{};
+    if (shmRead(g_fpsShm, s) && s.magic == FPS_MAGIC && (uint32_t)(now - s.brokerTick) <= 1500 && s.fps) {
+        g_lastFps = { {"fps", s.fps}, {"frametime", s.frametimeX100 / 100.0} };
+        g_lastFpsAt = GetTickCount64();
+        return g_lastFps;
+    }
+    if (!g_lastFps.is_null() && GetTickCount64() - g_lastFpsAt < 1500) return g_lastFps;
+    return nullptr;
+}
+static json readSenseCpu() {   // CPU-Temp/-Watt vom PawnIO-Broker
+    if (!shmOpen(g_senseShm, "Local\\LumoraOSDSense")) return nullptr;
+    uint32_t now = GetTickCount();
+    shmWriteApp(g_senseShm, 1);
+    SenseShmFull s{};
+    if (shmRead(g_senseShm, s) && s.magic == SENSE_MAGIC && (uint32_t)(now - s.brokerTick) <= 3000 && s.tempX10 > 0)
+        return { {"temp", s.tempX10 / 10.0}, {"power", s.powerX10 > 0 ? json(s.powerX10 / 10.0) : json(nullptr)} };
+    return nullptr;
+}
+static void brokersEnsure() {   // beide Aufgaben anstossen (idempotent, 4s-Spawn-Sperre)
+    if (GetTickCount64() - g_brokerSpawnAt < 4000) return;
+    g_brokerSpawnAt = GetTickCount64();
+    // WICHTIG (wie Electrons startBroker): Sections App-first erstellen UND wanted=1
+    // VOR dem Task-Start schreiben - der Broker prueft das Flag beim Hochkommen und
+    // beendet sich sonst sofort wieder ("App will keine Werte").
+    shmOpen(g_fpsShm, "Local\\LumoraOSDFps"); shmWriteApp(g_fpsShm, 1);
+    shmOpen(g_senseShm, "Local\\LumoraOSDSense"); shmWriteApp(g_senseShm, 1);
+    std::thread([]() { runTask(L"LumoraOSD-FPS"); runTask(L"LumoraOSD-Sensors"); }).detach();
+}
 static json readGpuPdh();
 // --- NVML (NVIDIA-Treiber-API, nvml.dll): temp/power/clock/vram wie readNvmlHandle ---
 struct NvmlUtil { unsigned int gpu, mem; };
@@ -1537,7 +1607,9 @@ static void osdDataTick() {
     if (!g_osdHwnd || !IsWindowVisible(g_osdHwnd)) return;
     PdhCollectQueryData(g_pdhQ);   // frisches Sample fuer die Delta-Zaehler
     json payload = { {"gpu", readGpuNative()}, {"cpu", readCpuNative()} };
-    payload["fps"] = "\xE2\x80\x94";   // FPS-Quelle (PresentMon/RTSS) folgt mit Sensor-Teil 2
+    json f = readBrokerFps();
+    if (f.is_object()) { payload["fps"] = f["fps"]; payload["frametime"] = f["frametime"]; }
+    else { payload["fps"] = "\xE2\x80\xA6"; brokersEnsure(); }   // "..." bis der Broker liefert
     sendToOsd("osd-data", payload);
 }
 static void sendToOsd(const std::string& channel, const json& payload) {   // threadsicher wie sendToUi
@@ -1603,8 +1675,8 @@ static void createOsdWindow() {
                 return S_OK;
             }).Get());
 }
-static void showOsd() { createOsdWindow(); sensorsInit(); SetTimer(g_hwnd, TIMER_OSDDATA, 1000, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
-static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
+static void showOsd() { createOsdWindow(); sensorsInit(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 1000, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
+static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
 
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
@@ -2161,9 +2233,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Ergebnis nach %TEMP%\lumora-shell-test.txt - automatisierte Verifikation des Dispatchers.
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-sensors") == 0) {
         // Sensor-Teil 1 am echten System: 2 Samples (Delta-Zaehler), dann Werte.
-        sensorsInit(); PdhCollectQueryData(g_pdhQ); Sleep(1100); PdhCollectQueryData(g_pdhQ);
+        sensorsInit(); shmOpen(g_fpsShm, "Local\LumoraOSDFps"); shmOpen(g_senseShm, "Local\LumoraOSDSense"); brokersEnsure();
+        PdhCollectQueryData(g_pdhQ); Sleep(1100); PdhCollectQueryData(g_pdhQ);
+        for (int w = 0; w < 8; ++w) { shmWriteApp(g_fpsShm, 1); shmWriteApp(g_senseShm, 1); Sleep(1000); }   // Broker hochkommen lassen
         json cpu = readCpuNative(), gpu = readGpuNative();
-        std::string s = "cpu=" + cpu.dump() + "\ngpu=" + gpu.dump() + "\n";
+        json fps = readBrokerFps(), sense = readSenseCpu();
+        for (int w = 0; w < 12 && fps.is_null(); ++w) { Sleep(1000); shmWriteApp(g_fpsShm, 1); shmWriteApp(g_senseShm, 1); fps = readBrokerFps(); if (sense.is_null()) sense = readSenseCpu(); }
+        FpsShmFull rawF{}; bool rOk = shmRead(g_fpsShm, rawF);
+        std::string s = "cpu=" + cpu.dump() + "\ngpu=" + gpu.dump() + "\nfps=" + fps.dump() + " sense=" + sense.dump() +
+            "\nshm: h=" + std::to_string(g_fpsShm.h != nullptr) + " read=" + std::to_string(rOk) + " gle=" + std::to_string(GetLastError()) +
+            " magic=" + std::to_string(rawF.magic) + " brokerTick=" + std::to_string(rawF.brokerTick) + " fps=" + std::to_string(rawF.fps) + " tick=" + std::to_string(GetTickCount()) + "\n";
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
         return 0;
