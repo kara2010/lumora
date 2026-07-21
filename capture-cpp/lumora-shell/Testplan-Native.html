@@ -1,0 +1,225 @@
+<title>Lumora Native — Offene Testfälle</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #f5f7fa; --panel: #ffffff; --panel-2: #eef2f7; --line: #dde4ec;
+    --ink: #182130; --ink-soft: #55617a; --ink-faint: #8a94a8;
+    --accent: #2f7de1; --accent-soft: #dbe9fb;
+    --good: #23935f; --good-bg: #e2f3ea; --warn: #b9791a; --warn-bg: #f7edd8; --crit: #cf4141; --crit-bg: #f8e2e2;
+    --mono: ui-monospace, "Cascadia Code", Consolas, "Liberation Mono", monospace;
+    --sans: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    --radius: 10px; --maxw: 880px;
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f7fa; --panel: #ffffff; --panel-2: #eef2f7; --line: #dde4ec;
+    --ink: #182130; --ink-soft: #55617a; --ink-faint: #8a94a8;
+    --accent: #2f7de1; --accent-soft: #dbe9fb;
+    --good: #23935f; --good-bg: #e2f3ea; --warn: #b9791a; --warn-bg: #f7edd8; --crit: #cf4141; --crit-bg: #f8e2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e131a; --panel: #161d27; --panel-2: #1c2531; --line: #28323f;
+      --ink: #e6ecf5; --ink-soft: #9fabbe; --ink-faint: #6b7688;
+      --accent: #5ea0f0; --accent-soft: #17283e;
+      --good: #46c088; --good-bg: #123024; --warn: #e0a94a; --warn-bg: #33280f; --crit: #e46b6b; --crit-bg: #341a1a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e131a; --panel: #161d27; --panel-2: #1c2531; --line: #28323f;
+    --ink: #e6ecf5; --ink-soft: #9fabbe; --ink-faint: #6b7688;
+    --accent: #5ea0f0; --accent-soft: #17283e;
+    --good: #46c088; --good-bg: #123024; --warn: #e0a94a; --warn-bg: #33280f; --crit: #e46b6b; --crit-bg: #341a1a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 36px 22px 90px; }
+  header.top { display: flex; flex-direction: column; gap: 6px; }
+  .eyebrow { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-size: clamp(25px, 4.4vw, 34px); margin: 0; letter-spacing: -.01em; text-wrap: balance; }
+  .sub { color: var(--ink-soft); font-size: 15px; max-width: 64ch; }
+  .build { font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+  code { font-family: var(--mono); font-size: .88em; background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+  kbd { font-family: var(--mono); font-size: .82em; background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+
+  .note { border-radius: var(--radius); padding: 14px 18px; margin: 20px 0; font-size: 14px; }
+  .note.prep { background: var(--panel); border: 1px solid var(--line); }
+  .note.done { background: var(--good-bg); border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line)); }
+  .note h2 { font-size: 14px; margin: 0 0 8px; letter-spacing: .01em; }
+  .note.done h2 { color: var(--good); }
+  .note ol, .note ul { margin: 0; padding-left: 20px; color: var(--ink-soft); }
+  .note li { margin: 4px 0; }
+  .note.done ul { list-style: none; padding-left: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .note.done li { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--ink); border-radius: 999px; padding: 3px 11px; font-size: 13px; margin: 0; }
+
+  .progress-bar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding: 12px 22px; margin: 0 -22px 22px; display: flex; align-items: center; gap: 14px; }
+  .track { flex: 1; height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+  .fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--good)); border-radius: 999px; transition: width .35s ease; }
+  .count { font-family: var(--mono); font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .reset { background: none; border: 1px solid var(--line); color: var(--ink-soft); font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+  .reset:hover { border-color: var(--accent); color: var(--accent); }
+
+  section.group { margin: 28px 0 0; }
+  .group-head { display: flex; align-items: baseline; gap: 12px; margin: 0 0 10px; padding-bottom: 8px; border-bottom: 2px solid var(--line); }
+  .group-letter { font-family: var(--mono); font-size: 13px; color: var(--accent); font-weight: 700; }
+  .group-head h2 { font-size: 17px; margin: 0; letter-spacing: -.005em; }
+
+  .case { display: grid; grid-template-columns: 28px 1fr; gap: 14px; padding: 13px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); margin: 8px 0; cursor: pointer; transition: border-color .15s, background .15s; }
+  .case:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+  .case.done { background: var(--good-bg); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); }
+  .case.done .c-title { color: var(--ink-soft); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--good) 60%, transparent); }
+  .box { width: 22px; height: 22px; border: 2px solid var(--ink-faint); border-radius: 6px; margin-top: 1px; display: grid; place-items: center; transition: all .15s; }
+  .case.done .box { background: var(--good); border-color: var(--good); }
+  .box svg { width: 13px; height: 13px; stroke: #fff; stroke-width: 3.2; fill: none; opacity: 0; transition: opacity .15s; }
+  .case.done .box svg { opacity: 1; }
+  .c-body { min-width: 0; }
+  .c-title { font-weight: 600; font-size: 15px; margin: 0 0 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .c-steps { color: var(--ink-soft); font-size: 13.5px; margin: 2px 0 0; }
+  .c-expect { color: var(--ink); font-size: 13.5px; margin: 6px 0 0; padding-left: 11px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .c-expect b { color: var(--accent); font-weight: 600; }
+  .ref { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+
+  .known { margin-top: 36px; border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); background: var(--warn-bg); border-radius: var(--radius); padding: 16px 20px; }
+  .known h2 { font-size: 14px; margin: 0 0 8px; color: var(--warn); }
+  .known ul { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--ink); }
+  .known li { margin: 5px 0; }
+  footer { margin-top: 30px; color: var(--ink-faint); font-size: 12.5px; text-align: center; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="progress-bar">
+  <div class="track"><div class="fill" id="fill"></div></div>
+  <span class="count" id="count">0 / 0</span>
+  <button class="reset" id="reset">Zurücksetzen</button>
+</div>
+
+<div class="wrap">
+  <header class="top">
+    <span class="eyebrow">Lumora Native · C++-Shell</span>
+    <h1>Offene Testfälle dieser Umbau-Runde</h1>
+    <p class="sub">Nur die <b>neu gebauten</b> Funktionen, die du gestern auf später verschoben hast — keine Basis-Funktionen, keine bereits bestätigten. Anklicken hakt ab, der Fortschritt bleibt lokal gespeichert.</p>
+    <p style="margin:8px 0 0"><span class="build">Build: Lumora-Native-Setup-0.1.0-osd.exe (NAS)</span></p>
+  </header>
+
+  <div class="note done">
+    <h2>✓ Von dir bereits bestätigt — NICHT mehr im Plan</h2>
+    <ul>
+      <li>Frame-Pacing (Desktop-Freigabe ohne Ruckeln)</li>
+      <li>Nahtloser Quellwechsel Monitor↔Fenster</li>
+      <li>Prozess-Ton</li>
+      <li>Live-Edit „Fertig" schließt</li>
+    </ul>
+  </div>
+
+  <div class="note prep">
+    <h2>Vorbereitung</h2>
+    <ol>
+      <li>Electron-Lumora beenden (teilt Ports/OSD-Aufgaben mit der nativen App).</li>
+      <li><b>Für A &amp; B (native CPU-Sensoren):</b> die zwei alten Aufgaben <code>LumoraOSD-FPS</code> + <code>LumoraOSD-Sensors</code> in der Aufgabenplanung löschen — sie zeigen noch auf die Electron-<code>Lumora.exe</code>. Die native App legt sie beim ersten OSD-Start neu an.</li>
+      <li>Bei Fehlern hilft: <code>%TEMP%\lumora-stream.log</code> (die betroffene Zeile schicken).</li>
+    </ol>
+  </div>
+
+  <div id="plan"></div>
+
+  <div class="known">
+    <h2>Bewusst NICHT zu testen (offen/vertagt)</h2>
+    <ul>
+      <li><b>OSD in Arkanoid unsichtbar</b> — zurückgestellt, Diagnose läuft.</li>
+      <li><b>Router-Portfreigabe-Anleitungen (#29)</b> — noch nicht portiert.</li>
+      <li><b>Auto-Update / Autostart / <code>lumora://</code> (#31, #33)</b> — erst beim finalen Electron-Umstieg.</li>
+      <li><b>Gruppen-Auto-Join</b> bei zweiter lokaler Instanz — Edge-Case.</li>
+    </ul>
+  </div>
+
+  <footer>Lumora Native · offene Testfälle · für Karsten Radermacher</footer>
+</div>
+
+<script>
+  const DATA = [
+    ["A", "OSD-Ersteinrichtung &amp; CPU-Sensoren", [
+      ["Ersteinrichtung: 1 Dialog, 1 UAC", "OSD erstmals einschalten (<kbd>Alt</kbd>+<kbd>O</kbd>) nachdem die alten Aufgaben gelöscht sind.", "Genau <b>ein</b> Dialog „OSD einrichten", danach <b>ein</b> UAC. PawnIO wird geladen (Signatur geprüft) + still installiert, die zwei Aufgaben werden neu angelegt.", "#22"],
+      ["CPU-Temperatur &amp; -Verbrauch", "Nach der Einrichtung ein paar Sekunden warten, OSD mit CPU-Temp/Power-Feldern.", "<b>Temperatur</b> und <b>Verbrauch</b> erscheinen (vom PawnIO-Sensor-Broker) — auch <b>ohne</b> MSI Afterburner.", "#23"],
+      ["CPU-Takt ohne Afterburner", "OSD mit CPU-Takt-Feld, Afterburner NICHT laufen lassen.", "Der <b>Takt (MHz)</b> wird angezeigt (war vorher leer ohne Afterburner).", "clock-Fix"],
+      ["Afterburner-Vorrang", "MSI Afterburner starten, OSD an.", "CPU-Werte kommen von Afterburner; PawnIO wird dann gar nicht erst installiert/gebraucht.", "#23"],
+      ["Ablehnen merkt sich", "Beim Einrichtungsdialog auf „Abbrechen".", "OSD läuft mit Last/RAM/Takt weiter und fragt <b>nicht</b> bei jedem Einschalten erneut.", "#22"],
+    ]],
+    ["B", "OSD-Anzeige: GPU, FPS, Graph, Quellen", [
+      ["GPU-Werte (NVIDIA)", "OSD mit GPU-Feldern, RTX 5080 aktiv.", "Last, Temp, Takt, Power, VRAM plausibel (via NVML).", "#25"],
+      ["GPU-Werte (AMD)", "In den OSD-Einstellungen als GPU die AMD-iGPU wählen.", "Radeon liefert Temp/Takt/Power/Last (via ADL) — im Test lieferte sie 48 °C / 600 MHz / 15 W.", "#25"],
+      ["Frametime-Graph flüssig", "OSD mit FPS + Graph in einem Spiel.", "Der <b>Frametime-Graph läuft flüssig</b> (~30 Hz), nicht in 1-Sekunden-Sprüngen.", "#27"],
+      ["Quellen-Anzeige", "Einstellungen → Overlay → Quellen-Anzeige.", "Zeigt die <b>echte</b> Quelle je Wert (z. B. „NVIDIA-Treiber", „PawnIO-Treiber", „PresentMon") statt Platzhalter.", "#32"],
+      ["FPS-Quelle umschalten", "FPS-Quelle zwischen PresentMon und RTSS wählen (RTSS/Afterburner müssen laufen).", "Werte kommen aus der gewählten Quelle; bei RTSS läuft kein PresentMon-Dienst mit.", "#24"],
+    ]],
+    ["C", "OSD-Live-Bearbeiten &amp; Alt+B", [
+      ["Design wechseln (Live)", "<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd>, dann ein anderes Design wählen.", "Overlay übernimmt das Design <b>sofort</b>.", "#24"],
+      ["Mausrad-Skalierung", "Im Edit-Modus mit dem Mausrad über dem OSD scrollen.", "Größe ändert sich in <b>kleinen, sanften Schritten</b> — nicht sprunghaft auf 1/−1.", "#27"],
+      ["Afterburner-OSD (Alt+B)", "<kbd>Alt</kbd>+<kbd>B</kbd> (RTSS/Afterburner installiert).", "Das native Afterburner-OSD wird ein-/ausgeschaltet, unabhängig vom Lumora-OSD.", "#24"],
+    ]],
+    ["D", "Hotkeys im Spiel &amp; Fensterfokus", [
+      ["Hotkey im Vollbild-Spiel", "In einem Vollbild-/Borderless-Spiel <kbd>Alt</kbd>+<kbd>O</kbd> bzw. <kbd>Alt</kbd>+<kbd>L</kbd> drücken.", "Die Hotkeys greifen <b>auch im Spiel</b> (vorher wurden sie vom Spiel abgefangen).", "#26"],
+      ["Fokus-Rückgabe ans Spiel", "Per Hotkey Lumora vor das laufende Spiel holen, dann wieder verstecken.", "Lumora kommt sauber nach vorne; danach bekommt das <b>Spiel den Fokus zurück</b> und hängt nicht halb-fokussiert.", "#26"],
+      ["Gamepad-Kombi entprellt", "Gamepad-Kombi für Oberfläche/OSD gedrückt halten.", "Löst sauber einmal aus, kein Zappeln bei kurzen Read-Aussetzern.", "#26"],
+    ]],
+    ["E", "Stream — Robustheit &amp; Zuschauerliste", [
+      ["Zuschauerliste „Browser · OS"", "Mit einem Zuschauer verbinden, Zuschauerliste öffnen.", "Zeigt je Zuschauer <b>„Chrome · Windows"</b> o. Ä. statt des rohen langen User-Agent, plus korrekte IP.", "#32/#28"],
+      ["mediamtx-Neustart", "Während des Streams den Relay-Prozess (mediamtx) im Task-Manager beenden.", "Der Relay startet <b>automatisch neu</b>, der Stream erholt sich statt tot zu bleiben.", "#28"],
+      ["IP-Wechsel nachziehen", "Falls testbar: DSL-Neuverbindung / neue öffentliche IP während des Streams.", "Links + Portfreigaben werden automatisch aktualisiert, der Stream bleibt erreichbar.", "#28"],
+    ]],
+    ["F", "Gruppe — LAN &amp; App-Ende", [
+      ["LAN-Erkennung", "Gruppe starten. An einem zweiten PC im selben Netz die native App öffnen.", "Der zweite PC <b>sieht die Gruppe automatisch</b> (LAN-Beacon), ohne Code-Eingabe.", "#30"],
+      ["App-Ende verlässt Gruppe", "Als Gruppenmitglied die App beenden.", "Die Gruppe wird sauber verlassen und bleibt nicht serverseitig hängen.", "#30"],
+    ]],
+  ];
+
+  const plan = document.getElementById('plan');
+  const KEY = 'lumora-native-offene-testfaelle-v2';
+  let state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { state = {}; }
+
+  let total = 0;
+  DATA.forEach((grp) => {
+    const [letter, title, cases] = grp;
+    const sec = document.createElement('section');
+    sec.className = 'group';
+    const head = document.createElement('div');
+    head.className = 'group-head';
+    head.innerHTML = '<span class="group-letter">' + letter + '</span><h2>' + title + '</h2>';
+    sec.appendChild(head);
+    cases.forEach((c, ci) => {
+      const [ttl, steps, expect, ref] = c;
+      const id = letter + ci;
+      total++;
+      const el = document.createElement('div');
+      el.className = 'case' + (state[id] ? ' done' : '');
+      el.innerHTML =
+        '<div class="box"><svg viewBox="0 0 24 24"><polyline points="4 12 10 18 20 6"></polyline></svg></div>' +
+        '<div class="c-body">' +
+          '<p class="c-title">' + ttl + '<span class="ref">' + ref + '</span></p>' +
+          '<p class="c-steps">' + steps + '</p>' +
+          '<p class="c-expect">Erwartet: ' + expect + '</p>' +
+        '</div>';
+      el.addEventListener('click', () => {
+        state[id] = !state[id];
+        el.classList.toggle('done', !!state[id]);
+        localStorage.setItem(KEY, JSON.stringify(state));
+        updateProgress();
+      });
+      sec.appendChild(el);
+    });
+    plan.appendChild(sec);
+  });
+
+  const fill = document.getElementById('fill');
+  const count = document.getElementById('count');
+  function updateProgress() {
+    const done = Object.values(state).filter(Boolean).length;
+    fill.style.width = (total ? (done / total * 100) : 0) + '%';
+    count.textContent = done + ' / ' + total;
+  }
+  document.getElementById('reset').addEventListener('click', () => {
+    state = {}; localStorage.removeItem(KEY);
+    document.querySelectorAll('.case.done').forEach(e => e.classList.remove('done'));
+    updateProgress();
+  });
+  updateProgress();
+</script>
