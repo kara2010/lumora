@@ -47,6 +47,22 @@ Copy-Item "$shell\MicrosoftEdgeWebview2Setup.exe" $bootstrap
 $stageSize = [math]::Round((Get-ChildItem $stage -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1)
 Write-Output "Staging: $stageSize MB"
 
+# 2b) EIGENE EXE signieren - PFLICHT: Smart App Control / SmartScreen verlangen einen
+# bestaetigten Herausgeber PRO ausfuehrbarer Datei, nicht nur fuer den Installer.
+# Fremd-Binaries (lumora-elevate, lumora-media-relay, PresentMon, HDRCmd) sind bereits signiert.
+$signtool = "$root\_testlab\tools\signtool\signtool.exe"
+if (Test-Path $signtool) {
+  foreach ($exe in "$stage\lumora-shell.exe", "$stage\bin\lumora-capture-native.exe", "$stage\bin\lumora-media-relay.exe", "$stage\bin\lumora-elevate.exe") {
+    if (Test-Path $exe) {
+      $st = (Get-AuthenticodeSignature $exe).Status
+      if ($st -ne "Valid") {
+        & $signtool sign /sha1 EC6B6B6FDEBDB88941519F15E9570994CE3E14E3 /fd sha256 /tr http://time.certum.pl /td sha256 $exe | Out-Null
+      }
+      Write-Output ("Signatur {0}: {1}" -f (Split-Path $exe -Leaf), (Get-AuthenticodeSignature $exe).Status)
+    }
+  }
+} else { Write-Warning "signtool fehlt - EXE bleiben UNSIGNIERT (Smart App Control blockiert sie!)" }
+
 # 3) NSIS-Installer bauen
 $makensis = (Get-ChildItem "$env:LOCALAPPDATA\electron-builder\Cache\nsis" -Recurse -Filter makensis.exe | Select-Object -First 1).FullName
 if (-not $makensis) { throw "makensis.exe nicht gefunden" }
