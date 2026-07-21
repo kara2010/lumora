@@ -862,6 +862,28 @@ static std::wstring bcWriteMtxConfig(const std::vector<std::string>& hosts) {
     writeFile(p, y);
     return p;
 }
+// Eigener nativer Relay (lumora-relay) statt mediamtx? Standard: ja, sobald das Exe da ist.
+// Einstellung useLegacyRelay=true erzwingt mediamtx (Uebergangs-Fallback, ein Release lang).
+static bool bcNativeRelay() {
+    if (loadSettings().value("useLegacyRelay", false)) return false;
+    return GetFileAttributesW((binDir() + L"\\lumora-media-relay.exe").c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+// ICE-Konfiguration (oeffentliche Hosts + TURN) an den nativen Relay pushen - ersetzt den
+// mediamtx-YAML-Hot-Reload. Wirkt nur auf NEUE Zuschauer-Sessions, bestehende bleiben verbunden.
+static void bcPushIceConfig(const std::vector<std::string>& hosts) {
+    json s = loadSettings();
+    json body; json ah = json::array();
+    for (auto& h : hosts) ah.push_back(h);
+    body["additionalHosts"] = ah;
+    json servers = json::array();
+    std::string turl = s.value("streamTurnUrl", "");
+    if (s.value("streamTurnEnabled", false) && !turl.empty()) {
+        if (turl.rfind("turn:", 0) != 0 && turl.rfind("turns:", 0) != 0) turl = "turn:" + turl;
+        servers.push_back({ {"url", turl}, {"user", s.value("streamTurnUser", "")}, {"pass", s.value("streamTurnPass", "")} });
+    }
+    body["iceServers"] = servers;
+    luart::httpPost("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/config/ice", body.dump(), 2000);
+}
 // Relay starten + aktiver Ready-Check (TCP-Probe auf den RTSP-Port, wie das Original).
 static std::wstring g_mtxCfgPath;   // fuer den Crash-Neustart gemerkt
 // Relay-Absturz mitten im Stream (nicht gewollt beendet): neu starten - der native
@@ -882,16 +904,28 @@ static void bcMtxExitWatch(HANDLE proc) {
 }
 bool bcStartMtx(const std::wstring& cfgPath) {
     g_mtxCfgPath = cfgPath;
-    std::wstring relay = binDir() + L"\\lumora-media-relay.exe";
-    if (GetFileAttributesW(relay.c_str()) == INVALID_FILE_ATTRIBUTES) relay = binDir() + L"\\mediamtx.exe";
-    if (!spawnChild(g_mtx, L"\"" + relay + L"\" \"" + cfgPath + L"\"", "mtx: ")) return false;
+    bool native = bcNativeRelay();
+    std::wstring relay = binDir() + (native ? L"\\lumora-media-relay.exe" : L"\\mediamtx.exe");
+    if (GetFileAttributesW(relay.c_str()) == INVALID_FILE_ATTRIBUTES) { native = false; relay = binDir() + L"\\mediamtx.exe"; }
+    // nativer Relay: keine Config-Datei (ICE kommt per Push nach dem Ready-Check)
+    std::wstring cmd = native ? (L"\"" + relay + L"\"") : (L"\"" + relay + L"\" \"" + cfgPath + L"\"");
+    if (!spawnChild(g_mtx, cmd, "mtx: ")) return false;
     bcMtxExitWatch(g_mtx.proc);
+    // Readiness: nativ = Control-API-Port (lauscht zuletzt), mediamtx = RTSP-Port (wie das Original)
+    int readyPort = native ? MTX_API_PORT : MTX_RTSP_PORT;
     for (int i = 0; i < 14; ++i) {   // ~840 ms Fallback, typisch nach ~150 ms bereit
         SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        sockaddr_in a{}; a.sin_family = AF_INET; a.sin_port = htons(MTX_RTSP_PORT); inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+        sockaddr_in a{}; a.sin_family = AF_INET; a.sin_port = htons(readyPort); inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
         bool ok = connect(s, (sockaddr*)&a, sizeof(a)) == 0;
         closesocket(s);
-        if (ok) return true;
+        if (ok) {
+            if (native) {   // initiale ICE-Hosts/TURN pushen (Cache; Router-Phase pusht spaeter frisch)
+                std::vector<std::string> hosts;
+                for (auto& h : loadSettings().value("streamLastHosts", json::array())) if (h.is_string()) hosts.push_back(h.get<std::string>());
+                bcPushIceConfig(hosts);
+            }
+            return true;
+        }
         Sleep(60);
     }
     DWORD ec = 0;   // nie bereit geworden: lebt der Prozess ueberhaupt noch? (Port belegt etc.)
@@ -1187,7 +1221,8 @@ static json startBroadcast() {
         if (!forceV6 && !pubIp.empty()) fresh.push_back(pubIp);
         if (!pubIp6.empty()) fresh.push_back(pubIp6);
         if (fresh != hosts) {
-            bcWriteMtxConfig(fresh);
+            bcWriteMtxConfig(fresh);       // mediamtx: Hot-Reload der YAML
+            bcPushIceConfig(fresh);        // nativer Relay: Push (bei mediamtx wirkungslos, API kennt den Pfad nicht)
             json s2 = loadSettings(); json arr = json::array(); for (auto& h : fresh) arr.push_back(h);
             s2["streamLastHosts"] = arr; writeFile(settingsPath(), s2.dump(2));
         }
@@ -1496,6 +1531,7 @@ static void bcIpWatchTick() {
         if (changed) {
             bcLogStream("ipwatch: oeffentliche Adresse geaendert");
             bcWriteMtxConfig(hosts);   // mediamtx-Hot-Reload
+            bcPushIceConfig(hosts);    // nativer Relay: Push (Sessions bleiben verbunden)
             json s2 = loadSettings(); json arr = json::array(); for (auto& h : hosts) arr.push_back(h);
             s2["streamLastHosts"] = arr; writeFile(settingsPath(), s2.dump(2));
             if (!forceV6 && !ip.empty()) { luupnp::mapPort(BROADCAST_PORT, "TCP", "Lumora Stream"); luupnp::mapPort(MTX_ICE_UDP, "UDP", "Lumora Stream Medien"); }
