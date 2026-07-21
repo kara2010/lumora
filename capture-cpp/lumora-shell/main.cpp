@@ -2009,6 +2009,15 @@ static struct {
     int (*mem)(void*, NvmlMem*) = nullptr;
     std::vector<std::pair<void*, std::string>> devices;   // handle + Modellname
 } g_nvml;
+// NVIDIA-Namen kuerzen (1:1 aus main.js:341): "NVIDIA "- und "GeForce "-Vorbau weg,
+// sonst passt "RTX 5080" nicht in die OSD-/Anzeige-Breite (Electron hatte das schon).
+static std::string cleanNvidiaName(const std::string& raw) {
+    std::string n = raw;
+    n = std::regex_replace(n, std::regex("^NVIDIA\\s+", std::regex::icase), "");
+    n = std::regex_replace(n, std::regex("GeForce\\s+", std::regex::icase), "");
+    size_t a = n.find_first_not_of(" \t"), b = n.find_last_not_of(" \t");
+    return a == std::string::npos ? std::string("NVIDIA") : n.substr(a, b - a + 1);
+}
 static void nvmlInitOnce() {
     if (g_nvml.tried) return;
     g_nvml.tried = true;
@@ -2030,7 +2039,7 @@ static void nvmlInitOnce() {
         void* h = nullptr;
         if (g_nvml.byIndex(i, &h) != 0 || !h) continue;
         char nm[96] = {}; if (g_nvml.name) g_nvml.name(h, nm, sizeof(nm));
-        g_nvml.devices.push_back({ h, nm[0] ? nm : "NVIDIA" });
+        g_nvml.devices.push_back({ h, nm[0] ? cleanNvidiaName(nm) : "NVIDIA" });
     }
     g_nvml.ok = !g_nvml.devices.empty();
 }
@@ -2076,7 +2085,8 @@ static std::string gpuNameFirst() {
         ComPtr<IDXGIAdapter1> ad; if (fac->EnumAdapters1(i, &ad) != S_OK) break;
         DXGI_ADAPTER_DESC1 d; ad->GetDesc1(&d);
         if (d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
-        return narrow(d.Description);
+        // Vorbau kuerzen wie in den NVML-/ADL-Zweigen (Anzeige-Breite)
+        return cleanNvidiaName(cleanAmdName(narrow(d.Description)));
     }
     return "GPU";
 }
