@@ -1,10 +1,11 @@
 # Baut den Lumora-Native-Installer (Phase 4): Shell bauen -> Staging -> NSIS -> signieren.
 # Reproduzierbar; laeuft neben der Electron-App (eigener Ordner/Uninstall-Eintrag).
 $ErrorActionPreference = "Stop"
-$root = "C:\Users\kara\Documents\HDR-Launcher"
+# Repo-Root aus der Script-Lage ableiten (PC-unabhaengig; frueher hartkodiert)
+$root = (Resolve-Path "$PSScriptRoot\..\..").Path
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "0.1.0"
+$version = "0.2.0"   # 0.2.0: eigener Relay (mediamtx-Abloesung), native HDR, ETW-FPS, libvpl statisch
 
 # 1) Shell frisch bauen
 $cmake = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
