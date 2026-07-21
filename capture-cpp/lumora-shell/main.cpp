@@ -1457,6 +1457,10 @@ static void showMainWindow() {
         keybd_event(VK_MENU, 0, 0, 0); keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
         SetForegroundWindow(g_hwnd); ShowWindow(g_hwnd, SW_SHOW);
     }
+    // Fokus INS WebView2 setzen: Chromium liefert Gamepad-Input (navigator.getGamepads)
+    // nur bei Dokument-Fokus. Ohne das musste nach dem Gamepad-Hotkey erst einmal mit
+    // der Maus in die UI geklickt werden, bevor der Controller reagierte.
+    if (g_controller) g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
 }
 static void toggleMainWindow() {
     if (IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd) && GetForegroundWindow() == g_hwnd) {
