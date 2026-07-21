@@ -1748,6 +1748,12 @@ static json readSenseCpu() {   // CPU-Temp/-Watt vom PawnIO-Broker
         return { {"temp", s.tempX10 / 10.0}, {"power", s.powerX10 > 0 ? json(s.powerX10 / 10.0) : json(nullptr)} };
     return nullptr;
 }
+// Laeuft der Sensor-Broker gerade (frischer brokerTick)? Fuer die Quellen-Anzeige.
+static bool senseBrokerAlive() {
+    if (!shmOpen(g_senseShm, "Local\\LumoraOSDSense")) return false;
+    SenseShmFull s{}; uint32_t now = GetTickCount();
+    return shmRead(g_senseShm, s) && s.magic == SENSE_MAGIC && (uint32_t)(now - s.brokerTick) <= 3000;
+}
 static void brokersEnsure() {   // beide Aufgaben anstossen (idempotent, 4s-Spawn-Sperre)
     if (GetTickCount64() - g_brokerSpawnAt < 4000) return;
     g_brokerSpawnAt = GetTickCount64();
@@ -2579,7 +2585,29 @@ static json handleChannel(const std::string& channel, const json& args) {
         ensureOsdSetup();   // zeigt nur, was wirklich fehlt (FPS-Task/PawnIO/Sensor-Task)
         return s;
     }
-    if (channel == "osd-sources") return { {"gpu", "folgt (Sensor-Schritt)"}, {"cpu", "folgt (Sensor-Schritt)"}, {"fps", "folgt (Sensor-Schritt)"}, {"ram", "folgt (Sensor-Schritt)"} };
+    if (channel == "osd-sources") {   // welche Quelle liefert GPU/CPU/FPS (1:1 aus main.js)
+        nvmlInitOnce(); luadl::setup();
+        json m = readMahm();
+        bool mGpu = !m.is_null() && m.contains("gpuTemp");
+        bool mCpu = !m.is_null() && m.contains("cpuTemp");
+        json s = loadSettings();
+        bool declined = s.value("osdSetupDeclined", false);
+        std::string gpu = g_nvml.ok ? "NVIDIA-Treiber (NVML)"
+            : luadl::available() ? "AMD-Treiber (ADL)"
+            : mGpu ? "MSI Afterburner" : "keine erkannt";
+        std::string cpu = mCpu ? "MSI Afterburner"
+            : senseBrokerAlive() ? "PawnIO-Treiber"
+            : (lubroker::cpuSensorModule() && pawnioInstalled() && senseTaskPresent()) ? "PawnIO-Treiber (startet mit dem OSD)"
+            : declined ? "nicht eingerichtet (nur Last/RAM/Takt)"
+            : "Einrichtung folgt beim OSD-Start (bis dahin Last/RAM/Takt)";
+        std::string src = s.value("osdFpsSource", std::string("auto"));
+        bool useRtss = (src == "rtss") ? true : (src == "presentmon") ? false : lurtss::available();
+        std::string fps = useRtss ? "RTSS/Afterburner"
+            : fpsTaskPresent() ? "PresentMon"
+            : declined ? "nicht eingerichtet"
+            : "PresentMon (Einrichtung folgt beim OSD-Start)";
+        return { {"gpu", gpu}, {"cpu", cpu}, {"fps", fps} };
+    }
     if (channel == "toggle-window") { toggleMainWindow(); return true; }
     if (channel == "toggle-osd") { toggleOsdSetting(); return true; }
     if (channel == "minimize-window") { ShowWindow(g_hwnd, SW_MINIMIZE); return true; }
