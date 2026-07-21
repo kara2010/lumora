@@ -43,6 +43,7 @@
 #include "osd_rtss.h"
 #include "osd_adl.h"
 #include "group_lan.h"
+#include "router_hints.h"
 #include <thread>
 #include <mutex>
 #include <map>
@@ -738,6 +739,8 @@ static std::vector<std::string> g_bcPinholeIds; static bool g_bcV4Mapped = false
 static ULONGLONG g_bcPinholeSetAt = 0;   // fuer die 12h-IPv6-Pinhole-Erneuerung (24h-Lease)
 #define TIMER_IPWATCH 109   // IP-Wechsel-Watcher (5 min): Zwangstrennung/IP-Wechsel nachziehen
 static void bcRegisterWatchLink(); static void bcUnregisterWatchLink();   // (Gruppen-Modul weiter unten)
+static void notifyForwardIssue();   // Tray-Balloon "Portfreigabe noetig" (Definition nach dem Tray)
+static bool g_bcForwardNotified = false;   // Balloon nur einmal je Stream
 
 static void bcPushState() { sendToUi("broadcast-status", g_bcState); }
 static std::wstring binDir() { return g_appDir + L"\\bin"; }
@@ -1107,7 +1110,7 @@ static json startBroadcast() {
     if (g_bcState.value("active", false)) return g_bcState;
     g_bcStopping = false; g_adaptLevel = 0; g_adaptLastChange = 0; g_adaptBadSince = 0; g_adaptGoodSince = 0; g_adaptUpAt = 0; g_adaptUpHold = 0;
     { std::lock_guard<std::mutex> lk(g_qosMx); g_qosMap.clear(); }
-    g_bcSince = GetTickCount64(); g_bcPeakViewers = 0; g_bcSwitches = 0; g_bcSessionIds.clear();
+    g_bcSince = GetTickCount64(); g_bcPeakViewers = 0; g_bcSwitches = 0; g_bcSessionIds.clear(); g_bcForwardNotified = false;
     std::string enc = bcShellEncoder();
     std::string lanLink = "http://" + bcLanIp() + ":" + std::to_string(BROADCAST_PORT) + "/";
     g_bcState = { {"active", true}, {"port", BROADCAST_PORT}, {"link", lanLink}, {"linkV4", ""}, {"linkV6", ""},
@@ -1195,6 +1198,11 @@ static json startBroadcast() {
         g_bcState["internet"] = v4Reachable || !l6.empty();
         g_bcState["ipv6Only"] = !v4Reachable && !l6.empty();
         g_bcState["needsForward"] = !pubIp.empty() && !v4Reachable && l6.empty();
+        if (g_bcState["needsForward"].get<bool>()) {   // herstellerspezifische Portfreigabe-Anleitung + Toast
+            lurouter::RouterHint hint = lurouter::routerUpnpHint(luupnp::routerName(), true /*de*/, BROADCAST_PORT, MTX_ICE_UDP);
+            g_bcState["forwardHint"] = { {"router", hint.router}, {"steps", hint.steps} };
+            notifyForwardIssue();
+        } else g_bcState["forwardHint"] = nullptr;
         g_bcState["opening"] = false;
         bcPushState();
         if (g_bcState.value("internet", false)) bcRegisterWatchLink();   // schoene stream.php-Teilen-URL statt IP
@@ -1521,6 +1529,17 @@ static void destroyTray() {
     if (!g_trayOn) return;
     Shell_NotifyIconW(NIM_DELETE, &g_nid);
     g_trayOn = false;
+}
+// Tray-Balloon "Portfreigabe noetig" (Pendant zu Electrons Notification). Nur mit
+// aktivem Tray-Icon; sonst zeigt die UI die Anleitung ohnehin (broadcastState.forwardHint).
+static void notifyForwardIssue() {
+    if (g_bcForwardNotified || !g_trayOn) return;
+    g_bcForwardNotified = true;
+    NOTIFYICONDATAW n{}; n.cbSize = sizeof(n); n.hWnd = g_hwnd; n.uID = 1; n.uFlags = NIF_INFO;
+    wcscpy_s(n.szInfoTitle, L"Stream nur im lokalen Netz erreichbar");
+    wcscpy_s(n.szInfo, L"Dein Router öffnet die Ports nicht automatisch. Klick hier für die Anleitung.");
+    n.dwInfoFlags = NIIF_WARNING;
+    Shell_NotifyIconW(NIM_MODIFY, &n);
 }
 // Accelerator "Alt+L" / "Ctrl+Shift+F1" -> RegisterHotKey-Parameter.
 static bool parseAccelerator(const std::string& acc, UINT& mods, UINT& vk) {
@@ -2814,6 +2833,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         break;
     case WM_SHELL_TRAY:
+        if (LOWORD(l) == NIN_BALLOONUSERCLICK) { showMainWindow(); sendToUi("show-forward-help", nullptr); return 0; }   // Portfreigabe-Balloon geklickt
         if (LOWORD(l) == WM_LBUTTONUP) { toggleMainWindow(); return 0; }
         if (LOWORD(l) == WM_RBUTTONUP) {
             HMENU menu = CreatePopupMenu();
