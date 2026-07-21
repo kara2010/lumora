@@ -59,3 +59,8 @@ capture-cpp/lumora-shell/stage/
 capture-cpp/lumora-shell/build/
 capture-cpp/lumora-shell/*.exe
 capture-cpp/lumora-shell/MicrosoftEdgeWebview2Setup.exe
+
+# Relay-Dependencies (per _testlab/build-relay-deps.ps1 gepinnt nachladen - zu gross fuers Repo)
+capture-cpp/third_party/libdatachannel-relay/
+capture-cpp/third_party/mbedtls/
+capture-cpp/lumora-relay/build/

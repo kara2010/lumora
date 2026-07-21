@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Minimaler WHEP-Testclient fuer den neuen Relay (direkt gegen 127.0.0.1:8889, ohne Shell).
+     Nur fuer Entwicklung/PoC - der echte Player ist player.html hinter der Shell. -->
+<meta charset="utf-8">
+<title>Relay-WHEP-Test</title>
+<body style="background:#111;color:#eee;font-family:sans-serif">
+<div id="st">verbinde…</div>
+<video id="v" autoplay muted playsinline controls style="width:90vw;max-height:80vh;background:#000"></video>
+<script>
+const st = m => document.getElementById('st').textContent = m;
+(async () => {
+  const pc = window.pc = new RTCPeerConnection();
+  pc.oniceconnectionstatechange = () => console.log('ICE:', pc.iceConnectionState);
+  pc.onicecandidateerror = e => console.log('ICE-ERR:', e.errorCode, e.errorText, e.url);
+  pc.addTransceiver('video', {direction:'recvonly'});
+  pc.addTransceiver('audio', {direction:'recvonly'});
+  pc.ontrack = e => { document.getElementById('v').srcObject = e.streams[0]; };
+  pc.onconnectionstatechange = () => st('PC: ' + pc.connectionState);
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await new Promise(r => { if (pc.iceGatheringState === 'complete') r();
+    else pc.onicegatheringstatechange = () => pc.iceGatheringState === 'complete' && r(); });
+  const resp = await fetch('http://127.0.0.1:8889/live/whep', {
+    method:'POST', headers:{'Content-Type':'application/sdp'}, body: pc.localDescription.sdp});
+  st('WHEP: ' + resp.status + ' ' + (resp.headers.get('Location')||''));
+  if (!resp.ok) return;
+  await pc.setRemoteDescription({type:'answer', sdp: await resp.text()});
+  setInterval(async () => {
+    let fps = 0, kbit = 0;
+    for (const s of (await pc.getStats()).values()) {
+      if (s.type === 'inbound-rtp' && s.kind === 'video') { fps = s.framesPerSecond|0; kbit = ((s.bytesReceived*8/1000)|0); }
+    }
+    st('PC: ' + pc.connectionState + ' | ' + fps + ' fps | ' + kbit + ' kbit empfangen');
+  }, 1000);
+})().catch(e => st('FEHLER: ' + e));
+</script>
