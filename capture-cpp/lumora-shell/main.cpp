@@ -747,7 +747,7 @@ static std::wstring binDir() { return g_appDir + L"\\bin"; }
 static std::wstring tempPath(const wchar_t* name) { wchar_t t[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", t, MAX_PATH); return std::wstring(t) + L"\\" + name; }
 static void bcWriteBitrateControl(int kbit) { writeFile(tempPath(L"lumora-bitrate.txt"), std::to_string((std::max)(500, kbit))); }
 static void bcWriteSourceControl(const json& cfg) {
-    writeFile(tempPath(L"lumora-source.txt"), (cfg.value("mode", "") == "window" && cfg.value("hwnd", 0) != 0) ? ("hwnd " + std::to_string(cfg.value("hwnd", 0))) : "monitor");
+    writeFile(tempPath(L"lumora-source.txt"), (cfg.value("mode", "") == "window" && cfg.value("hwnd", 0) != 0) ? ("hwnd " + std::to_string(cfg.value("hwnd", 0))) : ("monitor " + std::to_string(cfg.value("outputIdx", 0))));
 }
 static void bcWriteHdrControl() {
     json s = loadSettings();
@@ -909,10 +909,13 @@ static json bcStreamCfg(const std::string& encoder) {
     std::string mode = "monitor"; int outputIdx = 0; long long hwnd = 0;
     if (src.rfind("window:", 0) == 0) { hwnd = atoll(src.c_str() + 7); if (hwnd) mode = "window"; }
     else if (src.rfind("screen:", 0) == 0) outputIdx = atoi(src.c_str() + 7);
-    if (mode == "monitor" && scaleH) {   // Preset >= native Monitorhoehe -> nicht skalieren (Audit-Lehre)
-        HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);   // V1: Hauptmonitor (outputIdx-Multi folgt)
-        MONITORINFO mi{ sizeof(mi) };
-        if (GetMonitorInfoW(hm, &mi) && scaleH >= (mi.rcMonitor.bottom - mi.rcMonitor.top)) scaleH = 0;
+    if (mode == "monitor" && scaleH) {   // Preset >= native Hoehe des GEWAEHLTEN Bildschirms -> nicht skalieren
+        struct MP { int want, cur, h; } mp{ outputIdx, 0, 0 };
+        EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR hm, HDC, LPRECT, LPARAM lp) -> BOOL {
+            auto* p = (MP*)lp; if (p->cur++ == p->want) { MONITORINFO mi{ sizeof(mi) }; if (GetMonitorInfoW(hm, &mi)) p->h = mi.rcMonitor.bottom - mi.rcMonitor.top; return FALSE; } return TRUE;
+        }, (LPARAM)&mp);
+        if (!mp.h) { HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY); MONITORINFO mi{ sizeof(mi) }; if (GetMonitorInfoW(hm, &mi)) mp.h = mi.rcMonitor.bottom - mi.rcMonitor.top; }
+        if (mp.h && scaleH >= mp.h) scaleH = 0;
     }
     return { {"encoder", encoder}, {"fps", s.value("streamFps", 60)}, {"kbit", kbit}, {"scaleH", scaleH},
              {"mode", mode}, {"outputIdx", outputIdx}, {"hwnd", hwnd} };
@@ -950,6 +953,7 @@ static void bcStartNative(const json& cfg) {
         L" --mtx-host 127.0.0.1 --mtx-port " + std::to_wstring(MTX_TS_UDP) + L" --audio";
     if (cfg.value("scaleH", 0)) args += L" --scale " + std::to_wstring(cfg.value("scaleH", 0));
     if (cfg.value("mode", "") == "window" && cfg.value("hwnd", 0ll)) args += L" --window --hwnd " + std::to_wstring(cfg.value("hwnd", 0ll));
+    else args += L" --monitor " + std::to_wstring(cfg.value("outputIdx", 0));   // gewaehlter Bildschirm
     bcWriteHdrControl();
     g_bcCapKey = std::to_string(cfg.value("mode", "") == "window" ? cfg.value("hwnd", 0ll) : 0) + "|" + std::to_string(cfg.value("fps", 60)) + "|" + std::to_string(cfg.value("scaleH", 0));
     bcWriteBitrateControl(cfg.value("kbit", 8000));
