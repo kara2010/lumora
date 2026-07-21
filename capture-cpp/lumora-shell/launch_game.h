@@ -35,14 +35,40 @@ inline std::vector<std::wstring> tokenizeArgs(const std::wstring& s) {
     return out;
 }
 
-// HDRCmd liegt neben dem UI (App-Ordner). Feuer-und-vergessen, versteckt.
-inline void setHDR(const std::wstring& appDir, bool on) {
-    std::wstring cmd = L"\"" + appDir + L"\\HDRCmd.exe\" " + (on ? L"on" : L"off");
-    STARTUPINFOW si{ sizeof(si) }; si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
-    PROCESS_INFORMATION pi{};
-    std::wstring mutableCmd = cmd;
-    if (CreateProcessW(nullptr, &mutableCmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+// HDR global an/aus - EIGENER Code statt HDRCmd.exe (HDRTray, GPLv3, entfernt).
+// Pro aktivem Display-Target: erst die moderne 24H2-API (SET_HDR_STATE), bei
+// aelterem Windows Fallback auf SET_ADVANCED_COLOR_STATE (Win10 1709+, gleiche
+// Wirkung dort). HDR-faehig? -> GET_ADVANCED_COLOR_INFO_2 (highDynamicRangeSupported),
+// Fallback klassisches GET_ADVANCED_COLOR_INFO (advancedColorSupported).
+inline void setHDR(bool on) {
+    UINT32 nPath = 0, nMode = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPath, &nMode) != ERROR_SUCCESS) return;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(nPath);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(nMode);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &nPath, paths.data(), &nMode, modes.data(), nullptr) != ERROR_SUCCESS) return;
+    paths.resize(nPath);
+    for (auto& p : paths) {
+        const LUID adapter = p.targetInfo.adapterId; const UINT32 target = p.targetInfo.id;
+        // HDR-Faehigkeit pruefen (24H2-Info zuerst, sonst klassisch)
+        bool hdrCapable = false;
+        DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2 i2{};
+        i2.header = { DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO_2, sizeof(i2), adapter, target };
+        if (DisplayConfigGetDeviceInfo(&i2.header) == ERROR_SUCCESS) hdrCapable = i2.highDynamicRangeSupported;
+        else {
+            DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO i1{};
+            i1.header = { DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO, sizeof(i1), adapter, target };
+            if (DisplayConfigGetDeviceInfo(&i1.header) == ERROR_SUCCESS) hdrCapable = i1.advancedColorSupported;
+        }
+        if (!hdrCapable) continue;
+        // Umschalten: 24H2-API zuerst, sonst klassisch
+        DISPLAYCONFIG_SET_HDR_STATE hs{};
+        hs.header = { DISPLAYCONFIG_DEVICE_INFO_SET_HDR_STATE, sizeof(hs), adapter, target };
+        hs.enableHdr = on ? 1 : 0;
+        if (DisplayConfigSetDeviceInfo(&hs.header) == ERROR_SUCCESS) continue;
+        DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE as{};
+        as.header = { DISPLAYCONFIG_DEVICE_INFO_SET_ADVANCED_COLOR_STATE, sizeof(as), adapter, target };
+        as.enableAdvancedColor = on ? 1 : 0;
+        DisplayConfigSetDeviceInfo(&as.header);
     }
 }
 

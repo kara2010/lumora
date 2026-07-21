@@ -70,6 +70,34 @@ Notes, aktualisiert `website\download.php` auf die neue Datei und legt alles in
 - Builds sind **unsigniert** (kein Zertifikat) – SmartScreen-Warnung ist normal.
 - Der Autostart-/Rebrand-Kram und weitere Details stehen in `_testlab\HANDOFF-AMD.md`.
 
+## Nativer Zweig (C++-Shell, ersetzt Electron/FFmpeg/mediamtx)
+
+Voraussetzung: **VS 2022 Build Tools** mit „Desktop development with C++"
+(MSVC v143, Windows 11 SDK, CMake). Kein Node/.NET/Go nötig.
+
+```powershell
+# 1) Einmalig: Relay-Abhaengigkeiten (klont gepinnt libdatachannel v0.23.1 + MbedTLS 3.6.2
+#    nach capture-cpp\third_party\ und baut sie statisch - NICHT im Repo, ~270 MB)
+._testlab\build-relay-deps.ps1
+
+# 2) Die drei Exes bauen (je: cmake -S <dir> -B <dir>\build -G "Visual Studio 17 2022" -A x64,
+#    dann cmake --build <dir>\build --config Release). Build-Caches sind PC-spezifisch -
+#    bei "CMakeCache directory"-Fehlern build\ loeschen und neu konfigurieren.
+#    capture-cpp\lumora-capture  -> build\Release\lumora_capture.exe -> bin\lumora-capture-native.exe
+#    capture-cpp\lumora-relay    -> build\Release\lumora_relay.exe   -> bin\lumora-media-relay.exe
+#    capture-cpp\lumora-shell    -> build\Release\lumora_shell.exe
+
+# 3) Installer bauen (staged bin\-Exes + UI-Assets, signiert, NSIS):
+.\capture-cpp\lumora-shell\build-installer.ps1
+```
+
+- **lumora-media-relay.exe** ist seit der mediamtx-Abloesung unser EIGENER C++-Relay
+  (`capture-cpp/lumora-relay`, libdatachannel/WHEP, ~2 MB). `bin\mediamtx.exe` wird
+  uebergangsweise als Fallback mitgeliefert (Einstellung `useLegacyRelay: true`).
+- Test-Client fuer den Relay ohne Shell: `capture-cpp\lumora-relay\test_whep.html`
+  (Relay + `lumora-capture-native.exe --mtx-port 8558` starten, Seite oeffnen).
+- Stream-Log: `%TEMP%\lumora-stream.log` (`mtx:` = Relay, `nat:` = Capture-Helfer).
+
 ## Projektstruktur (Kurz)
 - `main.js` – Electron-Hauptprozess (Launcher, OSD, **Streaming**: `bcDetectEncoder`,
   `bcEncoderArgs`, `bcBuildFfmpegArgs`, `bcStartFfmpeg`).

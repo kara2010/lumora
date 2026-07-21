@@ -25,6 +25,7 @@
 #pragma comment(lib, "xinput9_1_0.lib")
 #pragma comment(lib, "winmm.lib")
 #include <ctime>
+#include <cmath>
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "bcrypt.lib")
 #include <wrl.h>
@@ -263,7 +264,7 @@ static void extWatchTick() {
         lulaunch::playLog(dataDir(), "EXTERN erkannt: " + exe + " (" + s.name + ") hdr=" + (g.value("hdr", false) ? "true" : "false"));
         // HDR wie beim Eigenstart - nur wenn nicht schon eine andere Session HDR verwaltet
         if (g.value("hdr", false) && !g_hdrByLauncher) {
-            lulaunch::setHDR(g_appDir, true); g_hdrByLauncher = true; s.hdrOn = true;
+            lulaunch::setHDR(true); g_hdrByLauncher = true; s.hdrOn = true;
             sendToUi("hdr-status", true);
         }
         g_extSessions[exe] = s;
@@ -276,7 +277,7 @@ static void extWatchTick() {
         ExtSession s = it->second; it = g_extSessions.erase(it);
         sendExternalRunning();
         lulaunch::playLog(dataDir(), "EXTERN beendet: " + s.gamePath + " Dauer " + std::to_string((GetTickCount64() - s.startTs) / 1000) + "s");
-        if (s.hdrOn) { lulaunch::setHDR(g_appDir, false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
+        if (s.hdrOn) { lulaunch::setHDR(false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
         sendToUi("play-session", { {"gamePath", s.gamePath}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
     }
 }
@@ -285,7 +286,7 @@ static void extWatchTick() {
 static void launchEndSession(lulaunch::LaunchSession& s, bool credit) {
     std::string exeLow = narrow(s.exeName); for (auto& c : exeLow) c = (char)tolower((unsigned char)c);
     g_activeLaunchExes.erase(std::remove(g_activeLaunchExes.begin(), g_activeLaunchExes.end(), exeLow), g_activeLaunchExes.end());   // Watcher darf wieder uebernehmen
-    if (s.useHdr) { lulaunch::setHDR(g_appDir, false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
+    if (s.useHdr) { lulaunch::setHDR(false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
     if (credit && s.startTs) sendToUi("play-session", { {"gamePath", narrow(s.gamePath)}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
     sendToUi("launch-status", "idle");
     s.done = true;
@@ -325,7 +326,7 @@ static json launchGame(const json& args) {
     std::vector<std::wstring> largs = lulaunch::tokenizeArgs(widen(opts.value("args", "")));
     try {
         if (useHdr) {
-            lulaunch::setHDR(g_appDir, true);
+            lulaunch::setHDR(true);
             sendToUi("hdr-status", true);
             sendToUi("launch-status", "hdr-wait");
             Sleep(3000);   // HDR-Umschaltzeit wie im Original
@@ -377,7 +378,7 @@ static json launchGame(const json& args) {
         SetTimer(g_hwnd, TIMER_LAUNCH, 4000, nullptr);   // Tick im UI-Thread
         return { {"success", true} };
     } catch (...) {
-        if (useHdr) { lulaunch::setHDR(g_appDir, false); sendToUi("hdr-status", false); }
+        if (useHdr) { lulaunch::setHDR(false); sendToUi("hdr-status", false); }
         sendToUi("launch-status", "idle");
         return { {"success", false}, {"error", "Startfehler"} };
     }
@@ -1250,10 +1251,22 @@ static json startBroadcast() {
 }
 static json stopBroadcast() {
     bool wasActive = g_bcState.value("active", false);
-    if (wasActive && GetTickCount64() - g_bcSince >= 10000) {   // Abschluss-Statistik (V1: ohne Byte-Zaehler)
+    if (wasActive && GetTickCount64() - g_bcSince >= 10000) {   // Abschluss-Statistik
         json s = loadSettings();
-        sendToUi("stream-summary", { {"durMs", (long long)(GetTickCount64() - g_bcSince)}, {"peakViewers", g_bcPeakViewers},
-            {"totalViewers", (int)g_bcSessionIds.size()}, {"bytes", 0}, {"avgMbit", 0}, {"switches", g_bcSwitches},
+        // Ingest-Bytes vom Relay (bevor er unten beendet wird): mediamtx UND nativer Relay
+        // liefern "bytesReceived" unter /v3/paths/get/<pfad>. Encoder-seitige Datenmenge,
+        // nicht Zuschauer-Summe - ehrlicher Wert unabhaengig von der Zuschauerzahl.
+        long long bytes = 0;
+        {
+            auto r = luart::httpGet("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/paths/get/" + MTX_PATH, L"", 1500);
+            json j = json::parse(r.body, nullptr, false);
+            if (r.status == 200 && j.is_object()) bytes = j.value("bytesReceived", 0ll);
+        }
+        long long durMs = (long long)(GetTickCount64() - g_bcSince);
+        double avgMbit = durMs > 0 ? (double)bytes * 8.0 / ((double)durMs / 1000.0) / 1e6 : 0.0;
+        avgMbit = std::round(avgMbit * 10.0) / 10.0;   // UI zeigt den Wert unformatiert an
+        sendToUi("stream-summary", { {"durMs", durMs}, {"peakViewers", g_bcPeakViewers},
+            {"totalViewers", (int)g_bcSessionIds.size()}, {"bytes", bytes}, {"avgMbit", avgMbit}, {"switches", g_bcSwitches},
             {"quality", s.value("streamQuality", "auto")}, {"fps", s.value("streamFps", 60)}, {"kbit", s.value("streamUploadKbit", 8000)} });
     }
     g_bcStopping = true;

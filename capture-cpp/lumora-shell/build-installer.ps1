@@ -33,8 +33,9 @@ New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
 foreach ($b in "lumora-capture-native.exe","lumora-media-relay.exe","mediamtx.exe","lumora-elevate.exe","libvpl.dll") {
   if (Test-Path "$root\bin\$b") { Copy-Item "$root\bin\$b" "$stage\bin" }
 }
-# HDRCmd + PresentMon + Sensor-Module (OSD/HDR) neben die Shell (wie in der Electron-Struktur)
-foreach ($b in "HDRCmd.exe","PresentMon.exe","AMDFamily17.bin","IntelMSR.bin") {
+# PresentMon + Sensor-Module (OSD) neben die Shell (wie in der Electron-Struktur).
+# HDRCmd.exe entfaellt: HDR-Umschaltung ist jetzt eigener Code (launch_game.h setHDR).
+foreach ($b in "PresentMon.exe","AMDFamily17.bin","IntelMSR.bin") {
   if (Test-Path "$root\$b") { Copy-Item "$root\$b" $stage }
 }
 # Lizenztexte (Distributionspflicht)
