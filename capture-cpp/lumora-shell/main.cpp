@@ -986,6 +986,17 @@ static std::string bcExtractIp(const std::string& cand) {
     if (std::regex_search(cand, m, std::regex("(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})"))) return m[1];
     return "";
 }
+// User-Agent auf "Browser · OS" kuerzen (1:1 aus main.js bcUaShort) - statt des
+// rohen langen UA-Strings in der Zuschauerliste.
+static std::string bcUaShort(const std::string& ua) {
+    if (ua.empty()) return "";
+    auto has = [&](const char* n) { return ua.find(n) != std::string::npos; };
+    std::string br = has("Edg/") ? "Edge" : (has("OPR/") || has("Opera")) ? "Opera"
+        : has("Firefox/") ? "Firefox" : has("Chrome/") ? "Chrome" : has("Safari/") ? "Safari" : "Browser";
+    std::string os = has("Android") ? "Android" : (has("iPhone") || has("iPad") || has("iPod")) ? "iOS"
+        : has("Windows") ? "Windows" : has("Mac OS X") ? "macOS" : has("Linux") ? "Linux" : "";
+    return os.empty() ? br : br + " · " + os;
+}
 static void bcViewerTick() {
     if (!g_bcState.value("active", false)) return;
     json readers = bcMtxReaders();
@@ -2289,7 +2300,7 @@ static json handleChannel(const std::string& channel, const json& args) {
             std::string ip = bcExtractIp(s.value("remoteCandidate", ""));
             std::string name; std::string q = s.value("query", "");
             size_t np = q.find("name="); if (np != std::string::npos) { name = q.substr(np + 5); size_t amp = name.find('&'); if (amp != std::string::npos) name = name.substr(0, amp); }
-            out.push_back({ {"id", s.value("id", "")}, {"ip", ip.empty() ? "(verbindet\xE2\x80\xA6)" : ip}, {"ua", s.value("userAgent", "").substr(0, 60)},
+            out.push_back({ {"id", s.value("id", "")}, {"ip", ip.empty() ? "(verbindet\xE2\x80\xA6)" : ip}, {"ua", bcUaShort(s.value("userAgent", ""))},
                             {"since", (long long)time(nullptr) * 1000}, {"bytes", s.value("bytesSent", 0ll)}, {"name", name} });
         }
         return out;
