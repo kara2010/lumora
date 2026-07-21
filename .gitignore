@@ -64,3 +64,6 @@ capture-cpp/lumora-shell/MicrosoftEdgeWebview2Setup.exe
 capture-cpp/third_party/libdatachannel-relay/
 capture-cpp/third_party/mbedtls/
 capture-cpp/lumora-relay/build/
+_testlab/debug-archiv/
+# FFmpeg-Build-Umgebung (nur alter Electron-Zweig; enthaelt >100MB Binaries)
+_testlab/ffmpeg-build/
