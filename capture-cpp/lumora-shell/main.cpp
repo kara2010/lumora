@@ -42,6 +42,7 @@
 #include "osd_broker.h"
 #include "osd_rtss.h"
 #include "osd_adl.h"
+#include "group_lan.h"
 #include <thread>
 #include <mutex>
 #include <map>
@@ -1300,7 +1301,7 @@ static void groupTickOnce() {
         return;
     }
     if (r.is_object() && r.value("error", "") == "no-room") {   // TTL abgelaufen -> lokal beenden
-        KillTimer(g_hwnd, TIMER_GROUP);
+        KillTimer(g_hwnd, TIMER_GROUP); lulan::beaconStop();   // LAN-Beacon einstellen (weiter lauschen)
         g_group = nullptr;
         groupPushState();
         return;
@@ -1575,6 +1576,7 @@ static bool g_osdLoaded = false;
 static void sendToOsd(const std::string& channel, const json& payload);
 #define TIMER_OSDDATA 107
 #define TIMER_OSDFPS 110   // schneller Frametime-Graph-Tick (~30 Hz), getrennt von den 5-Hz-Sensoren
+#define TIMER_LANPUSH 111  // LAN-Gruppen (Beacon-Empfang) alle 5 s an die UI melden
 // --- OSD-Sensorik Teil 1 (treiberfrei): PDH-CPU/GPU-Last, RAM, DXGI-VRAM.
 // Temp/Takt/Power (NVML/ADL/PawnIO) + FPS (PresentMon) folgen als Teil 2.
 static PDH_HQUERY g_pdhQ = nullptr;
@@ -2418,6 +2420,7 @@ static json handleChannel(const std::string& channel, const json& args) {
         if (r.is_object() && r.value("ok", false)) g_group["members"] = r.value("members", json::array());
         json s = loadSettings(); s["groupLastCode"] = c.value("code", ""); writeFile(settingsPath(), s.dump(2));
         SetTimer(g_hwnd, TIMER_GROUP, 8000, nullptr);
+        lulan::beaconStart(g_group.value("code", ""), groupDisplayName(), groupMemberId());   // eigene Gruppe im LAN bewerben
         groupPushState();
         g_bcState["link"] = bcShareUrl(); bcPushState();   // Teilen-Link = Grid-Link (alle Streams)
         return groupPublicState();
@@ -2440,6 +2443,7 @@ static json handleChannel(const std::string& channel, const json& args) {
         g_group = { {"code", code}, {"members", r.value("members", json::array())}, {"relayFails", 0} };
         json s = loadSettings(); s["groupLastCode"] = code; writeFile(settingsPath(), s.dump(2));
         SetTimer(g_hwnd, TIMER_GROUP, 8000, nullptr);
+        lulan::beaconStart(g_group.value("code", ""), groupDisplayName(), groupMemberId());   // eigene Gruppe im LAN bewerben
         groupPushState();
         g_bcState["link"] = bcShareUrl(); bcPushState();
         return groupPublicState();
@@ -2447,7 +2451,7 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "group-leave") {
         if (g_group.is_null()) return groupPublicState();
         std::string code = g_group.value("code", "");
-        KillTimer(g_hwnd, TIMER_GROUP);
+        KillTimer(g_hwnd, TIMER_GROUP); lulan::beaconStop();   // LAN-Beacon einstellen (weiter lauschen)
         g_group = nullptr;
         json leave = { {"id", groupMemberId()} };
         groupRelay("leave", { {"code", code} }, &leave);
@@ -2741,6 +2745,12 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_IPWATCH) { bcIpWatchTick(); return 0; }
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
         if (w == TIMER_XINPUT) { xinputTick(); return 0; }
+        if (w == TIMER_LANPUSH) {   // im LAN entdeckte Gruppen an die UI (veraltete raus)
+            json arr = json::array();
+            for (auto& [code, name] : lulan::groups()) arr.push_back({ {"code", code}, {"name", name} });
+            sendToUi("lan-groups", arr);
+            return 0;
+        }
         if (w == TIMER_OSDDATA) { osdDataTick(); return 0; }
         if (w == TIMER_OSDFPS) { osdFpsTick(); return 0; }
         if (w == TIMER_GROUP) {   // Heartbeat im Worker (Netz, 8s-Timeout) - nie doppelt
@@ -3038,6 +3048,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
     timeBeginPeriod(1);                              // praeziser Hintergrund-Poll (wie Electron/RTSS)
     SetTimer(hwnd, TIMER_XINPUT, 40, nullptr);       // nativer Gamepad-Hotkey-Poll (25 Hz)
+    lulan::listenStart();                            // LAN-Beacon-Empfang ab Start (fremde Gruppen sehen)
+    SetTimer(hwnd, TIMER_LANPUSH, 5000, nullptr);    // im LAN sichtbare Gruppen an die UI
     syncOsdVisibility();   // OSD-Overlay gemaess Einstellung anzeigen
 
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
