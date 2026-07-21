@@ -30,7 +30,8 @@ foreach ($f in Get-ChildItem "$root\*.png","$root\*.svg" -ErrorAction SilentlyCo
 # mediamtx.exe wird EIN Release lang als Legacy-Fallback (useLegacyRelay) mitgeliefert,
 # mediamtx.default.yml entfaellt (der eigene Relay braucht keine YAML).
 New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
-foreach ($b in "lumora-capture-native.exe","lumora-media-relay.exe","mediamtx.exe","lumora-elevate.exe","libvpl.dll") {
+# libvpl.dll entfaellt: oneVPL-Dispatcher ist jetzt statisch in lumora-capture-native gelinkt.
+foreach ($b in "lumora-capture-native.exe","lumora-media-relay.exe","mediamtx.exe","lumora-elevate.exe") {
   if (Test-Path "$root\bin\$b") { Copy-Item "$root\bin\$b" "$stage\bin" }
 }
 # PresentMon + Sensor-Module (OSD) neben die Shell (wie in der Electron-Struktur).
