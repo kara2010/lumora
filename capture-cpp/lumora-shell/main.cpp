@@ -2798,6 +2798,10 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_CLOSE:
         if (loadSettings().value("minimizeToTray", false) && !g_quitting) { ShowWindow(h, SW_HIDE); return 0; }   // in den Infobereich statt beenden
         if (g_bcState.value("active", false)) stopBroadcast();   // Stream + Kindprozesse sauber beenden
+        if (!g_group.is_null()) {   // fullTeardown: Gruppe beim App-Ende sauber verlassen (nicht serverseitig haengen lassen)
+            std::string code = g_group.value("code", ""); json leave = { {"id", groupMemberId()} };
+            groupRelay("leave", { {"code", code} }, &leave); g_group = nullptr;
+        }
         destroyTray();
         saveWindowState(h); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
