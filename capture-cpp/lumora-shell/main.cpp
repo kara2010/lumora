@@ -301,10 +301,18 @@ static void launchTick() {
             if (running) {
                 s.started = true; s.startTs = GetTickCount64(); s.absent = 0;
                 sendToUi("launch-status", "running");
+                // HDR wurde bei der 30s-Freigabe geparkt? Spaetstarter doch noch da -> wieder an.
+                if (s.useHdr && !g_hdrByLauncher) { lulaunch::setHDR(true); g_hdrByLauncher = true; sendToUi("hdr-status", true); }
                 lulaunch::playLog(dataDir(), "STARTED nach +" + std::to_string((GetTickCount64() - s.launchTs) / 1000) + "s");
             } else {
                 ULONGLONG waited = GetTickCount64() - s.launchTs;
-                if (!s.reenabled && waited > 30000) { s.reenabled = true; sendToUi("launch-status", "idle"); }
+                if (!s.reenabled && waited > 30000) {
+                    s.reenabled = true; sendToUi("launch-status", "idle");
+                    // Missglueckter Start (BF6-Fall): UI zeigt ab hier "idle" - dann darf HDR
+                    // nicht bis zum 120s-Timeout anbleiben. Jetzt aus; kommt das Spiel doch
+                    // noch (Spaetstart bis 120s), schaltet der STARTED-Zweig es wieder ein.
+                    if (s.useHdr && g_hdrByLauncher) { lulaunch::setHDR(false); g_hdrByLauncher = false; sendToUi("hdr-status", false); lulaunch::playLog(dataDir(), "HDR aus nach 30s ohne Start-Erkennung"); }
+                }
                 if (waited > 120000) { lulaunch::playLog(dataDir(), "TIMEOUT - nie erkannt nach " + std::to_string(waited / 1000) + "s."); launchEndSession(s, false); }
             }
         } else if (running) s.absent = 0;
