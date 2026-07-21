@@ -532,10 +532,21 @@ static int hdrCheck() {   // pro Monitor "1" (HDR/PQ aktiv) oder "0"
     return 0;
 }
 
+// HMONITOR des idx-ten Bildschirms (EnumDisplayMonitors-Reihenfolge - GLEICH wie die
+// list-sources-Auswahl in der Shell). Fallback Hauptmonitor, falls idx nicht existiert.
+struct MonPick { int want; int cur; HMONITOR hm; };
+static BOOL CALLBACK monPickProc(HMONITOR hm, HDC, LPRECT, LPARAM lp) {
+    auto* p = (MonPick*)lp; if (p->cur++ == p->want) { p->hm = hm; return FALSE; } return TRUE;
+}
+static HMONITOR monitorByIndex(int idx) {
+    MonPick p{ idx, 0, nullptr };
+    EnumDisplayMonitors(nullptr, nullptr, monPickProc, (LPARAM)&p);
+    return p.hm ? p.hm : MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
+}
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     for (int i = 1; i < argc; ++i) { std::string a = argv[i]; if (a == "--list") return listWindows(); if (a == "--hdr-check") return hdrCheck(); }
-    int fps = 60, mbit = 20, port = 9998, maxFrames = 0, scaleH = 0; std::string host = "127.0.0.1", tsout, encName = "auto";
+    int fps = 60, mbit = 20, port = 9998, maxFrames = 0, scaleH = 0, monIdx = 0; std::string host = "127.0.0.1", tsout, encName = "auto";
     HWND targetHwnd = nullptr; bool findWindow = false, forceHdr = false; DWORD audioPid = 0;
     for (int i = 1; i < argc; ++i) { std::string a = argv[i];
         if (a == "--fps" && i + 1 < argc) fps = atoi(argv[++i]); else if (a == "--bitrate" && i + 1 < argc) mbit = atoi(argv[++i]);
@@ -545,6 +556,7 @@ int main(int argc, char** argv) {
         else if (a == "--hwnd" && i + 1 < argc) targetHwnd = (HWND)(uintptr_t)strtoull(argv[++i], nullptr, 0);
         else if (a == "--window") findWindow = true;
         else if (a == "--scale" && i + 1 < argc) scaleH = atoi(argv[++i]);
+        else if (a == "--monitor" && i + 1 < argc) monIdx = atoi(argv[++i]);   // Bildschirm-Index (EnumDisplayMonitors-Reihenfolge wie die UI-Quellenliste)
         else if (a == "--hdr-force") forceHdr = true;   // Diagnose: HDR-Pfad (FP16+Tonemap) auch ohne aktives HDR erzwingen
         else if (a == "--audio-pid" && i + 1 < argc) { audioPid = (DWORD)strtoul(argv[++i], nullptr, 0); g_withAudio = true; }
         else if (a == "--audio") g_withAudio = true;
@@ -625,9 +637,9 @@ int main(int argc, char** argv) {
             if (FAILED(interop->CreateForWindow(hw, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item))) || !item) { printf("SOURCE: Fenster-Capture fehlgeschlagen (HWND ungueltig?)\n"); return false; }
             wchar_t t[128] = {}; GetWindowTextW(hw, t, 127); printf("Quelle: Fenster \"%ls\"\n", t);
         } else {
-            HMONITOR hmon = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
+            HMONITOR hmon = monitorByIndex(monIdx);   // gewaehlter Bildschirm (nicht mehr fest Hauptmonitor)
             if (FAILED(interop->CreateForMonitor(hmon, winrt::guid_of<wg::GraphicsCaptureItem>(), winrt::put_abi(item))) || !item) { printf("SOURCE: Monitor-Capture fehlgeschlagen\n"); return false; }
-            printf("Quelle: Hauptmonitor\n");
+            printf("Quelle: Bildschirm %d\n", monIdx);
         }
         curHwnd = hw;
         auto s2 = item.Size(); W = s2.Width; H = s2.Height;
@@ -752,8 +764,13 @@ int main(int argc, char** argv) {
                 if (smt != srcMtime) { srcMtime = smt;
                     FILE* sf = nullptr; fopen_s(&sf, srcPath.c_str(), "r");
                     if (sf) { char what[16] = { 0 }; unsigned long long id = 0; int n = fscanf_s(sf, "%15s %llu", what, (unsigned)_countof(what), &id); fclose(sf);
-                        HWND want = (n >= 2 && _stricmp(what, "hwnd") == 0) ? (HWND)(uintptr_t)id : nullptr;
-                        if (n >= 1 && want != curHwnd) { printf("SOURCE: Wechsel angefordert\n"); switchSource(want); } }
+                        if (n >= 1 && _stricmp(what, "monitor") == 0) {   // "monitor <idx>" - Bildschirm-zu-Bildschirm live wechseln
+                            int newIdx = (n >= 2) ? (int)id : 0;
+                            if (curHwnd != nullptr || newIdx != monIdx) { monIdx = newIdx; printf("SOURCE: Wechsel -> Bildschirm %d\n", monIdx); switchSource(nullptr); }
+                        } else {
+                            HWND want = (n >= 2 && _stricmp(what, "hwnd") == 0) ? (HWND)(uintptr_t)id : nullptr;
+                            if (n >= 1 && want != curHwnd) { printf("SOURCE: Wechsel angefordert\n"); switchSource(want); }
+                        } }
                 }
                 // Fenster geschlossen? -> automatisch auf den Monitor zurueck (statt ewigem Standbild).
                 if (curHwnd && !IsWindow(curHwnd)) { printf("SOURCE: Fenster geschlossen -> Monitor\n"); switchSource(nullptr); }
