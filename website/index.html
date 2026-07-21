@@ -1668,8 +1668,10 @@
       <strong>durchgehend eigener C++-Code</strong>: Bildaufnahme (Windows Graphics Capture),
       Hardware-Encoding (NVENC/AMF/QuickSync direkt), MPEG-TS-Muxing, der WebRTC-Medien-Relay,
       HDR-Umschaltung, FPS-Messung (ETW) und Gamepad-Steuerung (XInput) nutzen ausschließlich
-      Windows-Systemschnittstellen. Die wenigen verbleibenden Open-Source-Bausteine sind hier
-      vollständig aufgeführt.
+      Windows-Systemschnittstellen. Die verbleibenden Bausteine sind hier vollständig aufgeführt —
+      bewusst in vier Gruppen getrennt, denn nur die erste ist „echter" Fremdcode, der in Lumora
+      mitläuft. Der Rest sind Schnittstellen-Definitionen der Hardware-Hersteller, Windows-Bestandteile
+      und Build-Werkzeuge.
     </p>
 
     <div class="table-scroll"><table class="tech-table">
@@ -1683,13 +1685,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td><strong>WebView2</strong><br><small style="color:var(--muted)">Microsoft Edge WebView2</small></td>
-          <td>Evergreen</td>
-          <td>Rendering der Benutzeroberfläche (Chromium-basiert, Windows-Systemkomponente — auf Windows 11 vorinstalliert)</td>
-          <td><span class="badge badge-mit">BSD (Loader)</span></td>
-          <td><a href="https://developer.microsoft.com/microsoft-edge/webview2" target="_blank" rel="noopener">developer.microsoft.com</a></td>
-        </tr>
+        <tr><th colspan="5" style="text-align:left;padding:14px 10px 6px;font-size:0.95em;color:var(--accent,#7ab7ff)">📚 Bibliotheken — Fremdcode, der in Lumora mitläuft (statisch eingebaut, Versionen gepinnt)</th></tr>
         <tr>
           <td><strong>libdatachannel</strong></td>
           <td>0.23</td>
@@ -1721,22 +1717,6 @@
           <td><a href="https://github.com/Mbed-TLS/mbedtls" target="_blank" rel="noopener">github.com/Mbed-TLS/mbedtls</a></td>
         </tr>
         <tr>
-          <td><strong>PawnIO</strong></td>
-          <td>2.x</td>
-          <td>Signierter Kernel-Treiber für CPU-Sensorik (Temperatur/Verbrauch) — wird <em>nicht</em> mitgeliefert, sondern auf Wunsch von der offiziellen Quelle installiert (Signatur wird geprüft) und ist über „Apps &amp; Features" deinstallierbar</td>
-          <td><span class="badge badge-gpl">GPL v2</span></td>
-          <td><a href="https://pawnio.eu" target="_blank" rel="noopener">pawnio.eu</a><br>
-              <small style="color:var(--muted)">© namazso</small></td>
-        </tr>
-        <tr>
-          <td><strong>PawnIO-Module</strong><br><small style="color:var(--muted)">AMDFamily17, IntelMSR</small></td>
-          <td>0.2.9</td>
-          <td>Offizielle, geprüfte Sensor-Definitionen für AMD-/Intel-CPUs (laufen sandboxed im PawnIO-Treiber)</td>
-          <td><span class="badge badge-gpl">LGPL 2.1</span></td>
-          <td><a href="https://github.com/namazso/PawnIO.Modules" target="_blank" rel="noopener">github.com/namazso/PawnIO.Modules</a><br>
-              <small style="color:var(--muted)">© namazso</small></td>
-        </tr>
-        <tr>
           <td><strong>libopus</strong></td>
           <td>1.5.x</td>
           <td>Opus-Audio-Encoding für den Stream-Ton (WebRTC-tauglich, patentfrei)</td>
@@ -1744,6 +1724,15 @@
           <td><a href="https://opus-codec.org" target="_blank" rel="noopener">opus-codec.org</a><br>
               <small style="color:var(--muted)">&copy; Xiph.Org, Skype, Mozilla u.&nbsp;a.</small></td>
         </tr>
+        <tr>
+          <td><strong>nlohmann/json</strong></td>
+          <td>3.x</td>
+          <td>JSON-Verarbeitung (Einstellungen, IPC, APIs)</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://github.com/nlohmann/json" target="_blank" rel="noopener">github.com/nlohmann/json</a><br>
+              <small style="color:var(--muted)">© Niels Lohmann</small></td>
+        </tr>
+        <tr><th colspan="5" style="text-align:left;padding:14px 10px 6px;font-size:0.95em;color:var(--accent,#7ab7ff)">🔌 Hersteller-Schnittstellen — nur API-Definitionen, um NVIDIA/AMD/Intel-Encoder anzusprechen (dieselben nutzte auch FFmpeg)</th></tr>
         <tr>
           <td><strong>nv-codec-headers</strong></td>
           <td>13.x</td>
@@ -1766,14 +1755,31 @@
           <td><a href="https://github.com/intel/libvpl" target="_blank" rel="noopener">github.com/intel/libvpl</a><br>
               <small style="color:var(--muted)">© Intel Corporation</small></td>
         </tr>
+        <tr><th colspan="5" style="text-align:left;padding:14px 10px 6px;font-size:0.95em;color:var(--accent,#7ab7ff)">🖥️ Windows-Bestandteile &amp; optionaler Sensor-Treiber — nicht Teil des Lumora-Pakets</th></tr>
         <tr>
-          <td><strong>nlohmann/json</strong></td>
-          <td>3.x</td>
-          <td>JSON-Verarbeitung (Einstellungen, IPC, APIs)</td>
-          <td><span class="badge badge-mit">MIT</span></td>
-          <td><a href="https://github.com/nlohmann/json" target="_blank" rel="noopener">github.com/nlohmann/json</a><br>
-              <small style="color:var(--muted)">© Niels Lohmann</small></td>
+          <td><strong>WebView2</strong><br><small style="color:var(--muted)">Microsoft Edge WebView2</small></td>
+          <td>Evergreen</td>
+          <td>Rendering der Benutzeroberfläche (Chromium-basiert, Windows-Systemkomponente — auf Windows 11 vorinstalliert)</td>
+          <td><span class="badge badge-mit">BSD (Loader)</span></td>
+          <td><a href="https://developer.microsoft.com/microsoft-edge/webview2" target="_blank" rel="noopener">developer.microsoft.com</a></td>
         </tr>
+        <tr>
+          <td><strong>PawnIO</strong></td>
+          <td>2.x</td>
+          <td>Signierter Kernel-Treiber für CPU-Sensorik (Temperatur/Verbrauch) — wird <em>nicht</em> mitgeliefert, sondern auf Wunsch von der offiziellen Quelle installiert (Signatur wird geprüft) und ist über „Apps &amp; Features" deinstallierbar</td>
+          <td><span class="badge badge-gpl">GPL v2</span></td>
+          <td><a href="https://pawnio.eu" target="_blank" rel="noopener">pawnio.eu</a><br>
+              <small style="color:var(--muted)">© namazso</small></td>
+        </tr>
+        <tr>
+          <td><strong>PawnIO-Module</strong><br><small style="color:var(--muted)">AMDFamily17, IntelMSR</small></td>
+          <td>0.2.9</td>
+          <td>Offizielle, geprüfte Sensor-Definitionen für AMD-/Intel-CPUs (laufen sandboxed im PawnIO-Treiber)</td>
+          <td><span class="badge badge-gpl">LGPL 2.1</span></td>
+          <td><a href="https://github.com/namazso/PawnIO.Modules" target="_blank" rel="noopener">github.com/namazso/PawnIO.Modules</a><br>
+              <small style="color:var(--muted)">© namazso</small></td>
+        </tr>
+        <tr><th colspan="5" style="text-align:left;padding:14px 10px 6px;font-size:0.95em;color:var(--accent,#7ab7ff)">🔧 Build-Werkzeuge — nur zum Bauen benutzt, nicht in der App enthalten</th></tr>
         <tr>
           <td><strong>NSIS</strong></td>
           <td>3.x</td>
