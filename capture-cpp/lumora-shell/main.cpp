@@ -2057,7 +2057,15 @@ static void osdDataTick() {
             HMONITOR hm2 = MonitorFromWindow(fg, MONITOR_DEFAULTTOPRIMARY); MONITORINFO mi2{ sizeof(mi2) }; GetMonitorInfoW(hm2, &mi2);
             bool full = fr.left <= mi2.rcMonitor.left && fr.top <= mi2.rcMonitor.top && fr.right >= mi2.rcMonitor.right && fr.bottom >= mi2.rcMonitor.bottom;
             wchar_t cls[64] = {}, ti[64] = {}; GetClassNameW(fg, cls, 63); GetWindowTextW(fg, ti, 63);
-            bcLogStream("osd-fg: '" + narrow(ti) + "' klasse=" + narrow(cls) + " vollbild=" + std::to_string(full) + " osdSichtbar=" + std::to_string(IsWindowVisible(g_osdHwnd) != 0));
+            // Exklusives Vollbild (D3D-Fullscreen-Exclusive) messen: DARUEBER kann ein
+            // DirectComposition-Overlay NICHT gezeichnet werden (DWM umgangen) - das
+            // unterscheidet den Fall "OSD dauerhaft weg" von blossem Z-Order-Flackern.
+            QUERY_USER_NOTIFICATION_STATE quns = (QUERY_USER_NOTIFICATION_STATE)0; SHQueryUserNotificationState(&quns);
+            LONG_PTR fgEx = GetWindowLongPtrW(fg, GWL_EXSTYLE); LONG_PTR fgSt = GetWindowLongPtrW(fg, GWL_STYLE);
+            bcLogStream("osd-fg: '" + narrow(ti) + "' klasse=" + narrow(cls) + " vollbild=" + std::to_string(full)
+                + " exklusivVollbild=" + std::to_string(quns == QUNS_RUNNING_D3D_FULL_SCREEN) + " quns=" + std::to_string((int)quns)
+                + " fgTopmost=" + std::to_string((fgEx & WS_EX_TOPMOST) != 0) + " fgPopup=" + std::to_string((fgSt & WS_POPUP) != 0)
+                + " osdSichtbar=" + std::to_string(IsWindowVisible(g_osdHwnd) != 0));
         }
     }
     PdhCollectQueryData(g_pdhQ);   // frisches Sample fuer die Delta-Zaehler
