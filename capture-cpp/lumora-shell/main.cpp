@@ -1557,7 +1557,39 @@ static bool registerHotkeys() {
 // dann Legacy-Keys ('electron.app.HDR Launcher','electron.app.Lumora','com.lumora.app')
 // loeschen + eigenen Key "Lumora" -> "<exe>" [--minimized] setzen/entfernen.
 static void applyAutostart() {
-    // bewusst leer bis Phase 4 (s.o.); --minimized-Start und Tray funktionieren schon.
+    // 1:1 aus main.js cleanupLegacyAutostart+applyAutostart. Umstiegs-scharf: entfernt die
+    // Electron-/Rebrand-Autostart-Keys (Doppelstart-Bug) und setzt EINEN eigenen Key.
+    const wchar_t* run = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    for (const wchar_t* k : { L"electron.app.HDR Launcher", L"electron.app.Lumora", L"com.lumora.app" })
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, run, k);   // verwaiste/doppelte Eintraege raeumen
+    json s = loadSettings();
+    HKEY h;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, run, 0, KEY_SET_VALUE, &h) == ERROR_SUCCESS) {
+        if (s.value("autostart", false)) {
+            wchar_t exe[MAX_PATH] = {}; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+            std::wstring cmd = std::wstring(L"\"") + exe + L"\"" + (s.value("startMinimized", true) ? L" --minimized" : L"");
+            RegSetValueExW(h, L"Lumora", 0, REG_SZ, (const BYTE*)cmd.c_str(), (DWORD)((cmd.size() + 1) * sizeof(wchar_t)));
+        } else RegDeleteValueW(h, L"Lumora");
+        RegCloseKey(h);
+    }
+}
+// lumora://-Protokoll auf die native exe registrieren (HKCU, kein Admin). Uebernimmt
+// den Handler beim Umstieg von der Electron-App. Idempotent, bei jedem Start aufgerufen.
+static void registerProtocol() {
+    wchar_t exe[MAX_PATH] = {}; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    HKEY k;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\lumora", 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) == ERROR_SUCCESS) {
+        const wchar_t* desc = L"URL:Lumora Protocol";
+        RegSetValueExW(k, nullptr, 0, REG_SZ, (const BYTE*)desc, (DWORD)((wcslen(desc) + 1) * sizeof(wchar_t)));
+        RegSetValueExW(k, L"URL Protocol", 0, REG_SZ, (const BYTE*)L"", sizeof(wchar_t));
+        RegCloseKey(k);
+    }
+    HKEY c;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\lumora\\shell\\open\\command", 0, nullptr, 0, KEY_WRITE, nullptr, &c, nullptr) == ERROR_SUCCESS) {
+        std::wstring cmd = std::wstring(L"\"") + exe + L"\" \"%1\"";
+        RegSetValueExW(c, nullptr, 0, REG_SZ, (const BYTE*)cmd.c_str(), (DWORD)((cmd.size() + 1) * sizeof(wchar_t)));
+        RegCloseKey(c);
+    }
 }
 // Deep-Link (lumora://...) verarbeiten. Die PROTOKOLL-Registrierung uebernimmt erst der
 // Installer (Phase 4) - sonst wuerde die Beta-Shell der produktiven Electron-App den
@@ -3066,6 +3098,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     if (loadSettings().value("minimizeToTray", false)) createTray();
     registerHotkeys();
     applyAutostart();
+    registerProtocol();   // lumora://-Handler auf die native exe (Umstieg von Electron)
     // Deep-Link als Startargument (lumora://...) direkt verarbeiten
     for (int i = 1; i < argc; ++i) { std::string a = narrow(argv[i]); if (a.rfind("lumora://", 0) == 0) handleDeepLink(a); }
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
