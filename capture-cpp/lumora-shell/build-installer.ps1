@@ -5,7 +5,8 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "0.2.0"   # 0.2.0: eigener Relay (mediamtx-Abloesung), native HDR, ETW-FPS, libvpl statisch
+$version = "0.2.1"   # 0.2.1: BF6-HDR-Fix, Gamepad-Fokus, GPU-Name, Bitrate-Presets 35/50
+                     # 0.2.0: eigener Relay (mediamtx-Abloesung), native HDR, ETW-FPS, libvpl statisch
 
 # 1) Shell frisch bauen
 $cmake = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
