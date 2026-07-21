@@ -2149,6 +2149,15 @@ static void createOsdWindow() {
                             std::wstring shim = SHIM_JS; size_t vp = shim.find(L"%SHELL_VERSION%");
                             if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
                             g_osdWv->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
+                            // FEHLTE: Nachrichten VOM OSD-WebView (osd-edit-*: Fertig/Theme/Ecke/
+                            // Skalierung/Felder) empfangen und an handleChannel leiten - sonst war der
+                            // Live-Edit tot ("Fertig" schloss nicht, Design liess sich nicht wechseln).
+                            g_osdWv->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* a) -> HRESULT {
+                                    LPWSTR j = nullptr;
+                                    if (SUCCEEDED(a->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_osdHwnd); CoTaskMemFree(j); }
+                                    return S_OK;
+                                }).Get(), nullptr);
                             g_osdWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
                                 [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { g_osdLoaded = true; bcLogStream("osd: osd.html geladen"); applyOsdConfig(); return S_OK; }).Get(), nullptr);
                             g_osdWv->Navigate(L"https://app.lumora/osd.html");
@@ -2600,8 +2609,8 @@ static void onWebMessage(const std::wstring& raw, HWND replyWnd) {
     long long id = msg.value("id", 0ll);
     std::string channel = msg.value("channel", "");
     json args = msg.contains("args") && msg["args"].is_array() ? msg["args"] : json::array();
-    // Antwort ans QUELL-Fenster (Haupt-UI oder Doorman) ueber dessen Marshalling-Message
-    UINT replyMsg = (replyWnd == g_doorHwnd) ? WM_SHELL_DOORMSG : WM_SHELL_REPLY;
+    // Antwort ans QUELL-Fenster (Haupt-UI / Doorman / OSD) ueber dessen Marshalling-Message
+    UINT replyMsg = (replyWnd == g_doorHwnd) ? WM_SHELL_DOORMSG : (replyWnd == g_osdHwnd) ? WM_SHELL_OSDMSG : WM_SHELL_REPLY;
     if (isSlowChannel(channel)) {
         std::thread([id, channel, args, replyWnd, replyMsg]() {
             CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // ShellLink/AppsFolder im Worker
