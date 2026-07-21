@@ -477,6 +477,8 @@
                 <option value="12000">12 Mbit – Full HD hoch</option>
                 <option value="16000">16 Mbit – 1440p</option>
                 <option value="25000">25 Mbit – 4K</option>
+                <option value="35000">35 Mbit – 4K hoch (starker Upload)</option>
+                <option value="50000">50 Mbit – Maximum (LAN / 1 Zuschauer)</option>
               </select>
             </div>
             <div class="osd-field">
@@ -841,6 +843,8 @@
             <option value="12000">12 Mbit – Full HD hoch</option>
             <option value="16000">16 Mbit – 1440p</option>
             <option value="25000">25 Mbit – 4K</option>
+            <option value="35000">35 Mbit – 4K hoch (starker Upload)</option>
+            <option value="50000">50 Mbit – Maximum (LAN / 1 Zuschauer)</option>
           </select>
         </div>
       </div>
@@ -1108,6 +1112,8 @@ const I18N_EN = {
   '12 Mbit – Full HD hoch': '12 Mbit – Full HD high',
   '16 Mbit – 1440p': '16 Mbit – 1440p',
   '25 Mbit – 4K': '25 Mbit – 4K',
+  '35 Mbit – 4K hoch (starker Upload)': '35 Mbit – 4K high (strong upload)',
+  '50 Mbit – Maximum (LAN / 1 Zuschauer)': '50 Mbit – maximum (LAN / 1 viewer)',
   'Puffer': 'Buffer',
   'Bitrate automatisch anpassen': 'Adapt bitrate automatically',
   'Automatisch anpassen': 'Adapt automatically',
@@ -3089,7 +3095,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       joinFillSources(st.streamSource)
       document.getElementById('joinQuality').value = ['auto', '1440', '1080', '720'].includes(String(st.streamQuality)) ? String(st.streamQuality) : 'auto'
       document.getElementById('joinFps').value = ['120', '60', '30'].includes(String(st.streamFps)) ? String(st.streamFps) : '60'
-      document.getElementById('joinBitrate').value = ['6000', '8000', '12000', '16000', '25000'].includes(String(st.streamUploadKbit)) ? String(st.streamUploadKbit) : '8000'
+      document.getElementById('joinBitrate').value = ['6000', '8000', '12000', '16000', '25000', '35000', '50000'].includes(String(st.streamUploadKbit)) ? String(st.streamUploadKbit) : '8000'
       // Ein evtl. bereits offener Dialog (zweiter Deep-Link) wird als Abbruch
       // aufgeloest, damit kein groupJoinClick-Aufruf ewig auf sein await wartet.
       if (_joinDialogResolve) { const r = _joinDialogResolve; _joinDialogResolve = null; r(false) }
