@@ -2155,7 +2155,7 @@ static void createOsdWindow() {
                             g_osdWv->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>(
                                 [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* a) -> HRESULT {
                                     LPWSTR j = nullptr;
-                                    if (SUCCEEDED(a->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_osdHwnd); CoTaskMemFree(j); }
+                                    if (SUCCEEDED(a->get_WebMessageAsJson(&j)) && j) { bcLogStream("osd-wv-msg: " + narrow(j)); onWebMessage(j, g_osdHwnd); CoTaskMemFree(j); }
                                     return S_OK;
                                 }).Get(), nullptr);
                             g_osdWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
@@ -2555,6 +2555,10 @@ static json handleChannel(const std::string& channel, const json& args) {
         return out;
     }
     // ---- OSD (Overlay steht; Live-Justierung schreibt Settings + zieht sie sofort nach) ----
+    // "Fertig" kommt OHNE Argument (osd.html: invoke('osd-edit-done')) -> MUSS vor den
+    // args>=1-Guard, sonst wird es verschluckt und der Live-Edit laesst sich nicht
+    // schliessen (genau der User-Befund: "Fertig hat keine Wirkung").
+    if (channel == "osd-edit-done") { setOsdEditMode(false); return true; }
     if (channel.rfind("osd-edit-", 0) == 0 && args.size() >= 1) {
         json s = loadSettings();
         if (channel == "osd-edit-corner" && args[0].is_string()) s["osdCorner"] = args[0];
@@ -2566,7 +2570,6 @@ static json handleChannel(const std::string& channel, const json& args) {
         }
         else if (channel == "osd-edit-theme" && args[0].is_string()) s["osdTheme"] = args[0];
         else if (channel == "osd-edit-fields") s["osdFields"] = args[0];
-        else if (channel == "osd-edit-done") { setOsdEditMode(false); return true; }
         writeFile(settingsPath(), s.dump(2));
         applyOsdConfig();
         return true;
