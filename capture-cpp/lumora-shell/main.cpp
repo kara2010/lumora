@@ -2300,9 +2300,61 @@ static void rebuildKbHotkeys() {
     g_kbHotkeys = std::move(list);
 }
 
+// --- Auto-Update: NUR voller Installer, NIEMALS Datei-Update (Fleet-Desaster,
+// [[file-updater-bug]]). Prueft einen JSON-Feed {version,url,notes,notesEn}; bei
+// neuerer Version -> update-available; auf Wunsch Download + Start des Installers,
+// der die vorhandene Version ueber den Umstiegs-/Parallel-Weg ersetzt.
+static const char* UPDATE_FEED_DEFAULT = "https://lumora-streaming.de/native-update.json";
+static std::atomic<bool> g_updBusy{ false };
+static std::string g_updUrl, g_updFile;
+static int cmpVer(const std::string& a, const std::string& b) {
+    int x[3] = { 0,0,0 }, y[3] = { 0,0,0 };
+    sscanf_s(a.c_str(), "%d.%d.%d", &x[0], &x[1], &x[2]); sscanf_s(b.c_str(), "%d.%d.%d", &y[0], &y[1], &y[2]);
+    for (int i = 0; i < 3; ++i) if (x[i] != y[i]) return x[i] < y[i] ? -1 : 1;
+    return 0;
+}
+static void checkForUpdates(bool manual) {
+    std::thread([manual]() {
+        std::string feed = loadSettings().value("updateFeed", std::string(UPDATE_FEED_DEFAULT));
+        luart::HttpResp r = luart::httpGet(feed);
+        if (r.status != 200) { if (manual) sendToUi("update-error", { {"message", "Update-Server nicht erreichbar"} }); return; }
+        json j = json::parse(r.body, nullptr, false);
+        std::string ver = j.is_object() ? j.value("version", "") : "";
+        if (ver.empty()) { if (manual) sendToUi("update-none", nullptr); return; }
+        if (cmpVer(shellVersion(), ver) < 0) {
+            g_updUrl = j.value("url", "");
+            sendToUi("update-available", { {"version", ver}, {"notes", j.value("notes", "")}, {"notesEn", j.value("notesEn", "")} });
+        } else if (manual) sendToUi("update-none", nullptr);
+    }).detach();
+}
+static void setupAutoUpdate() { std::thread([]() { Sleep(4000); checkForUpdates(false); }).detach(); }
+
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
 // Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
 static json handleChannel(const std::string& channel, const json& args) {
+    if (channel == "check-for-updates") { checkForUpdates(true); return true; }
+    if (channel == "download-update") {
+        if (g_updBusy.load() || g_updUrl.empty()) return false;
+        g_updBusy = true;
+        std::thread([]() {
+            luart::HttpResp r = luart::httpGet(g_updUrl, L"", 180000);   // Installer ist klein (~13 MB)
+            if (r.status != 200 || r.body.empty()) { sendToUi("update-error", { {"message", "Download fehlgeschlagen"} }); g_updBusy = false; return; }
+            wchar_t tmp[MAX_PATH] = {}; GetTempPathW(MAX_PATH, tmp);
+            g_updFile = narrow(tmp) + "Lumora-Native-Update.exe";
+            HANDLE f = CreateFileW(widen(g_updFile).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+            if (f != INVALID_HANDLE_VALUE) { DWORD w = 0; WriteFile(f, r.body.data(), (DWORD)r.body.size(), &w, nullptr); CloseHandle(f); }
+            sendToUi("update-progress", { {"percent", 100} });
+            sendToUi("update-ready", { {"version", ""} });
+            g_updBusy = false;
+        }).detach();
+        return true;
+    }
+    if (channel == "install-update") {
+        if (g_updFile.empty()) return false;
+        ShellExecuteW(nullptr, L"open", widen(g_updFile).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        g_quitting = true; PostMessageW(g_hwnd, WM_CLOSE, 0, 0);   // App beenden, Installer laeuft
+        return true;
+    }
     if (channel == "get-app-settings") return loadSettings();
     if (channel == "set-app-settings") {                      // Merge wie Object.assign in main.js
         if (args.size() >= 1 && args[0].is_object()) {
@@ -3119,6 +3171,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     registerHotkeys();
     applyAutostart();
     registerProtocol();   // lumora://-Handler auf die native exe (Umstieg von Electron)
+    setupAutoUpdate();    // 4 s nach Start still nach einer neueren Version schauen
     // Deep-Link als Startargument (lumora://...) direkt verarbeiten
     for (int i = 1; i < argc; ++i) { std::string a = narrow(argv[i]); if (a.rfind("lumora://", 0) == 0) handleDeepLink(a); }
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
