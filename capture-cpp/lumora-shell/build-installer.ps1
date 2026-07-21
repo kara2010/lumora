@@ -27,12 +27,12 @@ foreach ($f in Get-ChildItem "$root\*.png","$root\*.svg" -ErrorAction SilentlyCo
 }
 
 # Native Binaries (nur die, die die Shell wirklich startet - FFmpeg/C#-Helfer entfallen).
-# lumora-media-relay.exe ist jetzt der EIGENE C++-Relay (capture-cpp/lumora-relay);
-# mediamtx.exe wird EIN Release lang als Legacy-Fallback (useLegacyRelay) mitgeliefert,
-# mediamtx.default.yml entfaellt (der eigene Relay braucht keine YAML).
+# lumora-media-relay.exe ist der EIGENE C++-Relay (capture-cpp/lumora-relay).
+# KEIN mediamtx.exe im Paket (52 MB -> Installer waere doppelt so gross); der Fallback
+# liegt archiviert auf dem NAS (Fileshare) und greift via useLegacyRelay nur, wenn er
+# manuell in bin\ gelegt wird. libvpl.dll entfaellt (statisch gelinkt).
 New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
-# libvpl.dll entfaellt: oneVPL-Dispatcher ist jetzt statisch in lumora-capture-native gelinkt.
-foreach ($b in "lumora-capture-native.exe","lumora-media-relay.exe","mediamtx.exe","lumora-elevate.exe") {
+foreach ($b in "lumora-capture-native.exe","lumora-media-relay.exe","lumora-elevate.exe") {
   if (Test-Path "$root\bin\$b") { Copy-Item "$root\bin\$b" "$stage\bin" }
 }
 # Sensor-Module (OSD) neben die Shell (wie in der Electron-Struktur).
@@ -59,7 +59,7 @@ Write-Output "Staging: $stageSize MB"
 # Fremd-Binaries (lumora-elevate, lumora-media-relay, PresentMon, HDRCmd) sind bereits signiert.
 $signtool = "$root\_testlab\tools\signtool\signtool.exe"
 if (Test-Path $signtool) {
-  foreach ($exe in "$stage\lumora-shell.exe", "$stage\bin\lumora-capture-native.exe", "$stage\bin\lumora-media-relay.exe", "$stage\bin\mediamtx.exe", "$stage\bin\lumora-elevate.exe") {
+  foreach ($exe in "$stage\lumora-shell.exe", "$stage\bin\lumora-capture-native.exe", "$stage\bin\lumora-media-relay.exe", "$stage\bin\lumora-elevate.exe") {
     if (Test-Path $exe) {
       $st = (Get-AuthenticodeSignature $exe).Status
       if ($st -ne "Valid") {
