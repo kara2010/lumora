@@ -2925,6 +2925,12 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             else if (w == SIZE_RESTORED) sendToUi("window-unmaximized", nullptr);
         }
         return 0;
+    case WM_SETFOCUS:
+        // Fenster-Fokus IMMER ins WebView2 weiterreichen: Chromium liefert Gamepad-Input
+        // nur bei Dokument-Fokus. Deckt App-Start + spaeter eingeschaltete Controller ab
+        // (der Hotkey-Pfad macht es zusaetzlich selbst in showMainWindow).
+        if (g_controller) g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        return 0;
     case WM_SHELL_DOORSYNC:
         createDoormanWindow();
         bcSyncDoorman();
@@ -3270,6 +3276,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                             g_controller = ctrl;
                             g_controller->get_CoreWebView2(&g_webview);
                             placeWebView(hwnd);
+                            // Dokument-Fokus sofort setzen (Gamepad-API braucht ihn; das erste
+                            // WM_SETFOCUS kam ggf. schon VOR der Controller-Erzeugung)
+                            g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
                             // -webkit-app-region:drag aus styles.css aktivieren (Fenster ziehen,
                             // Doppelklick-Maximieren, System-Menue - wie Electrons frame:false).
                             { ComPtr<ICoreWebView2Settings> set0; g_webview->get_Settings(&set0);
