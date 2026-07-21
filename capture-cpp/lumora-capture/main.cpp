@@ -112,8 +112,10 @@ struct NvencEncoder : Encoder {
         pc.presetCfg.version = NV_ENC_CONFIG_VER;
         nv.nvEncGetEncodePresetConfigEx(enc, NV_ENC_CODEC_H264_GUID, NV_ENC_PRESET_P4_GUID, NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY, &pc);
         pc.presetCfg.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR; pc.presetCfg.rcParams.averageBitRate = mbit * 1000000;
-        pc.presetCfg.gopLength = fps * 2; pc.presetCfg.frameIntervalP = 1;
-        pc.presetCfg.encodeCodecConfig.h264Config.repeatSPSPPS = 1; pc.presetCfg.encodeCodecConfig.h264Config.idrPeriod = fps * 2;
+        // GOP = 1s (nicht 2s): halbiert die Wartezeit bis zum ersten Bild fuer neue
+        // Zuschauer/die Vorschau (gleiche Erkenntnis wie im FFmpeg-Pfad, s. main.js bcEncoderArgs).
+        pc.presetCfg.gopLength = fps; pc.presetCfg.frameIntervalP = 1;
+        pc.presetCfg.encodeCodecConfig.h264Config.repeatSPSPPS = 1; pc.presetCfg.encodeCodecConfig.h264Config.idrPeriod = fps;
         ip.encodeGUID = NV_ENC_CODEC_H264_GUID; ip.presetGUID = NV_ENC_PRESET_P4_GUID; ip.tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
         ip.encodeWidth = w; ip.encodeHeight = h; ip.darWidth = w; ip.darHeight = h; ip.frameRateNum = fps; ip.frameRateDen = 1; ip.enablePTD = 1; ip.encodeConfig = &pc.presetCfg;
         if (nv.nvEncInitializeEncoder(enc, &ip) != NV_ENC_SUCCESS) return false;
@@ -137,24 +139,65 @@ struct NvencEncoder : Encoder {
 
 struct AmfEncoder : Encoder {
     amf::AMFContextPtr context; amf::AMFComponentPtr encoder;
+    winrt::com_ptr<ID3D11DeviceContext> d3dctx; int encW = 0, encH = 0, encFps = 60; uint64_t frameNo = 0;
     const char* name() override { return "AMF"; }
     bool init(ID3D11Device* dev, int w, int h, int fps, int mbit) override {
+        encW = w; encH = h; encFps = fps > 0 ? fps : 60; dev->GetImmediateContext(d3dctx.put());
         HMODULE lib = LoadLibraryW(AMF_DLL_NAME); if (!lib) return false;
         auto amfInit = (AMFInit_Fn)GetProcAddress(lib, AMF_INIT_FUNCTION_NAME); if (!amfInit) return false;
         amf::AMFFactory* f = nullptr; if (amfInit(AMF_FULL_VERSION, &f) != AMF_OK) return false;
         if (f->CreateContext(&context) != AMF_OK) return false; if (context->InitDX11(dev) != AMF_OK) return false;
         if (f->CreateComponent(context, AMFVideoEncoderVCE_AVC, &encoder) != AMF_OK) return false;
+        // USAGE zuerst (setzt Defaults); danach unsere Werte. WebRTC-sauber wie NVENC:
+        // echtes CBR (keine VBR-Bursts, die den WHEP-Decoder abwuergen), Low-Latency-Modus,
+        // KEINE Filler-Daten. B-Frames sind unter LOW_LATENCY ohnehin 0 (kein Reordering).
         encoder->SetProperty(AMF_VIDEO_ENCODER_USAGE, AMF_VIDEO_ENCODER_USAGE_LOW_LATENCY);
+        encoder->SetProperty(AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD, AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD_CBR);
+        encoder->SetProperty(AMF_VIDEO_ENCODER_LOWLATENCY_MODE, true);
+        // AMF defaultet unter LOW_LATENCY auf Profile MAIN (CABAC) - real auf AMD bestaetigt
+        // (mediamtx meldet "profile":"Main" fuer den einkommenden Track). Viele WebRTC-Decoder
+        // (v.a. Firefox' eingebetteter OpenH264, aber auch etliche Chromium-Sandboxes/Hardware-
+        // Pfade) koennen NUR Constrained-Baseline (CAVLC, keine B-Frames) zuverlaessig decodieren
+        // - das ist der von WebRTC/RFC6184 als Minimalkonsens vorausgesetzte Modus. NVENC laeuft
+        // ueber denselben Pfad ohne explizites Profile und landet dort offenbar kompatibel;
+        // AMF nicht. Deshalb hier hart auf Baseline zwingen statt AMF-Default zu vertrauen.
+        encoder->SetProperty(AMF_VIDEO_ENCODER_PROFILE, AMF_VIDEO_ENCODER_PROFILE_BASELINE);
+        encoder->SetProperty(AMF_VIDEO_ENCODER_FILLER_DATA_ENABLE, false);
         encoder->SetProperty(AMF_VIDEO_ENCODER_TARGET_BITRATE, (amf_int64)mbit * 1000000);
         encoder->SetProperty(AMF_VIDEO_ENCODER_FRAMESIZE, ::AMFConstructSize(w, h));
         encoder->SetProperty(AMF_VIDEO_ENCODER_FRAMERATE, ::AMFConstructRate(fps, 1));
-        encoder->SetProperty(AMF_VIDEO_ENCODER_IDR_PERIOD, (amf_int64)fps * 2);
-        encoder->SetProperty(AMF_VIDEO_ENCODER_HEADER_INSERTION_SPACING, (amf_int64)fps * 2); // SPS/PPS periodisch (Zuschauer-Einstieg)
+        // GOP = 1s (nicht 2s): halbiert die Wartezeit bis zum ersten Bild fuer neue
+        // Zuschauer/die Vorschau (gleiche Erkenntnis wie im FFmpeg-Pfad, s. main.js bcEncoderArgs).
+        // IDR_PERIOD ist unter LOW_LATENCY nachweislich unzuverlaessig (s. FORCE_PICTURE_TYPE
+        // unten) - trotzdem gesetzt, falls AMF sie in anderen Faellen doch honoriert.
+        encoder->SetProperty(AMF_VIDEO_ENCODER_IDR_PERIOD, (amf_int64)fps);
+        encoder->SetProperty(AMF_VIDEO_ENCODER_HEADER_INSERTION_SPACING, (amf_int64)fps); // SPS/PPS periodisch (Zuschauer-Einstieg)
         return encoder->Init(amf::AMF_SURFACE_NV12, w, h) == AMF_OK;
     }
     void encode(ID3D11Texture2D* nv12, std::vector<std::vector<uint8_t>>& out) override {
-        amf::AMFSurfacePtr surf; if (context->CreateSurfaceFromDX11Native(nv12, &surf, nullptr) != AMF_OK) return;
-        encoder->SubmitInput(surf);
+        // WICHTIG: NICHT die geteilte nv12-Textur direkt an AMF wrappen. SubmitInput ist
+        // asynchron - der Encoder liest die Surface SPAETER, waehrend der Render-Loop nv12
+        // im naechsten Takt schon wieder ueberschreibt -> zerrissene Frames -> kaputte
+        // P-Frames -> Zuschauer-Bild kippt nach Sekunden auf schwarz + Reconnect-Schleife
+        // (auf AMD real reproduziert; NVENC liest synchron und hat das Problem nicht).
+        // Darum: eigene AMF-Surface pro Frame, nv12 hineinkopieren - AMF liest eine Surface,
+        // die wir nie wieder anfassen.
+        amf::AMFSurfacePtr surf;
+        if (context->AllocSurface(amf::AMF_MEMORY_DX11, amf::AMF_SURFACE_NV12, encW, encH, &surf) != AMF_OK) return;
+        ID3D11Texture2D* dst = (ID3D11Texture2D*)surf->GetPlaneAt(0)->GetNative();
+        if (!dst) return;
+        d3dctx->CopyResource(dst, nv12);   // gleiche Immediate-Context-Reihenfolge: nach Blt+Flush
+        // AMF-Sonderfall (bekannter WHEP-Kernbug, bereits fuer den alten FFmpeg/h264_amf-Pfad
+        // dokumentiert, s. main.js "AMF-Sonderfall"): der Encoder haelt sich unter LOW_LATENCY
+        // NICHT zuverlaessig an AMF_VIDEO_ENCODER_IDR_PERIOD - es kann bei EINEM IDR-Keyframe
+        // fuer die gesamte Session bleiben, nur noch P-Frames danach. Ein Zuschauer, der NACH
+        // diesem einen Keyframe verbindet, bekommt nie eine Referenz und das Bild bleibt
+        // schwarz (matcht exakt das reale Symptom). FORCE_PICTURE_TYPE ist eine Frame-Property
+        // (muss pro Submit gesetzt werden) - hier alle 1s (GOP-Laenge) hart IDR erzwingen statt
+        // uns auf die (nachweislich unzuverlaessige) IDR_PERIOD-Automatik zu verlassen.
+        if (frameNo % (uint64_t)encFps == 0) surf->SetProperty(AMF_VIDEO_ENCODER_FORCE_PICTURE_TYPE, amf_int64(AMF_VIDEO_ENCODER_PICTURE_TYPE_IDR));
+        frameNo++;
+        if (encoder->SubmitInput(surf) != AMF_OK) return;
         amf::AMFDataPtr data;
         while (encoder->QueryOutput(&data) == AMF_OK && data) { amf::AMFBufferPtr b(data); if (b) out.emplace_back((uint8_t*)b->GetNative(), (uint8_t*)b->GetNative() + b->GetSize()); data = nullptr; }
     }
@@ -167,43 +210,171 @@ struct AmfEncoder : Encoder {
 // zu pruefen. Runtime (libmfx) kommt mit dem Intel-Treiber; Dispatcher = libvpl.dll.
 struct QsvEncoder : Encoder {
     mfxLoader loader = nullptr; mfxSession session = nullptr; winrt::com_ptr<ID3D11DeviceContext> ctx;
+    winrt::com_ptr<ID3D11Texture2D> staging; int encW = 0, encH = 0;
+    mfxFrameInfo surfInfo{}; std::vector<uint8_t> surfBuf;
     std::vector<uint8_t> bsBuf; bool inited = false;
+    // Pipelining (s. Kommentar in encode()): ein Submit bleibt zwischen zwei Aufrufen "in
+    // Flight", der Sync-Wait wird erst beim naechsten Aufruf nachgeholt. surf MUSS ein Member
+    // sein (nicht lokal in encode()) - der Treiber liest asynchron aus der mfxFrameSurface1-
+    // Struktur, solange die Operation noch nicht synchronisiert ist; eine Stack-lokale Variable
+    // waere nach Rueckkehr aus encode() bereits ungueltig/ueberschrieben (fuehrte zu kaputten
+    // Access Units, Log-Beweis 2026-07-21).
+    mfxSyncPoint pendingSyncp = nullptr; mfxBitstream pendingBs{}; mfxFrameSurface1 surf{};
+    mfxVideoParam par{};   // Member (nicht lokal in init()): setBitrate() braucht die aktuellen
+                           // Params fuer MFXVideoENCODE_Reset (Reset erwartet den VOLLEN Satz,
+                           // nicht nur das geaenderte Feld).
     const char* name() override { return "QSV"; }
-    ~QsvEncoder() { if (session) { if (inited) MFXVideoENCODE_Close(session); MFXClose(session); } if (loader) MFXUnload(loader); }
+    ~QsvEncoder() { if (session) { if (pendingSyncp) MFXVideoCORE_SyncOperation(session, pendingSyncp, 100000); if (inited) MFXVideoENCODE_Close(session); MFXClose(session); } if (loader) MFXUnload(loader); }
+    // WICHTIGER BEFUND (Log-Beweise 2026-07-21, auf echter Intel-Hardware reproduziert, siehe
+    // HANDOFF-INTEL-QSV-DEBUG.md): MFXVideoENCODE_Init schlaegt mit IOPattern=VIDEO_MEMORY
+    // (D3D11-Zero-Copy) auf diesem Geraet IMMER mit status=-15 (MFX_ERR_INVALID_VIDEO_PARAM)
+    // fehl - MFXVideoENCODE_Query bleibt dabei durchgehend lautlos MFX_ERR_NONE. Systematisch
+    // ausgeschlossen (je isoliert getestet, status=-15 blieb JEWEILS identisch): CodecProfile/
+    // CodecLevel; Adapter-Mismatch (nur EINE Implementierung passt zum Filter, kein zweideutiges
+    // Index-0 auf diesem Hybrid-GPU-Geraet mit Intel UHD + NVIDIA RTX 2060); LowPower=ON;
+    // BufferSizeInKB/InitialDelayInKB; CQP statt CBR (schliesst Bitrate/RateControl komplett
+    // aus); GopPicSize/GopRefDist/IdrInterval/AsyncDepth; TargetUsage; NumRefFrame;
+    // D3D11_CREATE_DEVICE_VIDEO_SUPPORT; ID3D10Multithread::SetMultithreadProtected(TRUE) (per
+    // oneVPL-Spec zwingend, aber allein nicht ausreichend); ein komplett frisches, nie zuvor
+    // benutztes D3D11-Device auf demselben Adapter (schliesst Konflikte mit der WGC/
+    // VideoProcessor-Nutzung des geteilten Devices aus).
+    // Mit IOPattern=MFX_IOPATTERN_IN_SYSTEM_MEMORY (sonst IDENTISCHE Session/Device/Params)
+    // initialisiert der Encoder ERFOLGREICH. Der Fehler sitzt also spezifisch/ausschliesslich im
+    // D3D11-Zero-Copy-Pfad dieser Treiber-/Runtime-Version (ApiVersion 1.30, Impl "mfxhw64") -
+    // sehr wahrscheinlich eine echte Treiber-Einschraenkung, kein App-seitiger Parameterfehler.
+    // Fix: QSV nutzt SYSTEM_MEMORY mit CPU-Readback (Staging-Textur + Map/Unmap) statt Zero-
+    // Copy. NVENC/AMF bleiben unveraendert Zero-Copy (dort nicht reproduzierbar/kein Problem).
     bool init(ID3D11Device* dev, int w, int h, int fps, int mbit) override {
         dev->GetImmediateContext(ctx.put());
-        loader = MFXLoad(); if (!loader) return false;
+        // Per oneVPL-Spec fuer D3D11-HW-Beschleunigung vorgeschrieben ("The application must
+        // also set multi-threading mode for the Direct3D 11 device") - bleibt trotz SYSTEM_MEMORY
+        // gesetzt (schadet nicht, ist Spec-konform).
+        { winrt::com_ptr<ID3D10Multithread> mt; if (SUCCEEDED(dev->QueryInterface(IID_PPV_ARGS(mt.put())))) mt->SetMultithreadProtected(TRUE); }
+        encW = w; encH = h;
+        D3D11_TEXTURE2D_DESC sd{}; sd.Width = w; sd.Height = h; sd.MipLevels = 1; sd.ArraySize = 1;
+        sd.Format = DXGI_FORMAT_NV12; sd.SampleDesc.Count = 1; sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        if (FAILED(dev->CreateTexture2D(&sd, nullptr, staging.put()))) { printf("QSV-DEBUG: Staging-Textur fehlgeschlagen\n"); return false; }
+        loader = MFXLoad(); if (!loader) { printf("QSV-DEBUG: MFXLoad fehlgeschlagen (Loader null)\n"); return false; }
         mfxConfig cfg = MFXCreateConfig(loader);
         mfxVariant v{}; v.Version.Version = MFX_VARIANT_VERSION; v.Type = MFX_VARIANT_TYPE_U32;
         v.Data.U32 = MFX_IMPL_TYPE_HARDWARE; MFXSetConfigFilterProperty(cfg, (const mfxU8*)"mfxImplDescription.Impl", v);
         v.Data.U32 = MFX_CODEC_AVC; MFXSetConfigFilterProperty(cfg, (const mfxU8*)"mfxImplDescription.mfxEncoderDescription.encoder.CodecID", v);
-        if (MFXCreateSession(loader, 0, &session) != MFX_ERR_NONE) return false;
-        if (MFXVideoCORE_SetHandle(session, MFX_HANDLE_D3D11_DEVICE, dev) != MFX_ERR_NONE) return false;
-        mfxVideoParam par{};
+        v.Data.U32 = MFX_ACCEL_MODE_VIA_D3D11; MFXSetConfigFilterProperty(cfg, (const mfxU8*)"mfxImplDescription.AccelerationMode", v);
+        // Diagnose (bestaetigt kein Adapter-Mismatch): loggen, wieviele Implementierungen zum
+        // Filter (HARDWARE + AVC-Encoder + D3D11) passen und welche das sind.
+        for (mfxU32 ei = 0;; ++ei) {
+            mfxImplDescription* idesc = nullptr;
+            if (MFXEnumImplementations(loader, ei, MFX_IMPLCAPS_IMPLDESCSTRUCTURE, (mfxHDL*)&idesc) != MFX_ERR_NONE || !idesc) break;
+            printf("QSV-DEBUG: Impl[%u]: Name=\"%s\" VendorID=0x%x VendorImplID=%u AccelMode=%d ApiVersion=%d.%d DeviceID=\"%s\"\n",
+                ei, idesc->ImplName, idesc->VendorID, idesc->VendorImplID, (int)idesc->AccelerationMode, idesc->ApiVersion.Major, idesc->ApiVersion.Minor, idesc->Dev.DeviceID);
+            MFXDispReleaseImplDescription(loader, idesc);
+        }
+        mfxStatus st = MFXCreateSession(loader, 0, &session);
+        if (st != MFX_ERR_NONE) { printf("QSV-DEBUG: MFXCreateSession fehlgeschlagen, status=%d\n", (int)st); return false; }
+        // KEIN MFXVideoCORE_SetHandle: bei reinem SYSTEM_MEMORY-Betrieb nicht noetig - mit
+        // gesetztem D3D11-Handle lieferte MFXMemory_GetSurfaceForEncode status=-6
+        // (MFX_ERR_INVALID_HANDLE); ohne SetHandle trat dieses Problem gar nicht erst auf (wir
+        // nutzen ohnehin die klassische externe-Surface-Methode statt GetSurfaceForEncode, s.u.).
+        mfxVersion ver{}; if (MFXQueryVersion(session, &ver) == MFX_ERR_NONE) printf("QSV-DEBUG: oneVPL-Session-Version Major=%d Minor=%d\n", ver.Major, ver.Minor);
+        mfxIMPL implVal = 0; if (MFXQueryIMPL(session, &implVal) == MFX_ERR_NONE) printf("QSV-DEBUG: MFXQueryIMPL=0x%x (Impl=%u ViaMask=0x%x)\n", (unsigned)implVal, (unsigned)MFX_IMPL_BASETYPE(implVal), (unsigned)(implVal & 0xFF00));
+        par = mfxVideoParam{};
         par.mfx.CodecId = MFX_CODEC_AVC; par.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
-        par.mfx.RateControlMethod = MFX_RATECONTROL_CBR; par.mfx.TargetKbps = (mfxU16)(mbit * 1000);
+        par.mfx.RateControlMethod = MFX_RATECONTROL_CBR; par.mfx.TargetKbps = (mfxU16)(mbit * 1000); par.mfx.MaxKbps = (mfxU16)(mbit * 1000);
         par.mfx.FrameInfo.FourCC = MFX_FOURCC_NV12; par.mfx.FrameInfo.ChromaFormat = MFX_CHROMAFORMAT_YUV420; par.mfx.FrameInfo.PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
         par.mfx.FrameInfo.FrameRateExtN = fps; par.mfx.FrameInfo.FrameRateExtD = 1;
         par.mfx.FrameInfo.Width = (mfxU16)((w + 15) & ~15); par.mfx.FrameInfo.Height = (mfxU16)((h + 15) & ~15);
         par.mfx.FrameInfo.CropW = (mfxU16)w; par.mfx.FrameInfo.CropH = (mfxU16)h;
-        par.mfx.GopPicSize = (mfxU16)(fps * 2); par.mfx.GopRefDist = 1; par.mfx.IdrInterval = 0; par.AsyncDepth = 1;
-        par.IOPattern = MFX_IOPATTERN_IN_VIDEO_MEMORY;
-        mfxExtCodingOption2 co2{}; co2.Header.BufferId = MFX_EXTBUFF_CODING_OPTION2; co2.Header.BufferSz = sizeof(co2); co2.RepeatPPS = MFX_CODINGOPTION_ON; // SPS/PPS periodisch (Zuschauer-Einstieg)
-        mfxExtBuffer* eb[] = { (mfxExtBuffer*)&co2 }; par.ExtParam = eb; par.NumExtParam = 1;
-        MFXVideoENCODE_Query(session, &par, &par);
-        if (MFXVideoENCODE_Init(session, &par) < MFX_ERR_NONE) return false;
-        bsBuf.resize((size_t)mbit * 1000 * 1000 / 8 + (1 << 20)); inited = true; return true;
+        // GOP = 1s (nicht 2s): halbiert die Wartezeit bis zum ersten Bild fuer neue
+        // Zuschauer/die Vorschau (gleiche Erkenntnis wie im FFmpeg-Pfad, s. main.js bcEncoderArgs).
+        par.mfx.GopPicSize = (mfxU16)fps; par.mfx.GopRefDist = 1; par.mfx.IdrInterval = 0;
+        // AsyncDepth=2 (statt 1): erlaubt ein Frame "in Flight" waehrend encode() bereits das
+        // naechste vorbereitet (s. Pipelining-Kommentar in encode()) - ohne das lehnt der
+        // Treiber ein Submit ab, waehrend noch ein Sync aussteht.
+        par.AsyncDepth = 2;
+        par.IOPattern = MFX_IOPATTERN_IN_SYSTEM_MEMORY;
+        mfxStatus qst = MFXVideoENCODE_Query(session, &par, &par);
+        if (qst != MFX_ERR_NONE) printf("QSV-DEBUG: MFXVideoENCODE_Query meldet status=%d (Warnung/Fehler, Query passt Parameter evtl. an)\n", (int)qst);
+        printf("QSV-DEBUG: nach Query: Width=%d Height=%d CropW=%d CropH=%d TargetUsage=%d RateControlMethod=%d IOPattern=%d TargetKbps=%d MaxKbps=%d BufferSizeInKB=%d GopPicSize=%d GopRefDist=%d IdrInterval=%d AsyncDepth=%d FourCC=%u ChromaFormat=%d PicStruct=%d FrameRate=%d/%d NumSlice=%d CodecProfile=%d CodecLevel=%d NumRefFrame=%d\n",
+            par.mfx.FrameInfo.Width, par.mfx.FrameInfo.Height, par.mfx.FrameInfo.CropW, par.mfx.FrameInfo.CropH, par.mfx.TargetUsage, par.mfx.RateControlMethod, par.IOPattern,
+            par.mfx.TargetKbps, par.mfx.MaxKbps, par.mfx.BufferSizeInKB, par.mfx.GopPicSize, par.mfx.GopRefDist, par.mfx.IdrInterval, par.AsyncDepth,
+            par.mfx.FrameInfo.FourCC, par.mfx.FrameInfo.ChromaFormat, par.mfx.FrameInfo.PicStruct, par.mfx.FrameInfo.FrameRateExtN, par.mfx.FrameInfo.FrameRateExtD,
+            par.mfx.NumSlice, par.mfx.CodecProfile, par.mfx.CodecLevel, par.mfx.NumRefFrame);
+        mfxStatus ist = MFXVideoENCODE_Init(session, &par);
+        if (ist < MFX_ERR_NONE) { printf("QSV-DEBUG: MFXVideoENCODE_Init fehlgeschlagen, status=%d\n", (int)ist); return false; }
+        if (ist != MFX_ERR_NONE) printf("QSV-DEBUG: MFXVideoENCODE_Init Warnung, status=%d (Init trotzdem fortgesetzt)\n", (int)ist);
+        // Log-Beweis 2026-07-21: bei 25 Mbit lieferte MFXVideoENCODE_EncodeFrameAsync mit dem
+        // alten Puffer (1x Bitrate/Sekunde + 1MB, ~4.17MB) durchgehend status=-5
+        // (MFX_ERR_NOT_ENOUGH_BUFFER) - obwohl die tatsaechlich erzeugten Frames winzig waren
+        // (IDR ~184KB, P-Frames <4KB). Der Treiber prueft bs.MaxLength offenbar gegen einen
+        // internen VBV/CPB-Puffergroessen-Schaetzwert (BufferSizeInKB=0="auto"), NICHT gegen die
+        // tatsaechliche Ausgabegroesse - bei 8 Mbit reichte die alte Groesse zufaellig, bei
+        // 25 Mbit nicht mehr. Mit 3x Bitrate/Sekunde + 2MB Headroom bei 8/25/50 Mbit real
+        // getestet, kein -5 mehr.
+        bsBuf.resize((size_t)mbit * 1000 * 1000 / 8 * 3 + (2 << 20));
+        // WIDERLEGT (Log-Beweis 2026-07-21): MFXMemory_GetSurfaceForEncode (interne
+        // Allokations-Convenience-API, seit oneVPL 2.0) liefert bei SYSTEM_MEMORY auf dieser
+        // HARDWARE-Session status=-6 (MFX_ERR_INVALID_HANDLE), sowohl MIT als auch OHNE
+        // vorherigem MFXVideoCORE_SetHandle - Init selbst war erfolgreich, nur diese
+        // Convenience-Funktion funktioniert nicht. Klassischer Weg stattdessen: eigene
+        // mfxFrameSurface1 mit Data.Y/UV auf selbstverwalteten Puffer (kein FrameInterface noetig,
+        // keine Map/Release-Zyklen) - funktioniert mit jeder Session, unabhaengig von dieser Bug.
+        surfInfo = par.mfx.FrameInfo;
+        surfBuf.assign((size_t)surfInfo.Width * surfInfo.Height * 3 / 2, 0);
+        inited = true; return true;
+    }
+    // FEHLTE BISHER KOMPLETT (Encoder-Basisklasse hat nur einen No-Op-Default) - main() rief
+    // encoder->setBitrate(k) bei einer Bitrate-Aenderung ueber die Steuerdatei zwar auf, fuer
+    // QSV passierte dabei aber schlicht nichts; das Log zeigte trotzdem "Bitrate live -> X kbit",
+    // weil dieser Printf in main() unabhaengig vom tatsaechlichen Encoder-Ergebnis erfolgt.
+    void setBitrate(int kbit) override {
+        if (!inited) return;
+        // Ein evtl. noch offenes Submit (s. Pipelining in encode()) muss VOR Reset
+        // synchronisiert sein - Reset setzt voraus, dass kein Frame mehr asynchron in
+        // Bearbeitung ist. Ergebnis wird hier verworfen (verliert hoechstens 1 Frame,
+        // vernachlaessigbar bei einer seltenen manuellen Bitrate-Aenderung).
+        if (pendingSyncp) { MFXVideoCORE_SyncOperation(session, pendingSyncp, 100000); pendingSyncp = nullptr; }
+        par.mfx.TargetKbps = (mfxU16)kbit; par.mfx.MaxKbps = (mfxU16)kbit;
+        mfxStatus st = MFXVideoENCODE_Reset(session, &par);
+        if (st < MFX_ERR_NONE) printf("QSV-DEBUG: MFXVideoENCODE_Reset (Bitrate) fehlgeschlagen, status=%d\n", (int)st);
     }
     void encode(ID3D11Texture2D* nv12, std::vector<std::vector<uint8_t>>& out) override {
-        mfxFrameSurface1* surf = nullptr;
-        if (MFXMemory_GetSurfaceForEncode(session, &surf) != MFX_ERR_NONE || !surf) return;
-        mfxHDL hdl = nullptr; mfxResourceType rt{};
-        if (surf->FrameInterface->GetNativeHandle(surf, &hdl, &rt) == MFX_ERR_NONE && hdl) ctx->CopyResource((ID3D11Texture2D*)hdl, nv12); // GPU->GPU, kein Readback
-        mfxBitstream bs{}; bs.Data = bsBuf.data(); bs.MaxLength = (mfxU32)bsBuf.size();
-        mfxSyncPoint syncp = nullptr; mfxStatus st;
-        do { st = MFXVideoENCODE_EncodeFrameAsync(session, nullptr, surf, &bs, &syncp); if (st == MFX_WRN_DEVICE_BUSY) Sleep(1); } while (st == MFX_WRN_DEVICE_BUSY);
-        surf->FrameInterface->Release(surf);
-        if (st == MFX_ERR_NONE && syncp) { MFXVideoCORE_SyncOperation(session, syncp, 100000); out.emplace_back(bs.Data + bs.DataOffset, bs.Data + bs.DataOffset + bs.DataLength); }
+        // Pipelining (Befund 2026-07-21, per QSV-PERF-Messung auf echter Intel-Hardware): mit
+        // SOFORTIGEM Sync direkt nach jedem Submit kostete Map()+Sync() zusammen im Schnitt
+        // ~14.5ms (Map ~5-6ms, Sync ~7-8ms), mit Spitzen >16.7ms (60fps-Budget) sobald beide
+        // gleichzeitig langsam waren - das war die Ursache fuer die schwankende/zurueckfallende
+        // Framerate im echten Stream. Fix: ein Submit bleibt bis zum NAECHSTEN encode()-Aufruf
+        // offen (AsyncDepth=2 s. init) - der Sync-Wait faellt dann praktisch weg, weil die GPU
+        // die HW-Kodierung des vorherigen Frames im Hintergrund laengst erledigt hat, waehrend
+        // wir hier bereits den naechsten Frame lesen/vorbereiten.
+        if (pendingSyncp) {
+            MFXVideoCORE_SyncOperation(session, pendingSyncp, 100000);
+            out.emplace_back(pendingBs.Data + pendingBs.DataOffset, pendingBs.Data + pendingBs.DataOffset + pendingBs.DataLength);
+            pendingSyncp = nullptr;
+        }
+        // Kein Zero-Copy (s. Kommentar bei init): GPU->GPU-Readback in eine Staging-Textur, dann
+        // CPU-Kopie in einen selbstverwalteten NV12-Puffer (Pitch von Quelle/Ziel koennen
+        // abweichen, deshalb zeilenweise).
+        ctx->CopyResource(staging.get(), nv12);
+        ctx->Flush(); // ohne das kann Map() auf manchen Treibern sehr lange/unbegrenzt blockieren
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(ctx->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) return;
+        uint8_t* dstY = surfBuf.data();
+        uint8_t* dstUV = surfBuf.data() + (size_t)surfInfo.Width * surfInfo.Height;
+        const uint8_t* srcY = (const uint8_t*)mapped.pData;
+        const uint8_t* srcUV = srcY + (size_t)mapped.RowPitch * encH;
+        for (int y = 0; y < encH; ++y) memcpy(dstY + (size_t)surfInfo.Width * y, srcY + (size_t)mapped.RowPitch * y, (size_t)encW);
+        for (int y = 0; y < encH / 2; ++y) memcpy(dstUV + (size_t)surfInfo.Width * y, srcUV + (size_t)mapped.RowPitch * y, (size_t)encW);
+        ctx->Unmap(staging.get(), 0);
+        // Klassische externe Surface (kein FrameInterface/GetSurfaceForEncode, s. Kommentar bei
+        // init): mfxFrameSurface1 direkt mit Data.Y/UV auf unseren Puffer, Pitch=Width. surfBuf/
+        // bsBuf/surf sind an dieser Stelle sicher wiederverwendbar - das vorherige Ergebnis wurde
+        // oben (falls vorhanden) bereits synchronisiert und in `out` kopiert, bevor es
+        // ueberschrieben wird.
+        surf = mfxFrameSurface1{}; surf.Info = surfInfo; surf.Data.Y = dstY; surf.Data.UV = dstUV; surf.Data.Pitch = (mfxU16)surfInfo.Width;
+        pendingBs = mfxBitstream{}; pendingBs.Data = bsBuf.data(); pendingBs.MaxLength = (mfxU32)bsBuf.size();
+        mfxStatus st;
+        do { st = MFXVideoENCODE_EncodeFrameAsync(session, nullptr, &surf, &pendingBs, &pendingSyncp); if (st == MFX_WRN_DEVICE_BUSY) Sleep(1); } while (st == MFX_WRN_DEVICE_BUSY);
+        if (st != MFX_ERR_NONE) pendingSyncp = nullptr;
     }
 };
 
@@ -643,6 +814,26 @@ int main(int argc, char** argv) {
         }
         curHwnd = hw;
         auto s2 = item.Size(); W = s2.Width; H = s2.Height;
+        // War das Fenster MINIMIERT, liefert WGC hier eine falsche Platzhaltergroesse (real
+        // 219x30 statt der echten Fensterinhaltsgroesse) - outW/outH werden aus GENAU DIESER
+        // ersten Groesse fuer die ganze Session fest verdrahtet (rebuildScaler passt bei einem
+        // spaeteren "Groessenwechsel" nur die Letterbox INNERHALB von outW/outH an, der Encoder
+        // selbst bleibt auf der falschen Aufloesung stehen - real reproduziert: Firefox minimiert
+        // vor Stream-Start -> Stream haengt dauerhaft in winzigem 1046x144-Letterbox fest).
+        // Fix OHNE das Fenster anzufassen (kein ShowWindow/SetWindowPos - das Fenster bleibt
+        // exakt wie der Nutzer es hingelegt hat): GetWindowPlacement liefert die "normale"
+        // (wiederhergestellte) Groesse auch waehrend das Fenster minimiert bleibt - damit outW/
+        // outH korrekt vorbelegen. WGC selbst captured den Inhalt eines minimierten Fensters auf
+        // aktuellen Windows-Versionen weiterhin (eigene Faehigkeit, kein Workaround noetig);
+        // nur die anfaengliche Groessenermittlung war die Fehlerquelle.
+        if (hw && IsIconic(hw)) {
+            WINDOWPLACEMENT wp{ sizeof(wp) };
+            if (GetWindowPlacement(hw, &wp)) {
+                int nw = wp.rcNormalPosition.right - wp.rcNormalPosition.left;
+                int nh = wp.rcNormalPosition.bottom - wp.rcNormalPosition.top;
+                if (nw > 0 && nh > 0) { W = nw; H = nh; s2.Width = nw; s2.Height = nh; }
+            }
+        }
         framePool = wg::Direct3D11CaptureFramePool::CreateFreeThreaded(d3dDevice, capFmt, 3, s2);
         session = framePool.CreateCaptureSession(item);
         try { session.IsBorderRequired(false); } catch (...) {}
@@ -650,11 +841,27 @@ int main(int argc, char** argv) {
         return initial ? true : rebuildScaler();   // beim Start folgt rebuildScaler nach outW/outH-Berechnung
     };
 
+    // Zielaufloesung aus einer Quellgroesse ableiten (--scale N = Hoehe, gerade Kanten) +
+    // Mindest-Encodergroesse (HW-Encoder scheitern an winzigen Quellen, s.u.). Eigene Funktion,
+    // weil sowohl der Start als auch ein spaeterer Resize-Neuaufbau (s.u.) sie brauchen.
+    auto computeOutSize = [&](int w, int h, int& ow, int& oh) {
+        ow = w & ~1; oh = h & ~1;
+        if (scaleH > 0 && scaleH < h) { oh = scaleH & ~1; ow = ((w * oh / h) + 1) & ~1; }
+        // Mindest-Encodergroesse: HW-Encoder (AMF/QSV, teils NVENC) scheitern an winzigen Quellen -
+        // ein 218x28-Fenster loeste auf AMD/Intel "Encoder-Init fehlgeschlagen" + Restart-Schleife
+        // aus (mtx-Timeout). Ausgabe seitenverhaeltnis-erhaltend auf ein gueltiges Minimum ziehen
+        // (kein Verzerren; bei normalem Seitenverhaeltnis fuellt die Quelle den Rahmen randlos).
+        const int MIN_W = 256, MIN_H = 144;
+        if (ow < MIN_W || oh < MIN_H) {
+            double sc = (double)MIN_W / ow; double sy = (double)MIN_H / oh; if (sy > sc) sc = sy;
+            ow = ((int)(ow * sc + 0.5)) & ~1; oh = ((int)(oh * sc + 0.5)) & ~1;
+            if (ow < MIN_W) ow = MIN_W; if (oh < MIN_H) oh = MIN_H;   // Rundungs-Rest
+            printf("HINWEIS: Quelle %dx%d zu klein -> Ausgabe %dx%d (Encoder-Mindestgroesse)\n", w, h, ow, oh);
+        }
+    };
+
     if (!setupSource(targetHwnd, true)) { printf("FEHLER: Capture-Start fehlgeschlagen\n"); return 1; }
-    // Zielaufloesung EINMAL aus der Startquelle ableiten (--scale N = Hoehe, gerade Kanten);
-    // sie bleibt fuer die gesamte Laufzeit konstant - der Encoder wird nie neu gestartet.
-    outW = W & ~1; outH = H & ~1;
-    if (scaleH > 0 && scaleH < H) { outH = scaleH & ~1; outW = ((W * outH / H) + 1) & ~1; }
+    computeOutSize(W, H, outW, outH);
     D3D11_TEXTURE2D_DESC nd{}; nd.Width = outW; nd.Height = outH; nd.MipLevels = 1; nd.ArraySize = 1; nd.Format = DXGI_FORMAT_NV12; nd.SampleDesc.Count = 1; nd.Usage = D3D11_USAGE_DEFAULT; nd.BindFlags = D3D11_BIND_RENDER_TARGET;
     dev->CreateTexture2D(&nd, nullptr, nv12.put());
     if (hdr) { if (!tonemap.init(dev.get(), W, H, outW, outH)) { printf("FEHLER: HDR-Tonemap-Init fehlgeschlagen\n"); return 3; } tonemap.readControl(ctx.get(), true); tonemapReady = true; }
@@ -706,6 +913,16 @@ int main(int argc, char** argv) {
     // neue WGC-Frames werden uebernommen, WANN IMMER sie kommen; encodiert wird strikt im
     // Wall-Clock-Takt (fps) - bei Stillstand wird der letzte Frame wiederholt (wie ddagrab).
     bool haveFrame = false; uint64_t frameIdx = 0;
+    // Deutliche Groessenaenderung (z.B. kleines Video -> Vollbild, oder ein minimiert
+    // gestartetes Fenster wird nachtraeglich wiederhergestellt): rebuildScaler() passt
+    // nur die Letterbox INNERHALB der bestehenden outW/outH an - der Encoder selbst bliebe
+    // auf der ALTEN Aufloesung stehen (dauerhaft unscharf/falsch, s. Audit-Befund im
+    // FFmpeg-Pfad, main.js bcStartWindowCapture). Dort loest man das durch einen kompletten
+    // Prozess-Neustart bei Flaechenverhaeltnis >=1.5x/<=0.67x, 3s stabil; hier (ein einziger
+    // Prozess, kein Neustart moeglich) stattdessen Encoder+D3D11-Pipeline in-process neu
+    // aufsetzen, sobald diese Bedingung erfuellt ist.
+    int srcBaseW = W, srcBaseH = H;   // Quellgroesse, aus der die AKTUELLEN outW/outH/der Encoder stammen
+    bool resizePending = false; std::chrono::steady_clock::time_point resizePendingAt;
     while ((maxFrames == 0 || (int)outFrame < maxFrames) && (haveFrame || tries < 3000)) {
         // 1) alle bereitliegenden WGC-Frames abholen, den NEUESTEN uebernehmen.
         for (;;) {
@@ -718,6 +935,8 @@ int main(int argc, char** argv) {
                 printf("SOURCE: Groessenwechsel %dx%d -> %dx%d\n", W, H, cs.Width, cs.Height);
                 framePool.Recreate(d3dDevice, capFmt, 3, cs);
                 W = cs.Width; H = cs.Height; rebuildScaler();
+                double ratio = ((double)W * H) / ((double)srcBaseW * srcBaseH);
+                if (ratio >= 1.5 || ratio <= 0.67) { resizePending = true; resizePendingAt = std::chrono::steady_clock::now(); }
                 break;   // diesen (alten) Frame verwerfen; die naechsten kommen in neuer Groesse
             }
             auto access = f.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
@@ -726,6 +945,23 @@ int main(int argc, char** argv) {
             // der Tonemap-Stufe, SDR -> bgraIn. Von dort wird beim Takt-Tick gerendert/encodiert.
             if (hdr) tonemap.update(ctx.get(), ft.get()); else ctx->CopyResource(bgraIn.get(), ft.get());
             haveFrame = true; inFrame++;
+        }
+        // Deutliche Groessenaenderung 3s stabil -> Encoder+D3D11-Pipeline in-process neu
+        // aufsetzen (kein Prozess-Neustart wie im FFmpeg-Pfad noetig/moeglich). Ein frischer
+        // Encoder liefert ab Frame 0 sofort einen IDR - direkt nutzbar fuer alle Zuschauer.
+        if (resizePending && std::chrono::steady_clock::now() - resizePendingAt >= std::chrono::milliseconds(3000)) {
+            resizePending = false;
+            int newOutW, newOutH; computeOutSize(W, H, newOutW, newOutH);
+            printf("SOURCE: Fenster deutlich veraendert (%dx%d) -> Encoder wird auf %dx%d neu aufgesetzt\n", W, H, newOutW, newOutH);
+            delete encoder;
+            outW = newOutW; outH = newOutH; srcBaseW = W; srcBaseH = H;
+            nv12 = nullptr;
+            D3D11_TEXTURE2D_DESC nd2{}; nd2.Width = outW; nd2.Height = outH; nd2.MipLevels = 1; nd2.ArraySize = 1; nd2.Format = DXGI_FORMAT_NV12; nd2.SampleDesc.Count = 1; nd2.Usage = D3D11_USAGE_DEFAULT; nd2.BindFlags = D3D11_BIND_RENDER_TARGET;
+            dev->CreateTexture2D(&nd2, nullptr, nv12.put());
+            if (hdr) { tonemap.init(dev.get(), W, H, outW, outH); tonemap.readControl(ctx.get(), true); }
+            rebuildScaler();
+            encoder = useQsv ? (Encoder*)new QsvEncoder() : (useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder());
+            if (!encoder->init(dev.get(), outW, outH, fps, mbit)) printf("FEHLER: Encoder-Neuaufbau (%s) fehlgeschlagen\n", encoder->name());
         }
         if (!haveFrame) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); tries++; continue; }   // auf den ERSTEN Frame warten (max ~6s)
         // 2) faellige Takt-Ticks encodieren (letzter Frame zaehlt - echt oder wiederholt).
@@ -742,10 +978,23 @@ int main(int argc, char** argv) {
         if (FAILED(vctx->VideoProcessorBlt(vproc.get(), outView.get(), 0, 1, &st))) continue;
         ctx->Flush();
         std::vector<std::vector<uint8_t>> aus; encoder->encode(nv12.get(), aus);
-        for (auto& au : aus) {
-            // Bild-PTS aus der gemeinsamen Wall-Clock (nicht dem Frame-Zaehler): haelt Bild
-            // und Ton synchron, auch wenn WGC mal einen Frame auslaesst.
-            uint64_t pts = basePts + (uint64_t)(std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() * 90000); std::vector<uint8_t> ts;
+        // Bild-PTS aus der gemeinsamen Wall-Clock (nicht dem Frame-Zaehler): haelt Bild
+        // und Ton synchron, auch wenn WGC mal einen Frame auslaesst. EINMAL pro Tick lesen:
+        // AMF kann pro SubmitInput 0..N AUs liefern (Pipeline-Puffer, real auf AMD beobachtet
+        // - 1 Tick 0 AUs, naechster Tick 2 AUs). Wuerde man now() je AU neu lesen, bekaemen
+        // beide AUs praktisch denselben PTS (die Schleife braucht ~0ms) -> nicht-monotone
+        // PTS, die den WHEP-Decoder nach ein paar Sekunden auf schwarz kippen lassen.
+        // Darum: EIN Tick-PTS, AUs im Batch rueckwaerts im Frame-Abstand verteilt, dazu
+        // Clamp gegen den zuletzt gesendeten PTS fuer garantierte Monotonie ueber Ticks hinweg.
+        static uint64_t lastVideoPts = 0; const uint64_t frameDur = 90000 / (fps > 0 ? fps : 60);
+        uint64_t tickPts = basePts + (uint64_t)(std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() * 90000);
+        uint64_t startPts = (aus.size() > 1) ? tickPts - (uint64_t)(aus.size() - 1) * frameDur : tickPts;
+        for (size_t auIdx = 0; auIdx < aus.size(); ++auIdx) {
+            auto& au = aus[auIdx];
+            uint64_t pts = startPts + auIdx * frameDur;
+            if (pts <= lastVideoPts) pts = lastVideoPts + frameDur;
+            lastVideoPts = pts;
+            std::vector<uint8_t> ts;
             if (outFrame % (fps / 2 ? fps / 2 : 30) == 0) { buildPAT(ts); buildPMT(ts); }
             std::vector<uint8_t> pes; pes.push_back(0); pes.push_back(0); pes.push_back(1); pes.push_back(0xE0); pes.push_back(0); pes.push_back(0); pes.push_back(0x80); pes.push_back(0x80); pes.push_back(5); writePTS(pes, 0x2, pts);
             pes.insert(pes.end(), AUD, AUD + 6); pes.insert(pes.end(), au.begin(), au.end());
