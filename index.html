@@ -4288,6 +4288,20 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       showUpdateToast()
     })
 
+    // Komponenten-Update hat die Shell getauscht - Neustart noetig, damit die neue Version laeuft.
+    ipcRenderer.on('update-restart', (e, info) => {
+      upTitle.textContent = window.tr('Update installiert')
+      upText.textContent = 'Lumora ' + info.version + window.tr(' ist bereit – zum Aktivieren neu starten.')
+      upTrack.style.display = 'none'
+      setUpdateActions([
+        { label: window.tr('Jetzt neu starten'), primary: true, onClick: async () => {
+            const r = await ipcRenderer.invoke('restart-app')
+            if (r && r.streaming) streamToast(window.tr('Neustart nach dem Stream – ein Stream läuft gerade.'))
+          } },
+        { label: window.tr('Später'), primary: false, onClick: dismissUpdateToast },
+      ])
+      showUpdateToast()
+    })
     // Nur bei manueller Suche (aus den Einstellungen) sichtbar:
     ipcRenderer.on('update-none', () => {
       if (typeof updateCheckBtn !== 'undefined' && updateCheckBtn) {
