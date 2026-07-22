@@ -139,7 +139,7 @@ inline Profile parseProfile(const json& p) {
         m.target = tgtFromStr(a.value("target", "")); m.deadzone = a.value("deadzone", 0.0);
         m.curve = a.value("curve", 1.0); m.invert = a.value("invert", false);
         if (a.contains("min") && a["min"].is_number() && a.contains("max") && a["max"].is_number()) {
-            m.mn = a["min"].get<double>(); m.mx = a["max"].get<double>(); m.hasRange = (m.mx > m.mn);
+            m.mn = a["min"].get<double>(); m.mx = a["max"].get<double>(); m.hasRange = (m.mx != m.mn);   // mn>mx erlaubt (invertierter Bereich, z.B. Bremse einer kombinierten Pedalachse)
         }
         if (m.target != Tgt::NONE && m.usage) r.axes.push_back(m);
     }
@@ -330,7 +330,9 @@ inline void captureCheck() {
         if ((key & 0xFFFF) == 0x39) continue;          // Hat zaehlt als DPad, nicht als Achse zuweisen
         if (fabs(v - base) < 0.30) continue;           // 30 % Weg = bewusste Bewegung
         g_capture = false;
-        g_push("input-bridge-captured", { {"type", "axis"}, {"usagePage", (key >> 16) & 0xFFFF}, {"usage", key & 0xFFFF} });
+        // base = Ruhelage (0..1), val = Auslenkung -> UI kann Trigger auto-kalibrieren
+        // (Deadzone/Invert so, dass die Ruhelage = 0 ist, egal wo die Achse ruht).
+        g_push("input-bridge-captured", { {"type", "axis"}, {"usagePage", (key >> 16) & 0xFFFF}, {"usage", key & 0xFFFF}, {"base", base}, {"val", v} });
         return;
     }
 }
