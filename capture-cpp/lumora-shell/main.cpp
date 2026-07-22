@@ -1638,13 +1638,39 @@ static bool xiButtonDown(const XINPUT_GAMEPAD& g, int idx) {
     }
     return false;
 }
-// Kombi auf irgendeinem der 4 XInput-Slots vollstaendig gedrueckt?
+// Zustand aller 4 Plaetze, EINMAL pro Tick geholt.
+// Wichtig: XInputGetState auf einen LEEREN Platz stoesst jedes Mal eine komplette
+// Geraete-Neuermittlung an - Microsoft rat ausdruecklich davon ab, das haeufig zu tun.
+// Vorher wurden alle 4 Plaetze 25x/s abgefragt (~100 Durchlaeufe/s am HID-Stack), was
+// per Bluetooth angebundene Controller aus der Verbindung warf: sie fielen nach Sekunden
+// weg und kamen erst nach dem Beenden von Lumora zur Ruhe. Verbundene Plaetze werden
+// weiter jeden Tick gelesen (Hotkeys bleiben unmittelbar), leere nur alle 2 s geprueft.
+struct PadSlot { bool on = false; XINPUT_STATE st{}; ULONGLONG nextProbe = 0, since = 0; };
+static PadSlot g_pads[4];
+static void padPoll() {
+    ULONGLONG now = GetTickCount64();
+    for (DWORD i = 0; i < 4; ++i) {
+        PadSlot& p = g_pads[i];
+        if (!p.on && now < p.nextProbe) continue;   // leerer Platz: nur alle 2 s antasten
+        XINPUT_STATE st{};
+        bool on = XInputGetState(i, &st) == ERROR_SUCCESS;
+        if (on) p.st = st; else p.nextProbe = now + 2000;
+        if (on != p.on) {
+            std::string ago = p.since ? (" nach " + std::to_string((now - p.since) / 1000) + "s") : "";
+            bcLogStream("pad: Platz " + std::to_string(i) + (on ? " verbunden" : " WEG") + ago
+                + " (virtuelles Pad: " + (lubridge::g_vigemSlot.load() >= 0
+                    ? ("Platz " + std::to_string(lubridge::g_vigemSlot.load())) : "aus") + ")");
+            p.on = on; p.since = now;
+        }
+    }
+}
+// Kombi auf irgendeinem der 4 XInput-Slots vollstaendig gedrueckt? (nutzt den Tick-Zustand)
 static bool gamepadComboDown(const json& combo) {
     if (!combo.is_array() || combo.empty()) return false;
     for (DWORD slot = 0; slot < 4; ++slot) {
         if ((LONG)slot == lubridge::g_vigemSlot.load()) continue;   // eigenes virtuelles Pad: gemappte Eingaben duerfen keine Hotkeys ausloesen
-        XINPUT_STATE st{};
-        if (XInputGetState(slot, &st) != ERROR_SUCCESS) continue;
+        if (!g_pads[slot].on) continue;
+        const XINPUT_STATE& st = g_pads[slot].st;
         bool all = true;
         for (auto& b : combo) { if (!b.is_number_integer() || !xiButtonDown(st.Gamepad, b.get<int>())) { all = false; break; } }
         if (all) return true;
@@ -1661,6 +1687,7 @@ static const ULONGLONG GP_RELEASE_MS = 150;   // Read-Aussetzer einer gehaltenen
 static bool g_gpMainWas = false, g_gpOsdWas = false;
 static ULONGLONG g_gpMainSeen = 0, g_gpOsdSeen = 0;
 static void xinputTick() {   // 25 Hz; Flanke = einmal ausloesen pro Druck
+    padPoll();   // EINE Abfrage pro Platz und Tick (leere Plaetze nur alle 2 s)
     json s = loadSettings();
     ULONGLONG now = GetTickCount64();
     // 1) Gamepad-Kombis (XInput) mit Release-Debounce gegen Read-Aussetzer.
