@@ -10,6 +10,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
+#include <dwmapi.h>   // runde Fensterecken (Tuersteher-Fenster)
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <objidl.h>
@@ -622,6 +623,10 @@ static void createDoormanWindow() {
     g_doorHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         L"LumoraDoor", L"Lumora", WS_POPUP, mi.rcWork.right - w - 16, mi.rcWork.top + 16, w, hgt, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!g_doorHwnd) return;
+    // Runde Ecken vom Fenstermanager - dadurch kann die Karte randlos sitzen (kein
+    // sichtbarer Fensterhintergrund mehr) und der blaue Rahmen bildet die Kontur.
+    { DWM_WINDOW_CORNER_PREFERENCE cp = DWMWCP_ROUND;
+      DwmSetWindowAttribute(g_doorHwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cp, sizeof(cp)); }
     wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
     std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
     CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
@@ -699,7 +704,8 @@ static void bcSyncDoorman() {   // pending-Anfragen ans Freigabefenster; zeigen 
         if (pend.empty()) { if (g_doorCtrl) g_doorCtrl->put_IsVisible(FALSE); ShowWindow(g_doorHwnd, SW_HIDE); }
         else if (g_doorReady) {
             UINT dpi = GetDpiForWindow(g_doorHwnd); if (!dpi) dpi = 96;
-            int pw = MulDiv(360, dpi, 96), ph = MulDiv(pend.size() > 1 ? 222 : 200, dpi, 96);
+            // Karte randlos -> Fensterhoehe = Kartenhoehe (gemessen 183; +22 fuer "+N weitere")
+            int pw = MulDiv(360, dpi, 96), ph = MulDiv(pend.size() > 1 ? 205 : 183, dpi, 96);
             MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(MonitorFromWindow(g_doorHwnd, MONITOR_DEFAULTTOPRIMARY), &mi);
             int x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - pw) / 2;   // mittig oben
             SetWindowPos(g_doorHwnd, HWND_TOPMOST, x, mi.rcWork.top + 16, pw, ph, SWP_NOACTIVATE | SWP_SHOWWINDOW);
