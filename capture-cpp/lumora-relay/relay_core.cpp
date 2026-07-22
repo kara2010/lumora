@@ -181,10 +181,6 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
                 auto pk = make_shared<rtc::AV1RtpPacketizer>(rtc::AV1RtpPacketizer::Packetization::TemporalUnit, s->vCfg);
                 pk->addToChain(make_shared<rtc::RtcpSrReporter>(s->vCfg));
                 pk->addToChain(make_shared<rtc::RtcpNackResponder>());
-                // Taktung: Keyframes sind gemessen 400-800 KB und gingen bisher als
-                // Schwall raus (in ~1-3 ms). Der Empfaenger verlor daraus 5-47 %.
-                // Token-Bucket verteilt sie ueber das Bildintervall.
-                pk->addToChain(make_shared<rtc::PacingHandler>(60e6, std::chrono::milliseconds(2)));
                 track->setMediaHandler(pk);
                 track->onMessage([](rtc::binary) {}, nullptr);   // RTCP-Rueckkanal konsumieren
                 s->video = track;
@@ -199,7 +195,6 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
             auto pk = make_shared<rtc::H264RtpPacketizer>(rtc::NalUnit::Separator::StartSequence, s->vCfg);
             pk->addToChain(make_shared<rtc::RtcpSrReporter>(s->vCfg));
             pk->addToChain(make_shared<rtc::RtcpNackResponder>());
-            pk->addToChain(make_shared<rtc::PacingHandler>(60e6, std::chrono::milliseconds(2)));
             track->setMediaHandler(pk);
             track->onMessage([](rtc::binary) {}, nullptr);   // RTCP-Rueckkanal konsumieren
             s->video = track;
