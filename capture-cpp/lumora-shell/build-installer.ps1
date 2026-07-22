@@ -7,7 +7,8 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "0.2.6"   # 0.2.6: Komponenten-Update bietet Neustart an (Shell-Tausch -> neue Version laeuft)
+$version = "0.2.7"   # 0.2.7: FIX Encoder-Destruktoren (Speicherleck/Absturz), Eingabe-Bruecke visuell + Auto-Kalibrierung
+                     # 0.2.6: Komponenten-Update bietet Neustart an (Shell-Tausch -> neue Version laeuft)
                      # 0.2.5: bedarfsgesteuertes AV1/H.264-Encoding, Player-Codec-Anzeige-Fix
                      # 0.2.4: AV1-Doppel-Encode, Eingabe-Bruecke, Komponenten-Updater, Statistik, libjuice-Patch
                      # 0.2.3: Alt-Electron-Version wird IMMER sauber deinstalliert (Parallel-Beta-Reste)
