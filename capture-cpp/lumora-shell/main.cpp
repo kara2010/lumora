@@ -978,7 +978,8 @@ static void bcWriteCodecControl(bool h264, bool av1) {
 // sonst glaubt die Shell noch den Stand des VORIGEN Streams, schreibt nichts Neues und
 // die Steuerdatei (vom Start auf "h264" gesetzt) passt nicht mehr zur Codec-Zuteilung
 // des Relays -> Vorschau bekommt AV1, Capture liefert H.264 -> schwarzes Bild.
-static bool g_wantH264 = true, g_wantAv1 = false;
+static bool g_wantH264 = true;
+bool g_wantAv1 = false;   // Forward-Deklaration oben (bcQualityLabel)
 static ULONGLONG g_av1GoneAt = 0, g_h264GoneAt = 0;
 static std::string g_lastCodec;
 static void bcResetCodecDemand() {
@@ -1056,11 +1057,20 @@ static json bcStreamCfg(const std::string& encoder) {
     return { {"encoder", encoder}, {"fps", s.value("streamFps", 60)}, {"kbit", kbit}, {"scaleH", scaleH},
              {"mode", mode}, {"outputIdx", outputIdx}, {"hwnd", hwnd} };
 }
+extern bool g_wantAv1;   // Definition weiter unten - fuer die Bitraten-Anzeige
 static std::string bcQualityLabel(const json& cfg) {
     std::string h = cfg.value("scaleH", 0) ? std::to_string(cfg.value("scaleH", 0)) + "p" : "nativ";
     std::string enc = cfg.value("encoder", ""); size_t us = enc.find('_'); if (us != std::string::npos) enc = enc.substr(us + 1);
     for (auto& c : enc) c = (char)toupper((unsigned char)c);
-    return h + " \xC2\xB7 " + std::to_string(cfg.value("fps", 60)) + " fps \xC2\xB7 " + std::to_string((int)(cfg.value("kbit", 8000) / 1000)) + " Mbit \xC2\xB7 " + enc;
+    int mbit = (int)(cfg.value("kbit", 8000) / 1000);
+    // AV1 laeuft bewusst mit der HALBEN Bitrate (etwa doppelte Effizienz -> gleiche Qualitaet).
+    // Das MUSS sichtbar sein, sonst wirkt "50 eingestellt, 25 kommt an" wie ein Fehler.
+    if (g_wantAv1) {
+        int av1 = (mbit + 1) / 2; if (av1 < 1) av1 = 1;
+        return h + " \xC2\xB7 " + std::to_string(cfg.value("fps", 60)) + " fps \xC2\xB7 AV1 "
+             + std::to_string(av1) + " Mbit (\xE2\x89\x99 " + std::to_string(mbit) + " Mbit H.264) \xC2\xB7 " + enc;
+    }
+    return h + " \xC2\xB7 " + std::to_string(cfg.value("fps", 60)) + " fps \xC2\xB7 " + std::to_string(mbit) + " Mbit \xC2\xB7 " + enc;
 }
 // Nativen Capture-Helfer starten (Args + Steuerdateien + Exit-Watch mit Auto-Neustart).
 static void bcStartNative(const json& cfg);
@@ -1176,7 +1186,13 @@ static void bcViewerTick() {
     else if (g_wantAv1) { if (!g_av1GoneAt) g_av1GoneAt = now; if (now - g_av1GoneAt > 10000) g_wantAv1 = false; }
     if (!g_wantH264 && !g_wantAv1) g_wantH264 = true;   // nie leer
     std::string cur = g_wantAv1 ? (g_wantH264 ? "h264+av1" : "av1") : "h264";
-    if (cur != g_lastCodec) { g_lastCodec = cur; bcWriteCodecControl(g_wantH264, g_wantAv1); bcLogStream("codec-bedarf -> " + cur); }
+    if (cur != g_lastCodec) {
+        g_lastCodec = cur; bcWriteCodecControl(g_wantH264, g_wantAv1); bcLogStream("codec-bedarf -> " + cur);
+        // Qualitaets-Anzeige mitziehen: AV1 laeuft mit halber Bitrate, das soll der
+        // Streamer sehen ("AV1 25 Mbit (≙ 50 Mbit H.264)") statt sich zu wundern.
+        g_bcState["quality"] = bcQualityLabel(bcStreamCfg(g_bcState.value("encoder", "")));
+        bcPushState();
+    }
 }
 // Live-Umstellung (bcDoRestartFfmpeg-Kern): Bitrate + Quelle ueber die Steuerdateien,
 // Vollneustart des Helfers nur bei fps/scaleH-Aenderung.
