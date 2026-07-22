@@ -7,7 +7,10 @@
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
     font-family: 'Segoe UI', system-ui, sans-serif; -webkit-user-select: none; cursor: default; }
   #card {
-    margin: 8px; padding: 14px 16px 15px; border-radius: 15px;
+    /* Randlos: ein Aussenabstand waere sichtbarer Fensterhintergrund (frueher ein
+       schwarzer Rahmen um die Karte). Die runden Ecken macht Windows selbst (DWM),
+       Radius passend zu DWMWCP_ROUND. */
+    margin: 0; padding: 14px 16px 15px; border-radius: 8px;
     background: linear-gradient(160deg, rgba(24,27,35,0.97) 0%, rgba(16,18,24,0.97) 100%);
     border: 1px solid rgba(79,142,247,0.55);
     box-shadow: 0 10px 34px rgba(0,0,0,0.6), 0 0 0 1px rgba(79,142,247,0.12), inset 0 1px 0 rgba(255,255,255,0.04);

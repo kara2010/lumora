@@ -14,5 +14,5 @@ target_include_directories(lumora_shell PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/json"
   "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ViGEmClient/include")
 target_link_libraries(lumora_shell PRIVATE user32 gdi32 shell32 ole32 advapi32 version shlwapi
-  setupapi hid
+  setupapi hid dwmapi
   "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/webview2/build/native/x64/WebView2LoaderStatic.lib")
