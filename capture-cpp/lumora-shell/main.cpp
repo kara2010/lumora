@@ -655,7 +655,20 @@ static void createDoormanWindow() {
                             // gepostetes doorman-list ginge ins Leere (Empfaenger noch nicht registriert)
                             // -> genau das zeigte "Keine Anfragen" bis zum naechsten Sync.
                             g_doorWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* na) -> HRESULT {
+                                    // Diagnose: schwarzes Fenster kann heissen "Navigation fehlgeschlagen"
+                                    // (leere Seite + dunkle Hintergrundfarbe) ODER "Seite da, aber Flaeche 0".
+                                    BOOL okNav = FALSE; COREWEBVIEW2_WEB_ERROR_STATUS es = (COREWEBVIEW2_WEB_ERROR_STATUS)0;
+                                    if (na) { na->get_IsSuccess(&okNav); na->get_WebErrorStatus(&es); }
+                                    RECT br{}; if (g_doorCtrl) g_doorCtrl->get_Bounds(&br);
+                                    bool vis = false; if (g_doorCtrl) { BOOL bv = FALSE; g_doorCtrl->get_IsVisible(&bv); vis = !!bv; }
+                                    bcLogStream("doorman: nav ok=" + std::to_string(okNav ? 1 : 0) + " err=" + std::to_string((int)es)
+                                        + " bounds=" + std::to_string(br.right - br.left) + "x" + std::to_string(br.bottom - br.top)
+                                        + " sichtbar=" + std::to_string(vis ? 1 : 0) + " dir=" + narrow(g_appDir));
+                                    if (g_doorWv) g_doorWv->ExecuteScript(
+                                        L"(function(){var c=document.getElementById('card');return c?(c.getBoundingClientRect().height+'px/'+document.body.innerHTML.length):'KEINE KARTE';})()",
+                                        Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+                                            [](HRESULT, LPCWSTR r) -> HRESULT { bcLogStream("doorman: karte=" + narrow(r ? r : L"?")); return S_OK; }).Get());
                                     g_doorReady = true;   // ab jetzt kann die Seite Daten empfangen UND anzeigen
                                     PostMessageW(g_hwnd, WM_SHELL_DOORSYNC, 0, 0);   // DOORSYNC gehoert dem Hauptfenster!
                                     return S_OK;
@@ -679,13 +692,18 @@ static void bcSyncDoorman() {   // pending-Anfragen ans Freigabefenster; zeigen 
         // Seite noetig, damit kann die Anzeige nicht mehr haengen bleiben.
         // Gezeigt wird ERST, wenn die Seite geladen ist (g_doorReady) - sonst saehe man das
         // leere schwarze Hostfenster, solange WebView2 noch startet.
-        if (pend.empty()) ShowWindow(g_doorHwnd, SW_HIDE);
+        // WICHTIG: ShowWindow allein reicht NICHT. Das Fenster entsteht absichtlich versteckt
+        // (kein Aufblitzen); WebView2 uebernimmt diesen Zustand bei seiner Erzeugung und bleibt
+        // danach unsichtbar - man sah nur das leere schwarze Hostfenster. Sichtbarkeit und
+        // Flaeche des WebView2 muessen hier explizit mitgezogen werden.
+        if (pend.empty()) { if (g_doorCtrl) g_doorCtrl->put_IsVisible(FALSE); ShowWindow(g_doorHwnd, SW_HIDE); }
         else if (g_doorReady) {
             UINT dpi = GetDpiForWindow(g_doorHwnd); if (!dpi) dpi = 96;
             int pw = MulDiv(360, dpi, 96), ph = MulDiv(pend.size() > 1 ? 222 : 200, dpi, 96);
             MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(MonitorFromWindow(g_doorHwnd, MONITOR_DEFAULTTOPRIMARY), &mi);
             int x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - pw) / 2;   // mittig oben
             SetWindowPos(g_doorHwnd, HWND_TOPMOST, x, mi.rcWork.top + 16, pw, ph, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            if (g_doorCtrl) { RECT rc; GetClientRect(g_doorHwnd, &rc); g_doorCtrl->put_Bounds(rc); g_doorCtrl->put_IsVisible(TRUE); }
         }
     }
     sendToUi("doorman-list", pend);   // Haupt-UI weiter mitinformieren
