@@ -444,7 +444,7 @@ static lusrv::HttpServer g_streamSrv;
 static bool g_streamSrvUp = false;
 static std::string g_playerHtmlCache;
 static std::mutex g_qosMx;
-struct QosEntry { ULONGLONG t; bool bad; double lossRate; int badStreak; };
+struct QosEntry { ULONGLONG t; bool bad; double lossRate; int badStreak; ULONGLONG first; long long pkts; };
 static std::map<std::string, QosEntry> g_qosMap;   // Zuschauer-QoS fuer die adaptive Bitrate
 
 static void bcLogStream(const std::string& msg) {   // gleiches Log wie die Electron-App
@@ -473,7 +473,12 @@ static void bcQosReport(const std::string& ip, const json& q) {
     std::lock_guard<std::mutex> lk(g_qosMx);
     auto prev = g_qosMap.find(key);
     int streak = bad ? ((prev != g_qosMap.end() ? prev->second.badStreak : 0) + 1) : 0;
-    g_qosMap[key] = { GetTickCount64(), bad, lossRate, streak };
+    // first = Beitrittszeit dieses Zuschauers (bleibt ueber Meldungen erhalten): seine ersten
+    // Messfenster sind konstruktionsbedingt Muell (Decoder-Anlauf, Puffer-Fuellung, Wi-Fi-
+    // Ratenanpassung) und duerfen die Regelung nicht ausloesen. pkts = Fenstergroesse fuer
+    // die statistische Untergrenze.
+    ULONGLONG first = prev != g_qosMap.end() ? prev->second.first : GetTickCount64();
+    g_qosMap[key] = { GetTickCount64(), bad, lossRate, streak, first, lost + recv };
     if (bad) bcLogStream("qos: " + key + " lost=" + std::to_string(lost) + "/" + std::to_string(lost + recv) + " !");
 }
 // --- Verbindungstest (STUN-NAT-Erkennung + UPnP-/IPv6-Proben, 1:1 aus main.js) ---
@@ -1258,8 +1263,16 @@ static void bcAdaptTick() {
         std::lock_guard<std::mutex> lk(g_qosMx);
         for (auto it = g_qosMap.begin(); it != g_qosMap.end();) {
             if (now - it->second.t > 15000) { it = g_qosMap.erase(it); continue; }
+            // Schonfrist: die ersten 12s nach Beitritt zaehlen nicht (Beitritts-Schub:
+            // Decoder-Anlauf/Pufferaufbau erzeugte 20% "Verlust" und loeste den Notabstieg
+            // aus - der Stream lief dann 2 min unnoetig auf halber Bitrate, s. Log 20:22).
+            if (now - it->second.first < 12000) { ++it; continue; }
             if (it->second.badStreak >= 2) bad = true;
-            if (now - it->second.t <= 8000 && it->second.lossRate > worstLoss) worstLoss = it->second.lossRate;
+            // Notabstieg nur auf BESTAETIGTEN Verlust: >=2 schlechte Fenster in Folge und
+            // ein statistisch tragfaehiges Fenster (>=500 Pakete; 9 verloren von 16 sind
+            // 56%, aber kein Signal).
+            if (now - it->second.t <= 8000 && it->second.badStreak >= 2 && it->second.pkts >= 500
+                && it->second.lossRate > worstLoss) worstLoss = it->second.lossRate;
             ++it;
         }
     }
@@ -1269,6 +1282,13 @@ static void bcAdaptTick() {
     if (worstLoss >= 0.12 && g_adaptLevel < maxLevel && now - g_adaptLastChange >= 6000) {   // NOTABSTIEG
         int target = (std::min)(maxLevel, g_adaptLevel + (worstLoss >= 0.30 ? 3 : 2));
         if (lvKbit(target) < lvKbit(g_adaptLevel)) {
+            // Anti-Pendel gilt AUCH hier: ein Notabstieg kurz nach einer Rauf-Probe heisst
+            // "Probe gescheitert" - vorher umging der Notabstieg die 10-min-Sperre komplett
+            // (return vor der Sperr-Logik), der Zyklus rauf->Notabstieg->rauf pendelte endlos.
+            if (g_adaptUpAt && now - g_adaptUpAt < 60000) {
+                g_adaptUpHold = now + 600000;
+                bcLogStream("adapt: Rauf-Probe gescheitert (Notabstieg) -> naechster Versuch in 10 min");
+            }
             g_adaptLevel = target; g_adaptLastChange = now; g_adaptBadSince = 0; g_adaptGoodSince = 0;
             { std::lock_guard<std::mutex> lk(g_qosMx); g_qosMap.clear(); }
             bcLogStream("adapt: NOTABSTIEG bei " + std::to_string((int)(worstLoss * 100)) + "% Verlust -> Stufe " + std::to_string(target) + " -> " + std::to_string(lvKbit(target)) + " kbit");
@@ -1287,7 +1307,11 @@ static void bcAdaptTick() {
         g_adaptUpHold = now + 600000;
         bcLogStream("adapt: Rauf-Probe gescheitert -> naechster Versuch in 10 min");
     }
-    if (!goingDown) g_adaptUpAt = now;
+    // Nach einem Aufstieg die 90s-Uhr NEU starten: vorher blieb g_adaptGoodSince stehen,
+    // dadurch stiegen Folgestufen im 20s-Takt (nur die Ruhezeit bremste) - 3 Stufen in
+    // 60 s, schneller als die Strecke sich beweisen kann, der naechste Einbruch war
+    // eingebaut. Jetzt muss JEDE Stufe 90 s sauber bestaetigt sein.
+    if (!goingDown) { g_adaptUpAt = now; g_adaptGoodSince = now; }
     g_adaptLevel = next; g_adaptLastChange = now;
     bcLogStream("adapt: Stufe " + std::to_string(next) + " -> " + std::to_string(lvKbit(next)) + " kbit");
     bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", "")));
