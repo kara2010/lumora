@@ -79,10 +79,29 @@ void RelayCore::setIceConfig(vector<string> hosts, vector<RelayIceServer> server
     cfg_.iceServers = std::move(servers);
 }
 
+void RelayCore::setCodecMode(const string& mode) {
+    std::lock_guard<std::mutex> lk(mx_);
+    codecMode_ = (mode == "h264" || mode == "av1") ? mode : "auto";
+}
+
+void RelayCore::codecDemand(bool& needH264, bool& needAv1) {
+    needH264 = false; needAv1 = false;
+    std::lock_guard<std::mutex> lk(mx_);
+    dropClosed();
+    // Ueber ALLE offenen Sessions inkl. lokaler Host-Vorschau: die Vorschau ist AV1-faehig
+    // und traegt unter auto/av1 zum AV1-Bedarf bei - sie allein loest also KEINEN Doppel-Encode
+    // aus (nur einen AV1-Encoder). Erst ein echter H.264-Zuschauer setzt needH264.
+    for (auto& s : sessions_) {
+        if (!s->video) continue;
+        if (s->vAv1) needAv1 = true; else needH264 = true;
+    }
+}
+
 string RelayCore::createSession(const string& offerSdp, const string& userAgent,
                                 const string& query, string& outSessionId) {
-    RelayConfig cfg;
-    { std::lock_guard<std::mutex> lk(mx_); cfg = cfg_; }
+    RelayConfig cfg; string codecMode;
+    { std::lock_guard<std::mutex> lk(mx_); cfg = cfg_; codecMode = codecMode_; }
+    bool allowAv1 = (codecMode != "h264");
 
     rtc::Configuration rc;
     rc.portRangeBegin = rc.portRangeEnd = cfg.icePort;
@@ -100,7 +119,7 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
 
     // Tracks entstehen aus den m-Lines des Offers (Client bietet recvonly an -> wir senden)
     std::weak_ptr<Session> wsess = sess;
-    sess->pc->onTrack([this, wsess](shared_ptr<rtc::Track> track) {
+    sess->pc->onTrack([this, wsess, allowAv1](shared_ptr<rtc::Track> track) {
         auto s = wsess.lock(); if (!s) return;
         auto desc = track->description();
         const string type = desc.type();
@@ -114,9 +133,12 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
             return 0;
         };
         if (type == "video") {
-            // Codec pro Zuschauer: AV1, wenn der Browser es anbietet UND der Ingest AV1 liefert
-            // (Doppel-Encode im Capture); sonst H.264-Fallback (Safari, aeltere Geraete).
-            int av1Pt = av1Active_.load() ? pickAv1Pt(&desc) : -1;
+            // Codec pro Zuschauer: AV1, wenn der Modus es erlaubt (auto/av1) UND der Browser es
+            // anbietet - NICHT an av1Active_ gekoppelt (das waere ein Bootstrapping-Deadlock:
+            // kein AV1-Ingest -> H.264 gewaehlt -> kein AV1-Bedarf -> AV1 startet nie). Die
+            // AV1-Frames kommen, sobald der Capture AV1 hochgefahren hat (~1-2s beim Erst-AV1-
+            // Zuschauer). Sonst H.264-Fallback (Safari, aeltere Geraete).
+            int av1Pt = allowAv1 ? pickAv1Pt(&desc) : -1;
             if (av1Pt >= 0) {
                 s->vAv1 = true;
                 s->vCfg = make_shared<rtc::RtpPacketizationConfig>(

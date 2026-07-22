@@ -64,7 +64,11 @@ namespace wg {
 static const int PID_PMT = 0x1000, PID_VIDEO = 0x0100, PID_AUDIO = 0x0101, PID_VIDEO_AV1 = 0x0102;
 static uint8_t g_ccVideo = 0, g_ccPat = 0, g_ccPmt = 0, g_ccAudio = 0, g_ccVideoAv1 = 0;
 static bool g_withAudio = false;
-static bool g_av1 = false;            // Doppel-Encode aktiv: AV1 zusaetzlich auf PID_VIDEO_AV1 (H.264 bleibt Fallback)
+// Bedarfsgesteuert: es laeuft genau die Codec-Menge, die die aktuellen Zuschauer brauchen
+// (Shell -> lumora-codec.txt). g_h264/g_av1 steuern PMT-Deklaration UND Mux. Mindestens
+// einer ist immer an; der jeweils primaere (H.264 wenn an, sonst AV1) traegt den PCR.
+static bool g_h264 = true;            // H.264 auf PID_VIDEO aktiv
+static bool g_av1 = false;            // AV1 zusaetzlich/alternativ auf PID_VIDEO_AV1 aktiv
 static bool g_audioNoBytes = false;   // Diagnose: Audio in PMT deklarieren, aber keine Audio-Pakete senden
 static uint64_t g_audioMuxed = 0;
 static uint32_t crc32_mpeg(const uint8_t* d, int len) { uint32_t c = 0xFFFFFFFF; for (int i = 0; i < len; ++i) { c ^= (uint32_t)d[i] << 24; for (int b = 0; b < 8; ++b) c = (c & 0x80000000) ? (c << 1) ^ 0x04C11DB7 : (c << 1); } return c; }
@@ -85,8 +89,10 @@ static void writeTS(std::vector<uint8_t>& out, int pid, bool pusi, uint8_t& cc, 
 }
 static void writePSI(std::vector<uint8_t>& out, int pid, uint8_t& cc, const uint8_t* sec, int n) { uint8_t k[188]; memset(k, 0xFF, 188); k[0] = 0x47; k[1] = 0x40 | ((pid >> 8) & 0x1F); k[2] = pid & 0xFF; k[3] = 0x10 | (cc & 0x0F); cc = (cc + 1) & 0x0F; k[4] = 0x00; memcpy(k + 5, sec, n); out.insert(out.end(), k, k + 188); }
 static void buildPAT(std::vector<uint8_t>& o) { uint8_t s[16]; int n = 0; s[n++] = 0; s[n++] = 0xB0; s[n++] = 0x0D; s[n++] = 0; s[n++] = 1; s[n++] = 0xC1; s[n++] = 0; s[n++] = 0; s[n++] = 0; s[n++] = 1; s[n++] = 0xE0 | ((PID_PMT >> 8) & 0x1F); s[n++] = PID_PMT & 0xFF; uint32_t c = crc32_mpeg(s, n); s[n++] = c >> 24; s[n++] = c >> 16; s[n++] = c >> 8; s[n++] = c; writePSI(o, 0, g_ccPat, s, n); }
-static void buildPMT(std::vector<uint8_t>& o) { uint8_t s[64]; int n = 0; s[n++] = 2; s[n++] = 0xB0; int lenPos = n; s[n++] = 0; s[n++] = 0; s[n++] = 1; s[n++] = 0xC1; s[n++] = 0; s[n++] = 0; s[n++] = 0xE0 | ((PID_VIDEO >> 8) & 0x1F); s[n++] = PID_VIDEO & 0xFF; s[n++] = 0xF0; s[n++] = 0;
-    s[n++] = 0x1B; s[n++] = 0xE0 | ((PID_VIDEO >> 8) & 0x1F); s[n++] = PID_VIDEO & 0xFF; s[n++] = 0xF0; s[n++] = 0;                        // Video H.264
+static void buildPMT(std::vector<uint8_t>& o) { uint8_t s[64]; int n = 0; s[n++] = 2; s[n++] = 0xB0; int lenPos = n; s[n++] = 0; s[n++] = 0; s[n++] = 1; s[n++] = 0xC1; s[n++] = 0; s[n++] = 0;
+    int pcrPid = g_h264 ? PID_VIDEO : PID_VIDEO_AV1;   // PCR traegt der primaere laufende Video-PID
+    s[n++] = 0xE0 | ((pcrPid >> 8) & 0x1F); s[n++] = pcrPid & 0xFF; s[n++] = 0xF0; s[n++] = 0;
+    if (g_h264) { s[n++] = 0x1B; s[n++] = 0xE0 | ((PID_VIDEO >> 8) & 0x1F); s[n++] = PID_VIDEO & 0xFF; s[n++] = 0xF0; s[n++] = 0; }        // Video H.264
     if (g_av1) { s[n++] = 0x06; s[n++] = 0xE0 | ((PID_VIDEO_AV1 >> 8) & 0x1F); s[n++] = PID_VIDEO_AV1 & 0xFF; s[n++] = 0xF0; s[n++] = 0x06; // Video AV1 (kein Standard-stream_type: 0x06 private)
         s[n++] = 0x05; s[n++] = 0x04; s[n++] = 'A'; s[n++] = 'V'; s[n++] = '0'; s[n++] = '1'; }  // registration_descriptor "AV01"
     if (g_withAudio) { s[n++] = 0x06; s[n++] = 0xE0 | ((PID_AUDIO >> 8) & 0x1F); s[n++] = PID_AUDIO & 0xFF; s[n++] = 0xF0; s[n++] = 0x0A; // Audio Opus (PES private data, stream_type 0x06)
@@ -898,24 +904,44 @@ int main(int argc, char** argv) {
     if (!rebuildScaler()) { printf("FEHLER: Scaler-Init fehlgeschlagen\n"); return 3; }
 
     auto newEncoder = [&]() -> Encoder* { return useQsv ? (Encoder*)new QsvEncoder() : (useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder()); };
-    Encoder* encoder = newEncoder();
-    if (!encoder->init(dev.get(), outW, outH, fps, mbit)) { printf("FEHLER: Encoder-Init (%s) fehlgeschlagen\n", encoder->name()); return 2; }
-    // AV1-Doppel-Encode: H.264 laeuft IMMER (Fallback fuer Zuschauer ohne AV1-Decode, z.B.
-    // Safari); zusaetzlich AV1 mit halber Bitrate (gleiches Qualitaetsziel bei ~50% Bits) auf
-    // eigenem TS-PID. Der Relay waehlt pro Zuschauer anhand dessen SDP-Offers. Init-Fehlschlag
-    // = keine AV1-HW (NVENC vor RTX 40, AMF vor RX 7000, QSV vor Arc/Xe) -> sauber nur H.264.
-    Encoder* encoderAv1 = nullptr; auto av1Kbit = [&](int kbit) { int k = (kbit + 1) / 2; return k < 500 ? 500 : k; };
-    if (codecName == "av1" || codecName == "auto") {
-        Encoder* e = newEncoder();
-        if (e->init(dev.get(), outW, outH, fps, (mbit + 1) / 2 > 0 ? (mbit + 1) / 2 : 1, true)) { encoderAv1 = e; g_av1 = true; }
-        else { delete e; if (codecName == "av1") printf("HINWEIS: AV1 angefordert, aber Encoder ohne AV1-Support -> nur H.264\n"); }
-    }
-    printf("codec=%s\n", g_av1 ? "av1" : "h264");   // maschinenlesbar fuer die Shell (Status/OSD)
+    auto av1Kbit = [&](int kbit) { int k = (kbit + 1) / 2; return k < 500 ? 500 : k; };
+    Encoder* encoder = nullptr;      // H.264 (PID_VIDEO) - bedarfsgesteuert, aber Warm-Default
+    Encoder* encoderAv1 = nullptr;   // AV1 (PID_VIDEO_AV1) - nur wenn ein AV1-Zuschauer verbunden ist
+    // Bedarfsgesteuertes Encoding: Der Relay meldet der Shell, welche Codecs die aktuellen
+    // Zuschauer brauchen; die Shell schreibt die Zielmenge nach %TEMP%\lumora-codec.txt.
+    // Doppel-Encode (H.264 + AV1) laeuft nur im echten Mischfall. av1Capable = HW kann AV1
+    // ueberhaupt (NVENC ab RTX 40, AMF ab RX 7000, QSV ab Arc/Xe) - sonst bleibt es bei H.264.
+    bool av1Capable = false;
+    { Encoder* probe = newEncoder();   // einmalige Faehigkeitspruefung: AV1-Init versuchen
+      if (probe->init(dev.get(), outW, outH, fps, (mbit + 1) / 2 > 0 ? (mbit + 1) / 2 : 1, true)) { av1Capable = true; delete probe; }
+      else { delete probe; if (codecName == "av1") printf("HINWEIS: AV1 angefordert, aber Encoder ohne AV1-Support -> nur H.264\n"); } }
+    // Encoder-Menge auf einen Sollzustand bringen (zwischen zwei Frames aufgerufen -> sicher).
+    // curKbit traegt die aktuelle Bitrate; wird weiter unten initialisiert - hier lokal gehalten.
+    auto reconcile = [&](bool wantH264, bool wantAv1, int kbit) {
+        if (!wantH264 && !wantAv1) wantH264 = true;   // Sicherung: nie beide aus
+        if (!av1Capable) wantAv1 = false;
+        if (wantH264 && !encoder) { Encoder* e = newEncoder(); if (e->init(dev.get(), outW, outH, fps, kbit / 1000 > 0 ? kbit / 1000 : 1)) { encoder = e; printf("codec: H.264 dazu\n"); } else { delete e; } }
+        else if (!wantH264 && encoder) { delete encoder; encoder = nullptr; printf("codec: H.264 weg\n"); }
+        if (wantAv1 && !encoderAv1) { Encoder* e = newEncoder(); int am = av1Kbit(kbit) / 1000; if (am < 1) am = 1; if (e->init(dev.get(), outW, outH, fps, am, true)) { encoderAv1 = e; printf("codec: AV1 dazu\n"); } else { delete e; } }
+        else if (!wantAv1 && encoderAv1) { delete encoderAv1; encoderAv1 = nullptr; printf("codec: AV1 weg\n"); }
+        // Flags aus der TATSAECHLICHEN Encoder-Praesenz ableiten (nicht nur bei Uebergaengen) -
+        // sonst bleibt g_h264 auf dem Startwert true, obwohl gar kein H.264-Encoder existiert.
+        g_h264 = (encoder != nullptr); g_av1 = (encoderAv1 != nullptr);
+    };
+    // Startmenge: aus lumora-codec.txt, falls die Shell sie schon geschrieben hat; sonst aus
+    // --codec (Standalone-Test: auto/av1 -> beide, h264 -> nur H.264). H.264 immer warm.
+    std::string codecPath = std::string(getenv("TEMP") ? getenv("TEMP") : ".") + "\\lumora-codec.txt";
+    bool wantH264 = true, wantAv1 = (codecName == "av1" || codecName == "auto") && av1Capable;
+    { FILE* cf = nullptr; fopen_s(&cf, codecPath.c_str(), "r"); if (cf) { char buf[32] = { 0 }; fread(buf, 1, 31, cf); fclose(cf); std::string cs = buf; wantH264 = cs.find("h264") != std::string::npos; wantAv1 = av1Capable && cs.find("av1") != std::string::npos; if (!wantH264 && !wantAv1) wantH264 = true; } }
+    reconcile(wantH264, wantAv1, mbit * 1000);
+    if (!encoder && !encoderAv1) { printf("FEHLER: Encoder-Init fehlgeschlagen\n"); return 2; }
+    printf("codec=%s\n", av1Capable ? "av1" : "h264");   // Faehigkeit fuer die Shell (Status/OSD)
+    uint64_t codecMtime = 0;
 
     WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa); SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     sockaddr_in dst{}; dst.sin_family = AF_INET; dst.sin_port = htons((u_short)port); inet_pton(AF_INET, host.c_str(), &dst.sin_addr);
     DXGI_ADAPTER_DESC1 gd; pick->GetDesc1(&gd);
-    printf("lumora-capture: Aufnahme %dx%d -> Ausgabe %dx%d @ %dfps, %d Mbit | %s | Encoder %s auf %ls -> mediamtx %s:%d (ohne FFmpeg)\n", W, H, outW, outH, fps, mbit, hdr ? "HDR->SDR (Tonemap)" : "SDR", encoder->name(), gd.Description, host.c_str(), port);
+    printf("lumora-capture: Aufnahme %dx%d -> Ausgabe %dx%d @ %dfps, %d Mbit | %s | Encoder %s auf %ls -> mediamtx %s:%d (ohne FFmpeg)\n", W, H, outW, outH, fps, mbit, hdr ? "HDR->SDR (Tonemap)" : "SDR", encoder ? encoder->name() : (encoderAv1 ? encoderAv1->name() : "-"), gd.Description, host.c_str(), port);
 
     static const uint8_t AUD[6] = { 0,0,0,1, 0x09, 0xF0 };
     FILE* tsf = nullptr; if (!tsout.empty()) fopen_s(&tsf, tsout.c_str(), "wb");
@@ -924,7 +950,7 @@ int main(int argc, char** argv) {
     // den Encoder ohne Neustart um (nahtlos, kein Stream-Abriss bei adaptiver Bitrate).
     std::string brPath = std::string(getenv("TEMP") ? getenv("TEMP") : ".") + "\\lumora-bitrate.txt";
     uint64_t brMtime = ~0ull; int curKbit = mbit * 1000;
-    uint64_t inFrame = 0, outFrame = 0; int tries = 0; auto t0 = std::chrono::steady_clock::now();
+    uint64_t inFrame = 0, outFrame = 0, frameTick = 0; int tries = 0; auto t0 = std::chrono::steady_clock::now();
     // Ton als Pointer: beim Quellwechsel (Monitor<->Fenster) wird die Aufnahme-Seite neu
     // gestartet (System- vs. Prozess-Loopback); die PTS laufen dank Epoch-Sync nahtlos weiter.
     AudioCapture* audio = new AudioCapture();
@@ -965,7 +991,7 @@ int main(int argc, char** argv) {
     // aufsetzen, sobald diese Bedingung erfuellt ist.
     int srcBaseW = W, srcBaseH = H;   // Quellgroesse, aus der die AKTUELLEN outW/outH/der Encoder stammen
     bool resizePending = false; std::chrono::steady_clock::time_point resizePendingAt;
-    while ((maxFrames == 0 || (int)outFrame < maxFrames) && (haveFrame || tries < 3000)) {
+    while ((maxFrames == 0 || (int)frameTick < maxFrames) && (haveFrame || tries < 3000)) {
         // 1) alle bereitliegenden WGC-Frames abholen, den NEUESTEN uebernehmen.
         for (;;) {
             auto f = framePool.TryGetNextFrame(); if (!f) break;
@@ -995,21 +1021,17 @@ int main(int argc, char** argv) {
             resizePending = false;
             int newOutW, newOutH; computeOutSize(W, H, newOutW, newOutH);
             printf("SOURCE: Fenster deutlich veraendert (%dx%d) -> Encoder wird auf %dx%d neu aufgesetzt\n", W, H, newOutW, newOutH);
-            delete encoder; if (encoderAv1) { delete encoderAv1; encoderAv1 = nullptr; }
+            // Aktuelle Encoder-Menge merken, alle abbauen, in neuer Groesse identisch neu aufsetzen.
+            bool hadH264 = (encoder != nullptr), hadAv1 = (encoderAv1 != nullptr);
+            if (encoder) { delete encoder; encoder = nullptr; g_h264 = false; }
+            if (encoderAv1) { delete encoderAv1; encoderAv1 = nullptr; g_av1 = false; }
             outW = newOutW; outH = newOutH; srcBaseW = W; srcBaseH = H;
             nv12 = nullptr;
             D3D11_TEXTURE2D_DESC nd2{}; nd2.Width = outW; nd2.Height = outH; nd2.MipLevels = 1; nd2.ArraySize = 1; nd2.Format = DXGI_FORMAT_NV12; nd2.SampleDesc.Count = 1; nd2.Usage = D3D11_USAGE_DEFAULT; nd2.BindFlags = D3D11_BIND_RENDER_TARGET;
             dev->CreateTexture2D(&nd2, nullptr, nv12.put());
             if (hdr) { tonemap.init(dev.get(), W, H, outW, outH); tonemap.readControl(ctx.get(), true); }
             rebuildScaler();
-            encoder = newEncoder();
-            if (!encoder->init(dev.get(), outW, outH, fps, mbit)) printf("FEHLER: Encoder-Neuaufbau (%s) fehlgeschlagen\n", encoder->name());
-            if (g_av1) {   // AV1-Zweig ebenfalls neu aufsetzen (frischer Encoder liefert ab Frame 0 einen Keyframe)
-                Encoder* e = newEncoder();
-                int av1Mbit = (curKbit / 1000 + 1) / 2; if (av1Mbit < 1) av1Mbit = 1;
-                if (e->init(dev.get(), outW, outH, fps, av1Mbit, true)) encoderAv1 = e;
-                else { delete e; g_av1 = false; printf("FEHLER: AV1-Encoder-Neuaufbau fehlgeschlagen -> nur H.264\n"); }
-            }
+            reconcile(hadH264, hadAv1, curKbit);   // gleiche Codec-Menge in neuer Aufloesung
         }
         if (!haveFrame) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); tries++; continue; }   // auf den ERSTEN Frame warten (max ~6s)
         // 2) faellige Takt-Ticks encodieren (letzter Frame zaehlt - echt oder wiederholt).
@@ -1025,8 +1047,37 @@ int main(int argc, char** argv) {
         D3D11_VIDEO_PROCESSOR_STREAM st{}; st.Enable = TRUE; st.pInputSurface = iv.get();
         if (FAILED(vctx->VideoProcessorBlt(vproc.get(), outView.get(), 0, 1, &st))) continue;
         ctx->Flush();
-        std::vector<std::vector<uint8_t>> aus; encoder->encode(nv12.get(), aus);
+        std::vector<std::vector<uint8_t>> aus; if (encoder) encoder->encode(nv12.get(), aus);
         std::vector<std::vector<uint8_t>> ausAv1; if (encoderAv1) encoderAv1->encode(nv12.get(), ausAv1);
+        frameTick++;
+        // --- 1x/s Steuerdateien pollen (Bitrate, Quelle, Codec) - auf TICK-Ebene, nicht am
+        //     H.264-AU-Zaehler (bei AV1-only kaeme sonst nie ein Tick durch). ---
+        if (frameTick % fps == 0) {
+            WIN32_FILE_ATTRIBUTE_DATA fa{}; uint64_t mt = 0;   // Bitrate
+            if (GetFileAttributesExA(brPath.c_str(), GetFileExInfoStandard, &fa)) mt = ((uint64_t)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime;
+            if (mt != brMtime) { brMtime = mt; FILE* bf = nullptr; fopen_s(&bf, brPath.c_str(), "r"); if (bf) { int k = 0; if (fscanf_s(bf, "%d", &k) == 1 && k >= 500 && k <= 200000 && k != curKbit) { curKbit = k; if (encoder) encoder->setBitrate(k); if (encoderAv1) encoderAv1->setBitrate(av1Kbit(k)); printf("  Bitrate live -> %d kbit\n", k); } fclose(bf); } }
+            // Codec-Steuerdatei: gewuenschte Encoder-Menge (Shell schreibt "h264"/"av1"/"h264+av1")
+            WIN32_FILE_ATTRIBUTE_DATA cfa{}; uint64_t cmt = 0;
+            if (GetFileAttributesExA(codecPath.c_str(), GetFileExInfoStandard, &cfa)) cmt = ((uint64_t)cfa.ftLastWriteTime.dwHighDateTime << 32) | cfa.ftLastWriteTime.dwLowDateTime;
+            if (cmt != codecMtime) { codecMtime = cmt; FILE* cf = nullptr; fopen_s(&cf, codecPath.c_str(), "r"); if (cf) { char buf[32] = { 0 }; fread(buf, 1, 31, cf); fclose(cf); std::string cs = buf; reconcile(cs.find("h264") != std::string::npos, cs.find("av1") != std::string::npos, curKbit); } }
+            // Quellwechsel-Steuerdatei ("monitor" | "hwnd <id>")
+            WIN32_FILE_ATTRIBUTE_DATA sfa{}; uint64_t smt = 0;
+            if (GetFileAttributesExA(srcPath.c_str(), GetFileExInfoStandard, &sfa)) smt = ((uint64_t)sfa.ftLastWriteTime.dwHighDateTime << 32) | sfa.ftLastWriteTime.dwLowDateTime;
+            if (smt != srcMtime) { srcMtime = smt;
+                FILE* sf = nullptr; fopen_s(&sf, srcPath.c_str(), "r");
+                if (sf) { char what[16] = { 0 }; unsigned long long id = 0; int n = fscanf_s(sf, "%15s %llu", what, (unsigned)_countof(what), &id); fclose(sf);
+                    if (n >= 1 && _stricmp(what, "monitor") == 0) { int newIdx = (n >= 2) ? (int)id : 0; if (curHwnd != nullptr || newIdx != monIdx) { monIdx = newIdx; printf("SOURCE: Wechsel -> Bildschirm %d\n", monIdx); switchSource(nullptr); } }
+                    else { HWND want = (n >= 2 && _stricmp(what, "hwnd") == 0) ? (HWND)(uintptr_t)id : nullptr; if (n >= 1 && want != curHwnd) { printf("SOURCE: Wechsel angefordert\n"); switchSource(want); } } }
+            }
+            if (curHwnd && !IsWindow(curHwnd)) { printf("SOURCE: Fenster geschlossen -> Monitor\n"); switchSource(nullptr); }
+            printf("  %llu Frames live (%.1fs, %s%s%s)%s\n", (unsigned long long)frameTick, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), g_h264 ? "H264" : "", (g_h264 && g_av1) ? "+" : "", g_av1 ? "AV1" : "", g_withAudio ? " +Ton" : "");
+        }
+        // --- PSI (PAT/PMT) periodisch, codec-unabhaengig als eigene Pakete ---
+        if (frameTick % (fps / 2 ? fps / 2 : 30) == 0) {
+            std::vector<uint8_t> psi; buildPAT(psi); buildPMT(psi);
+            sendto(s, (const char*)psi.data(), (int)psi.size(), 0, (sockaddr*)&dst, sizeof(dst));
+            if (tsf) fwrite(psi.data(), 1, psi.size(), tsf);
+        }
         // Bild-PTS aus der gemeinsamen Wall-Clock (nicht dem Frame-Zaehler): haelt Bild
         // und Ton synchron, auch wenn WGC mal einen Frame auslaesst. EINMAL pro Tick lesen:
         // AMF kann pro SubmitInput 0..N AUs liefern (Pipeline-Puffer, real auf AMD beobachtet
@@ -1044,41 +1095,17 @@ int main(int argc, char** argv) {
             if (pts <= lastVideoPts) pts = lastVideoPts + frameDur;
             lastVideoPts = pts;
             std::vector<uint8_t> ts;
-            if (outFrame % (fps / 2 ? fps / 2 : 30) == 0) { buildPAT(ts); buildPMT(ts); }
             std::vector<uint8_t> pes; pes.push_back(0); pes.push_back(0); pes.push_back(1); pes.push_back(0xE0); pes.push_back(0); pes.push_back(0); pes.push_back(0x80); pes.push_back(0x80); pes.push_back(5); writePTS(pes, 0x2, pts);
             pes.insert(pes.end(), AUD, AUD + 6); pes.insert(pes.end(), au.begin(), au.end());
-            writeTS(ts, PID_VIDEO, true, g_ccVideo, pes.data(), (int)pes.size(), true, pts * 300);
+            writeTS(ts, PID_VIDEO, true, g_ccVideo, pes.data(), (int)pes.size(), true, pts * 300);   // H.264 aktiv = PCR-Traeger
             for (size_t o = 0; o < ts.size(); o += 1316) { int len = (int)((ts.size() - o) < 1316 ? (ts.size() - o) : 1316); sendto(s, (const char*)ts.data() + o, len, 0, (sockaddr*)&dst, sizeof(dst)); }
             if (tsf) fwrite(ts.data(), 1, ts.size(), tsf);
             outFrame++;
-            if (outFrame % fps == 0) {
-                WIN32_FILE_ATTRIBUTE_DATA fa{}; uint64_t mt = 0;   // Bitrate-Steuerdatei 1x/s pruefen
-                if (GetFileAttributesExA(brPath.c_str(), GetFileExInfoStandard, &fa)) mt = ((uint64_t)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime;
-                if (mt != brMtime) { brMtime = mt; FILE* bf = nullptr; fopen_s(&bf, brPath.c_str(), "r"); if (bf) { int k = 0; if (fscanf_s(bf, "%d", &k) == 1 && k >= 500 && k <= 200000 && k != curKbit) { curKbit = k; encoder->setBitrate(k); if (encoderAv1) encoderAv1->setBitrate(av1Kbit(k)); printf("  Bitrate live -> %d kbit\n", k); } fclose(bf); } }
-                // Quellwechsel-Steuerdatei ("monitor" | "hwnd <id>"): Capture live umschalten - fuer
-                // den Zuschauer ein nahtloser Schnitt (Encoder/Zeitachse/Verbindung laufen durch).
-                WIN32_FILE_ATTRIBUTE_DATA sfa{}; uint64_t smt = 0;
-                if (GetFileAttributesExA(srcPath.c_str(), GetFileExInfoStandard, &sfa)) smt = ((uint64_t)sfa.ftLastWriteTime.dwHighDateTime << 32) | sfa.ftLastWriteTime.dwLowDateTime;
-                if (smt != srcMtime) { srcMtime = smt;
-                    FILE* sf = nullptr; fopen_s(&sf, srcPath.c_str(), "r");
-                    if (sf) { char what[16] = { 0 }; unsigned long long id = 0; int n = fscanf_s(sf, "%15s %llu", what, (unsigned)_countof(what), &id); fclose(sf);
-                        if (n >= 1 && _stricmp(what, "monitor") == 0) {   // "monitor <idx>" - Bildschirm-zu-Bildschirm live wechseln
-                            int newIdx = (n >= 2) ? (int)id : 0;
-                            if (curHwnd != nullptr || newIdx != monIdx) { monIdx = newIdx; printf("SOURCE: Wechsel -> Bildschirm %d\n", monIdx); switchSource(nullptr); }
-                        } else {
-                            HWND want = (n >= 2 && _stricmp(what, "hwnd") == 0) ? (HWND)(uintptr_t)id : nullptr;
-                            if (n >= 1 && want != curHwnd) { printf("SOURCE: Wechsel angefordert\n"); switchSource(want); }
-                        } }
-                }
-                // Fenster geschlossen? -> automatisch auf den Monitor zurueck (statt ewigem Standbild).
-                if (curHwnd && !IsWindow(curHwnd)) { printf("SOURCE: Fenster geschlossen -> Monitor\n"); switchSource(nullptr); }
-                printf("  %llu Frames live (%.1fs, %s)%s\n", (unsigned long long)outFrame, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), encoder->name(), g_withAudio ? " +Ton" : "");
-            }
         }
-        // AV1-AUs (Temporal Units, low-overhead OBU-Format wie vom Encoder geliefert) auf eigenem
-        // PID einmuxen - gleiche monotone Tick-PTS-Logik wie H.264, aber ohne AUD (gibt es bei
-        // AV1 nicht) und ohne PCR (die traegt der H.264-PID, der immer mitlaeuft).
+        // AV1-AUs (Temporal Units) auf eigenem PID einmuxen - ohne AUD (gibt es bei AV1 nicht).
+        // PCR nur, wenn KEIN H.264 laeuft (dann ist AV1 der primaere Takttraeger).
         static uint64_t lastAv1Pts = 0;
+        bool av1CarriesPcr = !g_h264;
         uint64_t startPtsAv1 = (ausAv1.size() > 1) ? tickPts - (uint64_t)(ausAv1.size() - 1) * frameDur : tickPts;
         for (size_t ai = 0; ai < ausAv1.size(); ++ai) {
             auto& au = ausAv1[ai];
@@ -1088,7 +1115,7 @@ int main(int argc, char** argv) {
             std::vector<uint8_t> ts;
             std::vector<uint8_t> pes; pes.push_back(0); pes.push_back(0); pes.push_back(1); pes.push_back(0xE0); pes.push_back(0); pes.push_back(0); pes.push_back(0x80); pes.push_back(0x80); pes.push_back(5); writePTS(pes, 0x2, pts);
             pes.insert(pes.end(), au.begin(), au.end());
-            writeTS(ts, PID_VIDEO_AV1, true, g_ccVideoAv1, pes.data(), (int)pes.size(), false, 0);
+            writeTS(ts, PID_VIDEO_AV1, true, g_ccVideoAv1, pes.data(), (int)pes.size(), av1CarriesPcr, pts * 300);
             for (size_t o = 0; o < ts.size(); o += 1316) { int len = (int)((ts.size() - o) < 1316 ? (ts.size() - o) : 1316); sendto(s, (const char*)ts.data() + o, len, 0, (sockaddr*)&dst, sizeof(dst)); }
             if (tsf) fwrite(ts.data(), 1, ts.size(), tsf);
         }
@@ -1107,6 +1134,6 @@ int main(int argc, char** argv) {
     }
     if (g_withAudio) { audio->join(); printf("AUDIO-MUX: %llu Ton-Frames eingemuxt\n", (unsigned long long)g_audioMuxed); }
     if (tsf) fclose(tsf);
-    printf("Ende: %llu in / %llu out Frames (%s).\n", (unsigned long long)inFrame, (unsigned long long)outFrame, encoder->name());
+    printf("Ende: %llu in / %llu out Frames (%s).\n", (unsigned long long)inFrame, (unsigned long long)outFrame, encoder ? encoder->name() : (encoderAv1 ? encoderAv1->name() : "-"));
     session.Close(); framePool.Close(); closesocket(s); WSACleanup(); return 0;
 }

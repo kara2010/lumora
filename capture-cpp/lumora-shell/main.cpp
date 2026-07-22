@@ -932,6 +932,18 @@ static void bcPushIceConfig(const std::vector<std::string>& hosts) {
     body["iceServers"] = servers;
     luart::httpPost("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/config/ice", body.dump(), 2000);
 }
+// Codec-Modus (auto|av1|h264) an den Relay pushen - bestimmt die Codec-Wahl pro Zuschauer.
+static void bcPushCodecConfig() {
+    std::string mode = loadSettings().value("streamCodec", "auto");
+    luart::httpPost("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/config/codec",
+                    json({ {"mode", mode} }).dump(), 2000);
+}
+// Gewuenschte Encoder-Menge an den Capture-Helfer signalisieren (bedarfsgesteuert).
+// Inhalt: "h264" | "av1" | "h264+av1". Nie leer (Warm-Default h264).
+static void bcWriteCodecControl(bool h264, bool av1) {
+    std::string v = av1 ? (h264 ? "h264+av1" : "av1") : "h264";
+    writeFile(tempPath(L"lumora-codec.txt"), v);
+}
 // Relay starten + aktiver Ready-Check (TCP-Probe auf den RTSP-Port, wie das Original).
 static std::wstring g_mtxCfgPath;   // fuer den Crash-Neustart gemerkt
 // Relay-Absturz mitten im Stream (nicht gewollt beendet): neu starten - der native
@@ -971,6 +983,7 @@ bool bcStartMtx(const std::wstring& cfgPath) {
                 std::vector<std::string> hosts;
                 for (auto& h : loadSettings().value("streamLastHosts", json::array())) if (h.is_string()) hosts.push_back(h.get<std::string>());
                 bcPushIceConfig(hosts);
+                bcPushCodecConfig();   // Codec-Modus (auto|av1|h264) an den Relay
             }
             return true;
         }
@@ -1034,9 +1047,11 @@ static void bcStartNative(const json& cfg) {
         L" --bitrate " + std::to_wstring((std::max)(1, (int)(cfg.value("kbit", 8000) / 1000.0 + 0.5))) +
         L" --mtx-host 127.0.0.1 --mtx-port " + std::to_wstring(MTX_TS_UDP) + L" --audio";
     if (cfg.value("scaleH", 0)) args += L" --scale " + std::to_wstring(cfg.value("scaleH", 0));
+    { std::string cm = loadSettings().value("streamCodec", "auto"); args += L" --codec " + std::wstring(cm.begin(), cm.end()); }
     if (cfg.value("mode", "") == "window" && cfg.value("hwnd", 0ll)) args += L" --window --hwnd " + std::to_wstring(cfg.value("hwnd", 0ll));
     else args += L" --monitor " + std::to_wstring(cfg.value("outputIdx", 0));   // gewaehlter Bildschirm
     bcWriteHdrControl();
+    bcWriteCodecControl(true, false);   // Warm-Default H.264 vor Capture-Start (bcViewerTick zieht bei Bedarf AV1 nach)
     g_bcCapKey = std::to_string(cfg.value("mode", "") == "window" ? cfg.value("hwnd", 0ll) : 0) + "|" + std::to_string(cfg.value("fps", 60)) + "|" + std::to_string(cfg.value("scaleH", 0));
     bcWriteBitrateControl(cfg.value("kbit", 8000));
     g_bcNatKbit = cfg.value("kbit", 8000);
@@ -1099,6 +1114,25 @@ static void bcViewerTick() {
         bcPushState();
         if (n > prev) sendToUi("viewer-joined", n);
     }
+    // Bedarfsgesteuertes Encoding: Codec-Bedarf der aktuellen Zuschauer vom Relay holen und
+    // dem Capture signalisieren. Modus h264 erzwingt reines H.264. Hysterese: einen Codec erst
+    // nach ~10s ohne Bedarf abschalten (verhindert Encoder-Flattern bei NAT-Reconnects).
+    static bool wantH264 = true, wantAv1 = false; static ULONGLONG av1GoneAt = 0, h264GoneAt = 0;
+    std::string mode = loadSettings().value("streamCodec", "auto");
+    auto r = luart::httpGet("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/paths/get/live", L"", 1500);
+    json j = json::parse(r.body, nullptr, false);
+    bool needH264 = j.is_object() ? j.value("needH264", false) : false;
+    bool needAv1 = (mode != "h264") && j.is_object() && j.value("needAV1", false);
+    ULONGLONG now = GetTickCount64();
+    // H.264 ist Warm-Default (immer mindestens einer). AV1 folgt dem Bedarf mit Hysterese.
+    if (needH264 || mode == "h264") { wantH264 = true; h264GoneAt = 0; }
+    else if (!wantH264) {} else { if (!h264GoneAt) h264GoneAt = now; if (now - h264GoneAt > 10000 && wantAv1) wantH264 = false; }
+    if (needAv1) { wantAv1 = true; av1GoneAt = 0; }
+    else if (wantAv1) { if (!av1GoneAt) av1GoneAt = now; if (now - av1GoneAt > 10000) wantAv1 = false; }
+    if (!wantH264 && !wantAv1) wantH264 = true;   // nie leer
+    static std::string lastCodec;
+    std::string cur = wantAv1 ? (wantH264 ? "h264+av1" : "av1") : "h264";
+    if (cur != lastCodec) { lastCodec = cur; bcWriteCodecControl(wantH264, wantAv1); bcLogStream("codec-bedarf -> " + cur); }
 }
 // Live-Umstellung (bcDoRestartFfmpeg-Kern): Bitrate + Quelle ueber die Steuerdateien,
 // Vollneustart des Helfers nur bei fps/scaleH-Aenderung.
@@ -1122,6 +1156,7 @@ static void bcApplyCfg(const json& cfg) {
             bcLogStream("nat: Bitrate live -> " + std::to_string(g_bcNatKbit) + " kbit (kein Neustart)");
         }
         g_bcState["quality"] = bcQualityLabel(cfg);
+        bcPushCodecConfig();   // evtl. geaenderter Codec-Modus -> Relay (bcViewerTick zieht das Encoding nach)
         bcPushState();
         return;
     }
