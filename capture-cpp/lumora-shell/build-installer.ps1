@@ -5,7 +5,8 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "0.2.1"   # 0.2.1: BF6-HDR-Fix, Gamepad-Fokus, GPU-Name, Bitrate-Presets 35/50
+$version = "0.2.2"   # 0.2.2: Auto-Update silent (/S), Update-Erkennung im Installer, Uninstall-Datenfrage, MUI2-Optik
+                     # 0.2.1: BF6-HDR-Fix, Gamepad-Fokus, GPU-Name, Bitrate-Presets 35/50
                      # 0.2.0: eigener Relay (mediamtx-Abloesung), native HDR, ETW-FPS, libvpl statisch
 
 # 1) Shell frisch bauen
@@ -89,3 +90,24 @@ if (Test-Path $signtool) {
 }
 $mb = [math]::Round((Get-Item $out).Length / 1MB, 1)
 Write-Output "FERTIG: $out ($mb MB)"
+
+# 5) Update-Feed erzeugen (native-update.json) - Rollout = diese 2 Dateien hochladen:
+#    website\updates\Lumora-Native-Setup-<version>.exe + website\updates\native-update.json
+#    Bestandskunden ziehen das Update dann automatisch (Shell: setupAutoUpdate -> /S-Install).
+#    Release-Notes optional aus _testlab\release-notes\<version>.txt (===EN===-Trenner wie latest.yml).
+$updDir = "$root\website\updates"
+New-Item -ItemType Directory -Force $updDir | Out-Null
+Copy-Item $out $updDir -Force
+$notes = ""; $notesEn = ""
+$notesFile = "$root\_testlab\release-notes\$version.txt"
+if (Test-Path $notesFile) {
+  $raw = [IO.File]::ReadAllText($notesFile)
+  $parts = $raw -split "===EN===", 2
+  $notes = $parts[0].Trim()
+  if ($parts.Count -gt 1) { $notesEn = $parts[1].Trim() }
+}
+$feed = @{ version = $version
+           url = "https://lumora-streaming.de/updates/Lumora-Native-Setup-$version.exe"
+           notes = $notes; notesEn = $notesEn } | ConvertTo-Json
+[IO.File]::WriteAllText("$updDir\native-update.json", $feed, (New-Object Text.UTF8Encoding($false)))   # BOM-frei (Feed-Parser!)
+Write-Output "Update-Feed: $updDir\native-update.json (v$version)"
