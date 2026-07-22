@@ -2395,3 +2395,6 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 #ibPad text { fill: var(--fg, #ddd); font-size: 11px; font-family: sans-serif; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }
 #ibPad .lbl { fill: var(--muted, #999); font-size: 9px; }
 #ibPad .stickdot { fill: var(--accent, #7ab7ff); pointer-events: none; }
+/* Fuellbalken fuer LT/RT: waechst proportional zum tatsaechlichen Ausschlag (0-255),
+   damit man beim Zuordnen sofort sieht, WIE WEIT ein Pedal/Regler wirkt - nicht nur ob. */
+#ibPad .trigger-fill { fill: var(--accent, #7ab7ff); opacity: .55; pointer-events: none; transition: width .05s linear, x .05s linear; }
