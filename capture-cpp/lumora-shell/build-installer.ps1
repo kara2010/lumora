@@ -5,7 +5,8 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "0.2.2"   # 0.2.2: Auto-Update silent (/S), Update-Erkennung im Installer, Uninstall-Datenfrage, MUI2-Optik
+$version = "0.2.3"   # 0.2.3: Alt-Electron-Version wird IMMER sauber deinstalliert (Parallel-Beta-Reste)
+                     # 0.2.2: Auto-Update silent (/S), Update-Erkennung im Installer, Uninstall-Datenfrage, MUI2-Optik
                      # 0.2.1: BF6-HDR-Fix, Gamepad-Fokus, GPU-Name, Bitrate-Presets 35/50
                      # 0.2.0: eigener Relay (mediamtx-Abloesung), native HDR, ETW-FPS, libvpl statisch
 
