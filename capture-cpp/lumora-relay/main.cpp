@@ -41,8 +41,10 @@ int main(int argc, char** argv) {
 
     // Status einmal pro Minute (landet via Shell-Pipe im Stream-Log)
     uint64_t lastAUs = 0;
-    for (;;) {
-        std::this_thread::sleep_for(std::chrono::seconds(60));
+    for (int tick = 0;; ++tick) {
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+        core.logSessionDiag();          // je Zuschauer alle 10s (Keyframe-Tor, Sendefehler)
+        if (tick % 6 != 5) continue;    // Gesamtstatus weiter nur 1x/min
         uint64_t aus = demux.videoAUs;
         printf("relay: %llu AUs (+%llu/min), %llu AV1-TUs, %llu Ton, %zu Zuschauer, ccErr=%llu\n",
                (unsigned long long)aus, (unsigned long long)(aus - lastAUs),
