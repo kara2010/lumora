@@ -1068,6 +1068,7 @@
           <a href="streaming.html"><span class="di" aria-hidden="true">📡</span><span class="dtxt">Game-Streaming<span class="dsub">Per Link in 1080p60 – bis 4K</span></span></a>
           <a href="gaming-osd.html"><span class="di" aria-hidden="true">📊</span><span class="dtxt">Gaming-OSD<span class="dsub">FPS, GPU &amp; CPU ohne Afterburner</span></span></a>
           <a href="gamepad.html"><span class="di" aria-hidden="true">🎮</span><span class="dtxt">Gamepad-Steuerung<span class="dsub">Couch-Gaming am TV</span></span></a>
+          <a href="eingabe-bruecke.html"><span class="di" aria-hidden="true">🕹️</span><span class="dtxt">Eingabe-Brücke<span class="dsub">Joystick als Xbox-Controller</span></span></a>
           <a href="discord-alternative.html"><span class="di" aria-hidden="true">💬</span><span class="dtxt">Vergleich mit Discord<span class="dsub">Streaming ohne Nitro</span></span></a>
           <a href="portfreigabe.html"><span class="di" aria-hidden="true">🔌</span><span class="dtxt">Portfreigabe einrichten<span class="dsub">Router-Anleitung, wenn's klemmt</span></span></a>
         </div>
@@ -1667,7 +1668,8 @@
       jede Zeile ist öffentlich nachlesbar. Seit der nativen Version ist Lumora
       <strong>durchgehend eigener C++-Code</strong>: Bildaufnahme (Windows Graphics Capture),
       Hardware-Encoding (NVENC/AMF/QuickSync direkt), MPEG-TS-Muxing, der WebRTC-Medien-Relay,
-      HDR-Umschaltung, FPS-Messung (ETW) und Gamepad-Steuerung (XInput) nutzen ausschließlich
+      HDR-Umschaltung, FPS-Messung (ETW), Gamepad-Steuerung (XInput) und die
+      <a href="eingabe-bruecke.html">Eingabe-Brücke</a> (RawInput) nutzen ausschließlich
       Windows-Systemschnittstellen. Die verbleibenden Bausteine sind hier vollständig aufgeführt —
       bewusst in vier Gruppen getrennt, denn nur die erste ist „echter" Fremdcode, der in Lumora
       mitläuft. Der Rest sind Schnittstellen-Definitionen der Hardware-Hersteller, Windows-Bestandteile
@@ -1725,6 +1727,21 @@
               <small style="color:var(--muted)">&copy; Xiph.Org, Skype, Mozilla u.&nbsp;a.</small></td>
         </tr>
         <tr>
+          <td><strong>usrsctp</strong></td>
+          <td>0.9.x</td>
+          <td>SCTP-Transport (WebRTC-Datenkanäle) — Bestandteil des libdatachannel-Stacks im Medien-Relay</td>
+          <td><span class="badge badge-mit">BSD-3</span></td>
+          <td><a href="https://github.com/sctplab/usrsctp" target="_blank" rel="noopener">github.com/sctplab/usrsctp</a></td>
+        </tr>
+        <tr>
+          <td><strong>ViGEmClient</strong></td>
+          <td>1.x</td>
+          <td>Ansteuerung des virtuellen Xbox-Controllers für die <a href="eingabe-bruecke.html">Eingabe-Brücke</a> (Joystick/Lenkrad → XInput)</td>
+          <td><span class="badge badge-mit">MIT</span></td>
+          <td><a href="https://github.com/nefarius/ViGEmClient" target="_blank" rel="noopener">github.com/nefarius/ViGEmClient</a><br>
+              <small style="color:var(--muted)">© Benjamin Höglinger-Stelzer</small></td>
+        </tr>
+        <tr>
           <td><strong>nlohmann/json</strong></td>
           <td>3.x</td>
           <td>JSON-Verarbeitung (Einstellungen, IPC, APIs)</td>
@@ -1762,6 +1779,14 @@
           <td>Rendering der Benutzeroberfläche (Chromium-basiert, Windows-Systemkomponente — auf Windows 11 vorinstalliert)</td>
           <td><span class="badge badge-mit">BSD (Loader)</span></td>
           <td><a href="https://developer.microsoft.com/microsoft-edge/webview2" target="_blank" rel="noopener">developer.microsoft.com</a></td>
+        </tr>
+        <tr>
+          <td><strong>ViGEmBus</strong></td>
+          <td>1.22</td>
+          <td>Signierter Treiber für virtuelle Gamepads (<a href="eingabe-bruecke.html">Eingabe-Brücke</a>) — wird <em>nicht</em> mitgeliefert, sondern auf Wunsch von der offiziellen Quelle installiert (Signatur wird geprüft) und ist über „Apps &amp; Features" deinstallierbar</td>
+          <td><span class="badge badge-mit">BSD-3</span></td>
+          <td><a href="https://github.com/nefarius/ViGEmBus" target="_blank" rel="noopener">github.com/nefarius/ViGEmBus</a><br>
+              <small style="color:var(--muted)">© Benjamin Höglinger-Stelzer / Nefarius</small></td>
         </tr>
         <tr>
           <td><strong>PawnIO</strong></td>
@@ -1833,10 +1858,10 @@
     <a href="gamepad.html">Bedienung per Gamepad</a>
   </p>
   <p>
-    Lumora 2.2.20 · Kostenlos &amp; Open Source (<a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">Quellcode auf GitHub</a>, AGPL v3) ·
-    HDR via <a href="https://github.com/res2k/HDRTray" target="_blank" rel="noopener">HDRTray</a> (Frank Richter, GPL v3) ·
-    FPS via <a href="https://github.com/GameTechDev/PresentMon" target="_blank" rel="noopener">PresentMon</a> (Intel, MIT) ·
-    CPU-Sensorik via <a href="https://pawnio.eu" target="_blank" rel="noopener">PawnIO</a> (namazso, GPL v2)
+    Lumora · Kostenlos &amp; Open Source (<a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">Quellcode auf GitHub</a>, AGPL v3) ·
+    durchgehend eigener C++-Code: HDR-Umschaltung, FPS-Messung (ETW), Hardware-Encoding und WebRTC-Medien-Relay ohne Fremd-Tools ·
+    CPU-Sensorik optional via <a href="https://pawnio.eu" target="_blank" rel="noopener">PawnIO</a> (namazso, GPL v2) ·
+    virtueller Controller optional via <a href="https://github.com/nefarius/ViGEmBus" target="_blank" rel="noopener">ViGEmBus</a> (Nefarius, BSD-3)
   </p>
   <p style="margin-top:10px; font-size:12px; opacity:0.7;">
     Inoffizielles Tool · nicht verbunden mit Valve/Steam oder Microsoft · alle Marken und Coverbilder gehören den jeweiligen Rechteinhabern.
@@ -1858,6 +1883,7 @@
     <a class="drawer-item" href="streaming.html"><span class="ico" aria-hidden="true">📡</span><span class="txt">Game-Streaming<span class="sub">Per Link in 1080p60 – bis 4K</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="gaming-osd.html"><span class="ico" aria-hidden="true">📊</span><span class="txt">Gaming-OSD<span class="sub">FPS, GPU &amp; CPU ohne Afterburner</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="gamepad.html"><span class="ico" aria-hidden="true">🎮</span><span class="txt">Gamepad-Steuerung<span class="sub">Couch-Gaming am TV</span></span><span class="chev" aria-hidden="true">›</span></a>
+    <a class="drawer-item" href="eingabe-bruecke.html"><span class="ico" aria-hidden="true">🕹️</span><span class="txt">Eingabe-Brücke<span class="sub">Joystick als Xbox-Controller</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="discord-alternative.html"><span class="ico" aria-hidden="true">💬</span><span class="txt">Vergleich mit Discord<span class="sub">Streaming ohne Nitro</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="portfreigabe.html"><span class="ico" aria-hidden="true">🔌</span><span class="txt">Portfreigabe einrichten<span class="sub">Router-Anleitung, wenn's klemmt</span></span><span class="chev" aria-hidden="true">›</span></a>
     <p class="drawer-group-label">Diese Seite</p>
