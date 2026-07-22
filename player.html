@@ -93,20 +93,9 @@
   @media (max-height: 430px) {
     #stats { font-size: 11px; padding: 5px 9px; gap: 7px; }
   }
-</style>
-</head>
-<body>
-<video id="v" autoplay playsinline></video>
-<canvas id="freeze" style="display:none; position:fixed; inset:0; width:100%; height:100%; object-fit:contain; background:#000; pointer-events:none; z-index:2;"></canvas>
-<div id="stats">
-  <span><span class="val fps" id="sFps">–</span><span class="unit">fps</span></span>
-  <span><span class="val" id="sRes">–</span></span>
-  <span><span class="val" id="sBitrate">–</span><span class="unit">Mbit/s</span></span>
-  <span><span class="val" id="sCodec">–</span></span>
-</div>
-<div id="overlay"><div class="badge"><span class="dot" id="dot"></span><span id="msg">Verbinde…</span></div></div>
-<div id="brToast"></div>
-<style>
+
+  /* Zutrittsschutz-Karte (Zuschauer-Namenseingabe/Warteschlange). Stand bisher als
+     zweiter <style>-Block mitten im <body> - hier zusammengefuehrt, ein Ort fuers CSS. */
   #gate { display:none; position:fixed; inset:0; z-index:9; align-items:center; justify-content:center;
     background:radial-gradient(120% 120% at 50% 30%, rgba(10,12,18,0.86), rgba(6,7,11,0.95)); backdrop-filter:blur(3px); }
   .gate-card { width:min(340px,86vw); padding:26px 26px 24px; text-align:center; border-radius:18px;
@@ -131,6 +120,18 @@
     border-top-color:#4F8EF7; animation:gspin .8s linear infinite; }
   @keyframes gspin { to { transform:rotate(360deg); } }
 </style>
+</head>
+<body>
+<video id="v" autoplay playsinline></video>
+<canvas id="freeze" style="display:none; position:fixed; inset:0; width:100%; height:100%; object-fit:contain; background:#000; pointer-events:none; z-index:2;"></canvas>
+<div id="stats">
+  <span><span class="val fps" id="sFps">–</span><span class="unit">fps</span></span>
+  <span><span class="val" id="sRes">–</span></span>
+  <span><span class="val" id="sBitrate">–</span><span class="unit">Mbit/s</span></span>
+  <span><span class="val" id="sCodec">–</span></span>
+</div>
+<div id="overlay"><div class="badge"><span class="dot" id="dot"></span><span id="msg">Verbinde…</span></div></div>
+<div id="brToast"></div>
 <div id="gate">
   <div class="gate-card">
     <div class="gate-ico" id="gateIco">🔒</div>

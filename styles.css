@@ -1612,6 +1612,10 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
   cursor: not-allowed;
 }
 
+/* Ersatz-Dialog fuer alert()/confirm()/prompt() (#lumoraModalOverlay in index.html) */
+.modal-dialog { width: 400px; gap: 16px; }
+.modal-msg { color: #ddd; font-size: 14px; line-height: 1.5; white-space: pre-line; }
+
 /* Erweiterte Cover-Suche */
 .cover-dialog {
   width: 640px;
@@ -2379,3 +2383,15 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 }
 .sum-val { font-size: 20px; font-weight: 700; color: var(--accent-light); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sum-lbl { font-size: 11.5px; color: #8a8a9a; margin-top: 4px; line-height: 1.3; }
+
+/* ---- Eingabe-Bruecke: interaktiver Xbox-Controller (index.html #ibPad-SVG) ----
+   Stand bisher als <style> innerhalb <defs> des inline-SVG - hierher verschoben,
+   damit auch dieses CSS an einem Ort liegt statt im Dokument verstreut zu sein. */
+#ibPad .ctl { fill: var(--card2, #2a2a35); stroke: var(--border, #444); stroke-width: 1.5; cursor: pointer; transition: fill .15s, stroke .15s; }
+#ibPad .ctl:hover { stroke: var(--accent, #7ab7ff); stroke-width: 2.5; }
+#ibPad .ctl.mapped { fill: #1f6f3f; stroke: #3fbf6f; }
+#ibPad .ctl.capturing { fill: #b8860b; stroke: #ffd24d; animation: ibpulse 1s ease-in-out infinite; }
+@keyframes ibpulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+#ibPad text { fill: var(--fg, #ddd); font-size: 11px; font-family: sans-serif; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }
+#ibPad .lbl { fill: var(--muted, #999); font-size: 9px; }
+#ibPad .stickdot { fill: var(--accent, #7ab7ff); pointer-events: none; }
