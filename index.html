@@ -491,6 +491,14 @@
                 <option value="amf">AMD (AMF)</option>
               </select>
             </div>
+            <div class="osd-field">
+              <span class="osd-field-label">Codec</span>
+              <select id="setStreamCodec" class="sort-select" style="flex:1" onchange="onStreamSettingChange()">
+                <option value="auto">Automatisch (AV1 wenn möglich)</option>
+                <option value="av1">AV1 (weniger Bandbreite)</option>
+                <option value="h264">H.264 (maximale Kompatibilität)</option>
+              </select>
+            </div>
             <p class="settings-hint">Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum.</p>
             <details class="sgdb-guide stream-advanced">
               <summary>Feineinstellung (Puffer, adaptive Bitrate, HDR)</summary>
@@ -2845,6 +2853,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setStreamQuality').value = s.streamQuality || '1080'
       document.getElementById('setStreamFps').value = String(s.streamFps || 60)
       document.getElementById('setStreamEncoder').value = s.streamEncoder || 'auto'
+      document.getElementById('setStreamCodec').value = s.streamCodec || 'auto'
       // Bitrate: alter 35-Mbit-Wert (fuers fruehere adaptive System) passt nicht
       // zu CBR -> auf tauglichen Standard migrieren, wenn er keine Option trifft.
       let skbit = s.streamUploadKbit || 8000
@@ -3531,6 +3540,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         streamFps: parseInt(document.getElementById('setStreamFps').value, 10),
         streamUploadKbit: parseInt(document.getElementById('setStreamBitrate').value, 10),
         streamEncoder: document.getElementById('setStreamEncoder').value,
+        streamCodec: document.getElementById('setStreamCodec').value,
         streamAdaptive: document.getElementById('setStreamAdaptive').checked,
         streamDoorman: document.getElementById('setStreamDoorman').checked,
         streamNativeHelper: document.getElementById('setStreamNative').checked,

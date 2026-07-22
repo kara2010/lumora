@@ -26,6 +26,7 @@ int main(int argc, char** argv) {
 
     TsDemux demux;
     demux.onVideoAU = [&](const uint8_t* au, size_t len, uint64_t pts) { core.pushVideoAU(au, len, pts); };
+    demux.onVideoAuAv1 = [&](const uint8_t* tu, size_t len, uint64_t pts) { core.pushVideoAuAv1(tu, len, pts); };
     demux.onAudioFrame = [&](const uint8_t* p, size_t len, uint64_t pts) { core.pushAudioFrame(p, len, pts); };
 
     Ingest ingest;
@@ -43,8 +44,9 @@ int main(int argc, char** argv) {
     for (;;) {
         std::this_thread::sleep_for(std::chrono::seconds(60));
         uint64_t aus = demux.videoAUs;
-        printf("relay: %llu AUs (+%llu/min), %llu Ton, %zu Zuschauer, ccErr=%llu\n",
+        printf("relay: %llu AUs (+%llu/min), %llu AV1-TUs, %llu Ton, %zu Zuschauer, ccErr=%llu\n",
                (unsigned long long)aus, (unsigned long long)(aus - lastAUs),
+               (unsigned long long)demux.videoAUsAv1,
                (unsigned long long)demux.audioFrames, core.listSessions().size(),
                (unsigned long long)demux.ccErrors);
         lastAUs = aus;

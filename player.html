@@ -102,6 +102,7 @@
   <span><span class="val fps" id="sFps">–</span><span class="unit">fps</span></span>
   <span><span class="val" id="sRes">–</span></span>
   <span><span class="val" id="sBitrate">–</span><span class="unit">Mbit/s</span></span>
+  <span><span class="val" id="sCodec">–</span></span>
 </div>
 <div id="overlay"><div class="badge"><span class="dot" id="dot"></span><span id="msg">Verbinde…</span></div></div>
 <div id="brToast"></div>
@@ -529,6 +530,8 @@
       var s = await window._pc.getStats(), inb = null
       s.forEach(function (r) { if (r.type === 'inbound-rtp' && r.kind === 'video') inb = r })
       if (!inb) return
+      // Codec-Anzeige: codecId des Video-Reports auf den codec-Report aufloesen (video/AV1 vs video/H264)
+      if (inb.codecId) { var c = s.get(inb.codecId); if (c && c.mimeType) sCodec.textContent = c.mimeType.replace('video/', '') }
       sFps.textContent = inb.framesPerSecond != null ? Math.round(inb.framesPerSecond) : '–'
       sRes.textContent = (inb.frameWidth && inb.frameHeight) ? inb.frameWidth + '×' + inb.frameHeight : '–'
       var now = performance.now()

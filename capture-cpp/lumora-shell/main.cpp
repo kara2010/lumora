@@ -41,6 +41,7 @@
 #include "http_server.h"
 #include "upnp.h"
 #include "osd_broker.h"
+#include "update_components.h"
 #include "osd_rtss.h"
 #include "osd_adl.h"
 #include "group_lan.h"
@@ -2470,10 +2471,18 @@ static void rebuildKbHotkeys() {
     g_kbHotkeys = std::move(list);
 }
 
-// --- Auto-Update: NUR voller Installer, NIEMALS Datei-Update (Fleet-Desaster,
-// [[file-updater-bug]]). Prueft einen JSON-Feed {version,url,notes,notesEn}; bei
-// neuerer Version -> update-available; auf Wunsch Download + Start des Installers,
-// der die vorhandene Version ueber den Umstiegs-/Parallel-Weg ersetzt.
+// --- Auto-Update, zwei Kanaele ---
+// 1) KOMPONENTEN (update_components.h): einzelne Dateien per Manifest, atomar
+//    (Stage -> SHA-256 + Signatur-Verify -> Swap mit Rollback). Das ersetzt die
+//    alte Regel "niemals Datei-Update" ([[file-updater-bug]], Fleet-Desaster der
+//    Electron-Zeit): deren Fehlerbild - halb getauschte Bestaende - ist durch das
+//    Alles-oder-nichts-Design konstruktiv ausgeschlossen.
+// 2) VOLLER INSTALLER (Fallback + grosse Sprnge): JSON-Feed {version,url,notes},
+//    Download + /S-Start des Installers. Bleibt fuer Faelle, die Komponenten nicht
+//    abdecken (neue Installer-Logik, Migrationsschritte).
+// Setting updateChannel: "auto" (Standard: Komponenten + Installer-Fallback),
+// "installer" (nur voller Installer), "store"/"off" (kein Selbst-Update, fuer
+// eine MS-Store-Distribution - dort aktualisiert der Store).
 static const char* UPDATE_FEED_DEFAULT = "https://lumora-streaming.de/native-update.json";
 static std::atomic<bool> g_updBusy{ false };
 static std::string g_updUrl, g_updFile;
@@ -2483,6 +2492,14 @@ static int cmpVer(const std::string& a, const std::string& b) {
     for (int i = 0; i < 3; ++i) if (x[i] != y[i]) return x[i] < y[i] ? -1 : 1;
     return 0;
 }
+// Effektiver Versionsstand = max(EXE-Version, per Komponenten-Update erreichte Version).
+// Ohne das wuerde nach einem Komponenten-Update (laufende Exe meldet noch die alte
+// Dateiversion) faelschlich zusaetzlich der volle Installer angeboten.
+static std::string effectiveVersion() {
+    std::string v = shellVersion();
+    std::string cv = loadSettings().value("componentsVersion", "");
+    return (!cv.empty() && cmpVer(v, cv) < 0) ? cv : v;
+}
 static void checkForUpdates(bool manual) {
     std::thread([manual]() {
         std::string feed = loadSettings().value("updateFeed", std::string(UPDATE_FEED_DEFAULT));
@@ -2491,13 +2508,50 @@ static void checkForUpdates(bool manual) {
         json j = json::parse(r.body, nullptr, false);
         std::string ver = j.is_object() ? j.value("version", "") : "";
         if (ver.empty()) { if (manual) sendToUi("update-none", nullptr); return; }
-        if (cmpVer(shellVersion(), ver) < 0) {
+        if (cmpVer(effectiveVersion(), ver) < 0) {
             g_updUrl = j.value("url", "");
             sendToUi("update-available", { {"version", ver}, {"notes", j.value("notes", "")}, {"notesEn", j.value("notesEn", "")} });
         } else if (manual) sendToUi("update-none", nullptr);
     }).detach();
 }
-static void setupAutoUpdate() { std::thread([]() { Sleep(4000); checkForUpdates(false); }).detach(); }
+// Installationsverzeichnis fuer den Updater: IMMER das Exe-Verzeichnis.
+// NICHT g_appDir - das ist das Startzeit-CWD (bei lumora://-Protokollstart z.B.
+// system32, im Dev-Betrieb der Projektroot) und hat den Updater im Test prompt
+// ins Repo schreiben lassen.
+static std::wstring exeDir() {
+    wchar_t p[MAX_PATH] = {}; GetModuleFileNameW(nullptr, p, MAX_PATH);
+    std::wstring s = p; size_t sl = s.find_last_of(L'\\');
+    return sl == std::wstring::npos ? s : s.substr(0, sl);
+}
+// Ein Komponenten-Durchlauf (blockierend, im Update-Thread aufrufen)
+static void componentUpdateOnce() {
+    luupd::Deps d;
+    d.loadSettings = []() { return loadSettings(); };
+    d.httpGetBody = [](const std::string& url) {
+        luart::HttpResp r = luart::httpGet(url, L"", 120000);
+        return r.status == 200 ? r.body : std::string();
+    };
+    d.log = [](const std::string& m) { lulaunch::playLog(dataDir(), m); };
+    d.notify = [](const std::string& ch, const json& v) { sendToUi(ch, v); };
+    std::string applied = luupd::runOnce(d, exeDir(), effectiveVersion());
+    if (!applied.empty()) {
+        json s = loadSettings(); s["componentsVersion"] = applied;
+        writeFile(settingsPath(), s.dump(2));
+    }
+}
+static void setupAutoUpdate() {
+    std::thread([]() {
+        luupd::cleanupOldFiles(exeDir());   // .old-Reste des letzten Swaps (jetzt entsperrbar)
+        Sleep(4000);
+        for (;;) {
+            std::string ch = loadSettings().value("updateChannel", "auto");
+            if (ch == "store" || ch == "off") return;         // Store/abgeschaltet: kein Selbst-Update
+            if (ch != "installer") componentUpdateOnce();      // 1) Komponenten (atomar)
+            checkForUpdates(false);                            // 2) voller Installer (Fallback/Sprung)
+            Sleep(6 * 3600 * 1000);                            // alle 6h erneut (nicht nur beim Start)
+        }
+    }).detach();
+}
 
 // Zentraler Kanal-Dispatcher (Phase-2-Checkliste: capture-cpp/lumora-shell/IPC-INVENTAR.md).
 // Unbekannte Kanaele -> null (Promise loest auf, UI haengt nicht).
