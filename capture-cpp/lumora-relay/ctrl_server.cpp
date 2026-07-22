@@ -31,11 +31,21 @@ void CtrlServer::handle(const HttpReq& req, HttpResp& resp) {
     if (req.method == "GET" && req.path == "/v3/paths/get/live") {
         // "ready" = Ingest liefert gerade Daten (mediamtx-Semantik: Publisher verbunden)
         // "bytesReceived" = Ingest-Bytes gesamt (mediamtx-Feldname, dort nativ vorhanden)
+        // "needH264"/"needAV1" = Codec-Bedarf der aktuellen Zuschauer (bedarfsgesteuertes Encoding)
+        bool needH264 = false, needAv1 = false; core_->codecDemand(needH264, needAv1);
         resp.body = json{
             {"name", "live"}, {"ready", core_->ingestAlive()},
             {"tracks", core_->av1Active() ? json::array({"AV1", "H264", "Opus"}) : json::array({"H264", "Opus"})},
             {"bytesReceived", (long long)core_->bytesIn()},
+            {"needH264", needH264}, {"needAV1", needAv1},
         }.dump();
+        return;
+    }
+    if (req.method == "POST" && req.path == "/v3/config/codec") {
+        json j = json::parse(req.body, nullptr, false);
+        if (!j.is_object()) { resp.status = 400; resp.body = "{}"; return; }
+        core_->setCodecMode(j.value("mode", "auto"));
+        resp.body = "{}";
         return;
     }
     if (req.method == "POST" && req.path == "/v3/config/ice") {
