@@ -34,6 +34,14 @@ static int pickH264Pt(const rtc::Description::Media* m) {
     }
     return fallback;
 }
+// AV1-PT aus dem Offer waehlen (Chrome/Firefox/Edge bieten AV1 an, Safari nicht)
+static int pickAv1Pt(const rtc::Description::Media* m) {
+    for (int pt : m->payloadTypes()) {
+        const auto* map = m->rtpMap(pt);
+        if (map && map->format == "AV1") return pt;
+    }
+    return -1;
+}
 static int pickOpusPt(const rtc::Description::Media* m) {
     for (int pt : m->payloadTypes()) {
         const auto* map = m->rtpMap(pt);
@@ -48,7 +56,8 @@ struct RelayCore::Session {
     shared_ptr<rtc::PeerConnection> pc;
     shared_ptr<rtc::Track> video, audio;
     shared_ptr<rtc::RtpPacketizationConfig> vCfg, aCfg;
-    bool vFirst = true;             // erst ab erstem IDR senden (Decoder braucht SPS/PPS+IDR)
+    bool vFirst = true;             // erst ab erstem Keyframe senden (H.264: SPS/PPS+IDR; AV1: SeqHdr+Key)
+    bool vAv1 = false;              // dieser Zuschauer bekommt den AV1-Zweig (SDP-Offer konnte AV1)
     // RTP-Timestamps laufen relativ weiter: bei PTS-Sprung (Capture-Neustart = neue Zeitbasis)
     // wird mit einem Frame-Schritt fortgesetzt statt den Sprung durchzureichen.
     uint64_t vLastPts = 0, aLastPts = 0; bool vTsSet = false, aTsSet = false;
@@ -105,6 +114,22 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
             return 0;
         };
         if (type == "video") {
+            // Codec pro Zuschauer: AV1, wenn der Browser es anbietet UND der Ingest AV1 liefert
+            // (Doppel-Encode im Capture); sonst H.264-Fallback (Safari, aeltere Geraete).
+            int av1Pt = av1Active_.load() ? pickAv1Pt(&desc) : -1;
+            if (av1Pt >= 0) {
+                s->vAv1 = true;
+                s->vCfg = make_shared<rtc::RtpPacketizationConfig>(
+                    (rtc::SSRC)0x4C4D5257, "lumora-video", (uint8_t)av1Pt, rtc::AV1RtpPacketizer::ClockRate);
+                s->vCfg->midId = findMidId(&desc); s->vCfg->mid = desc.mid();
+                auto pk = make_shared<rtc::AV1RtpPacketizer>(rtc::AV1RtpPacketizer::Packetization::TemporalUnit, s->vCfg);
+                pk->addToChain(make_shared<rtc::RtcpSrReporter>(s->vCfg));
+                pk->addToChain(make_shared<rtc::RtcpNackResponder>());
+                track->setMediaHandler(pk);
+                track->onMessage([](rtc::binary) {}, nullptr);   // RTCP-Rueckkanal konsumieren
+                s->video = track;
+                return;
+            }
             int pt = pickH264Pt(&desc); if (pt < 0) return;
             s->vCfg = make_shared<rtc::RtpPacketizationConfig>(
                 (rtc::SSRC)0x4C4D5256, "lumora-video", (uint8_t)pt, rtc::H264RtpPacketizer::ClockRate);
@@ -257,11 +282,11 @@ void RelayCore::pushVideoAU(const uint8_t* au, size_t len, uint64_t pts90k) {
     scanAnnexB(au, len, hasIdr, spsPpsEnd);
 
     std::lock_guard<std::mutex> lk(mx_);
-    ++framesIn_; lastIngestMs_ = nowMs();
+    ++framesIn_; bytesIn_ += len; lastIngestMs_ = nowMs();
     if (spsPpsEnd > 0) lastSpsPps_.assign(au, au + spsPpsEnd);   // fuer spaeter (derzeit: Encoder sendet SPS/PPS vor jedem IDR)
 
     for (auto& s : sessions_) {
-        if (!s->video || !s->video->isOpen() || !s->vCfg) continue;
+        if (!s->video || !s->video->isOpen() || !s->vCfg || s->vAv1) continue;
         if (s->vFirst) { if (!hasIdr) continue; s->vFirst = false; }   // sauberer Einstieg am IDR
         if (!s->vTsSet) { s->vTs = s->vCfg->startTimestamp; s->vTsSet = true; }
         else {
@@ -277,9 +302,51 @@ void RelayCore::pushVideoAU(const uint8_t* au, size_t len, uint64_t pts90k) {
     }
 }
 
+// AV1-Temporal-Unit (low-overhead OBU-Format) nach OBU_SEQUENCE_HEADER (Typ 1) scannen:
+// der Encoder wiederholt den Sequence Header bei jedem Keyframe (repeatSeqHdr bzw.
+// KEY_FRAME_ALIGNED) -> sein Vorhandensein ist unser Keyframe-Signal fuer den Einstieg.
+static bool av1HasSeqHdr(const uint8_t* d, size_t n) {
+    size_t i = 0;
+    while (i < n) {
+        uint8_t hdr = d[i];
+        if (hdr & 0x80) return false;                    // forbidden bit -> kein gueltiges OBU
+        int type = (hdr >> 3) & 0x0F;
+        bool ext = (hdr & 0x04) != 0, hasSize = (hdr & 0x02) != 0;
+        if (type == 1) return true;                      // OBU_SEQUENCE_HEADER
+        size_t j = i + 1 + (ext ? 1 : 0);
+        if (!hasSize) return false;                      // low-overhead ohne Size: Rest = letztes OBU
+        uint64_t sz = 0; int shift = 0;                  // leb128
+        while (j < n) { uint8_t b = d[j++]; sz |= (uint64_t)(b & 0x7F) << shift; if (!(b & 0x80)) break; shift += 7; if (shift > 56) return false; }
+        i = j + sz;
+    }
+    return false;
+}
+
+void RelayCore::pushVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k) {
+    bool key = av1HasSeqHdr(tu, len);
+    std::lock_guard<std::mutex> lk(mx_);
+    av1Active_.store(true);
+    bytesIn_ += len; lastIngestMs_ = nowMs();
+    for (auto& s : sessions_) {
+        if (!s->vAv1 || !s->video || !s->video->isOpen() || !s->vCfg) continue;
+        if (s->vFirst) { if (!key) continue; s->vFirst = false; }      // sauberer Einstieg am Keyframe
+        if (!s->vTsSet) { s->vTs = s->vCfg->startTimestamp; s->vTsSet = true; }
+        else {
+            int64_t d = (int64_t)pts90k - (int64_t)s->vLastPts;
+            if (d < 0 || d > 90000 * 10) d = 3000;   // Diskontinuitaet (Capture-Neustart): 1 Frame-Schritt
+            s->vTs += (uint32_t)d;
+        }
+        s->vLastPts = pts90k;
+        s->vCfg->timestamp = s->vTs;
+        try {
+            if (s->video->send(reinterpret_cast<const std::byte*>(tu), len)) s->bytesSent += len;
+        } catch (...) {}
+    }
+}
+
 void RelayCore::pushAudioFrame(const uint8_t* pkt, size_t len, uint64_t pts90k) {
     std::lock_guard<std::mutex> lk(mx_);
-    lastIngestMs_ = nowMs();
+    bytesIn_ += len; lastIngestMs_ = nowMs();
     for (auto& s : sessions_) {
         if (!s->audio || !s->audio->isOpen() || !s->aCfg) continue;
         if (s->vFirst && s->video) continue;                 // Ton erst, wenn Video laeuft (A/V-Start sync)
@@ -301,4 +368,9 @@ void RelayCore::pushAudioFrame(const uint8_t* pkt, size_t len, uint64_t pts90k) 
 bool RelayCore::ingestAlive() const {
     std::lock_guard<std::mutex> lk(mx_);
     return lastIngestMs_ != 0 && (nowMs() - lastIngestMs_) < 3000;
+}
+
+uint64_t RelayCore::bytesIn() const {
+    std::lock_guard<std::mutex> lk(mx_);
+    return bytesIn_;
 }

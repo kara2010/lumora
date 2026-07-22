@@ -3,6 +3,7 @@
 // Bewusst als eigenstaendige Klasse (statische Lib denkbar) - Frontends sind
 // UDP/TS-Ingest (ingest.cpp) und HTTP (whep_server/ctrl_server).
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -40,12 +41,18 @@ public:
     // ICE-Konfiguration live ersetzen - wirkt nur auf NEUE Sessions (bestehende bleiben verbunden).
     void setIceConfig(std::vector<std::string> additionalHosts, std::vector<RelayIceServer> iceServers);
 
-    // Ingest (vom TS-Demuxer): Annex-B-AU / rohes Opus-Paket mit 90kHz-PTS an alle Sessions.
+    // Ingest (vom TS-Demuxer): Annex-B-AU / AV1-Temporal-Unit / rohes Opus-Paket mit 90kHz-PTS.
+    // H.264 geht an H.264-Sessions, AV1 an AV1-Sessions (Codec-Wahl pro Zuschauer per SDP).
     void pushVideoAU(const uint8_t* au, size_t len, uint64_t pts90k);
+    void pushVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k);
     void pushAudioFrame(const uint8_t* pkt, size_t len, uint64_t pts90k);
+
+    // true sobald der Ingest AV1 liefert -> erst dann wird AV1 im SDP-Answer gewaehlt
+    bool av1Active() const { return av1Active_.load(); }
 
     bool ingestAlive() const;                            // Ingest in den letzten 3s gesehen?
     uint64_t framesIn() const { return framesIn_; }
+    uint64_t bytesIn() const;                            // Ingest-Bytes gesamt (Video-AUs + Opus-Pakete)
 
 private:
     struct Session;
@@ -54,7 +61,9 @@ private:
     mutable std::mutex mx_;
     std::vector<std::shared_ptr<Session>> sessions_;
     uint64_t framesIn_ = 0;
+    uint64_t bytesIn_ = 0;
     int64_t lastIngestMs_ = 0;
+    std::atomic<bool> av1Active_{ false };               // Ingest liefert (auch) AV1
     // SPS/PPS-Cache: neuen Sessions fehlt sonst bis zum naechsten IDR (max 1s GOP) der Parametersatz
     std::vector<uint8_t> lastSpsPps_;
 };

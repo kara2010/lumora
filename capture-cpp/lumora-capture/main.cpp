@@ -1,7 +1,7 @@
 // lumora-capture (C++, Phase 2 v2): echter Helfer mit Encoder-Abstraktion.
 // WGC-Monitor -> VideoProcessor NV12 -> Encoder (NVENC ODER AMF, GPU-Auto-Auswahl,
 // Zero-Copy) -> eigener MPEG-TS-Mux -> UDP an mediamtx. LIVE, OHNE FFmpeg.
-// Aufruf: lumora-capture [--encoder auto|nvenc|amf] [--fps N] [--bitrate MBIT]
+// Aufruf: lumora-capture [--encoder auto|nvenc|amf|qsv] [--codec auto|h264|av1] [--fps N] [--bitrate MBIT]
 //                        [--mtx-host IP] [--mtx-port P] [--frames N] [--tsout DATEI]
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
@@ -48,6 +48,7 @@
 #include "public/include/core/Buffer.h"
 #include "public/include/components/Component.h"
 #include "public/include/components/VideoEncoderVCE.h"
+#include "public/include/components/VideoEncoderAV1.h"
 #include "vpl/mfxvideo.h"
 #include "vpl/mfxdispatcher.h"
 #pragma comment(lib, "ws2_32.lib")
@@ -60,9 +61,10 @@ namespace wg {
 }
 
 // ================= MPEG-TS-Muxer (bewiesen gegen mediamtx) =================
-static const int PID_PMT = 0x1000, PID_VIDEO = 0x0100, PID_AUDIO = 0x0101;
-static uint8_t g_ccVideo = 0, g_ccPat = 0, g_ccPmt = 0, g_ccAudio = 0;
+static const int PID_PMT = 0x1000, PID_VIDEO = 0x0100, PID_AUDIO = 0x0101, PID_VIDEO_AV1 = 0x0102;
+static uint8_t g_ccVideo = 0, g_ccPat = 0, g_ccPmt = 0, g_ccAudio = 0, g_ccVideoAv1 = 0;
 static bool g_withAudio = false;
+static bool g_av1 = false;            // Doppel-Encode aktiv: AV1 zusaetzlich auf PID_VIDEO_AV1 (H.264 bleibt Fallback)
 static bool g_audioNoBytes = false;   // Diagnose: Audio in PMT deklarieren, aber keine Audio-Pakete senden
 static uint64_t g_audioMuxed = 0;
 static uint32_t crc32_mpeg(const uint8_t* d, int len) { uint32_t c = 0xFFFFFFFF; for (int i = 0; i < len; ++i) { c ^= (uint32_t)d[i] << 24; for (int b = 0; b < 8; ++b) c = (c & 0x80000000) ? (c << 1) ^ 0x04C11DB7 : (c << 1); } return c; }
@@ -83,19 +85,22 @@ static void writeTS(std::vector<uint8_t>& out, int pid, bool pusi, uint8_t& cc, 
 }
 static void writePSI(std::vector<uint8_t>& out, int pid, uint8_t& cc, const uint8_t* sec, int n) { uint8_t k[188]; memset(k, 0xFF, 188); k[0] = 0x47; k[1] = 0x40 | ((pid >> 8) & 0x1F); k[2] = pid & 0xFF; k[3] = 0x10 | (cc & 0x0F); cc = (cc + 1) & 0x0F; k[4] = 0x00; memcpy(k + 5, sec, n); out.insert(out.end(), k, k + 188); }
 static void buildPAT(std::vector<uint8_t>& o) { uint8_t s[16]; int n = 0; s[n++] = 0; s[n++] = 0xB0; s[n++] = 0x0D; s[n++] = 0; s[n++] = 1; s[n++] = 0xC1; s[n++] = 0; s[n++] = 0; s[n++] = 0; s[n++] = 1; s[n++] = 0xE0 | ((PID_PMT >> 8) & 0x1F); s[n++] = PID_PMT & 0xFF; uint32_t c = crc32_mpeg(s, n); s[n++] = c >> 24; s[n++] = c >> 16; s[n++] = c >> 8; s[n++] = c; writePSI(o, 0, g_ccPat, s, n); }
-static void buildPMT(std::vector<uint8_t>& o) { uint8_t s[48]; int n = 0; s[n++] = 2; s[n++] = 0xB0; s[n++] = g_withAudio ? 0x21 : 0x12; s[n++] = 0; s[n++] = 1; s[n++] = 0xC1; s[n++] = 0; s[n++] = 0; s[n++] = 0xE0 | ((PID_VIDEO >> 8) & 0x1F); s[n++] = PID_VIDEO & 0xFF; s[n++] = 0xF0; s[n++] = 0;
+static void buildPMT(std::vector<uint8_t>& o) { uint8_t s[64]; int n = 0; s[n++] = 2; s[n++] = 0xB0; int lenPos = n; s[n++] = 0; s[n++] = 0; s[n++] = 1; s[n++] = 0xC1; s[n++] = 0; s[n++] = 0; s[n++] = 0xE0 | ((PID_VIDEO >> 8) & 0x1F); s[n++] = PID_VIDEO & 0xFF; s[n++] = 0xF0; s[n++] = 0;
     s[n++] = 0x1B; s[n++] = 0xE0 | ((PID_VIDEO >> 8) & 0x1F); s[n++] = PID_VIDEO & 0xFF; s[n++] = 0xF0; s[n++] = 0;                        // Video H.264
+    if (g_av1) { s[n++] = 0x06; s[n++] = 0xE0 | ((PID_VIDEO_AV1 >> 8) & 0x1F); s[n++] = PID_VIDEO_AV1 & 0xFF; s[n++] = 0xF0; s[n++] = 0x06; // Video AV1 (kein Standard-stream_type: 0x06 private)
+        s[n++] = 0x05; s[n++] = 0x04; s[n++] = 'A'; s[n++] = 'V'; s[n++] = '0'; s[n++] = '1'; }  // registration_descriptor "AV01"
     if (g_withAudio) { s[n++] = 0x06; s[n++] = 0xE0 | ((PID_AUDIO >> 8) & 0x1F); s[n++] = PID_AUDIO & 0xFF; s[n++] = 0xF0; s[n++] = 0x0A; // Audio Opus (PES private data, stream_type 0x06)
         s[n++] = 0x05; s[n++] = 0x04; s[n++] = 'O'; s[n++] = 'p'; s[n++] = 'u'; s[n++] = 's';   // registration_descriptor "Opus"
         s[n++] = 0x7F; s[n++] = 0x02; s[n++] = 0x80; s[n++] = 0x02; }                            // Opus-Erweiterungsdeskriptor: 2 Kanaele
+    s[lenPos] = (uint8_t)(n - lenPos - 1 + 4);   // section_length: Rest der Sektion inkl. CRC
     uint32_t c = crc32_mpeg(s, n); s[n++] = c >> 24; s[n++] = c >> 16; s[n++] = c >> 8; s[n++] = c; writePSI(o, PID_PMT, g_ccPmt, s, n); }
 static void writePTS(std::vector<uint8_t>& v, int g, uint64_t t) { v.push_back((uint8_t)((g << 4) | (((t >> 30) & 7) << 1) | 1)); v.push_back((uint8_t)((t >> 22) & 0xFF)); v.push_back((uint8_t)((((t >> 15) & 0x7F) << 1) | 1)); v.push_back((uint8_t)((t >> 7) & 0xFF)); v.push_back((uint8_t)(((t & 0x7F) << 1) | 1)); }
 
 // ================= Encoder-Abstraktion =================
 struct Encoder {
     virtual ~Encoder() {}
-    virtual bool init(ID3D11Device* dev, int w, int h, int fps, int mbit) = 0;
-    virtual void encode(ID3D11Texture2D* nv12, std::vector<std::vector<uint8_t>>& out) = 0; // 0..N fertige H.264-AUs
+    virtual bool init(ID3D11Device* dev, int w, int h, int fps, int mbit, bool av1 = false) = 0; // av1=true: AV1 statt H.264 (false bei fehlender HW-Faehigkeit)
+    virtual void encode(ID3D11Texture2D* nv12, std::vector<std::vector<uint8_t>>& out) = 0; // 0..N fertige AUs (H.264 Annex-B bzw. AV1 Temporal Units)
     virtual void setBitrate(int kbit) {}   // Live-Bitrate in kbit (Reconfigure OHNE Neustart); default no-op
     virtual const char* name() = 0;
 };
@@ -104,19 +109,23 @@ struct NvencEncoder : Encoder {
     NV_ENCODE_API_FUNCTION_LIST nv{ NV_ENCODE_API_FUNCTION_LIST_VER }; void* enc = nullptr; NV_ENC_OUTPUT_PTR outBuf = nullptr; int W = 0, H = 0;
     NV_ENC_PRESET_CONFIG pc{ NV_ENC_PRESET_CONFIG_VER }; NV_ENC_INITIALIZE_PARAMS ip{ NV_ENC_INITIALIZE_PARAMS_VER };  // gespeichert fuer Live-Bitrate-Reconfigure
     const char* name() override { return "NVENC"; }
-    bool init(ID3D11Device* dev, int w, int h, int fps, int mbit) override {
+    bool init(ID3D11Device* dev, int w, int h, int fps, int mbit, bool av1 = false) override {
         W = w; H = h; HMODULE lib = LoadLibraryW(L"nvEncodeAPI64.dll"); if (!lib) return false;
         typedef NVENCSTATUS(NVENCAPI* Fn)(NV_ENCODE_API_FUNCTION_LIST*); if (((Fn)GetProcAddress(lib, "NvEncodeAPICreateInstance"))(&nv) != NV_ENC_SUCCESS) return false;
         NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS op{ NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER }; op.deviceType = NV_ENC_DEVICE_TYPE_DIRECTX; op.device = dev; op.apiVersion = NVENCAPI_VERSION;
         if (nv.nvEncOpenEncodeSessionEx(&op, &enc) != NV_ENC_SUCCESS) return false;
+        GUID codec = av1 ? NV_ENC_CODEC_AV1_GUID : NV_ENC_CODEC_H264_GUID;
         pc.presetCfg.version = NV_ENC_CONFIG_VER;
-        nv.nvEncGetEncodePresetConfigEx(enc, NV_ENC_CODEC_H264_GUID, NV_ENC_PRESET_P4_GUID, NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY, &pc);
+        // Rueckgabe pruefen: auf GPUs ohne AV1-Encode (vor RTX 40) scheitert bereits diese
+        // Abfrage mit UNSUPPORTED_PARAM - das ist zugleich unser Faehigkeits-Check.
+        if (nv.nvEncGetEncodePresetConfigEx(enc, codec, NV_ENC_PRESET_P4_GUID, NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY, &pc) != NV_ENC_SUCCESS) return false;
         pc.presetCfg.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR; pc.presetCfg.rcParams.averageBitRate = mbit * 1000000;
         // GOP = 1s (nicht 2s): halbiert die Wartezeit bis zum ersten Bild fuer neue
         // Zuschauer/die Vorschau (gleiche Erkenntnis wie im FFmpeg-Pfad, s. main.js bcEncoderArgs).
         pc.presetCfg.gopLength = fps; pc.presetCfg.frameIntervalP = 1;
-        pc.presetCfg.encodeCodecConfig.h264Config.repeatSPSPPS = 1; pc.presetCfg.encodeCodecConfig.h264Config.idrPeriod = fps;
-        ip.encodeGUID = NV_ENC_CODEC_H264_GUID; ip.presetGUID = NV_ENC_PRESET_P4_GUID; ip.tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
+        if (av1) { pc.presetCfg.encodeCodecConfig.av1Config.repeatSeqHdr = 1; pc.presetCfg.encodeCodecConfig.av1Config.idrPeriod = fps; }
+        else { pc.presetCfg.encodeCodecConfig.h264Config.repeatSPSPPS = 1; pc.presetCfg.encodeCodecConfig.h264Config.idrPeriod = fps; }
+        ip.encodeGUID = codec; ip.presetGUID = NV_ENC_PRESET_P4_GUID; ip.tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
         ip.encodeWidth = w; ip.encodeHeight = h; ip.darWidth = w; ip.darHeight = h; ip.frameRateNum = fps; ip.frameRateDen = 1; ip.enablePTD = 1; ip.encodeConfig = &pc.presetCfg;
         if (nv.nvEncInitializeEncoder(enc, &ip) != NV_ENC_SUCCESS) return false;
         NV_ENC_CREATE_BITSTREAM_BUFFER cb{ NV_ENC_CREATE_BITSTREAM_BUFFER_VER }; nv.nvEncCreateBitstreamBuffer(enc, &cb); outBuf = cb.bitstreamBuffer; return true;
@@ -139,14 +148,30 @@ struct NvencEncoder : Encoder {
 
 struct AmfEncoder : Encoder {
     amf::AMFContextPtr context; amf::AMFComponentPtr encoder;
-    winrt::com_ptr<ID3D11DeviceContext> d3dctx; int encW = 0, encH = 0, encFps = 60; uint64_t frameNo = 0;
+    winrt::com_ptr<ID3D11DeviceContext> d3dctx; int encW = 0, encH = 0, encFps = 60; uint64_t frameNo = 0; bool isAv1 = false;
     const char* name() override { return "AMF"; }
-    bool init(ID3D11Device* dev, int w, int h, int fps, int mbit) override {
-        encW = w; encH = h; encFps = fps > 0 ? fps : 60; dev->GetImmediateContext(d3dctx.put());
+    bool init(ID3D11Device* dev, int w, int h, int fps, int mbit, bool av1 = false) override {
+        encW = w; encH = h; encFps = fps > 0 ? fps : 60; isAv1 = av1; dev->GetImmediateContext(d3dctx.put());
         HMODULE lib = LoadLibraryW(AMF_DLL_NAME); if (!lib) return false;
         auto amfInit = (AMFInit_Fn)GetProcAddress(lib, AMF_INIT_FUNCTION_NAME); if (!amfInit) return false;
         amf::AMFFactory* f = nullptr; if (amfInit(AMF_FULL_VERSION, &f) != AMF_OK) return false;
         if (f->CreateContext(&context) != AMF_OK) return false; if (context->InitDX11(dev) != AMF_OK) return false;
+        if (av1) {
+            // AV1-Component (VCN4+, ab RX 7000); CreateComponent scheitert auf aelterer HW -
+            // das ist zugleich unser Faehigkeits-Check. Eigener Property-Namespace (AV1_*),
+            // sonst gleiche Philosophie wie der AVC-Pfad unten: CBR, Low-Latency, kein Filler,
+            // Keyframe alle 1s mit Sequence-Header (Zuschauer-Einstieg).
+            if (f->CreateComponent(context, AMFVideoEncoder_AV1, &encoder) != AMF_OK) return false;
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_USAGE, AMF_VIDEO_ENCODER_AV1_USAGE_LOW_LATENCY);
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD, AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CBR);
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_FILLER_DATA, false);
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE, (amf_int64)mbit * 1000000);
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMESIZE, ::AMFConstructSize(w, h));
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMERATE, ::AMFConstructRate(fps, 1));
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_GOP_SIZE, (amf_int64)fps);
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_HEADER_INSERTION_MODE, AMF_VIDEO_ENCODER_AV1_HEADER_INSERTION_MODE_KEY_FRAME_ALIGNED);
+            return encoder->Init(amf::AMF_SURFACE_NV12, w, h) == AMF_OK;
+        }
         if (f->CreateComponent(context, AMFVideoEncoderVCE_AVC, &encoder) != AMF_OK) return false;
         // USAGE zuerst (setzt Defaults); danach unsere Werte. WebRTC-sauber wie NVENC:
         // echtes CBR (keine VBR-Bursts, die den WHEP-Decoder abwuergen), Low-Latency-Modus,
@@ -195,13 +220,16 @@ struct AmfEncoder : Encoder {
         // schwarz (matcht exakt das reale Symptom). FORCE_PICTURE_TYPE ist eine Frame-Property
         // (muss pro Submit gesetzt werden) - hier alle 1s (GOP-Laenge) hart IDR erzwingen statt
         // uns auf die (nachweislich unzuverlaessige) IDR_PERIOD-Automatik zu verlassen.
-        if (frameNo % (uint64_t)encFps == 0) surf->SetProperty(AMF_VIDEO_ENCODER_FORCE_PICTURE_TYPE, amf_int64(AMF_VIDEO_ENCODER_PICTURE_TYPE_IDR));
+        if (frameNo % (uint64_t)encFps == 0) {
+            if (isAv1) { surf->SetProperty(AMF_VIDEO_ENCODER_AV1_FORCE_FRAME_TYPE, amf_int64(AMF_VIDEO_ENCODER_AV1_FORCE_FRAME_TYPE_KEY)); surf->SetProperty(AMF_VIDEO_ENCODER_AV1_FORCE_INSERT_SEQUENCE_HEADER, true); }
+            else surf->SetProperty(AMF_VIDEO_ENCODER_FORCE_PICTURE_TYPE, amf_int64(AMF_VIDEO_ENCODER_PICTURE_TYPE_IDR));
+        }
         frameNo++;
         if (encoder->SubmitInput(surf) != AMF_OK) return;
         amf::AMFDataPtr data;
         while (encoder->QueryOutput(&data) == AMF_OK && data) { amf::AMFBufferPtr b(data); if (b) out.emplace_back((uint8_t*)b->GetNative(), (uint8_t*)b->GetNative() + b->GetSize()); data = nullptr; }
     }
-    void setBitrate(int kbit) override { encoder->SetProperty(AMF_VIDEO_ENCODER_TARGET_BITRATE, (amf_int64)kbit * 1000); }   // AMF: Bitrate live (kbit)
+    void setBitrate(int kbit) override { encoder->SetProperty(isAv1 ? AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE : AMF_VIDEO_ENCODER_TARGET_BITRATE, (amf_int64)kbit * 1000); }   // AMF: Bitrate live (kbit)
 };
 
 // Intel-QSV via oneVPL (MFXVideoENCODE). Struktur wie NVENC/AMF. HINWEIS: kompiliert und
@@ -244,7 +272,8 @@ struct QsvEncoder : Encoder {
     // sehr wahrscheinlich eine echte Treiber-Einschraenkung, kein App-seitiger Parameterfehler.
     // Fix: QSV nutzt SYSTEM_MEMORY mit CPU-Readback (Staging-Textur + Map/Unmap) statt Zero-
     // Copy. NVENC/AMF bleiben unveraendert Zero-Copy (dort nicht reproduzierbar/kein Problem).
-    bool init(ID3D11Device* dev, int w, int h, int fps, int mbit) override {
+    bool init(ID3D11Device* dev, int w, int h, int fps, int mbit, bool av1 = false) override {
+        mfxU32 codecId = av1 ? MFX_CODEC_AV1 : MFX_CODEC_AVC;   // AV1 ab Arc/Xe; Query/Init scheitern auf aelterer HW = Faehigkeits-Check
         dev->GetImmediateContext(ctx.put());
         // Per oneVPL-Spec fuer D3D11-HW-Beschleunigung vorgeschrieben ("The application must
         // also set multi-threading mode for the Direct3D 11 device") - bleibt trotz SYSTEM_MEMORY
@@ -258,7 +287,7 @@ struct QsvEncoder : Encoder {
         mfxConfig cfg = MFXCreateConfig(loader);
         mfxVariant v{}; v.Version.Version = MFX_VARIANT_VERSION; v.Type = MFX_VARIANT_TYPE_U32;
         v.Data.U32 = MFX_IMPL_TYPE_HARDWARE; MFXSetConfigFilterProperty(cfg, (const mfxU8*)"mfxImplDescription.Impl", v);
-        v.Data.U32 = MFX_CODEC_AVC; MFXSetConfigFilterProperty(cfg, (const mfxU8*)"mfxImplDescription.mfxEncoderDescription.encoder.CodecID", v);
+        v.Data.U32 = codecId; MFXSetConfigFilterProperty(cfg, (const mfxU8*)"mfxImplDescription.mfxEncoderDescription.encoder.CodecID", v);
         v.Data.U32 = MFX_ACCEL_MODE_VIA_D3D11; MFXSetConfigFilterProperty(cfg, (const mfxU8*)"mfxImplDescription.AccelerationMode", v);
         // Diagnose (bestaetigt kein Adapter-Mismatch): loggen, wieviele Implementierungen zum
         // Filter (HARDWARE + AVC-Encoder + D3D11) passen und welche das sind.
@@ -278,7 +307,7 @@ struct QsvEncoder : Encoder {
         mfxVersion ver{}; if (MFXQueryVersion(session, &ver) == MFX_ERR_NONE) printf("QSV-DEBUG: oneVPL-Session-Version Major=%d Minor=%d\n", ver.Major, ver.Minor);
         mfxIMPL implVal = 0; if (MFXQueryIMPL(session, &implVal) == MFX_ERR_NONE) printf("QSV-DEBUG: MFXQueryIMPL=0x%x (Impl=%u ViaMask=0x%x)\n", (unsigned)implVal, (unsigned)MFX_IMPL_BASETYPE(implVal), (unsigned)(implVal & 0xFF00));
         par = mfxVideoParam{};
-        par.mfx.CodecId = MFX_CODEC_AVC; par.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
+        par.mfx.CodecId = codecId; par.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
         par.mfx.RateControlMethod = MFX_RATECONTROL_CBR; par.mfx.TargetKbps = (mfxU16)(mbit * 1000); par.mfx.MaxKbps = (mfxU16)(mbit * 1000);
         par.mfx.FrameInfo.FourCC = MFX_FOURCC_NV12; par.mfx.FrameInfo.ChromaFormat = MFX_CHROMAFORMAT_YUV420; par.mfx.FrameInfo.PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
         par.mfx.FrameInfo.FrameRateExtN = fps; par.mfx.FrameInfo.FrameRateExtD = 1;
@@ -717,13 +746,14 @@ static HMONITOR monitorByIndex(int idx) {
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     for (int i = 1; i < argc; ++i) { std::string a = argv[i]; if (a == "--list") return listWindows(); if (a == "--hdr-check") return hdrCheck(); }
-    int fps = 60, mbit = 20, port = 9998, maxFrames = 0, scaleH = 0, monIdx = 0; std::string host = "127.0.0.1", tsout, encName = "auto";
+    int fps = 60, mbit = 20, port = 9998, maxFrames = 0, scaleH = 0, monIdx = 0; std::string host = "127.0.0.1", tsout, encName = "auto", codecName = "auto";
     HWND targetHwnd = nullptr; bool findWindow = false, forceHdr = false; DWORD audioPid = 0;
     for (int i = 1; i < argc; ++i) { std::string a = argv[i];
         if (a == "--fps" && i + 1 < argc) fps = atoi(argv[++i]); else if (a == "--bitrate" && i + 1 < argc) mbit = atoi(argv[++i]);
         else if (a == "--mtx-host" && i + 1 < argc) host = argv[++i]; else if (a == "--mtx-port" && i + 1 < argc) port = atoi(argv[++i]);
         else if (a == "--frames" && i + 1 < argc) maxFrames = atoi(argv[++i]); else if (a == "--tsout" && i + 1 < argc) tsout = argv[++i];
         else if (a == "--encoder" && i + 1 < argc) encName = argv[++i];
+        else if (a == "--codec" && i + 1 < argc) codecName = argv[++i];   // auto|h264|av1: av1/auto = AV1 zusaetzlich zu H.264 (Doppel-Encode, Fallback pro Zuschauer)
         else if (a == "--hwnd" && i + 1 < argc) targetHwnd = (HWND)(uintptr_t)strtoull(argv[++i], nullptr, 0);
         else if (a == "--window") findWindow = true;
         else if (a == "--scale" && i + 1 < argc) scaleH = atoi(argv[++i]);
@@ -867,8 +897,20 @@ int main(int argc, char** argv) {
     if (hdr) { if (!tonemap.init(dev.get(), W, H, outW, outH)) { printf("FEHLER: HDR-Tonemap-Init fehlgeschlagen\n"); return 3; } tonemap.readControl(ctx.get(), true); tonemapReady = true; }
     if (!rebuildScaler()) { printf("FEHLER: Scaler-Init fehlgeschlagen\n"); return 3; }
 
-    Encoder* encoder = useQsv ? (Encoder*)new QsvEncoder() : (useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder());
+    auto newEncoder = [&]() -> Encoder* { return useQsv ? (Encoder*)new QsvEncoder() : (useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder()); };
+    Encoder* encoder = newEncoder();
     if (!encoder->init(dev.get(), outW, outH, fps, mbit)) { printf("FEHLER: Encoder-Init (%s) fehlgeschlagen\n", encoder->name()); return 2; }
+    // AV1-Doppel-Encode: H.264 laeuft IMMER (Fallback fuer Zuschauer ohne AV1-Decode, z.B.
+    // Safari); zusaetzlich AV1 mit halber Bitrate (gleiches Qualitaetsziel bei ~50% Bits) auf
+    // eigenem TS-PID. Der Relay waehlt pro Zuschauer anhand dessen SDP-Offers. Init-Fehlschlag
+    // = keine AV1-HW (NVENC vor RTX 40, AMF vor RX 7000, QSV vor Arc/Xe) -> sauber nur H.264.
+    Encoder* encoderAv1 = nullptr; auto av1Kbit = [&](int kbit) { int k = (kbit + 1) / 2; return k < 500 ? 500 : k; };
+    if (codecName == "av1" || codecName == "auto") {
+        Encoder* e = newEncoder();
+        if (e->init(dev.get(), outW, outH, fps, (mbit + 1) / 2 > 0 ? (mbit + 1) / 2 : 1, true)) { encoderAv1 = e; g_av1 = true; }
+        else { delete e; if (codecName == "av1") printf("HINWEIS: AV1 angefordert, aber Encoder ohne AV1-Support -> nur H.264\n"); }
+    }
+    printf("codec=%s\n", g_av1 ? "av1" : "h264");   // maschinenlesbar fuer die Shell (Status/OSD)
 
     WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa); SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     sockaddr_in dst{}; dst.sin_family = AF_INET; dst.sin_port = htons((u_short)port); inet_pton(AF_INET, host.c_str(), &dst.sin_addr);
@@ -953,15 +995,21 @@ int main(int argc, char** argv) {
             resizePending = false;
             int newOutW, newOutH; computeOutSize(W, H, newOutW, newOutH);
             printf("SOURCE: Fenster deutlich veraendert (%dx%d) -> Encoder wird auf %dx%d neu aufgesetzt\n", W, H, newOutW, newOutH);
-            delete encoder;
+            delete encoder; if (encoderAv1) { delete encoderAv1; encoderAv1 = nullptr; }
             outW = newOutW; outH = newOutH; srcBaseW = W; srcBaseH = H;
             nv12 = nullptr;
             D3D11_TEXTURE2D_DESC nd2{}; nd2.Width = outW; nd2.Height = outH; nd2.MipLevels = 1; nd2.ArraySize = 1; nd2.Format = DXGI_FORMAT_NV12; nd2.SampleDesc.Count = 1; nd2.Usage = D3D11_USAGE_DEFAULT; nd2.BindFlags = D3D11_BIND_RENDER_TARGET;
             dev->CreateTexture2D(&nd2, nullptr, nv12.put());
             if (hdr) { tonemap.init(dev.get(), W, H, outW, outH); tonemap.readControl(ctx.get(), true); }
             rebuildScaler();
-            encoder = useQsv ? (Encoder*)new QsvEncoder() : (useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder());
+            encoder = newEncoder();
             if (!encoder->init(dev.get(), outW, outH, fps, mbit)) printf("FEHLER: Encoder-Neuaufbau (%s) fehlgeschlagen\n", encoder->name());
+            if (g_av1) {   // AV1-Zweig ebenfalls neu aufsetzen (frischer Encoder liefert ab Frame 0 einen Keyframe)
+                Encoder* e = newEncoder();
+                int av1Mbit = (curKbit / 1000 + 1) / 2; if (av1Mbit < 1) av1Mbit = 1;
+                if (e->init(dev.get(), outW, outH, fps, av1Mbit, true)) encoderAv1 = e;
+                else { delete e; g_av1 = false; printf("FEHLER: AV1-Encoder-Neuaufbau fehlgeschlagen -> nur H.264\n"); }
+            }
         }
         if (!haveFrame) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); tries++; continue; }   // auf den ERSTEN Frame warten (max ~6s)
         // 2) faellige Takt-Ticks encodieren (letzter Frame zaehlt - echt oder wiederholt).
@@ -978,6 +1026,7 @@ int main(int argc, char** argv) {
         if (FAILED(vctx->VideoProcessorBlt(vproc.get(), outView.get(), 0, 1, &st))) continue;
         ctx->Flush();
         std::vector<std::vector<uint8_t>> aus; encoder->encode(nv12.get(), aus);
+        std::vector<std::vector<uint8_t>> ausAv1; if (encoderAv1) encoderAv1->encode(nv12.get(), ausAv1);
         // Bild-PTS aus der gemeinsamen Wall-Clock (nicht dem Frame-Zaehler): haelt Bild
         // und Ton synchron, auch wenn WGC mal einen Frame auslaesst. EINMAL pro Tick lesen:
         // AMF kann pro SubmitInput 0..N AUs liefern (Pipeline-Puffer, real auf AMD beobachtet
@@ -1005,7 +1054,7 @@ int main(int argc, char** argv) {
             if (outFrame % fps == 0) {
                 WIN32_FILE_ATTRIBUTE_DATA fa{}; uint64_t mt = 0;   // Bitrate-Steuerdatei 1x/s pruefen
                 if (GetFileAttributesExA(brPath.c_str(), GetFileExInfoStandard, &fa)) mt = ((uint64_t)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime;
-                if (mt != brMtime) { brMtime = mt; FILE* bf = nullptr; fopen_s(&bf, brPath.c_str(), "r"); if (bf) { int k = 0; if (fscanf_s(bf, "%d", &k) == 1 && k >= 500 && k <= 200000 && k != curKbit) { curKbit = k; encoder->setBitrate(k); printf("  Bitrate live -> %d kbit\n", k); } fclose(bf); } }
+                if (mt != brMtime) { brMtime = mt; FILE* bf = nullptr; fopen_s(&bf, brPath.c_str(), "r"); if (bf) { int k = 0; if (fscanf_s(bf, "%d", &k) == 1 && k >= 500 && k <= 200000 && k != curKbit) { curKbit = k; encoder->setBitrate(k); if (encoderAv1) encoderAv1->setBitrate(av1Kbit(k)); printf("  Bitrate live -> %d kbit\n", k); } fclose(bf); } }
                 // Quellwechsel-Steuerdatei ("monitor" | "hwnd <id>"): Capture live umschalten - fuer
                 // den Zuschauer ein nahtloser Schnitt (Encoder/Zeitachse/Verbindung laufen durch).
                 WIN32_FILE_ATTRIBUTE_DATA sfa{}; uint64_t smt = 0;
@@ -1025,6 +1074,23 @@ int main(int argc, char** argv) {
                 if (curHwnd && !IsWindow(curHwnd)) { printf("SOURCE: Fenster geschlossen -> Monitor\n"); switchSource(nullptr); }
                 printf("  %llu Frames live (%.1fs, %s)%s\n", (unsigned long long)outFrame, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), encoder->name(), g_withAudio ? " +Ton" : "");
             }
+        }
+        // AV1-AUs (Temporal Units, low-overhead OBU-Format wie vom Encoder geliefert) auf eigenem
+        // PID einmuxen - gleiche monotone Tick-PTS-Logik wie H.264, aber ohne AUD (gibt es bei
+        // AV1 nicht) und ohne PCR (die traegt der H.264-PID, der immer mitlaeuft).
+        static uint64_t lastAv1Pts = 0;
+        uint64_t startPtsAv1 = (ausAv1.size() > 1) ? tickPts - (uint64_t)(ausAv1.size() - 1) * frameDur : tickPts;
+        for (size_t ai = 0; ai < ausAv1.size(); ++ai) {
+            auto& au = ausAv1[ai];
+            uint64_t pts = startPtsAv1 + ai * frameDur;
+            if (pts <= lastAv1Pts) pts = lastAv1Pts + frameDur;
+            lastAv1Pts = pts;
+            std::vector<uint8_t> ts;
+            std::vector<uint8_t> pes; pes.push_back(0); pes.push_back(0); pes.push_back(1); pes.push_back(0xE0); pes.push_back(0); pes.push_back(0); pes.push_back(0x80); pes.push_back(0x80); pes.push_back(5); writePTS(pes, 0x2, pts);
+            pes.insert(pes.end(), au.begin(), au.end());
+            writeTS(ts, PID_VIDEO_AV1, true, g_ccVideoAv1, pes.data(), (int)pes.size(), false, 0);
+            for (size_t o = 0; o < ts.size(); o += 1316) { int len = (int)((ts.size() - o) < 1316 ? (ts.size() - o) : 1316); sendto(s, (const char*)ts.data() + o, len, 0, (sockaddr*)&dst, sizeof(dst)); }
+            if (tsf) fwrite(ts.data(), 1, ts.size(), tsf);
         }
         // Fertige Ton-Frames (Opus) einmuxen (PID 0x101, PES stream_id 0xBD = private_stream_1).
         if (g_withAudio && !g_audioNoBytes) { AudioFrame af;

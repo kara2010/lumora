@@ -1,11 +1,14 @@
 # Baut den Lumora-Native-Installer (Phase 4): Shell bauen -> Staging -> NSIS -> signieren.
 # Reproduzierbar; laeuft neben der Electron-App (eigener Ordner/Uninstall-Eintrag).
 $ErrorActionPreference = "Stop"
-# Repo-Root aus der Script-Lage ableiten (PC-unabhaengig; frueher hartkodiert)
-$root = (Resolve-Path "$PSScriptRoot\..\..").Path
+# Repo-Root aus der Script-Lage ableiten (PC-unabhaengig; frueher hartkodiert).
+# TrimEnd: ein Laufwerks-Root ("Z:\") kommt MIT Backslash aus Resolve-Path -
+# ohne Trim verrutschen alle Substring-Pfadberechnungen um 1 Zeichen (icon->con!).
+$root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "0.2.3"   # 0.2.3: Alt-Electron-Version wird IMMER sauber deinstalliert (Parallel-Beta-Reste)
+$version = "0.2.4"   # 0.2.4: AV1-Doppel-Encode, Eingabe-Bruecke, Komponenten-Updater, Statistik, libjuice-Patch
+                     # 0.2.3: Alt-Electron-Version wird IMMER sauber deinstalliert (Parallel-Beta-Reste)
                      # 0.2.2: Auto-Update silent (/S), Update-Erkennung im Installer, Uninstall-Datenfrage, MUI2-Optik
                      # 0.2.1: BF6-HDR-Fix, Gamepad-Fokus, GPU-Name, Bitrate-Presets 35/50
                      # 0.2.0: eigener Relay (mediamtx-Abloesung), native HDR, ETW-FPS, libvpl statisch
@@ -112,3 +115,26 @@ $feed = @{ version = $version
            notes = $notes; notesEn = $notesEn } | ConvertTo-Json
 [IO.File]::WriteAllText("$updDir\native-update.json", $feed, (New-Object Text.UTF8Encoding($false)))   # BOM-frei (Feed-Parser!)
 Write-Output "Update-Feed: $updDir\native-update.json (v$version)"
+
+# 6) Komponenten-Manifest (components.json) + Dateiablage fuer den Komponenten-Updater
+#    (update_components.h): SHA-256 je Staging-Datei; Rollout = updates\components.json
+#    + updates\components\<version>\ hochladen. Bestandskunden tauschen dann nur die
+#    geaenderten Dateien (atomar, signaturgeprueft) - der Basis-Installer bleibt unberuehrt.
+$compDir = "$updDir\components\$version"
+Remove-Item -Recurse -Force $compDir -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $compDir | Out-Null
+$files = @()
+foreach ($f in Get-ChildItem $stage -Recurse -File) {
+  if ($f.Name -eq "MicrosoftEdgeWebview2Setup.exe") { continue }   # Bootstrapper: nur Erstinstallation
+  $rel = $f.FullName.Substring($stage.Length + 1)
+  $sha = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+  $dst = Join-Path $compDir $rel
+  New-Item -ItemType Directory -Force (Split-Path $dst) | Out-Null
+  Copy-Item $f.FullName $dst
+  $files += @{ path = $rel; sha256 = $sha; size = $f.Length }
+}
+$manifest = @{ version = $version
+               baseUrl = "https://lumora-streaming.de/updates/components/$version/"
+               files = $files } | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText("$updDir\components.json", $manifest, (New-Object Text.UTF8Encoding($false)))
+Write-Output "Komponenten-Manifest: $updDir\components.json ($($files.Count) Dateien)"

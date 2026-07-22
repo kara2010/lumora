@@ -30,9 +30,11 @@ void CtrlServer::handle(const HttpReq& req, HttpResp& resp) {
     }
     if (req.method == "GET" && req.path == "/v3/paths/get/live") {
         // "ready" = Ingest liefert gerade Daten (mediamtx-Semantik: Publisher verbunden)
+        // "bytesReceived" = Ingest-Bytes gesamt (mediamtx-Feldname, dort nativ vorhanden)
         resp.body = json{
             {"name", "live"}, {"ready", core_->ingestAlive()},
-            {"tracks", json::array({"H264", "Opus"})},
+            {"tracks", core_->av1Active() ? json::array({"AV1", "H264", "Opus"}) : json::array({"H264", "Opus"})},
+            {"bytesReceived", (long long)core_->bytesIn()},
         }.dump();
         return;
     }

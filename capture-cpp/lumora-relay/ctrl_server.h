@@ -2,7 +2,7 @@
 // damit die Shell (bcMtxReaders/Kick/Selftest) unveraendert weiterlaeuft:
 //   GET  /v3/webrtcsessions/list        -> {items:[{id,path,state,remoteCandidate,userAgent,query,bytesSent}]}
 //   POST /v3/webrtcsessions/kick/<id>   -> 200/404
-//   GET  /v3/paths/get/live             -> {name,ready,tracks} (E2E-Selftest)
+//   GET  /v3/paths/get/live             -> {name,ready,tracks,bytesReceived} (E2E-Selftest, Abschluss-Statistik)
 // Neu (ersetzt mediamtx-YAML-Hot-Reload):
 //   POST /v3/config/ice  {additionalHosts:[..], iceServers:[{url,user,pass}]} - wirkt auf NEUE Sessions
 #pragma once

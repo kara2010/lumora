@@ -93,6 +93,7 @@ const appSettings = { autostart: false, startMinimized: false, minimizeToTray: f
   // zu knapp - jede kleine Sende-/Netz-Schwankung schlug direkt als Ruckler durch.
   // 300 ms ist weiterhin "live" (unter einer halben Sekunde), schluckt aber Jitter.
   streamUploadKbit: 8000, streamFps: 60, streamQuality: '1080', streamBufferMs: 300, streamHotkey: '', streamEncoder: 'auto', streamDoorman: false,
+  streamCodec: 'auto',   // auto/h264/av1: auto = AV1 wenn die GPU es kann (Doppel-Encode, H.264-Fallback pro Zuschauer im Relay)
   streamRegulars: {}, streamBanned: {},   // Tuersteher: dauerhaft akzeptierte / gesperrte Zuschauer (vid -> {name, since})
   streamTurnEnabled: false, streamTurnUrl: '', streamTurnUser: '', streamTurnPass: '', streamTurnForce: false,
   streamForceIPv6: false,
@@ -3304,7 +3305,7 @@ ipcMain.handle('set-app-settings', (event, partial) => {
   }
   // Encoder-Override umgestellt -> Cache verwerfen (der Neustart waehlt neu) und die
   // Selbstheilungs-Flags zuruecksetzen, sonst blieben sie vom letzten Versuch haengen.
-  if (partial && Object.prototype.hasOwnProperty.call(partial, 'streamEncoder')) {
+  if (partial && (Object.prototype.hasOwnProperty.call(partial, 'streamEncoder') || Object.prototype.hasOwnProperty.call(partial, 'streamCodec'))) {
     bcEncoderCache = null; bcZeroCopyBroken = false; bcQsvBroken = false
   }
   if (partial && Object.keys(partial).some(k => k.startsWith('stream') && !bcNoRestart.has(k)) && broadcastState.active) {
@@ -5408,6 +5409,7 @@ function bcStartNative(cfg) {
     '--fps', String(cfg.fps),
     '--bitrate', String(Math.max(1, Math.round(cfg.kbit / 1000))),
     '--mtx-host', '127.0.0.1', '--mtx-port', String(MTX_TS_UDP),
+    '--codec', ['h264', 'av1'].includes(appSettings.streamCodec) ? appSettings.streamCodec : 'auto',
     '--audio',
   ]
   if (cfg.scaleH) args.push('--scale', String(cfg.scaleH))
@@ -5427,7 +5429,16 @@ function bcStartNative(cfg) {
   const startedAt = Date.now()
   bcBoostPriority(p, 'ffmpeg', true)
   if (!bcAdaptTimer) { bcAdaptTimer = setInterval(() => { if (!ffProc && !broadcastState.active) { clearInterval(bcAdaptTimer); bcAdaptTimer = null; return } try { bcAdaptTick() } catch {} }, 5000) }
-  const log = (d) => { const s = d.toString().trim(); if (s) bcLogStream('nat: ' + s) }
+  const log = (d) => {
+    const s = d.toString().trim(); if (s) bcLogStream('nat: ' + s)
+    // Helfer meldet einmalig "codec=av1|h264" (av1 = Doppel-Encode aktiv) -> Status/OSD
+    const m = /(?:^|\s)codec=(av1|h264)\b/.exec(s)
+    if (m && broadcastState.codec !== m[1]) {
+      broadcastState.codec = m[1]
+      if (m[1] === 'av1' && broadcastState.quality && !broadcastState.quality.includes('AV1')) broadcastState.quality += ' + AV1'
+      bcPushState()
+    }
+  }
   if (p.stdout) p.stdout.on('data', log)
   if (p.stderr) p.stderr.on('data', log)
   p.on('error', (e) => { bcLogStream('nat-error: ' + (e && e.message)) })
@@ -5895,7 +5906,7 @@ async function startBroadcast(opts) {
   bcAdaptUpAt = 0; bcAdaptUpHold = 0
   bcQosMap.clear(); bcQosLogLast.clear()
   bcForwardNotified = false
-  broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, linkV4: prevV4, linkV6: prevV6, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder, since: Date.now() }
+  broadcastState = { active: true, port: BROADCAST_PORT, link: lanLink, linkV4: prevV4, linkV6: prevV6, lanLink, viewers: 0, quality: '', internet: false, opening: true, encoder: enc.encoder, codec: '', since: Date.now() }
   bcStatsStart()   // Abschluss-Statistik: Zaehler fuer diese Stream-Sitzung frisch
   bcPushState()   // LAN-Link sofort anzeigen
   bcPinholeIds = []
