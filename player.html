@@ -638,8 +638,23 @@
     pc.addEventListener('iceconnectionstatechange', function () { console.log('[ICE] Status:', pc.iceConnectionState) })
     if (relay) { setTimeout(function () { if (!sawRelay) status('Relay antwortet nicht – Server/Zugangsdaten prüfen (F12-Konsole)', 'err') }, 6000) }
     var stream = new MediaStream()
-    pc.addTransceiver('video', { direction: 'recvonly' })
+    var vtr = pc.addTransceiver('video', { direction: 'recvonly' })
     pc.addTransceiver('audio', { direction: 'recvonly' })
+    // AV1 nur anbieten, wenn dieses Geraet es in HARDWARE dekodiert. Software-Dekodierung
+    // von 4K60-AV1 presst schwache CPUs aus (Laptop mit UHD 630: Browser kommt mit dem
+    // Paket-Entgegennehmen nicht nach -> Kernel verwirft UDP -> sah aus wie Netzverlust,
+    // 20-47% "lost", Frames stark schwankend). H.264 dekodiert jede GPU in Hardware.
+    // Kein AV1 im Angebot -> der Relay waehlt pro Zuschauer automatisch H.264.
+    try {
+      if (navigator.mediaCapabilities && vtr.setCodecPreferences && window.RTCRtpReceiver && RTCRtpReceiver.getCapabilities) {
+        var mc = await navigator.mediaCapabilities.decodingInfo({ type: 'webrtc',
+          video: { contentType: 'video/AV1', width: 3840, height: 2160, framerate: 60, bitrate: 25000000 } })
+        if (!mc.powerEfficient) {
+          var cs = RTCRtpReceiver.getCapabilities('video').codecs.filter(function (c) { return !/av01|AV1/i.test(c.mimeType) })
+          if (cs.length) { vtr.setCodecPreferences(cs); console.log('[codec] kein AV1-Hardware-Decoder -> H.264 angefordert') }
+        } else { console.log('[codec] AV1-Hardware-Decoder vorhanden') }
+      }
+    } catch (e) { console.log('[codec] Faehigkeits-Check nicht verfuegbar:', e && e.message) }
     pc.ontrack = function (e) {
       stream.addTrack(e.track); v.srcObject = stream
       // Vom Streamer eingestellten Jitter-Puffer anwenden (siehe applyBuffer).
