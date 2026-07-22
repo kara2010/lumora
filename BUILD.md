@@ -80,6 +80,11 @@ Voraussetzung: **VS 2022 Build Tools** mit „Desktop development with C++"
 #    nach capture-cpp\third_party\ und baut sie statisch - NICHT im Repo, ~270 MB)
 ._testlab\build-relay-deps.ps1
 
+# 1b) Einmalig: ViGEmClient fuer die Eingabe-Bruecke (MIT, wird in die Shell einkompiliert;
+#     third_party\ ist gitignored, auf frischem Checkout also erneut noetig):
+git clone --depth 1 https://github.com/nefarius/ViGEmClient.git capture-cpp\third_party\ViGEmClient
+Remove-Item -Recurse -Force capture-cpp\third_party\ViGEmClient\.git
+
 # 2) Die drei Exes bauen (je: cmake -S <dir> -B <dir>\build -G "Visual Studio 17 2022" -A x64,
 #    dann cmake --build <dir>\build --config Release). Build-Caches sind PC-spezifisch -
 #    bei "CMakeCache directory"-Fehlern build\ loeschen und neu konfigurieren.
