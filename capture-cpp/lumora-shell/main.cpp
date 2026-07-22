@@ -45,6 +45,7 @@
 #include "osd_adl.h"
 #include "group_lan.h"
 #include "router_hints.h"
+#include "input_bridge.h"
 #include <thread>
 #include <mutex>
 #include <map>
@@ -237,6 +238,39 @@ static void sendExternalRunning() {   // Start-Knopf zeigt "laeuft" fuer Fremd-S
     for (auto& [k, s] : g_extSessions) arr.push_back(s.gamePath);
     sendToUi("external-running", arr);
 }
+// --- Eingabe-Bruecke: Profile (input-profiles.json) + Auto-Aktivierung ---------------
+// Eigene Datei statt app-settings.json: Profile werden gross, und die merge-Semantik
+// von set-app-settings soll sauber bleiben. Die UI liest/schreibt das Objekt komplett.
+static std::wstring inputProfilesPath() { return dataDir() + L"\\input-profiles.json"; }
+static json loadInputProfiles() {
+    json j = json::parse(readFile(inputProfilesPath()), nullptr, false);
+    return j.is_object() ? j : json{ {"profiles", json::object()}, {"gameLinks", json::object()}, {"defaultProfile", nullptr} };
+}
+static std::string g_bridgeAutoGame;   // Spielpfad, der die Bruecke AUTO-aktiviert hat ("" = manuell/aus)
+static json inputProfileForGame(const std::string& gamePath) {
+    json p = loadInputProfiles();
+    if (!p["gameLinks"].is_object()) return nullptr;
+    std::string id = p["gameLinks"].value(gamePath, "");
+    if (id.empty() || !p["profiles"].is_object() || !p["profiles"].contains(id)) return nullptr;
+    return p["profiles"][id];
+}
+// Aufruf NUR wenn das Spiel WIRKLICH laeuft (probeRunning/extWatch) - "Launch heisst
+// nicht laeuft": ein Startaufruf ohne erkannten Prozess aktiviert hier nie etwas.
+static void inputBridgeOnRunning(const std::string& gamePath) {
+    if (!loadSettings().value("inputBridgeAutoActivate", true)) return;
+    if (lubridge::g_feeding.load()) return;        // manuell/anderes Spiel aktiv -> nicht anfassen
+    if (!lubridge::busInstalled()) return;         // Setup nie automatisch anstossen (kein UAC ohne Klick)
+    json prof = inputProfileForGame(gamePath);
+    if (prof.is_null()) return;
+    if (lubridge::start(prof, "auto")) g_bridgeAutoGame = gamePath;
+}
+static void inputBridgeOnEnd(const std::string& gamePath) {
+    if (!g_bridgeAutoGame.empty() && g_bridgeAutoGame == gamePath) {
+        lubridge::stop("spiel-beendet");
+        g_bridgeAutoGame.clear();
+    }
+}
+
 // Fremdstart-Watcher (2s-Takt wie Electron-Nachruestung: HDR geht an, BEVOR das Spiel
 // seine Display-Faehigkeiten prueft; Ende nach 3 leeren Scans ~6s gegen DRM-Handoff).
 static void extWatchTick() {
@@ -269,6 +303,7 @@ static void extWatchTick() {
         }
         g_extSessions[exe] = s;
         sendExternalRunning();
+        inputBridgeOnRunning(p);   // Spiel laeuft nachweislich -> ggf. Eingabe-Bruecke (Profil-Link) an
     }
     // 2) Laufende Fremd-Sessions pruefen / beenden
     for (auto it = g_extSessions.begin(); it != g_extSessions.end();) {
@@ -278,6 +313,7 @@ static void extWatchTick() {
         sendExternalRunning();
         lulaunch::playLog(dataDir(), "EXTERN beendet: " + s.gamePath + " Dauer " + std::to_string((GetTickCount64() - s.startTs) / 1000) + "s");
         if (s.hdrOn) { lulaunch::setHDR(false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
+        inputBridgeOnEnd(s.gamePath);
         sendToUi("play-session", { {"gamePath", s.gamePath}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
     }
 }
@@ -287,6 +323,7 @@ static void launchEndSession(lulaunch::LaunchSession& s, bool credit) {
     std::string exeLow = narrow(s.exeName); for (auto& c : exeLow) c = (char)tolower((unsigned char)c);
     g_activeLaunchExes.erase(std::remove(g_activeLaunchExes.begin(), g_activeLaunchExes.end(), exeLow), g_activeLaunchExes.end());   // Watcher darf wieder uebernehmen
     if (s.useHdr) { lulaunch::setHDR(false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
+    inputBridgeOnEnd(narrow(s.gamePath));
     if (credit && s.startTs) sendToUi("play-session", { {"gamePath", narrow(s.gamePath)}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
     sendToUi("launch-status", "idle");
     s.done = true;
@@ -301,6 +338,7 @@ static void launchTick() {
             if (running) {
                 s.started = true; s.startTs = GetTickCount64(); s.absent = 0;
                 sendToUi("launch-status", "running");
+                inputBridgeOnRunning(narrow(s.gamePath));   // erst JETZT (laeuft nachweislich), nie beim Startaufruf
                 // HDR wurde bei der 30s-Freigabe geparkt? Spaetstarter doch noch da -> wieder an.
                 if (s.useHdr && !g_hdrByLauncher) { lulaunch::setHDR(true); g_hdrByLauncher = true; sendToUi("hdr-status", true); }
                 lulaunch::playLog(dataDir(), "STARTED nach +" + std::to_string((GetTickCount64() - s.launchTs) / 1000) + "s");
@@ -1491,6 +1529,7 @@ static bool xiButtonDown(const XINPUT_GAMEPAD& g, int idx) {
 static bool gamepadComboDown(const json& combo) {
     if (!combo.is_array() || combo.empty()) return false;
     for (DWORD slot = 0; slot < 4; ++slot) {
+        if ((LONG)slot == lubridge::g_vigemSlot.load()) continue;   // eigenes virtuelles Pad: gemappte Eingaben duerfen keine Hotkeys ausloesen
         XINPUT_STATE st{};
         if (XInputGetState(slot, &st) != ERROR_SUCCESS) continue;
         bool all = true;
@@ -2004,6 +2043,62 @@ static void ensureOsdSetup() {
         g_osdSetupRunning = false;
     }).detach();
 }
+
+// --- Eingabe-Bruecke: ViGEmBus-Ersteinrichtung (Muster ensureOsdSetup: Einwilligung,
+// Download von der offiziellen Quelle, Authenticode-Pruefung, EIN UAC). Version
+// GEPINNT: das Projekt ist archiviert, v1.22.0 ist der finale Stand - "latest"
+// waere hier Zufall. Deinstallation macht der ViGEmBus-Installer selbst ueber
+// Apps & Features (registriert sich dort als "Nefarius Virtual Gamepad Emulation Bus").
+static std::atomic<bool> g_vigemSetupRunning{ false };
+static void ensureVigemSetup() {
+    if (g_vigemSetupRunning.load() || lubridge::busInstalled()) return;
+    if (loadSettings().value("inputBridgeSetupDeclined", false)) return;
+    g_vigemSetupRunning = true;
+    std::thread([]() {
+        auto q = [](std::wstring s) { size_t p = 0; while ((p = s.find(L'\'', p)) != std::wstring::npos) { s.insert(p, 1, L'\''); p += 2; } return s; };
+        auto status     = [](const std::string& m) { sendToUiMulti("input-bridge-setup-status", json::array({ m, false })); };
+        auto statusDone = [](const std::string& m) { sendToUiMulti("input-bridge-setup-status", json::array({ m, true })); };
+        auto statusOff  = []()                      { sendToUiMulti("input-bridge-setup-status", json::array({ nullptr, false })); };
+        if (MessageBoxW(g_hwnd,
+            L"Fuer die Eingabe-Bruecke (Joystick/Lenkrad als virtuelles Xbox-Gamepad) richtet Lumora einmalig ein:\n\n"
+            L"• Virtueller-Gamepad-Treiber ViGEmBus (signierter Open-Source-Treiber, wird von der offiziellen Quelle geladen)\n\n"
+            L"Gleich fragt Windows EINMAL nach deiner Bestaetigung (Administratorrechte). Der Treiber laesst sich jederzeit ueber Apps & Features wieder deinstallieren.",
+            L"Eingabe-Bruecke einrichten", MB_OKCANCEL | MB_ICONINFORMATION | MB_SETFOREGROUND) != IDOK) {
+            json s = loadSettings(); s["inputBridgeSetupDeclined"] = true; writeFile(settingsPath(), s.dump(2));
+            statusOff();   // Schalter zurueck, nicht staendig neu fragen
+            g_vigemSetupRunning = false; return;
+        }
+        // 1) Installer non-elevated laden + Authenticode-Signatur pruefen (wie PawnIO).
+        status("Eingabe-Bruecke: Lade ViGEmBus-Treiber herunter und pruefe die Signatur ...");
+        wchar_t tmp[MAX_PATH]; GetTempPathW(MAX_PATH, tmp);
+        std::wstring setupExe = std::wstring(tmp) + L"ViGEmBus_1.22.0_x64_x86_arm64.exe";
+        std::wstring dl = L"Invoke-WebRequest -Uri 'https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe' -OutFile '"
+            + q(setupExe) + L"' -UseBasicParsing; (Get-AuthenticodeSignature '" + q(setupExe) + L"').Status";
+        std::string out = runCaptureOutput(L"powershell -NoProfile -Command \"" + dl + L"\"", 180000);
+        if (out.find("Valid") == std::string::npos) {
+            statusOff();
+            MessageBoxW(g_hwnd, L"Der ViGEmBus-Treiber konnte nicht geladen oder verifiziert werden.\nBitte Internetverbindung pruefen - die Einrichtung wird beim naechsten Aktivieren erneut angeboten.",
+                L"ViGEmBus-Download fehlgeschlagen", MB_OK | MB_ICONERROR);
+            g_vigemSetupRunning = false; return;
+        }
+        // 2) EIN elevated Aufruf: Silent-Install (Advanced-Installer-Bundle: /exenoui /qn /norestart).
+        std::wstring inner = L"Start-Process -FilePath '" + q(setupExe) + L"' -ArgumentList '/exenoui','/qn','/norestart' -Wait";
+        std::string b64 = b64encode((const uint8_t*)inner.data(), inner.size() * 2);   // UTF-16LE wie PowerShell -EncodedCommand
+        std::wstring b64w = widen(b64);
+        std::wstring elevExe = binDir() + L"\\lumora-elevate.exe";
+        std::wstring outer = (GetFileAttributesW(elevExe.c_str()) != INVALID_FILE_ATTRIBUTES)
+            ? L"Start-Process -FilePath '" + q(elevExe) + L"' -Verb RunAs -WindowStyle Hidden -ArgumentList '--ps-encoded','" + b64w + L"'"
+            : L"Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand " + b64w + L"'";
+        status("Eingabe-Bruecke: Warte auf deine Bestaetigung (Windows-Sicherheitsabfrage) ...");
+        runCaptureOutput(L"powershell -NoProfile -Command \"" + outer + L"\"", 20000);
+        // 3) Warten bis der Bus-Dienst da ist, dann Vollzug melden.
+        bool ok = false;
+        for (int i = 0; i < 90 && !(ok = lubridge::busInstalled()); ++i) Sleep(1000);
+        statusDone(ok ? "Eingabe-Bruecke eingerichtet - das virtuelle Gamepad steht bereit. ✓"
+                      : "Einrichtung nicht abgeschlossen - erneut ueber Einstellungen → Eingabe-Bruecke.");
+        g_vigemSetupRunning = false;
+    }).detach();
+}
 static json readGpuPdh();
 // --- NVML (NVIDIA-Treiber-API, nvml.dll): temp/power/clock/vram wie readNvmlHandle ---
 struct NvmlUtil { unsigned int gpu, mem; };
@@ -2426,7 +2521,9 @@ static json handleChannel(const std::string& channel, const json& args) {
     }
     if (channel == "install-update") {
         if (g_updFile.empty()) return false;
-        ShellExecuteW(nullptr, L"open", widen(g_updFile).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        // /S = Silent-Update: Installer erkennt die Installation selbst (.onInit-UPDATE-Pfad),
+        // installiert ohne Fragen drueber und startet die App danach wieder (installer.nsi).
+        ShellExecuteW(nullptr, L"open", widen(g_updFile).c_str(), L"/S", nullptr, SW_SHOWNORMAL);
         g_quitting = true; PostMessageW(g_hwnd, WM_CLOSE, 0, 0);   // App beenden, Installer laeuft
         return true;
     }
@@ -2809,6 +2906,44 @@ static json handleChannel(const std::string& channel, const json& args) {
             : "PresentMon (Einrichtung folgt beim OSD-Start)";
         return { {"gpu", gpu}, {"cpu", cpu}, {"fps", fps} };
     }
+    // ---- Eingabe-Bruecke (HID -> virtuelles Xbox-Pad; input_bridge.h) ----
+    if (channel == "input-bridge-list-devices") return lubridge::listDevices();
+    if (channel == "input-bridge-get-profiles") return loadInputProfiles();
+    if (channel == "input-bridge-save-profiles" && args.size() >= 1 && args[0].is_object()) {
+        writeFile(inputProfilesPath(), args[0].dump(2));   // UI liefert das komplette Objekt (wie save-games)
+        return true;
+    }
+    if (channel == "input-bridge-start") {   // slow channel: kann Setup-Dialog + Download anstossen
+        if (!lubridge::busInstalled()) {
+            json s = loadSettings(); s["inputBridgeSetupDeclined"] = false; writeFile(settingsPath(), s.dump(2));
+            ensureVigemSetup();                        // Einwilligung + Download + EIN UAC (detached)
+            return { {"ok", false}, {"setup", true} }; // UI: Setup laeuft, danach erneut starten
+        }
+        json prof = args.size() >= 1 && args[0].is_object() ? args[0] : json::object();
+        g_bridgeAutoGame.clear();                      // manueller Start gehoert dem Nutzer, nicht der Automatik
+        return { {"ok", lubridge::start(prof, "manuell")} };
+    }
+    if (channel == "input-bridge-stop") { g_bridgeAutoGame.clear(); lubridge::stop("manuell"); return true; }
+    if (channel == "input-bridge-set-profile" && args.size() >= 1 && args[0].is_object()) {
+        // Regler-Aenderung live nachziehen (auch waehrend die Bruecke aktiv ist)
+        std::lock_guard<std::mutex> lk(lubridge::g_mx);
+        lubridge::g_profile = lubridge::parseProfile(args[0]);
+        return true;
+    }
+    if (channel == "input-bridge-monitor") { lubridge::setMonitor(args.size() >= 1 && args[0].is_boolean() && args[0].get<bool>()); return true; }
+    if (channel == "input-bridge-capture") { lubridge::setCapture(args.size() >= 1 && args[0].is_boolean() && args[0].get<bool>()); return true; }
+    if (channel == "input-bridge-status") return lubridge::status();
+    if (channel == "input-bridge-selftest") {
+        // Geschlossener Kreis ohne Fremdtools: das virtuelle Pad ueber XInput
+        // zuruecklesen - beweist Treiber + Mapping-Ausgabe in einem Rutsch.
+        LONG slot = lubridge::g_vigemSlot.load();
+        XINPUT_STATE st{};
+        if (slot < 0 || XInputGetState((DWORD)slot, &st) != ERROR_SUCCESS) return { {"ok", false} };
+        return { {"ok", true}, {"slot", slot}, {"buttons", st.Gamepad.wButtons},
+                 {"lx", st.Gamepad.sThumbLX}, {"ly", st.Gamepad.sThumbLY},
+                 {"rx", st.Gamepad.sThumbRX}, {"ry", st.Gamepad.sThumbRY},
+                 {"lt", st.Gamepad.bLeftTrigger}, {"rt", st.Gamepad.bRightTrigger} };
+    }
     if (channel == "toggle-window") { toggleMainWindow(); return true; }
     if (channel == "toggle-osd") { toggleOsdSetting(); return true; }
     if (channel == "minimize-window") { ShowWindow(g_hwnd, SW_MINIMIZE); return true; }
@@ -2833,7 +2968,8 @@ static bool isSlowChannel(const std::string& c) {
            c == "start-broadcast" || c == "stop-broadcast" || c == "list-sources" ||   // Relay-Ready/Helfer-Lauf
            c == "list-viewers" || c == "kick-viewer" || c == "preview-whep" || c == "preview-whep-stop" ||
            c == "group-start" || c == "group-join" || c == "group-leave" || c == "group-status" ||
-           c == "test-connectivity";   // STUN+UPnP-Proben ~10s   // Vermittlungs-Netz
+           c == "test-connectivity" ||   // STUN+UPnP-Proben ~10s   // Vermittlungs-Netz
+           c == "input-bridge-start" || c == "input-bridge-list-devices";   // ViGEm-Connect / HID-Handles
 }
 static void onWebMessage(const std::wstring& raw, HWND replyWnd) {
     json msg = json::parse(narrow(raw), nullptr, false);
@@ -3258,6 +3394,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
     timeBeginPeriod(1);                              // praeziser Hintergrund-Poll (wie Electron/RTSS)
     SetTimer(hwnd, TIMER_XINPUT, 40, nullptr);       // nativer Gamepad-Hotkey-Poll (25 Hz)
+    lubridge::init(sendToUi);                        // Eingabe-Bruecke: Push-Kanal verdrahten (Thread startet erst bei Nutzung)
     lulan::listenStart();                            // LAN-Beacon-Empfang ab Start (fremde Gruppen sehen)
     SetTimer(hwnd, TIMER_LANPUSH, 5000, nullptr);    // im LAN sichtbare Gruppen an die UI
     syncOsdVisibility();   // OSD-Overlay gemaess Einstellung anzeigen
@@ -3315,5 +3452,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+    lubridge::shutdown();   // virtuelles Pad entfernen + Bridge-Thread beenden (sonst haengt der Prozess)
     return 0;
 }
