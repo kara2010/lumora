@@ -114,6 +114,15 @@ struct Encoder {
 struct NvencEncoder : Encoder {
     NV_ENCODE_API_FUNCTION_LIST nv{ NV_ENCODE_API_FUNCTION_LIST_VER }; void* enc = nullptr; NV_ENC_OUTPUT_PTR outBuf = nullptr; int W = 0, H = 0;
     NV_ENC_PRESET_CONFIG pc{ NV_ENC_PRESET_CONFIG_VER }; NV_ENC_INITIALIZE_PARAMS ip{ NV_ENC_INITIALIZE_PARAMS_VER };  // gespeichert fuer Live-Bitrate-Reconfigure
+    // WICHTIG: rohe NVENC-Handles muessen explizit freigegeben werden. Ohne diesen Destruktor
+    // leckt jeder bedarfsgesteuerte Encoder-Abbau die komplette NVENC-Session (bei 4K hunderte
+    // MB Frame-/Referenzpuffer) - fuehrte zu RADAR_PRE_LEAK/Absturz beim Codec-Wechsel im Stream.
+    ~NvencEncoder() override {
+        if (enc) {
+            if (outBuf) { nv.nvEncDestroyBitstreamBuffer(enc, outBuf); outBuf = nullptr; }
+            nv.nvEncDestroyEncoder(enc); enc = nullptr;
+        }
+    }
     const char* name() override { return "NVENC"; }
     bool init(ID3D11Device* dev, int w, int h, int fps, int mbit, bool av1 = false) override {
         W = w; H = h; HMODULE lib = LoadLibraryW(L"nvEncodeAPI64.dll"); if (!lib) return false;
@@ -155,6 +164,12 @@ struct NvencEncoder : Encoder {
 struct AmfEncoder : Encoder {
     amf::AMFContextPtr context; amf::AMFComponentPtr encoder;
     winrt::com_ptr<ID3D11DeviceContext> d3dctx; int encW = 0, encH = 0, encFps = 60; uint64_t frameNo = 0; bool isAv1 = false;
+    // AMF-Smart-Pointer released ohnehin, aber explizit Terminate() gibt die VCN-/Surface-Puffer
+    // sofort frei (sonst analoges Leck wie bei NVENC beim bedarfsgesteuerten Encoder-Abbau).
+    ~AmfEncoder() override {
+        if (encoder) { encoder->Terminate(); encoder = nullptr; }
+        if (context) { context->Terminate(); context = nullptr; }
+    }
     const char* name() override { return "AMF"; }
     bool init(ID3D11Device* dev, int w, int h, int fps, int mbit, bool av1 = false) override {
         encW = w; encH = h; encFps = fps > 0 ? fps : 60; isAv1 = av1; dev->GetImmediateContext(d3dctx.put());
