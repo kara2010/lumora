@@ -475,11 +475,36 @@ inline void ensureThread() {
     if (g_thread.joinable()) g_thread.join();
     g_thread = std::thread(bridgeThreadProc);
 }
+// Ist das Quellgeraet des Profils (Lenkrad/Joystick) ueberhaupt angeschlossen?
+// Ohne diese Pruefung legte die automatische Aktivierung bei JEDEM Spielstart ein
+// virtuelles Xbox-Pad an - auch wenn nichts da war, was es haette abbilden koennen.
+// Ein zusaetzliches XInput-Geraet neben einem echten Controller ist nicht gratis:
+// Windows verteilt die vier XInput-Plaetze neu, und der echte Controller kann dabei
+// herausfallen. Kein Quellgeraet -> kein virtuelles Pad.
+inline bool profileDevicePresent(const Profile& p) {
+    if (p.vid.empty() && p.pid.empty()) return false;   // ohne Geraetebindung nicht automatisch aktivieren
+    for (auto& d : listDevices()) {
+        std::string v = d.value("vid", ""), i = d.value("pid", "");
+        for (auto& c : v) c = (char)toupper((unsigned char)c);
+        for (auto& c : i) c = (char)toupper((unsigned char)c);
+        if (v == p.vid && i == p.pid) return true;
+    }
+    return false;
+}
 // Pad aktivieren: Profil setzen + ViGEm-Target anlegen. reason nur fuer den UI-Push.
-inline bool start(const json& profile, const std::string& reason) {
+// requireDevice=true (automatische Aktivierung): nur mit angeschlossenem Quellgeraet.
+// Der manuelle Weg aus der UI bleibt ohne diese Huerde (Einrichten/Testen).
+inline bool start(const json& profile, const std::string& reason, bool requireDevice = false) {
     {
         std::lock_guard<std::mutex> lk(g_mx);
         g_profile = parseProfile(profile);
+    }
+    if (requireDevice) {
+        Profile snap; { std::lock_guard<std::mutex> lk(g_mx); snap = g_profile; }
+        if (!profileDevicePresent(snap)) {
+            if (g_push) g_push("input-bridge-active", { {"active", false}, {"reason", "quellgeraet-fehlt"} });
+            return false;
+        }
     }
     ensureThread();
     bool ok = vigemStart();

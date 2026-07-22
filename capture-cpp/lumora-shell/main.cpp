@@ -264,7 +264,9 @@ static void inputBridgeOnRunning(const std::string& gamePath) {
     if (!lubridge::busInstalled()) return;         // Setup nie automatisch anstossen (kein UAC ohne Klick)
     json prof = inputProfileForGame(gamePath);
     if (prof.is_null()) return;
-    if (lubridge::start(prof, "auto")) g_bridgeAutoGame = gamePath;
+    // requireDevice: bei Spielstart nur aktivieren, wenn das gemappte Lenkrad/Joystick
+    // wirklich angeschlossen ist - sonst entstuende grundlos ein zweites XInput-Geraet.
+    if (lubridge::start(prof, "auto", true)) g_bridgeAutoGame = gamePath;
 }
 static void inputBridgeOnEnd(const std::string& gamePath) {
     if (!g_bridgeAutoGame.empty() && g_bridgeAutoGame == gamePath) {
@@ -1658,8 +1660,12 @@ static void padPoll() {
         if (on != p.on) {
             std::string ago = p.since ? (" nach " + std::to_string((now - p.since) / 1000) + "s") : "";
             bcLogStream("pad: Platz " + std::to_string(i) + (on ? " verbunden" : " WEG") + ago
-                + " (virtuelles Pad: " + (lubridge::g_vigemSlot.load() >= 0
-                    ? ("Platz " + std::to_string(lubridge::g_vigemSlot.load())) : "aus") + ")");
+                // g_feeding ist die Wahrheit ueber "Bruecke laeuft". Vorher stand hier nur
+                // g_vigemSlot - der ist -1, wenn ViGEm den Platz nicht meldet, und das las
+                // sich faelschlich als "virtuelles Pad: aus", obwohl es lief.
+                + " (Bruecke: " + (lubridge::g_feeding.load() ? "AN" : "aus")
+                + ", virtueller Platz: " + (lubridge::g_vigemSlot.load() >= 0
+                    ? std::to_string(lubridge::g_vigemSlot.load()) : "unbekannt") + ")");
             p.on = on; p.since = now;
         }
     }
