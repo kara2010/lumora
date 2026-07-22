@@ -2087,6 +2087,8 @@ static void ensureOsdSetup() {
 // waere hier Zufall. Deinstallation macht der ViGEmBus-Installer selbst ueber
 // Apps & Features (registriert sich dort als "Nefarius Virtual Gamepad Emulation Bus").
 static std::atomic<bool> g_vigemSetupRunning{ false };
+static json g_bridgePendingProfile;   // Profil, mit dem nach dem Treiber-Setup automatisch gestartet wird
+static bool g_bridgeStartAfterSetup = false;   // true, wenn der Nutzer "Aktivieren" geklickt hat (nicht nur Setup)
 static void ensureVigemSetup() {
     if (g_vigemSetupRunning.load() || lubridge::busInstalled()) return;
     if (loadSettings().value("inputBridgeSetupDeclined", false)) return;
@@ -2131,7 +2133,12 @@ static void ensureVigemSetup() {
         // 3) Warten bis der Bus-Dienst da ist, dann Vollzug melden.
         bool ok = false;
         for (int i = 0; i < 90 && !(ok = lubridge::busInstalled()); ++i) Sleep(1000);
-        statusDone(ok ? "Eingabe-Bruecke eingerichtet - das virtuelle Gamepad steht bereit. ✓"
+        // Der Nutzer hat "Aktivieren" geklickt (nicht nur eingerichtet) -> Bruecke jetzt auch
+        // WIRKLICH starten, sonst bliebe der Schalter trotz erfolgreicher Installation auf "aus".
+        // lubridge::start pusht input-bridge-active -> die UI kippt den Schalter auf "an".
+        if (ok && g_bridgeStartAfterSetup) { g_bridgeAutoGame.clear(); lubridge::start(g_bridgePendingProfile, "nach-setup"); }
+        g_bridgeStartAfterSetup = false;
+        statusDone(ok ? "Eingabe-Bruecke eingerichtet und aktiviert - das virtuelle Gamepad ist an. ✓"
                       : "Einrichtung nicht abgeschlossen - erneut ueber Einstellungen → Eingabe-Bruecke.");
         g_vigemSetupRunning = false;
     }).detach();
@@ -3022,8 +3029,12 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "input-bridge-start") {   // slow channel: kann Setup-Dialog + Download anstossen
         if (!lubridge::busInstalled()) {
             json s = loadSettings(); s["inputBridgeSetupDeclined"] = false; writeFile(settingsPath(), s.dump(2));
+            // Profil merken + Merker setzen: nach dem Setup startet ensureVigemSetup die Bruecke
+            // automatisch, damit der EINE "Aktivieren"-Klick reicht (kein zweiter noetig).
+            g_bridgePendingProfile = args.size() >= 1 && args[0].is_object() ? args[0] : json::object();
+            g_bridgeStartAfterSetup = true;
             ensureVigemSetup();                        // Einwilligung + Download + EIN UAC (detached)
-            return { {"ok", false}, {"setup", true} }; // UI: Setup laeuft, danach erneut starten
+            return { {"ok", false}, {"setup", true} }; // UI: Setup laeuft, danach automatischer Start
         }
         json prof = args.size() >= 1 && args[0].is_object() ? args[0] : json::object();
         g_bridgeAutoGame.clear();                      // manueller Start gehoert dem Nutzer, nicht der Automatik

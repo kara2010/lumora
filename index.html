@@ -761,12 +761,58 @@
           </div>
           <div class="form-group">
             <label>Zuordnung</label>
-            <p class="settings-hint">„Zuweisen" klicken, dann am Gerät den gewünschten Knopf drücken oder die Achse bewegen. Knopf auf Achsen-Ziel = Knopf-als-Achse (Barrierefreiheit); Achse auf Knopf-Ziel = Schwellwert-Knopf.</p>
+            <p class="settings-hint">Klick auf ein Bauteil des Controllers unten – dann am Gerät den gewünschten Knopf drücken oder die Achse bewegen. <b>Grün</b> = schon belegt (Quelle darunter). Bei aktivem Pad bewegt sich der Controller live mit.</p>
+            <!-- Interaktiver Xbox-Controller: jedes Bauteil ist anklickbar (data-t = Ziel).
+                 Klick startet die Zuweisung; .mapped = belegt, .capturing = wartet auf Eingabe. -->
+            <div id="ibPad" style="max-width:420px;margin:6px auto 12px">
+              <svg viewBox="0 0 400 270" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+                <defs><style>
+                  #ibPad .ctl { fill:var(--card2,#2a2a35); stroke:var(--border,#444); stroke-width:1.5; cursor:pointer; transition:fill .15s,stroke .15s }
+                  #ibPad .ctl:hover { stroke:var(--accent,#7ab7ff); stroke-width:2.5 }
+                  #ibPad .ctl.mapped { fill:#1f6f3f; stroke:#3fbf6f }
+                  #ibPad .ctl.capturing { fill:#b8860b; stroke:#ffd24d; animation:ibpulse 1s ease-in-out infinite }
+                  @keyframes ibpulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+                  #ibPad text { fill:var(--fg,#ddd); font-size:11px; font-family:sans-serif; pointer-events:none; text-anchor:middle; dominant-baseline:middle }
+                  #ibPad .lbl { fill:var(--muted,#999); font-size:9px }
+                  #ibPad .stickdot { fill:var(--accent,#7ab7ff); pointer-events:none }
+                </style></defs>
+                <!-- Body -->
+                <path d="M40 120 Q40 70 90 66 L310 66 Q360 70 360 120 Q372 210 320 230 Q290 244 262 214 L138 214 Q110 244 80 230 Q28 210 40 120 Z" fill="var(--card,#20202a)" stroke="var(--border,#444)" stroke-width="2"/>
+                <!-- Trigger + Bumper -->
+                <rect class="ctl" data-t="LT" x="74" y="40" width="52" height="16" rx="7"/><text x="100" y="48">LT</text>
+                <rect class="ctl" data-t="RT" x="274" y="40" width="52" height="16" rx="7"/><text x="300" y="48">RT</text>
+                <rect class="ctl" data-t="LB" x="74" y="58" width="52" height="13" rx="6"/><text x="100" y="65" style="font-size:9px">LB</text>
+                <rect class="ctl" data-t="RB" x="274" y="58" width="52" height="13" rx="6"/><text x="300" y="65" style="font-size:9px">RB</text>
+                <!-- Linker Stick: Klick-Ring = LS; Pfeile = LX/LY -->
+                <circle class="ctl" data-t="LS" cx="100" cy="120" r="26"/><circle id="ibDotL" class="stickdot" cx="100" cy="120" r="9"/>
+                <text class="lbl" data-t="LX" x="100" y="153" style="cursor:pointer">↔ X</text>
+                <text class="lbl" data-t="LY" x="136" y="120" style="cursor:pointer">↕ Y</text>
+                <!-- ABXY -->
+                <circle class="ctl" data-t="Y" cx="300" cy="96" r="13"/><text x="300" y="96">Y</text>
+                <circle class="ctl" data-t="X" cx="276" cy="120" r="13"/><text x="276" y="120">X</text>
+                <circle class="ctl" data-t="B" cx="324" cy="120" r="13"/><text x="324" y="120">B</text>
+                <circle class="ctl" data-t="A" cx="300" cy="144" r="13"/><text x="300" y="144">A</text>
+                <!-- D-Pad -->
+                <rect class="ctl" data-t="DPAD_UP" x="112" y="150" width="18" height="18" rx="3"/><text x="121" y="159" style="font-size:9px">▲</text>
+                <rect class="ctl" data-t="DPAD_LEFT" x="94" y="168" width="18" height="18" rx="3"/><text x="103" y="177" style="font-size:9px">◀</text>
+                <rect class="ctl" data-t="DPAD_RIGHT" x="130" y="168" width="18" height="18" rx="3"/><text x="139" y="177" style="font-size:9px">▶</text>
+                <rect class="ctl" data-t="DPAD_DOWN" x="112" y="186" width="18" height="18" rx="3"/><text x="121" y="195" style="font-size:9px">▼</text>
+                <!-- Rechter Stick: Klick-Ring = RS; Pfeile = RX/RY -->
+                <circle class="ctl" data-t="RS" cx="240" cy="168" r="24"/><circle id="ibDotR" class="stickdot" cx="240" cy="168" r="8"/>
+                <text class="lbl" data-t="RX" x="240" y="198" style="cursor:pointer">↔ X</text>
+                <text class="lbl" data-t="RY" x="272" y="168" style="cursor:pointer">↕ Y</text>
+                <!-- Back / Start -->
+                <circle class="ctl" data-t="BACK" cx="172" cy="112" r="9"/><text x="172" y="126" class="lbl">Back</text>
+                <circle class="ctl" data-t="START" cx="228" cy="112" r="9"/><text x="228" y="126" class="lbl">Start</text>
+              </svg>
+            </div>
             <div class="setting-toggle-row">
               <span class="setting-toggle-label">POV-Hat (Rundblickschalter) → Steuerkreuz</span>
               <label class="switch"><input type="checkbox" id="ibHatDpad" onchange="ibHatToggle(this.checked)"><span class="switch-slider"></span></label>
             </div>
-            <div id="ibMapTable"></div>
+            <details style="margin-top:8px"><summary class="settings-hint" style="cursor:pointer">Feineinstellung (Deadzone / Kurve / Invertieren) &amp; Liste</summary>
+              <div id="ibMapTable" style="margin-top:8px"></div>
+            </details>
           </div>
           <div class="form-group">
             <label>Live-Monitor</label>
@@ -2572,7 +2618,33 @@ function ibRenderMap() {
     </div>`
   }
   el.innerHTML = IB_AXES.map(([k, l]) => row(k, l, true)).join('') + IB_BTNS.map(([k, l]) => row(k, l, false)).join('')
+  ibRenderController()
 }
+// Interaktiver Controller: belegte Bauteile gruen, das gerade zugewiesene pulsiert,
+// Tooltip zeigt Ziel + aktuelle Quelle. Klick auf ein Bauteil startet die Zuweisung.
+function ibRenderController() {
+  const svg = document.getElementById('ibPad'); if (!svg) return
+  const p = ibProf()
+  const nameOf = { LX:'Linker Stick ↔', LY:'Linker Stick ↕', RX:'Rechter Stick ↔', RY:'Rechter Stick ↕',
+    LT:'Linker Trigger', RT:'Rechter Trigger', LB:'Schulter links', RB:'Schulter rechts',
+    LS:'Linker Stick-Klick', RS:'Rechter Stick-Klick', BACK:'Back / View', START:'Start / Menü',
+    A:'A', B:'B', X:'X', Y:'Y', DPAD_UP:'Steuerkreuz ▲', DPAD_DOWN:'Steuerkreuz ▼', DPAD_LEFT:'Steuerkreuz ◀', DPAD_RIGHT:'Steuerkreuz ▶' }
+  svg.querySelectorAll('[data-t]').forEach(el => {
+    const t = el.getAttribute('data-t')
+    const src = p ? ibSourceLabel(p, t) : '–'
+    const mapped = src && src !== '–'
+    if (el.classList.contains('ctl') || true) {
+      el.classList.toggle('mapped', !!mapped && ibCaptureTarget !== t)
+      el.classList.toggle('capturing', ibCaptureTarget === t)
+    }
+    let tip = el.querySelector('title'); if (!tip) { tip = document.createElementNS('http://www.w3.org/2000/svg','title'); el.appendChild(tip) }
+    tip.textContent = (nameOf[t] || t) + (mapped ? ' — belegt: ' + src : ' — nicht belegt (klicken zum Zuweisen)')
+  })
+}
+// Klick-Delegation auf dem Controller-SVG
+document.getElementById('ibPad')?.addEventListener('click', e => {
+  const g = e.target.closest('[data-t]'); if (g) ibAssign(g.getAttribute('data-t'))
+})
 function ibHatToggle(on) {
   const p = ibProf(); if (!p) return
   p.axes = p.axes.filter(a => a.target !== 'DPAD')
@@ -2603,7 +2675,20 @@ ipcRenderer.on('input-bridge-state', (e, st) => {
   const o = st.out || {}
   const out = st.feeding ? `\n→ Pad: LX ${o.lx} LY ${o.ly} RX ${o.rx} RY ${o.ry} LT ${o.lt} RT ${o.rt} Btn 0x${(o.buttons || 0).toString(16)}` : ''
   el.textContent = (axes || 'Keine Achsen erkannt – Gerät bewegen.') + '\n' + btns + out
+  if (st.feeding) ibAnimatePad(o)
 })
+// Live-Ausgabe am Controller-SVG zeigen (Sticks bewegen, gedrueckte Tasten leuchten).
+function ibAnimatePad(o) {
+  const dL = document.getElementById('ibDotL'), dR = document.getElementById('ibDotR')
+  if (dL) { dL.setAttribute('cx', 100 + (o.lx || 0) / 32767 * 15); dL.setAttribute('cy', 120 - (o.ly || 0) / 32767 * 15) }
+  if (dR) { dR.setAttribute('cx', 240 + (o.rx || 0) / 32767 * 14); dR.setAttribute('cy', 168 - (o.ry || 0) / 32767 * 14) }
+  const B = o.buttons || 0, mask = { A:0x1000,B:0x2000,X:0x4000,Y:0x8000,DPAD_UP:0x0001,DPAD_DOWN:0x0002,DPAD_LEFT:0x0004,DPAD_RIGHT:0x0008,START:0x0010,BACK:0x0020,LS:0x0040,RS:0x0080,LB:0x0100,RB:0x0200 }
+  document.querySelectorAll('#ibPad .ctl').forEach(el => {
+    const t = el.getAttribute('data-t')
+    let on = mask[t] ? (B & mask[t]) : (t === 'LT' ? (o.lt || 0) > 30 : t === 'RT' ? (o.rt || 0) > 30 : false)
+    el.style.filter = on ? 'brightness(1.8)' : ''
+  })
+}
 // Aktiv/inaktiv (manuell, auto beim Spielstart, Spielende, Fehler).
 ipcRenderer.on('input-bridge-active', (e, st) => ibShowActive(st && st.active))
 function ibShowActive(on) {
