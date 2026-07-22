@@ -65,6 +65,7 @@ using Microsoft::WRL::ComPtr;
 using nlohmann::json;
 
 static ComPtr<ICoreWebView2Controller> g_controller;
+static void placeWebView(HWND h);   // (weiter unten definiert; von showMainWindow gebraucht)
 static ComPtr<ICoreWebView2> g_webview;
 static std::wstring g_appDir;
 static HWND g_hwnd = nullptr;
@@ -1620,9 +1621,23 @@ static void restoreGameFocus() {
     g_prevGameHwnd = nullptr;
 }
 static void showMainWindow() {
+    // Diagnose "schwarzes Fenster nach --minimized-Autostart": dieselbe Fehlerklasse wie
+    // beim Tuersteher-Fenster (WebView2 entsteht gegen ein noch verstecktes Hostfenster
+    // und bleibt danach unsichtbar, auch wenn das Fenster spaeter gezeigt wird). Erst
+    // messen statt vermuten.
+    if (g_controller) {
+        BOOL visBefore = FALSE; g_controller->get_IsVisible(&visBefore);
+        bcLogStream("show-main: WebView2 sichtbar VOR ShowWindow=" + std::to_string(visBefore ? 1 : 0));
+    }
     HWND fg = GetForegroundWindow();
     if (fg && fg != g_hwnd && fg != g_osdHwnd) g_prevGameHwnd = fg;   // merken, wem wir den Fokus nehmen
     if (IsIconic(g_hwnd)) ShowWindow(g_hwnd, SW_RESTORE); else ShowWindow(g_hwnd, SW_SHOW);
+    // Fix: WebView2 entsteht bei --minimized-Autostart gegen ein noch verstecktes
+    // Hostfenster (der Controller wird VOR dem ersten ShowWindow erzeugt) und bleibt
+    // danach unsichtbar - ShowWindow auf das Hostfenster zieht das NICHT automatisch
+    // nach. Sichtbarkeit + Flaeche hier explizit nachziehen (gleicher Fund/Fix wie beim
+    // Tuersteher-Fenster).
+    if (g_controller) { placeWebView(g_hwnd); g_controller->put_IsVisible(TRUE); }
     // Kurzes TOPMOST-Anheben erzwingt das echte Nach-vorn (Hintergrund-Aufruf per
     // Hotkey/Tray wuerde sonst nur in der Taskleiste blinken); danach zuruecknehmen.
     SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
