@@ -149,6 +149,9 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
         std::unique_lock<std::mutex> lk(gm);
         gcv.wait_for(lk, std::chrono::milliseconds(3000), [&] { return done; });
     }
+    // Callback abmelden: er captured gm/gcv/done per Referenz (lokale Variablen dieser
+    // Funktion) und darf nach dem Return nicht mehr feuern.
+    sess->pc->onGatheringStateChange(nullptr);
     auto local = sess->pc->localDescription();
     if (!local) return "";
     string sdp = string(*local);

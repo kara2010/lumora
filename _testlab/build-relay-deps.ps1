@@ -21,6 +21,17 @@ if (-not (Test-Path "$tp\mbedtls\CMakeLists.txt")) {
   if ($LASTEXITCODE -ne 0) { throw "MbedTLS-Clone fehlgeschlagen" }
 }
 
+# --- 0b) Lokale Patches auf die geklonten Quellen (idempotent) ---
+# libjuice v0.23.x: release_registry() zerstoert den Registry-Mutex nicht ->
+# auf Windows leakt 1 CreateMutex-Handle pro ICE-Mux-Session-Zyklus.
+$patch = "$PSScriptRoot\patches\libjuice-registry-mutex-leak.patch"
+$connC = "$tp\libdatachannel-relay\deps\libjuice\src\conn.c"
+if (-not (Select-String -Path $connC -Pattern 'mutex_destroy\(&registry->mutex\)' -Quiet)) {
+  git -C "$tp\libdatachannel-relay" apply $patch
+  if ($LASTEXITCODE -ne 0) { throw "libjuice-Patch (Registry-Mutex-Leak) fehlgeschlagen" }
+  Write-Output "libjuice-Patch angewendet: Registry-Mutex-Leak"
+}
+
 # --- 1) MbedTLS ---
 # WICHTIG: libdatachannel braucht DTLS-SRTP; in MbedTLS default AUS. Idempotent einschalten.
 $mb = "$tp\mbedtls"
