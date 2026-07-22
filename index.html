@@ -884,34 +884,32 @@
           — entwickelt und gepflegt von Karsten Radermacher. Der Name „Lumora" und das Logo sind nicht Teil der Lizenz.
         </p>
         <p class="about-text"><strong>Lumora steht auf den Schultern großartiger Open-Source-Projekte.</strong> Eingesetzte Komponenten und ihre Urheber:</p>
+        <!-- Native Version (seit dem Umbau von Electron/FFmpeg/mediamtx auf eigenen C++-Code):
+             Bildaufnahme, Hardware-Encoding, MPEG-TS-Muxing, WebRTC-Medien-Relay, HDR-Umschaltung
+             und FPS-Messung (ETW) sind durchgehend eigener Code - hier nur noch die verbleibenden
+             Bausteine, in derselben Vier-Gruppen-Logik wie die Transparenz-Tabelle der Webseite. -->
         <ul class="about-credits">
-          <li><strong>HDRTray / HDRCmd</strong> — HDR-Steuerung · Frank Richter (res2k) · GPL&nbsp;v3 · <span class="about-link" onclick="openExternal('https://github.com/res2k/HDRTray')">GitHub</span></li>
-          <li><strong>PresentMon</strong> — FPS-/Frametime-Messung · Intel Corporation · MIT · <span class="about-link" onclick="openExternal('https://github.com/GameTechDev/PresentMon')">GitHub</span></li>
+          <li><strong>libdatachannel</strong> — WebRTC-Stack (WHEP) im eigenen Medien-Relay · Paul-Louis Ageneau · MPL&nbsp;2.0 · <span class="about-link" onclick="openExternal('https://github.com/paullouisageneau/libdatachannel')">GitHub</span></li>
+          <li><strong>libjuice</strong> — ICE/STUN/TURN (Verbindungsaufbau durch NAT/Router) im Medien-Relay · Paul-Louis Ageneau · MIT · <span class="about-link" onclick="openExternal('https://github.com/paullouisageneau/libjuice')">GitHub</span></li>
+          <li><strong>libSRTP</strong> — Verschlüsselung der Medienströme (SRTP) im Medien-Relay · Cisco Systems · BSD-3 · <span class="about-link" onclick="openExternal('https://github.com/cisco/libsrtp')">GitHub</span></li>
+          <li><strong>Mbed TLS</strong> — DTLS-Verschlüsselung (WebRTC-Handshake) im Medien-Relay · Mbed-TLS-Projekt · Apache&nbsp;2.0 · <span class="about-link" onclick="openExternal('https://github.com/Mbed-TLS/mbedtls')">GitHub</span></li>
+          <li><strong>usrsctp</strong> — SCTP-Transport (WebRTC-Datenkanäle) im Medien-Relay · sctplab · BSD-3 · <span class="about-link" onclick="openExternal('https://github.com/sctplab/usrsctp')">GitHub</span></li>
+          <li><strong>libopus</strong> — Opus-Encoding für den Stream-Ton (WebRTC-tauglich, patentfrei) · Xiph.Org u.&nbsp;a. · BSD-3 · <span class="about-link" onclick="openExternal('https://opus-codec.org')">opus-codec.org</span></li>
+          <li><strong>nlohmann/json</strong> — JSON-Verarbeitung (Einstellungen, IPC, APIs) · Niels Lohmann · MIT · <span class="about-link" onclick="openExternal('https://github.com/nlohmann/json')">GitHub</span></li>
+          <li><strong>ViGEmClient</strong> — Ansteuerung des virtuellen Xbox-Controllers für die Eingabe-Brücke · Benjamin Höglinger-Stelzer · MIT · <span class="about-link" onclick="openExternal('https://github.com/nefarius/ViGEmClient')">GitHub</span></li>
+          <li><strong>nv-codec-headers</strong> — NVENC-API-Header (NVIDIA-Hardware-Encoding) · FFmpeg-Projekt · MIT · <span class="about-link" onclick="openExternal('https://github.com/FFmpeg/nv-codec-headers')">GitHub</span></li>
+          <li><strong>AMF SDK</strong> — AMD-Hardware-Encoding-API (Radeon-GPUs) · AMD · MIT · <span class="about-link" onclick="openExternal('https://github.com/GPUOpen-LibrariesAndSDKs/AMF')">GitHub</span></li>
+          <li><strong>libvpl</strong> — Intel-oneVPL-Dispatcher für QuickSync-Hardware-Encoding · Intel Corporation · MIT · <span class="about-link" onclick="openExternal('https://github.com/intel/libvpl')">GitHub</span></li>
+          <li><strong>WebView2</strong> — Rendering der Benutzeroberfläche (Chromium-basiert, Windows-Systemkomponente) · Microsoft · BSD (Loader) · <span class="about-link" onclick="openExternal('https://developer.microsoft.com/microsoft-edge/webview2')">developer.microsoft.com</span></li>
           <li><strong>PawnIO</strong> — signierter Treiber für CPU-Sensorik · namazso · GPL&nbsp;2.0; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps &amp; Features" entfernbar · <span class="about-link" onclick="openExternal('https://pawnio.eu')">pawnio.eu</span></li>
           <li><strong>PawnIO-Module</strong> (AMDFamily17, IntelMSR) — Sensor-Definitionen · namazso · LGPL&nbsp;2.1 · <span class="about-link" onclick="openExternal('https://github.com/namazso/PawnIO.Modules')">GitHub</span></li>
-          <li><strong>Electron</strong> &amp; <strong>electron-updater</strong> — App-Framework und Auto-Updates · OpenJS Foundation / Electron-Userland · MIT</li>
-          <li><strong>koffi</strong> — Windows-API-Anbindung · Niels Martignène · MIT · <span class="about-link" onclick="openExternal('https://koffi.dev')">koffi.dev</span></li>
-          <li><strong>FFmpeg</strong> — Aufnahme &amp; Hardware-Encoding fürs Streaming · FFmpeg-Projekt · LGPL&nbsp;v3 (Build ohne GPL-Bausteine) · <span class="about-link" onclick="openExternal('https://ffmpeg.org')">ffmpeg.org</span></li>
-          <li><strong>mediamtx</strong> — WebRTC-Server, verteilt den Stream an die Zuschauer · bluenviron · MIT · <span class="about-link" onclick="openExternal('https://github.com/bluenviron/mediamtx')">GitHub</span></li>
-          <li><strong>Vortice.Windows</strong> — Direct3D-/Screen-Capture im Aufnahme-Helfer · Amer Koleci · MIT · <span class="about-link" onclick="openExternal('https://github.com/amerkoleci/Vortice.Windows')">GitHub</span></li>
-          <li><strong>NAudio</strong> — System-Ton (WASAPI) fürs Streaming · Mark Heath · MIT · <span class="about-link" onclick="openExternal('https://github.com/naudio/NAudio')">GitHub</span></li>
-          <li><strong>.NET-Runtime</strong> — Laufzeit des Aufnahme-Helfers · Microsoft · MIT · <span class="about-link" onclick="openExternal('https://dotnet.microsoft.com')">dotnet.microsoft.com</span></li>
-          <!-- VORBEREITET fuer den Release des nativen C++-Capture-Helfers (feature/cpp-capture):
-               Beim Ausliefern die vier <li> FFmpeg / Vortice.Windows / NAudio / .NET-Runtime ENTFERNEN
-               und die drei <li> unten aktivieren (auch die EN-Uebersetzungstabelle ergaenzen).
-               Capture (Windows.Graphics.Capture via C++/WinRT), Encoding (NVENC/AMF/QSV) und
-               MPEG-TS-Muxing macht der native Helfer selbst - externe Komponente ist nur der Opus-Encoder.
-          <li><strong>libopus</strong> — Opus-Encoding fuer den Stream-Ton (WebRTC-tauglich, patentfrei) · Xiph.Org u.&nbsp;a. · BSD-3 · <span class="about-link" onclick="openExternal('https://opus-codec.org')">opus-codec.org</span></li>
-          <li><strong>nv-codec-headers</strong> — NVENC-API-Header (NVIDIA-Encoding) · FFmpeg-Projekt · MIT · <span class="about-link" onclick="openExternal('https://github.com/FFmpeg/nv-codec-headers')">GitHub</span></li>
-          <li><strong>AMF SDK</strong> — AMD-Hardware-Encoding-API · AMD · MIT · <span class="about-link" onclick="openExternal('https://github.com/GPUOpen-LibrariesAndSDKs/AMF')">GitHub</span></li>
-          -->
-
+          <li><strong>ViGEmBus</strong> — signierter Treiber für virtuelle Gamepads (Eingabe-Brücke) · Nefarius Software Solutions · BSD-3; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps &amp; Features" entfernbar · <span class="about-link" onclick="openExternal('https://github.com/nefarius/ViGEmBus')">GitHub</span></li>
           <li><strong>SteamGridDB</strong> — optionale Community-Artworks (eigener API-Key) · <span class="about-link" onclick="openExternal('https://www.steamgriddb.com')">steamgriddb.com</span></li>
         </ul>
         <p class="about-text">
           Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML),
           dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten
-          liegen im Installationsordner (<em>resources</em>) bei.
+          liegen im Installationsordner bei.
         </p>
       </div>
       <div class="dialog-actions">
@@ -1551,20 +1549,23 @@ const I18N_EN = {
   "— entwickelt und gepflegt von Karsten Radermacher. Der Name „Lumora\" und das Logo sind nicht Teil der Lizenz.": "— developed and maintained by Karsten Radermacher. The “Lumora” name and logo are not part of the license.",
   "Lumora steht auf den Schultern großartiger Open-Source-Projekte.": "Lumora stands on the shoulders of great open-source projects.",
   "Eingesetzte Komponenten und ihre Urheber:": "Components used and their authors:",
-  "— HDR-Steuerung · Frank Richter (res2k) · GPL v3 ·": "— HDR control · Frank Richter (res2k) · GPL v3 ·",
-  "— FPS-/Frametime-Messung · Intel Corporation · MIT ·": "— FPS/frametime measurement · Intel Corporation · MIT ·",
+  "— WebRTC-Stack (WHEP) im eigenen Medien-Relay · Paul-Louis Ageneau · MPL 2.0 ·": "— WebRTC stack (WHEP) in our own media relay · Paul-Louis Ageneau · MPL 2.0 ·",
+  "— ICE/STUN/TURN (Verbindungsaufbau durch NAT/Router) im Medien-Relay · Paul-Louis Ageneau · MIT ·": "— ICE/STUN/TURN (connection setup through NAT/router) in the media relay · Paul-Louis Ageneau · MIT ·",
+  "— Verschlüsselung der Medienströme (SRTP) im Medien-Relay · Cisco Systems · BSD-3 ·": "— encryption of the media streams (SRTP) in the media relay · Cisco Systems · BSD-3 ·",
+  "— DTLS-Verschlüsselung (WebRTC-Handshake) im Medien-Relay · Mbed-TLS-Projekt · Apache 2.0 ·": "— DTLS encryption (WebRTC handshake) in the media relay · Mbed TLS project · Apache 2.0 ·",
+  "— SCTP-Transport (WebRTC-Datenkanäle) im Medien-Relay · sctplab · BSD-3 ·": "— SCTP transport (WebRTC data channels) in the media relay · sctplab · BSD-3 ·",
+  "— Opus-Encoding für den Stream-Ton (WebRTC-tauglich, patentfrei) · Xiph.Org u. a. · BSD-3 ·": "— Opus encoding for the stream audio (WebRTC-capable, patent-free) · Xiph.Org and others · BSD-3 ·",
+  "— JSON-Verarbeitung (Einstellungen, IPC, APIs) · Niels Lohmann · MIT ·": "— JSON handling (settings, IPC, APIs) · Niels Lohmann · MIT ·",
+  "— Ansteuerung des virtuellen Xbox-Controllers für die Eingabe-Brücke · Benjamin Höglinger-Stelzer · MIT ·": "— drives the virtual Xbox controller for the input bridge · Benjamin Höglinger-Stelzer · MIT ·",
+  "— NVENC-API-Header (NVIDIA-Hardware-Encoding) · FFmpeg-Projekt · MIT ·": "— NVENC API headers (NVIDIA hardware encoding) · FFmpeg project · MIT ·",
+  "— AMD-Hardware-Encoding-API (Radeon-GPUs) · AMD · MIT ·": "— AMD hardware encoding API (Radeon GPUs) · AMD · MIT ·",
+  "— Intel-oneVPL-Dispatcher für QuickSync-Hardware-Encoding · Intel Corporation · MIT ·": "— Intel oneVPL dispatcher for QuickSync hardware encoding · Intel Corporation · MIT ·",
+  "— Rendering der Benutzeroberfläche (Chromium-basiert, Windows-Systemkomponente) · Microsoft · BSD (Loader) ·": "— renders the user interface (Chromium-based, Windows system component) · Microsoft · BSD (loader) ·",
   "— signierter Treiber für CPU-Sensorik · namazso · GPL 2.0; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for CPU sensors · namazso · GPL 2.0; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
   "(AMDFamily17, IntelMSR) — Sensor-Definitionen · namazso · LGPL 2.1 ·": "(AMDFamily17, IntelMSR) — sensor definitions · namazso · LGPL 2.1 ·",
-  "— App-Framework und Auto-Updates · OpenJS Foundation / Electron-Userland · MIT": "— app framework and auto-updates · OpenJS Foundation / Electron Userland · MIT",
-  "— Windows-API-Anbindung · Niels Martignène · MIT ·": "— Windows API binding · Niels Martignène · MIT ·",
-  "— Aufnahme & Hardware-Encoding fürs Streaming · FFmpeg-Projekt · LGPL v3 (Build ohne GPL-Bausteine) ·": "— capture & hardware encoding for streaming · FFmpeg project · LGPL v3 (build without GPL components) ·",
-  "— WebRTC-Server, verteilt den Stream an die Zuschauer · bluenviron · MIT ·": "— WebRTC server, distributes the stream to viewers · bluenviron · MIT ·",
-  "— Direct3D-/Screen-Capture im Aufnahme-Helfer · Amer Koleci · MIT ·": "— Direct3D / screen capture in the capture helper · Amer Koleci · MIT ·",
-  "— System-Ton (WASAPI) fürs Streaming · Mark Heath · MIT ·": "— system audio (WASAPI) for streaming · Mark Heath · MIT ·",
-  "— Laufzeit des Aufnahme-Helfers · Microsoft · MIT ·": "— runtime of the capture helper · Microsoft · MIT ·",
+  "— signierter Treiber für virtuelle Gamepads (Eingabe-Brücke) · Nefarius Software Solutions · BSD-3; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for virtual gamepads (input bridge) · Nefarius Software Solutions · BSD-3; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
   "— optionale Community-Artworks (eigener API-Key) ·": "— optional community artwork (your own API key) ·",
-  "Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML), dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten liegen im Installationsordner (": "Additionally, Lumora reads — if present — sensor and FPS data from the NVIDIA driver (NVML), the AMD driver (ADL) and MSI Afterburner/RTSS. The license texts of the bundled components are included in the installation folder (",
-  ") bei.": ").",
+  "Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML), dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten liegen im Installationsordner bei.": "Additionally, Lumora reads — if present — sensor and FPS data from the NVIDIA driver (NVML), the AMD driver (ADL) and MSI Afterburner/RTSS. The license texts of the bundled components are included in the installation folder.",
 }
 function lumoraLangEffective() {
   try {
