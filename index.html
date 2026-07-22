@@ -2589,6 +2589,10 @@ function ibTweak(target, field, val) {
   const p = ibProf(); if (!p) return
   const ax = p.axes.find(a => a.target === target); if (!ax) return
   if (field === 'invert') ax.invert = !!val
+  else if (field === 'min' || field === 'max') {   // Bereich: 0..1; leer = ganze Achse (Feld entfernen)
+    if (val === '' || val === null) { delete ax.min; delete ax.max }
+    else { ax[field] = Math.max(0, Math.min(1, parseFloat(val))); if (typeof ax.min !== 'number') ax.min = 0; if (typeof ax.max !== 'number') ax.max = 1 }
+  }
   else ax[field] = Math.max(0, Math.min(field === 'curve' ? 4 : 0.9, parseFloat(val) || 0)) || (field === 'curve' ? 1 : 0)
   ibSave()
 }
@@ -2606,9 +2610,11 @@ function ibRenderMap() {
     const capturing = ibCaptureTarget === key
     const ax = isAxis ? p.axes.find(a => a.target === key) : null
     const tweaks = ax ? `
-      <input type="number" title="Deadzone (0–0.9)" min="0" max="0.9" step="0.05" value="${ax.deadzone ?? 0}" style="width:62px" onchange="ibTweak('${key}','deadzone',this.value)">
-      <input type="number" title="Kurve (1 = linear)" min="0.2" max="4" step="0.1" value="${ax.curve ?? 1}" style="width:62px" onchange="ibTweak('${key}','curve',this.value)">
-      <label title="Invertieren" style="display:flex;align-items:center;gap:3px">⇅<input type="checkbox" ${ax.invert ? 'checked' : ''} onchange="ibTweak('${key}','invert',this.checked)"></label>` : ''
+      <input type="number" title="Deadzone (0–0.9)" min="0" max="0.9" step="0.05" value="${ax.deadzone ?? 0}" style="width:56px" onchange="ibTweak('${key}','deadzone',this.value)">
+      <input type="number" title="Kurve (1 = linear)" min="0.2" max="4" step="0.1" value="${ax.curve ?? 1}" style="width:56px" onchange="ibTweak('${key}','curve',this.value)">
+      <label title="Invertieren" style="display:flex;align-items:center;gap:3px">⇅<input type="checkbox" ${ax.invert ? 'checked' : ''} onchange="ibTweak('${key}','invert',this.checked)"></label>
+      <input type="number" title="Bereich von (0–1) – für geteilte Achsen, z. B. kombiniertes Gas/Bremse-Pedal. Leer = ganze Achse." placeholder="von" min="0" max="1" step="0.05" value="${typeof ax.min === 'number' ? ax.min : ''}" style="width:52px" onchange="ibTweak('${key}','min',this.value)">
+      <input type="number" title="Bereich bis (0–1). „bis“ kleiner als „von“ kehrt die Richtung um (Bremse)." placeholder="bis" min="0" max="1" step="0.05" value="${typeof ax.max === 'number' ? ax.max : ''}" style="width:52px" onchange="ibTweak('${key}','max',this.value)">` : ''
     return `<div class="setting-toggle-row" style="gap:8px">
       <span class="setting-toggle-label" style="min-width:150px">${label}</span>
       <span style="flex:1;opacity:.8">${capturing ? '👉 jetzt drücken / bewegen …' : ibSourceLabel(p, key)}</span>
@@ -2658,7 +2664,16 @@ ipcRenderer.on('input-bridge-captured', (e, hit) => {
   if (!p || !target || !hit) { ibRenderMap(); return }
   ibClear(target)   // alte Zuordnung dieses Ziels ersetzen (ibClear speichert schon)
   const isAxisTarget = IB_AXES.some(([k]) => k === target)
-  if (hit.type === 'axis' && isAxisTarget) p.axes.push({ usagePage: hit.usagePage, usage: hit.usage, target, deadzone: target === 'LT' || target === 'RT' ? 0.05 : 0.1, curve: 1, invert: false })
+  const isTrigger = target === 'LT' || target === 'RT'
+  if (hit.type === 'axis' && isAxisTarget && isTrigger && typeof hit.base === 'number') {
+    // Auto-Kalibrierung: Ruhelage (hit.base) soll 0 ergeben. Invert so, dass Druecken
+    // zu hohen Werten fuehrt; Deadzone knapp ueber der (ggf. invertierten) Ruhelage.
+    const invert = hit.val < hit.base
+    const restAfter = invert ? (1 - hit.base) : hit.base
+    const dz = Math.min(0.9, Math.max(0.03, restAfter + 0.03))
+    p.axes.push({ usagePage: hit.usagePage, usage: hit.usage, target, deadzone: +dz.toFixed(2), curve: 1, invert })
+  }
+  else if (hit.type === 'axis' && isAxisTarget) p.axes.push({ usagePage: hit.usagePage, usage: hit.usage, target, deadzone: isTrigger ? 0.05 : 0.1, curve: 1, invert: false })
   else if (hit.type === 'axis') p.axisToButton.push({ usagePage: hit.usagePage, usage: hit.usage, threshold: 0.7, target })
   else if (isAxisTarget) p.buttonToAxis.push({ usage: hit.usage, target, value: 1 })
   else p.buttons.push({ usage: hit.usage, target })
