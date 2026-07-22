@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0f">
+  <title>Joystick &amp; Lenkrad als Xbox-Controller – Forza &amp; Game-Pass-Spiele mit jedem Gerät | Lumora</title>
+  <meta name="description" content="Dein Spiel erkennt Joystick oder Lenkrad nicht? Die Lumora Eingabe-Brücke macht daraus einen virtuellen Xbox-Controller – für Forza, Game-Pass- und Microsoft-Store-Spiele. Kostenlos, Open Source, visuelle Einrichtung.">
+  <meta name="keywords" content="Forza mit Joystick spielen, Microsoft Store Spiel erkennt Lenkrad nicht, Joystick als Xbox Controller, DirectInput zu XInput, x360ce Alternative, Game Pass Lenkrad, Flightstick als Gamepad, Joystick wird nicht erkannt Windows 11">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://lumora-streaming.de/eingabe-bruecke.html">
+  <link rel="icon" href="favicon-v2.ico" sizes="any">
+  <link rel="icon" type="image/png" href="favicon-v2.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://lumora-streaming.de/eingabe-bruecke.html">
+  <meta property="og:title" content="Joystick &amp; Lenkrad als Xbox-Controller – für Spiele, die nur XInput können">
+  <meta property="og:description" content="Virtueller Xbox-Controller aus jedem Joystick, Lenkrad oder Flightstick. Visuelle Zuordnung, Auto-Kalibrierung, Profile pro Spiel. Kostenlos für Windows 10/11.">
+  <meta property="og:image" content="https://lumora-streaming.de/screenshot.png">
+  <meta property="og:locale" content="de_DE">
+  <script type="application/ld+json">
+    {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Lumora",
+        "operatingSystem": "Windows 10, Windows 11",
+        "applicationCategory": "GameApplication",
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+        "sameAs": ["https://github.com/kara2010/lumora"],
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "url": "https://lumora-streaming.de/",
+        "downloadUrl": "https://lumora-streaming.de/download.php",
+        "description": "Kostenloser Spiele-Launcher mit Eingabe-Brücke: Joystick, Lenkrad oder Flightstick als virtueller Xbox-Controller für XInput-Spiele."
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Lumora", "item": "https://lumora-streaming.de/" },
+          { "@type": "ListItem", "position": 2, "name": "Eingabe-Brücke", "item": "https://lumora-streaming.de/eingabe-bruecke.html" }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "inLanguage": "de",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Warum erkennt Forza (Microsoft Store) mein Lenkrad oder meinen Joystick nicht?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Viele Microsoft-Store- und Game-Pass-Spiele akzeptieren nur XInput – also das Xbox-Controller-Protokoll. Ältere Lenkräder, Joysticks und Flightsticks melden sich aber als DirectInput-Gerät und bleiben deshalb unsichtbar. Die Lumora Eingabe-Brücke legt aus deinem Gerät einen virtuellen Xbox-360-Controller an, den jedes XInput-Spiel sofort erkennt."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wie richte ich die Zuordnung ein?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Visuell: In Lumora klickst du auf dem abgebildeten Xbox-Controller die Taste oder Achse an, bewegst dann den echten Hebel oder drückst den echten Knopf – fertig. Achsen werden dabei automatisch kalibriert (Ruhelage und Ausschlag), auch invertierte Achsen und kombinierte Pedale funktionieren."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Kann ich Knöpfe auf Achsen legen – zum Beispiel Gas auf RT?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja, in beide Richtungen: eine echte Achse kann auf die analogen Trigger LT/RT (oder Stick-Achsen) gelegt werden, und ein echter Knopf kann eine Achse voll ausschlagen lassen. So wird aus Pedal oder Schubregler ein sauberes analoges Gas."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Ist das eine Alternative zu x360ce?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Ja, mit anderem Ansatz: Statt DLL-Dateien in Spielordner zu kopieren, erzeugt die Eingabe-Brücke über den signierten Open-Source-Treiber ViGEmBus einen systemweiten virtuellen Xbox-Controller. Das funktioniert dadurch auch mit Microsoft-Store- und Game-Pass-Spielen, bei denen der DLL-Trick nicht möglich ist."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Wird Force Feedback an mein Lenkrad weitergegeben?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Nein, aktuell nicht: Die Brücke überträgt deine Eingaben zum Spiel, Vibration und Force-Feedback-Effekte werden nicht an das Gerät zurückgereicht. Für Lenkräder mit Force Feedback ist der native Treiber des Herstellers die bessere Wahl, wenn das Spiel ihn unterstützt."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Was wird dafür installiert?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Einmalig der ViGEmBus-Treiber – ein signierter Open-Source-Treiber für virtuelle Gamepads. Lumora lädt ihn auf deinen Klick von der offiziellen Quelle, prüft die Signatur und installiert ihn; über „Apps & Features" ist er jederzeit wieder deinstallierbar. Nichts davon passiert automatisch im Hintergrund."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg:#0a0a0f; --border:#1e1e2e; --accent:#4f8ef7; --accent2:#7ab3ff; --text:#d8d8e8; --muted:#82829e; --card:#16161f; }
+    html { scrollbar-width: thin; scrollbar-color: #2a2a3a transparent; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background-color: var(--bg); background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(79,142,247,.18) 0%, transparent 70%); background-size: 100% 780px; background-position: 0 63px; background-repeat: no-repeat; color: var(--text); line-height: 1.7; }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 40px 20px; }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    h1 { font-size: 2.1rem; color: #fff; margin-bottom: 12px; letter-spacing: -.5px; line-height: 1.25; }
+    h2 { font-size: 1.3rem; color: #fff; margin: 40px 0 12px; }
+    h3 { font-size: 1.05rem; color: #fff; margin: 18px 0 6px; }
+    p { margin-bottom: 12px; }
+    .lead { font-size: 1.08rem; color: #b8b8cc; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .cta { display: inline-block; background: linear-gradient(135deg, var(--accent), #6a8cff); color: #fff; font-weight: 700; padding: 13px 30px; border-radius: 12px; margin: 18px 0 6px; }
+    .cta:hover { text-decoration: none; filter: brightness(1.1); }
+    ul.feat { list-style: none; margin: 12px 0; }
+    ul.feat li { padding: 7px 0 7px 30px; position: relative; }
+    ul.feat li::before { content: "✔"; position: absolute; left: 4px; color: #6ee7a0; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 24px; margin: 14px 0; }
+    .note { border-left: 3px solid var(--accent); padding: 10px 16px; background: rgba(79,142,247,.07); border-radius: 0 10px 10px 0; margin: 14px 0; font-size: 14.5px; }
+    .steps { counter-reset: s; list-style: none; margin: 12px 0; }
+    .steps li { counter-increment: s; padding: 9px 0 9px 44px; position: relative; }
+    .steps li::before { content: counter(s); position: absolute; left: 0; top: 8px; width: 30px; height: 30px; border-radius: 50%; background: rgba(79,142,247,.15); border: 1px solid rgba(79,142,247,.4); color: var(--accent2); font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+    footer { max-width: 860px; margin: 48px auto 0; padding: 18px 20px 40px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+    footer a { color: var(--muted); }
+    nav { position: sticky; top: 0; background: rgba(10,10,15,0.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); padding: 14px 32px; display: flex; align-items: center; justify-content: space-between; z-index: 100; }
+    .nav-logo { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; color: var(--accent2); text-decoration: none; }
+    .nav-logo:hover { text-decoration: none; }
+    .nav-logo span { color: var(--text); }
+    .nav-logo-img { width: 26px; height: 26px; border-radius: 6px; display: block; }
+    .nav-right { display: flex; align-items: center; gap: 28px; }
+    nav ul { display: flex; gap: 28px; list-style: none; }
+    nav ul a { color: var(--muted); text-decoration: none; font-size: 14px; transition: color .2s; }
+    nav ul a:hover { color: var(--text); }
+    @media (max-width: 640px) { nav { padding: 12px 16px; } nav ul { display: none; } }
+  </style>
+</head>
+<body>
+<div class="page">
+<nav>
+  <a class="nav-logo" href="index.html"><img src="icon.png" alt="" class="nav-logo-img"> <span>Lumora</span></a>
+  <div class="nav-right">
+    <ul>
+      <li><a href="index.html#features">Funktionen</a></li>
+      <li><a href="index.html#changelog">Neuerungen</a></li>
+      <li><a href="index.html#install">Installation</a></li>
+      <li><a href="index.html#transparency">Transparenz</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main class="wrap" id="main">
+    <h1>Spiel erkennt Joystick oder Lenkrad nicht? Die Eingabe-Brücke macht daraus einen Xbox-Controller</h1>
+    <p class="lead">Forza aus dem Microsoft Store, ein Game-Pass-Rennspiel oder ein Flugspiel, das stur nur den Xbox-Controller akzeptiert – während dein Joystick, Flightstick oder älteres Lenkrad unsichtbar bleibt? Die <strong>Lumora Eingabe-Brücke</strong> legt aus deinem Gerät einen <strong>virtuellen Xbox-360-Controller</strong> an, den jedes XInput-Spiel sofort erkennt.</p>
+    <a class="cta" href="download.php">⬇ Lumora kostenlos laden</a>
+    <p class="muted">Für Windows 10 &amp; 11 · keine Registrierung · Open Source (AGPL v3)</p>
+
+    <h2>Warum dein Gerät „nicht erkannt" wird</h2>
+    <p>Viele moderne Windows-Spiele – besonders aus dem <strong>Microsoft Store</strong> und dem <strong>Game Pass</strong> – sprechen nur noch <strong>XInput</strong>, das Protokoll des Xbox-Controllers. Joysticks, Flightsticks, ältere Lenkräder und Pedale melden sich aber als klassisches <strong>DirectInput</strong>-Gerät. Das Spiel ignoriert sie schlicht – nicht, weil das Gerät defekt wäre, sondern weil das Spiel nie danach fragt.</p>
+    <p>Die Eingabe-Brücke übersetzt dazwischen: Sie liest dein Gerät und speist die Eingaben in einen virtuellen Xbox-Controller ein, der sich für Windows und jedes Spiel wie ein echtes Xbox-Gamepad verhält.</p>
+
+    <h2>Einrichtung: anklicken, bewegen, fertig</h2>
+    <div class="card">
+      <ol class="steps">
+        <li><strong>Gerät wählen</strong> – Lumora listet alle angeschlossenen Joysticks, Lenkräder und Gamepads auf.</li>
+        <li><strong>Visuell zuordnen</strong> – auf dem abgebildeten Xbox-Controller die Taste oder Achse anklicken, dann den echten Hebel bewegen oder Knopf drücken. Die <strong>Auto-Kalibrierung</strong> erfasst Ruhelage und Ausschlag dabei von selbst – auch invertierte Achsen und kombinierte Pedale.</li>
+        <li><strong>Profil speichern</strong> – pro Spiel verknüpfbar: startet das Spiel, schaltet sich die Brücke automatisch ein (nur wenn das Gerät auch angeschlossen ist) und danach wieder aus.</li>
+      </ol>
+    </div>
+    <ul class="feat">
+      <li><strong>Achse → Trigger:</strong> Pedal oder Schubregler auf die analogen LT/RT legen – echtes analoges Gas statt An/Aus.</li>
+      <li><strong>Knopf → Achse:</strong> umgekehrt kann ein Knopf eine Achse voll ausschlagen lassen.</li>
+      <li><strong>Profile pro Spiel</strong> mit automatischer Aktivierung beim Spielstart.</li>
+      <li><strong>Alles lokal:</strong> keine Cloud, kein Konto, keine Telemetrie.</li>
+    </ul>
+
+    <h2>Der Unterschied zu x360ce</h2>
+    <p>Das bekannte x360ce arbeitet mit DLL-Dateien, die in den Spielordner kopiert werden – bei Microsoft-Store- und Game-Pass-Spielen ist genau das nicht möglich, ihre Ordner sind versiegelt. Die Eingabe-Brücke setzt stattdessen auf den signierten Open-Source-Treiber <a href="https://github.com/nefarius/ViGEmBus" target="_blank" rel="noopener">ViGEmBus</a>: Der virtuelle Controller existiert <strong>systemweit</strong>, für jedes Spiel, ohne eine einzige Datei im Spielordner anzufassen.</p>
+
+    <div class="note">
+      <strong>Ehrliche Grenze:</strong> Vibration und Force Feedback werden derzeit <em>nicht</em> an dein Gerät zurückgereicht. Für ein Force-Feedback-Lenkrad, das dein Spiel nativ unterstützt, bleibt der Herstellertreiber die bessere Wahl – die Brücke ist für die Fälle da, in denen das Spiel dein Gerät sonst gar nicht sieht.
+    </div>
+
+    <h2>Was wird installiert – und was nicht</h2>
+    <p>Für den virtuellen Controller braucht Windows einmalig den <strong>ViGEmBus-Treiber</strong> (signiert, Open Source, von Nefarius). Lumora lädt ihn erst nach deinem Klick von der offiziellen Quelle, prüft die Signatur und installiert ihn – deinstallierbar jederzeit über „Apps &amp; Features". Nichts passiert automatisch im Hintergrund, und wie alles in Lumora ist der komplette Quellcode <a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">öffentlich auf GitHub</a>.</p>
+
+    <p><a class="cta" href="download.php">⬇ Jetzt kostenlos laden</a></p>
+
+    <h2>Mehr von Lumora</h2>
+    <p>
+      <a href="gamepad.html">Den ganzen Launcher per Gamepad bedienen →</a><br>
+      <a href="streaming.html">Gameplay in 4K mit Freunden teilen →</a><br>
+      <a href="gaming-osd.html">FPS &amp; Hardware-Werte im Spiel anzeigen →</a>
+    </p>
+  </main>
+</div><!-- /.page -->
+
+<footer>
+  <p style="margin-bottom:10px">
+    <strong>Themen:</strong>
+    <a href="streaming.html">Gameplay per Link mit Freunden teilen</a> ·
+    <a href="gamepad.html">Launcher per Gamepad bedienen</a> ·
+    <a href="gaming-osd.html">FPS &amp; Hardware-Werte im Spiel</a>
+  </p>
+  <p>
+    Lumora · Kostenlos &amp; Open Source (<a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">Quellcode auf GitHub</a>, AGPL v3) ·
+    virtueller Controller via <a href="https://github.com/nefarius/ViGEmBus" target="_blank" rel="noopener">ViGEmBus</a> (Nefarius, BSD-3)
+  </p>
+  <p style="margin-top:10px; font-size:12px; opacity:0.7;">
+    Inoffizielles Tool · nicht verbunden mit Microsoft, „Forza" und „Xbox" sind Marken der Microsoft Corporation · alle Marken gehören den jeweiligen Rechteinhabern.
+  </p>
+  <p style="margin-top:14px;">
+    <a href="impressum.html">Impressum</a> &nbsp;·&nbsp; <a href="datenschutz.html">Datenschutzerklärung</a>
+  </p>
+</footer>
+</body>
+</html>
