@@ -76,7 +76,17 @@
   $('no').onclick = () => decide('deny')       // 60-s-Cooldown, danach erneut moeglich
   $('always').onclick = () => decide('always') // dauerhaft: Stammgast
   $('ban').onclick = () => decide('ban')       // dauerhaft: gesperrt
-  ipcRenderer.on('doorman-list', (e, list, isDe) => { queue = Array.isArray(list) ? list : []; de = !!isDe; applyLang(); render() })
+  // Nach dem Rendern die ECHTE Kartengroesse melden: die Shell schneidet das Fenster
+  // passgenau zu (sonst schwarzer Rahmen drumherum), zentriert es oben und zeigt es
+  // erst jetzt an. Doppelt per rAF, damit das Layout (Schriften/Umbruch) steht.
+  function reportSize() {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const r = $('card').getBoundingClientRect()
+      const w = Math.ceil(r.width) + 16, h = Math.ceil(r.height) + 16   // + 2x8px Rand der Karte
+      ipcRenderer.invoke('doorman-size', w, h, queue.length)
+    }))
+  }
+  ipcRenderer.on('doorman-list', (e, list, isDe) => { queue = Array.isArray(list) ? list : []; de = !!isDe; applyLang(); render(); reportSize() })
   applyLang(); render()
 </script>
 </body>
