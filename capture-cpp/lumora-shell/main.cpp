@@ -1504,6 +1504,7 @@ static void bcUnregisterWatchLink() {
 #define HK_OSDAB 6
 static NOTIFYICONDATAW g_nid{};
 static bool g_trayOn = false, g_quitting = false;
+static bool g_pendingRestart = false;   // Komponenten-Update hat die Shell getauscht -> Neustart offen
 
 // Fenster, dem wir beim Hochholen den Fokus genommen haben (i.d.R. das Spiel) -
 // beim Verstecken geben wir ihn exakt dorthin zurueck (1:1 aus main.js).
@@ -2568,10 +2569,15 @@ static void componentUpdateOnce() {
     };
     d.log = [](const std::string& m) { lulaunch::playLog(dataDir(), m); };
     d.notify = [](const std::string& ch, const json& v) { sendToUi(ch, v); };
-    std::string applied = luupd::runOnce(d, exeDir(), effectiveVersion());
+    bool restartRequired = false;
+    std::string applied = luupd::runOnce(d, exeDir(), effectiveVersion(), &restartRequired);
     if (!applied.empty()) {
         json s = loadSettings(); s["componentsVersion"] = applied;
         writeFile(settingsPath(), s.dump(2));
+        // Wurde die Shell selbst getauscht, laeuft dieser Prozess noch die alte Version.
+        // Meldung an die UI: Neustart anbieten (Zustimmung -> restart-app). Helfer/UI-Updates
+        // wirken ohne Neustart und loesen die Meldung NICHT aus.
+        if (restartRequired) { g_pendingRestart = true; lulaunch::playLog(dataDir(), "comp-update: Shell getauscht -> Neustart angeboten"); sendToUi("update-restart", { {"version", applied} }); }
     }
 }
 static void setupAutoUpdate() {
@@ -2615,6 +2621,17 @@ static json handleChannel(const std::string& channel, const json& args) {
         ShellExecuteW(nullptr, L"open", widen(g_updFile).c_str(), L"/S", nullptr, SW_SHOWNORMAL);
         g_quitting = true; PostMessageW(g_hwnd, WM_CLOSE, 0, 0);   // App beenden, Installer laeuft
         return true;
+    }
+    // Neustart in die per Komponenten-Update getauschte Shell (Nutzer hat zugestimmt).
+    // Der laufende Prozess ist noch die alte Version (aus der .old-Abbildung); die neue
+    // liegt bereits am normalen Pfad. -> neue Exe starten, dann selbst beenden.
+    // Waehrend eines laufenden Streams NICHT neu starten (Zuschauer wuerden abbrechen).
+    if (channel == "restart-app") {
+        if (g_bcState.value("active", false)) return json{ {"ok", false}, {"streaming", true} };
+        std::wstring exe = exeDir() + L"\\lumora-shell.exe";
+        ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, exeDir().c_str(), SW_SHOWNORMAL);
+        g_quitting = true; PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+        return json{ {"ok", true} };
     }
     if (channel == "get-app-settings") return loadSettings();
     if (channel == "set-app-settings") {                      // Merge wie Object.assign in main.js

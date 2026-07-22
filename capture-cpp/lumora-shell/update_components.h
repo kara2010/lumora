@@ -131,7 +131,12 @@ inline int cmpVer3(const std::string& a, const std::string& b) {
 
 // Ein Update-Durchlauf. Rueckgabe: Manifest-Version, wenn Komponenten getauscht
 // wurden (Aufrufer merkt sie sich als componentsVersion), sonst "".
-inline std::string runOnce(const Deps& d, const std::wstring& appDir, const std::string& currentVer) {
+// restartRequired (out): true, wenn lumora-shell.exe SELBST getauscht wurde - dann laeuft der
+// aktuelle Prozess noch die alte Version (aus der .old-Abbildung); der Aufrufer muss einen
+// Neustart in die neue Version anbieten. Helfer/UI-Dateien wirken dagegen sofort (Helfer beim
+// naechsten Stream, UI beim naechsten Laden) und brauchen keinen Neustart.
+inline std::string runOnce(const Deps& d, const std::wstring& appDir, const std::string& currentVer, bool* restartRequired = nullptr) {
+    if (restartRequired) *restartRequired = false;
     json s = d.loadSettings();
     std::string feed = s.value("componentFeed", std::string("https://lumora-streaming.de/updates/components.json"));
 
@@ -215,6 +220,8 @@ inline std::string runOnce(const Deps& d, const std::wstring& appDir, const std:
         return "";
     }
     ufs::remove_all(stage, ec);
+    // Wurde die Shell selbst getauscht? -> Neustart noetig, damit die neue Version laeuft.
+    if (restartRequired) for (auto& it : todo) { ufs::path p(it.path); if (_wcsicmp(p.filename().wstring().c_str(), L"lumora-shell.exe") == 0) { *restartRequired = true; break; } }
     d.log("comp-update: " + mver + " angewendet (" + std::to_string(todo.size()) + " Datei(en))");
     d.notify("component-update-done", { {"version", mver}, {"files", (int)todo.size()} });
     return mver;
