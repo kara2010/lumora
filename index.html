@@ -783,24 +783,24 @@
                 <rect class="ctl" data-t="RT" x="274" y="40" width="52" height="16" rx="7"/><text x="300" y="48">RT</text>
                 <rect class="ctl" data-t="LB" x="74" y="58" width="52" height="13" rx="6"/><text x="100" y="65" style="font-size:9px">LB</text>
                 <rect class="ctl" data-t="RB" x="274" y="58" width="52" height="13" rx="6"/><text x="300" y="65" style="font-size:9px">RB</text>
-                <!-- Linker Stick: Klick-Ring = LS; Pfeile = LX/LY -->
-                <circle class="ctl" data-t="LS" cx="100" cy="120" r="26"/><circle id="ibDotL" class="stickdot" cx="100" cy="120" r="9"/>
-                <text class="lbl" data-t="LX" x="100" y="153" style="cursor:pointer">↔ X</text>
-                <text class="lbl" data-t="LY" x="136" y="120" style="cursor:pointer">↕ Y</text>
+                <!-- Linker Stick: Ring = LS-Klick, Chips darunter = X/Y-Achse (klar & belegbar) -->
+                <circle class="ctl" data-t="LS" cx="100" cy="108" r="21"/><circle id="ibDotL" class="stickdot" cx="100" cy="108" r="8"/>
+                <rect class="ctl" data-t="LX" x="70" y="131" width="30" height="15" rx="7"/><text x="85" y="139" style="font-size:9px">↔ X</text>
+                <rect class="ctl" data-t="LY" x="102" y="131" width="30" height="15" rx="7"/><text x="117" y="139" style="font-size:9px">↕ Y</text>
                 <!-- ABXY -->
                 <circle class="ctl" data-t="Y" cx="300" cy="96" r="13"/><text x="300" y="96">Y</text>
                 <circle class="ctl" data-t="X" cx="276" cy="120" r="13"/><text x="276" y="120">X</text>
                 <circle class="ctl" data-t="B" cx="324" cy="120" r="13"/><text x="324" y="120">B</text>
                 <circle class="ctl" data-t="A" cx="300" cy="144" r="13"/><text x="300" y="144">A</text>
                 <!-- D-Pad -->
-                <rect class="ctl" data-t="DPAD_UP" x="112" y="150" width="18" height="18" rx="3"/><text x="121" y="159" style="font-size:9px">▲</text>
-                <rect class="ctl" data-t="DPAD_LEFT" x="94" y="168" width="18" height="18" rx="3"/><text x="103" y="177" style="font-size:9px">◀</text>
-                <rect class="ctl" data-t="DPAD_RIGHT" x="130" y="168" width="18" height="18" rx="3"/><text x="139" y="177" style="font-size:9px">▶</text>
-                <rect class="ctl" data-t="DPAD_DOWN" x="112" y="186" width="18" height="18" rx="3"/><text x="121" y="195" style="font-size:9px">▼</text>
-                <!-- Rechter Stick: Klick-Ring = RS; Pfeile = RX/RY -->
-                <circle class="ctl" data-t="RS" cx="240" cy="168" r="24"/><circle id="ibDotR" class="stickdot" cx="240" cy="168" r="8"/>
-                <text class="lbl" data-t="RX" x="240" y="198" style="cursor:pointer">↔ X</text>
-                <text class="lbl" data-t="RY" x="272" y="168" style="cursor:pointer">↕ Y</text>
+                <rect class="ctl" data-t="DPAD_UP" x="92" y="152" width="18" height="18" rx="3"/><text x="101" y="161" style="font-size:9px">▲</text>
+                <rect class="ctl" data-t="DPAD_LEFT" x="74" y="170" width="18" height="18" rx="3"/><text x="83" y="179" style="font-size:9px">◀</text>
+                <rect class="ctl" data-t="DPAD_RIGHT" x="110" y="170" width="18" height="18" rx="3"/><text x="119" y="179" style="font-size:9px">▶</text>
+                <rect class="ctl" data-t="DPAD_DOWN" x="92" y="188" width="18" height="18" rx="3"/><text x="101" y="197" style="font-size:9px">▼</text>
+                <!-- Rechter Stick: Ring = RS-Klick, Chips darunter = X/Y-Achse -->
+                <circle class="ctl" data-t="RS" cx="238" cy="166" r="21"/><circle id="ibDotR" class="stickdot" cx="238" cy="166" r="8"/>
+                <rect class="ctl" data-t="RX" x="208" y="189" width="30" height="15" rx="7"/><text x="223" y="197" style="font-size:9px">↔ X</text>
+                <rect class="ctl" data-t="RY" x="240" y="189" width="30" height="15" rx="7"/><text x="255" y="197" style="font-size:9px">↕ Y</text>
                 <!-- Back / Start -->
                 <circle class="ctl" data-t="BACK" cx="172" cy="112" r="9"/><text x="172" y="126" class="lbl">Back</text>
                 <circle class="ctl" data-t="START" cx="228" cy="112" r="9"/><text x="228" y="126" class="lbl">Start</text>
@@ -2680,8 +2680,8 @@ ipcRenderer.on('input-bridge-state', (e, st) => {
 // Live-Ausgabe am Controller-SVG zeigen (Sticks bewegen, gedrueckte Tasten leuchten).
 function ibAnimatePad(o) {
   const dL = document.getElementById('ibDotL'), dR = document.getElementById('ibDotR')
-  if (dL) { dL.setAttribute('cx', 100 + (o.lx || 0) / 32767 * 15); dL.setAttribute('cy', 120 - (o.ly || 0) / 32767 * 15) }
-  if (dR) { dR.setAttribute('cx', 240 + (o.rx || 0) / 32767 * 14); dR.setAttribute('cy', 168 - (o.ry || 0) / 32767 * 14) }
+  if (dL) { dL.setAttribute('cx', 100 + (o.lx || 0) / 32767 * 13); dL.setAttribute('cy', 108 - (o.ly || 0) / 32767 * 13) }
+  if (dR) { dR.setAttribute('cx', 238 + (o.rx || 0) / 32767 * 13); dR.setAttribute('cy', 166 - (o.ry || 0) / 32767 * 13) }
   const B = o.buttons || 0, mask = { A:0x1000,B:0x2000,X:0x4000,Y:0x8000,DPAD_UP:0x0001,DPAD_DOWN:0x0002,DPAD_LEFT:0x0004,DPAD_RIGHT:0x0008,START:0x0010,BACK:0x0020,LS:0x0040,RS:0x0080,LB:0x0100,RB:0x0200 }
   document.querySelectorAll('#ibPad .ctl').forEach(el => {
     const t = el.getAttribute('data-t')
