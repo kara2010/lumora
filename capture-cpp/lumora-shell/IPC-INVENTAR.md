@@ -25,6 +25,13 @@ Jeder Kanal wird beim Portieren abgehakt; bis dahin antwortet die Shell mit null
 
 **Sonstiges:** set-hotkey, shell-open-external (nur im Shim)
 
+**Eingabe-Bruecke (neu, nur nativ - input_bridge.h):** input-bridge-list-devices (HID-Geraete),
+input-bridge-get-profiles / input-bridge-save-profiles (input-profiles.json komplett, wie save-games),
+input-bridge-start (slow; stoesst ggf. ViGEmBus-Setup an, Rueckgabe {ok} bzw. {ok:false,setup:true}),
+input-bridge-stop, input-bridge-set-profile (Live-Regler), input-bridge-monitor (an/aus),
+input-bridge-capture ("Druecken zum Zuweisen"), input-bridge-status ({active,busInstalled,slot}),
+input-bridge-selftest (Debug: virtuelles Pad per XInput zurueckgelesen)
+
 ## Shell -> UI (Push, 31)
 
 - broadcast-status
@@ -32,6 +39,10 @@ Jeder Kanal wird beim Portieren abgehakt; bis dahin antwortet die Shell mit null
 - deep-join
 - doorman-list
 - external-running
+- input-bridge-active ({active,reason}: manuell/auto/spiel-beendet/vigem-fehler)
+- input-bridge-captured (Capture-Treffer {type:button|axis,usage[,usagePage]})
+- input-bridge-setup-status (Multi [msg,done], wie osd-setup-status)
+- input-bridge-state (Live-Monitor ~10 Hz, nur bei offenem Eingabe-Tab)
 - group-autojoin
 - group-status
 - hdr-status

@@ -165,6 +165,16 @@
       ["mediamtx-Neustart", "Während des Streams den Relay-Prozess (mediamtx) im Task-Manager beenden.", "Der Relay startet <b>automatisch neu</b>, der Stream erholt sich statt tot zu bleiben.", "#28"],
       ["IP-Wechsel nachziehen", "Falls testbar: DSL-Neuverbindung / neue öffentliche IP während des Streams.", "Links + Portfreigaben werden automatisch aktualisiert, der Stream bleibt erreichbar.", "#28"],
     ]],
+    ["G", "Eingabe-Brücke (HID → virtuelles Xbox-Pad)", [
+      ["Treiber-Ersteinrichtung: 1 Dialog, 1 UAC", "Einstellungen → Eingabe → Profil anlegen, „▶ Aktivieren" (ViGEmBus noch nicht installiert).", "Genau <b>ein</b> Erklärdialog, dann <b>ein</b> UAC. ViGEmBus 1.22.0 wird von GitHub geladen (Signatur geprüft) + still installiert; Toast meldet Abschluss. In Apps &amp; Features erscheint „Nefarius Virtual Gamepad Emulation Bus".", "Bridge"],
+      ["Virtuelles Pad erscheint/verschwindet", "Nach der Einrichtung „Aktivieren" bzw. „Deaktivieren"; parallel <code>joy.cpl</code> offen halten.", "„Xbox 360 Controller for Windows" taucht beim Aktivieren auf und verschwindet beim Deaktivieren.", "Bridge"],
+      ["Zuweisen per Druck", "Joystick/Lenkrad anstecken, im Eingabe-Tab bei „Linker Stick X" auf „Zuweisen", dann Achse bewegen; bei „A" einen Knopf drücken.", "Die Quelle erscheint sofort in der Zeile; Live-Monitor zeigt Achsenbalken/Knöpfe in Echtzeit.", "Bridge"],
+      ["Barrierefreiheit: Knopf ↔ Achse", "Einen <b>Knopf</b> auf „Rechter Trigger" zuweisen; eine <b>Achse</b> auf „A" zuweisen.", "Knopf halten = Vollgas (RT 255 im Monitor); Achse über ~70 % = A gedrückt.", "Bridge"],
+      ["Forza/MS-Store steuerbar", "Profil aktivieren, Forza (Microsoft Store) starten, mit dem gemappten Gerät lenken.", "Das Spiel reagiert auf das virtuelle Pad — dort, wo Steam Input nicht greift.", "Bridge"],
+      ["Auto-Aktivierung erst bei „läuft"", "Profil mit einem Spiel verknüpfen, Spiel starten (über Lumora ODER direkt).", "Bridge geht erst an, wenn das Spiel <b>wirklich läuft</b> (nicht schon beim Startaufruf); beim Beenden wieder aus. Fehlgeschlagener Start = Bridge bleibt aus.", "Bridge"],
+      ["Kein Hotkey-Echo", "Bridge aktiv, gemappte Knöpfe wild drücken (auch die Gamepad-Hotkey-Kombi der Oberfläche).", "Lumora-Fenster/OSD togglen <b>nicht</b> durch gemappte Eingaben (virtueller Slot wird im Hotkey-Poll übersprungen).", "Bridge"],
+      ["Ablehnen merkt sich", "Beim Einrichtungsdialog „Abbrechen".", "Kein erneutes Nachfragen bei jedem Klick; erneuter „Aktivieren"-Klick bietet die Einrichtung wieder an.", "Bridge"],
+    ]],
     ["F", "Gruppe — LAN &amp; App-Ende", [
       ["LAN-Erkennung", "Gruppe starten. An einem zweiten PC im selben Netz die native App öffnen.", "Der zweite PC <b>sieht die Gruppe automatisch</b> (LAN-Beacon), ohne Code-Eingabe.", "#30"],
       ["App-Ende verlässt Gruppe", "Als Gruppenmitglied die App beenden.", "Die Gruppe wird sauber verlassen und bleibt nicht serverseitig hängen.", "#30"],

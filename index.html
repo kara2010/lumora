@@ -100,6 +100,7 @@
         <button class="detail-nav-tab" data-view="overlay" onclick="showSettings('overlay')">Overlay</button>
         <button class="detail-nav-tab" data-view="steuerung" onclick="showSettings('steuerung')">Steuerung</button>
         <button class="detail-nav-tab" data-view="stream" onclick="showSettings('stream')">Stream</button>
+        <button class="detail-nav-tab" data-view="eingabe" onclick="showSettings('eingabe')">Eingabe</button>
       </nav>
       <div class="empty-state" id="emptyState">
         <div class="empty-icon">🎮</div>
@@ -720,6 +721,61 @@
           </div>
         </div>
 
+        <!-- ===== EINGABE-BRUECKE ===== -->
+        <div class="settings-panel" data-panel="eingabe" hidden>
+          <div class="form-group">
+            <label>Eingabe-Brücke</label>
+            <p class="settings-hint">Verwandelt <b>jedes</b> Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Xbox-Titeln wie Forza, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z.&nbsp;B. Knopf = Vollgas) und umgekehrt.</p>
+            <p class="settings-hint">⚠ Spiele sehen dann <b>zwei</b> Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.</p>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label">Bei verknüpften Spielen automatisch aktivieren</span>
+              <label class="switch"><input type="checkbox" id="setIbAuto" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
+            </div>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label" id="ibStatusLabel">Virtuelles Gamepad: aus</span>
+              <button class="btn-primary" id="ibToggleBtn" onclick="ibToggle()">▶ Aktivieren</button>
+            </div>
+            <p class="settings-hint" id="ibSetupHint" style="display:none">Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber <b>ViGEmBus</b> ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps &amp; Features.</p>
+          </div>
+          <div class="form-group">
+            <label>Profil</label>
+            <div class="path-row">
+              <select id="ibProfileSel" class="sort-select" style="flex:1" onchange="ibSelectProfile(this.value)"></select>
+              <button class="btn-browse" onclick="ibNewProfile()">+ Neu</button>
+              <button class="btn-browse" onclick="ibRenameProfile()">✏</button>
+              <button class="btn-browse" onclick="ibDeleteProfile()">✕</button>
+            </div>
+            <div class="path-row" style="margin-top:8px">
+              <select id="ibDeviceSel" class="sort-select" style="flex:1" onchange="ibSetDevice(this.value)"></select>
+              <button class="btn-browse" onclick="ibRefreshDevices()">↻ Geräte</button>
+            </div>
+            <p class="settings-hint">Das Profil gilt für das gewählte Gerät („Alle Geräte" = jede Quelle wird gemappt, z.&nbsp;B. Lenkrad + separate Pedale).</p>
+          </div>
+          <div class="form-group">
+            <label>Zuordnung</label>
+            <p class="settings-hint">„Zuweisen" klicken, dann am Gerät den gewünschten Knopf drücken oder die Achse bewegen. Knopf auf Achsen-Ziel = Knopf-als-Achse (Barrierefreiheit); Achse auf Knopf-Ziel = Schwellwert-Knopf.</p>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label">POV-Hat (Rundblickschalter) → Steuerkreuz</span>
+              <label class="switch"><input type="checkbox" id="ibHatDpad" onchange="ibHatToggle(this.checked)"><span class="switch-slider"></span></label>
+            </div>
+            <div id="ibMapTable"></div>
+          </div>
+          <div class="form-group">
+            <label>Live-Monitor</label>
+            <p class="settings-hint">Zeigt rohe Geräte-Eingaben und (bei aktivem Pad) das Ergebnis am virtuellen Controller.</p>
+            <div id="ibMonitor" class="settings-hint" style="font-family:monospace; white-space:pre-wrap; min-height:60px">–</div>
+          </div>
+          <div class="form-group">
+            <label>Mit Spielen verknüpfen</label>
+            <p class="settings-hint">Startet das Spiel (egal ob über Lumora oder direkt), aktiviert sich das verknüpfte Profil automatisch – aber erst, wenn das Spiel wirklich läuft. Beim Beenden geht das virtuelle Pad wieder aus.</p>
+            <div class="path-row">
+              <select id="ibLinkGameSel" class="sort-select" style="flex:1"></select>
+              <button class="btn-browse" onclick="ibLinkGame()">Verknüpfen</button>
+            </div>
+            <div id="ibLinkList" style="margin-top:8px"></div>
+          </div>
+        </div>
+
       </div>
 
   <!-- Startoptionen pro Spiel -->
@@ -996,6 +1052,19 @@ const I18N_EN = {
   'Allgemein': 'General',
   'Darstellung': 'Appearance',
   'Steuerung': 'Controls',
+  'Eingabe': 'Input',
+  'Eingabe-Brücke': 'Input bridge',
+  'Bei verknüpften Spielen automatisch aktivieren': 'Activate automatically for linked games',
+  'Virtuelles Gamepad: aus': 'Virtual gamepad: off',
+  '▶ Aktivieren': '▶ Activate',
+  'Profil': 'Profile',
+  'Zuordnung': 'Mapping',
+  'POV-Hat (Rundblickschalter) → Steuerkreuz': 'POV hat switch → D-pad',
+  'Live-Monitor': 'Live monitor',
+  'Mit Spielen verknüpfen': 'Link to games',
+  'Verknüpfen': 'Link',
+  '↻ Geräte': '↻ Devices',
+  '+ Neu': '+ New',
   'Kein Spiel ausgewählt': 'No game selected',
   'Erstes Spiel hinzufügen': 'Add your first game',
   'Bild hier ablegen': 'Drop image here',
@@ -1239,6 +1308,10 @@ const I18N_EN = {
   '📖 Ausführliche Web-Anleitung mit allen Routern ↗': '📖 Detailed web guide for every router ↗',
   'Encoder': 'Encoder',
   'Automatisch (empfohlen)': 'Automatic (recommended)',
+  'Codec': 'Codec',
+  'Automatisch (AV1 wenn möglich)': 'Automatic (AV1 when possible)',
+  'AV1 (weniger Bandbreite)': 'AV1 (less bandwidth)',
+  'H.264 (maximale Kompatibilität)': 'H.264 (maximum compatibility)',
   'Zugriffsschutz': 'Access protection',
   'Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein.': 'Off by default. When on, only people you explicitly approve can see your stream – even someone who knows the link or IP cannot get in uninvited.',
   'Aktuell gilt: Wer den Raumcode-Link hat, kommt hinein – wer nur die rohe IP kennt, wird abgewiesen. Das gezielte Freigeben einzelner Zuschauer folgt als Nächstes.': 'For now: whoever has the room-code link gets in – anyone who only knows the raw IP is rejected. Approving individual viewers is coming next.',
@@ -2363,6 +2436,223 @@ ipcRenderer.on('osd-setup-status', (e, msg, done) => {
   if (done) t._timer = setTimeout(() => { t.style.display = 'none' }, 5000)
 })
 
+// --- Eingabe-Bruecke (Einstellungen -> Eingabe): HID-Geraet -> virtuelles Xbox-Pad ---
+// Profile liegen in %APPDATA%\lumora\input-profiles.json (Shell liest/schreibt sie als
+// Ganzes ueber input-bridge-get/save-profiles). Capture = "Zuweisen"-Modus der Shell.
+let ibProfiles = null, ibCurrent = null, ibCaptureTarget = null, ibDevices = []
+const IB_AXES = [['LX','Linker Stick X'],['LY','Linker Stick Y'],['RX','Rechter Stick X'],['RY','Rechter Stick Y'],['LT','Linker Trigger'],['RT','Rechter Trigger']]
+const IB_BTNS = [['A','A'],['B','B'],['X','X'],['Y','Y'],['LB','LB (Schulter links)'],['RB','RB (Schulter rechts)'],['BACK','Back / View'],['START','Start / Menü'],['LS','Linker Stick (Klick)'],['RS','Rechter Stick (Klick)'],['DPAD_UP','Steuerkreuz ▲'],['DPAD_DOWN','Steuerkreuz ▼'],['DPAD_LEFT','Steuerkreuz ◀'],['DPAD_RIGHT','Steuerkreuz ▶']]
+const IB_AXIS_NAMES = { 0x30:'X', 0x31:'Y', 0x32:'Z', 0x33:'Rx', 0x34:'Ry', 0x35:'Rz', 0x36:'Schieberegler', 0x37:'Drehregler', 0x39:'POV-Hat' }
+function ibAxisName(up, u) { return IB_AXIS_NAMES[u] || ('Achse 0x' + u.toString(16).toUpperCase()) }
+function ibProf() { return (ibProfiles && ibCurrent && ibProfiles.profiles[ibCurrent]) || null }
+function ibSave() {
+  if (!ibProfiles) return
+  ipcRenderer.invoke('input-bridge-save-profiles', ibProfiles)
+  const p = ibProf(); if (p) ipcRenderer.invoke('input-bridge-set-profile', p)   // Regler wirken sofort
+}
+async function ibOpen() {   // beim Oeffnen des Tabs: alles frisch laden
+  ibProfiles = await ipcRenderer.invoke('input-bridge-get-profiles') || { profiles: {}, gameLinks: {}, defaultProfile: null }
+  if (!ibProfiles.profiles) ibProfiles.profiles = {}
+  if (!ibProfiles.gameLinks) ibProfiles.gameLinks = {}
+  const ids = Object.keys(ibProfiles.profiles)
+  if (!ibCurrent || !ibProfiles.profiles[ibCurrent]) ibCurrent = ids[0] || null
+  ibRenderProfiles(); ibRenderMap(); ibRenderLinks(); ibRefreshDevices(); ibRefreshStatus()
+}
+function ibRenderProfiles() {
+  const sel = document.getElementById('ibProfileSel')
+  const ids = Object.keys(ibProfiles.profiles)
+  sel.innerHTML = ids.length ? ids.map(id => `<option value="${id}" ${id === ibCurrent ? 'selected' : ''}>${(ibProfiles.profiles[id].name || id)}</option>`).join('')
+    : `<option value="">${window.tr ? window.tr('Noch kein Profil – mit „+ Neu" anlegen') : 'Noch kein Profil'}</option>`
+}
+function ibSelectProfile(id) { if (ibProfiles.profiles[id]) { ibCurrent = id; ibRenderMap(); ibRenderDeviceSel() } }
+function ibNewProfile() {
+  const name = (window.prompt && prompt('Profilname:', 'Profil ' + (Object.keys(ibProfiles.profiles).length + 1))) || ('Profil ' + (Object.keys(ibProfiles.profiles).length + 1))
+  const id = 'p' + Date.now()
+  ibProfiles.profiles[id] = { name, device: null, axes: [], buttons: [], axisToButton: [], buttonToAxis: [] }
+  ibCurrent = id; ibSave(); ibRenderProfiles(); ibRenderMap(); ibRenderDeviceSel()
+}
+function ibRenameProfile() {
+  const p = ibProf(); if (!p) return
+  const name = window.prompt && prompt('Profilname:', p.name || ''); if (!name) return
+  p.name = name; ibSave(); ibRenderProfiles()
+}
+function ibDeleteProfile() {
+  if (!ibCurrent) return
+  delete ibProfiles.profiles[ibCurrent]
+  for (const g of Object.keys(ibProfiles.gameLinks)) if (ibProfiles.gameLinks[g] === ibCurrent) delete ibProfiles.gameLinks[g]
+  ibCurrent = Object.keys(ibProfiles.profiles)[0] || null
+  ibSave(); ibRenderProfiles(); ibRenderMap(); ibRenderLinks(); ibRenderDeviceSel()
+}
+async function ibRefreshDevices() {
+  ibDevices = await ipcRenderer.invoke('input-bridge-list-devices') || []
+  ibRenderDeviceSel()
+}
+function ibRenderDeviceSel() {
+  const sel = document.getElementById('ibDeviceSel'); if (!sel) return
+  const p = ibProf()
+  const cur = p && p.device ? (p.device.vid + ':' + p.device.pid) : ''
+  let opts = `<option value="">Alle Geräte</option>`
+  const seen = new Set()
+  for (const d of ibDevices) {
+    const key = d.vid + ':' + d.pid
+    if (seen.has(key)) continue; seen.add(key)
+    opts += `<option value="${key}" ${key === cur ? 'selected' : ''}>${d.name} (${key})</option>`
+  }
+  if (cur && !seen.has(cur)) opts += `<option value="${cur}" selected>${(p.device.name || 'Getrenntes Gerät')} (${cur}) – nicht verbunden</option>`
+  sel.innerHTML = opts
+}
+function ibSetDevice(val) {
+  const p = ibProf(); if (!p) return
+  if (!val) p.device = null
+  else {
+    const [vid, pid] = val.split(':')
+    const d = ibDevices.find(x => x.vid === vid && x.pid === pid)
+    p.device = { vid, pid, name: d ? d.name : '' }
+  }
+  ibSave()
+}
+// Zuordnungs-Tabelle: pro Xbox-Ziel die aktuelle Quelle + Regler (nur Achsen-Ziele).
+function ibSourceLabel(p, target) {
+  const ax = p.axes.find(a => a.target === target)
+  if (ax) return `${ibAxisName(ax.usagePage, ax.usage)}${ax.invert ? ' (invertiert)' : ''}`
+  const ba = p.buttonToAxis.find(b => b.target === target)
+  if (ba) return `Knopf ${ba.usage} (= ${Math.round(ba.value * 100)} %)`
+  const bt = p.buttons.find(b => b.target === target)
+  if (bt) return `Knopf ${bt.usage}`
+  const ab = p.axisToButton.find(a => a.target === target)
+  if (ab) return `${ibAxisName(ab.usagePage, ab.usage)} ab ${Math.round(ab.threshold * 100)} %`
+  return '–'
+}
+function ibClear(target) {
+  const p = ibProf(); if (!p) return
+  p.axes = p.axes.filter(a => a.target !== target)
+  p.buttons = p.buttons.filter(b => b.target !== target)
+  p.axisToButton = p.axisToButton.filter(a => a.target !== target)
+  p.buttonToAxis = p.buttonToAxis.filter(b => b.target !== target)
+  ibSave(); ibRenderMap()
+}
+function ibTweak(target, field, val) {
+  const p = ibProf(); if (!p) return
+  const ax = p.axes.find(a => a.target === target); if (!ax) return
+  if (field === 'invert') ax.invert = !!val
+  else ax[field] = Math.max(0, Math.min(field === 'curve' ? 4 : 0.9, parseFloat(val) || 0)) || (field === 'curve' ? 1 : 0)
+  ibSave()
+}
+function ibAssign(target) {
+  ibCaptureTarget = target
+  ipcRenderer.invoke('input-bridge-capture', true)
+  ibRenderMap()
+}
+function ibRenderMap() {
+  const el = document.getElementById('ibMapTable'); if (!el) return
+  const p = ibProf()
+  if (!p) { el.innerHTML = '<p class="settings-hint">Erst ein Profil anlegen.</p>'; return }
+  document.getElementById('ibHatDpad').checked = p.axes.some(a => a.usage === 0x39 && a.target === 'DPAD')
+  const row = (key, label, isAxis) => {
+    const capturing = ibCaptureTarget === key
+    const ax = isAxis ? p.axes.find(a => a.target === key) : null
+    const tweaks = ax ? `
+      <input type="number" title="Deadzone (0–0.9)" min="0" max="0.9" step="0.05" value="${ax.deadzone ?? 0}" style="width:62px" onchange="ibTweak('${key}','deadzone',this.value)">
+      <input type="number" title="Kurve (1 = linear)" min="0.2" max="4" step="0.1" value="${ax.curve ?? 1}" style="width:62px" onchange="ibTweak('${key}','curve',this.value)">
+      <label title="Invertieren" style="display:flex;align-items:center;gap:3px">⇅<input type="checkbox" ${ax.invert ? 'checked' : ''} onchange="ibTweak('${key}','invert',this.checked)"></label>` : ''
+    return `<div class="setting-toggle-row" style="gap:8px">
+      <span class="setting-toggle-label" style="min-width:150px">${label}</span>
+      <span style="flex:1;opacity:.8">${capturing ? '👉 jetzt drücken / bewegen …' : ibSourceLabel(p, key)}</span>
+      ${tweaks}
+      <button class="btn-browse" onclick="ibAssign('${key}')">${capturing ? '…' : 'Zuweisen'}</button>
+      <button class="btn-browse" onclick="ibClear('${key}')" title="Zuordnung entfernen">✕</button>
+    </div>`
+  }
+  el.innerHTML = IB_AXES.map(([k, l]) => row(k, l, true)).join('') + IB_BTNS.map(([k, l]) => row(k, l, false)).join('')
+}
+function ibHatToggle(on) {
+  const p = ibProf(); if (!p) return
+  p.axes = p.axes.filter(a => a.target !== 'DPAD')
+  if (on) p.axes.push({ usagePage: 1, usage: 0x39, target: 'DPAD' })
+  ibSave(); ibRenderMap()
+}
+// Capture-Ergebnis aus der Shell: Quelle dem wartenden Ziel zuordnen.
+ipcRenderer.on('input-bridge-captured', (e, hit) => {
+  const p = ibProf(), target = ibCaptureTarget
+  ibCaptureTarget = null
+  if (!p || !target || !hit) { ibRenderMap(); return }
+  ibClear(target)   // alte Zuordnung dieses Ziels ersetzen (ibClear speichert schon)
+  const isAxisTarget = IB_AXES.some(([k]) => k === target)
+  if (hit.type === 'axis' && isAxisTarget) p.axes.push({ usagePage: hit.usagePage, usage: hit.usage, target, deadzone: target === 'LT' || target === 'RT' ? 0.05 : 0.1, curve: 1, invert: false })
+  else if (hit.type === 'axis') p.axisToButton.push({ usagePage: hit.usagePage, usage: hit.usage, threshold: 0.7, target })
+  else if (isAxisTarget) p.buttonToAxis.push({ usage: hit.usage, target, value: 1 })
+  else p.buttons.push({ usage: hit.usage, target })
+  ibSave(); ibRenderMap()
+})
+// Live-Monitor (kommt nur, solange der Tab offen ist -> input-bridge-monitor an/aus).
+ipcRenderer.on('input-bridge-state', (e, st) => {
+  const el = document.getElementById('ibMonitor'); if (!el || !st) return
+  const axes = (st.axes || []).filter(a => a.value >= 0).map(a => {
+    const bar = '█'.repeat(Math.round(a.value * 10)).padEnd(10, '·')
+    return `${ibAxisName(a.usagePage, a.usage).padEnd(14)} ${bar} ${(a.value * 100).toFixed(0)} %`
+  }).join('\n')
+  const btns = (st.buttons || []).length ? 'Knöpfe: ' + st.buttons.join(', ') : 'Knöpfe: –'
+  const o = st.out || {}
+  const out = st.feeding ? `\n→ Pad: LX ${o.lx} LY ${o.ly} RX ${o.rx} RY ${o.ry} LT ${o.lt} RT ${o.rt} Btn 0x${(o.buttons || 0).toString(16)}` : ''
+  el.textContent = (axes || 'Keine Achsen erkannt – Gerät bewegen.') + '\n' + btns + out
+})
+// Aktiv/inaktiv (manuell, auto beim Spielstart, Spielende, Fehler).
+ipcRenderer.on('input-bridge-active', (e, st) => ibShowActive(st && st.active))
+function ibShowActive(on) {
+  const lbl = document.getElementById('ibStatusLabel'), btn = document.getElementById('ibToggleBtn')
+  if (!lbl || !btn) return
+  lbl.textContent = on ? 'Virtuelles Gamepad: AKTIV' : 'Virtuelles Gamepad: aus'
+  btn.textContent = on ? '⏹ Deaktivieren' : '▶ Aktivieren'
+  btn.dataset.on = on ? '1' : ''
+}
+async function ibRefreshStatus() {
+  const st = await ipcRenderer.invoke('input-bridge-status') || {}
+  ibShowActive(!!st.active)
+  const hint = document.getElementById('ibSetupHint')
+  if (hint) hint.style.display = st.busInstalled ? 'none' : 'block'
+}
+async function ibToggle() {
+  const btn = document.getElementById('ibToggleBtn')
+  if (btn.dataset.on) { await ipcRenderer.invoke('input-bridge-stop'); ibShowActive(false); return }
+  const p = ibProf()
+  if (!p) { alert('Erst ein Profil anlegen und Eingaben zuweisen.'); return }
+  const r = await ipcRenderer.invoke('input-bridge-start', p) || {}
+  if (r.setup) return   // Treiber-Einrichtung laeuft (Status-Toasts); danach erneut aktivieren
+  ibShowActive(!!r.ok)
+  ibRefreshStatus()
+}
+// Spiel-Verknuepfungen (Schluessel = Spielpfad aus games.json).
+function ibRenderLinks() {
+  const sel = document.getElementById('ibLinkGameSel'), list = document.getElementById('ibLinkList')
+  if (!sel || !list) return
+  sel.innerHTML = (games || []).map(g => `<option value="${encodeURIComponent(g.path)}">${g.name}</option>`).join('') || '<option value="">Keine Spiele in der Bibliothek</option>'
+  const rows = Object.entries(ibProfiles.gameLinks).map(([path, pid]) => {
+    const g = (games || []).find(x => x.path === path)
+    const prof = ibProfiles.profiles[pid]
+    return `<div class="setting-toggle-row"><span class="setting-toggle-label">${g ? g.name : path}</span>
+      <span style="opacity:.8">${prof ? (prof.name || pid) : '?'}</span>
+      <button class="btn-browse" onclick="ibUnlink('${encodeURIComponent(path)}')">✕</button></div>`
+  })
+  list.innerHTML = rows.join('') || '<p class="settings-hint">Noch keine Verknüpfung.</p>'
+}
+function ibLinkGame() {
+  const sel = document.getElementById('ibLinkGameSel')
+  if (!sel.value || !ibCurrent) return
+  ibProfiles.gameLinks[decodeURIComponent(sel.value)] = ibCurrent
+  ibSave(); ibRenderLinks()
+}
+function ibUnlink(encPath) { delete ibProfiles.gameLinks[decodeURIComponent(encPath)]; ibSave(); ibRenderLinks() }
+// Einrichtungs-Status (Download/Signatur/UAC) - gleicher Sticky-Toast wie beim OSD.
+ipcRenderer.on('input-bridge-setup-status', (e, msg, done) => {
+  const t = document.getElementById('gamepadToast')
+  if (!t) return
+  clearTimeout(t._timer)
+  if (!msg) { t.style.display = 'none'; ibRefreshStatus(); return }
+  t.textContent = '🎮 ' + msg
+  t.style.display = 'block'
+  if (done) { t._timer = setTimeout(() => { t.style.display = 'none' }, 6000); ibRefreshStatus() }
+})
+
 // Start-Knopf: gespeist aus dem Eigenstart-Status (launch-status, global) UND den
 // vom Fremdstart-Watcher gemeldeten laufenden Spielen (external-running, pro Pfad).
 let launchStatus = 'idle'
@@ -2500,6 +2790,8 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     function setSettingsTab(tab) {
       document.querySelectorAll('.settings-panel').forEach(p => p.hidden = p.dataset.panel !== tab)
       refreshStreamPreview()   // startet/stoppt die Vorschau je nach Tab (+ Fenster sichtbar + Stream aktiv)
+      ipcRenderer.send('input-bridge-monitor', tab === 'eingabe')   // Live-Monitor nur bei offenem Eingabe-Tab
+      if (tab === 'eingabe') ibOpen()
     }
     function showLibraryView() { stopStreamPreview(); applyLibView() }   // zurück zur Bibliothek (setzt settingsTab=null)
     async function showSettings(tab) {
@@ -2518,6 +2810,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setStartMin').checked = !!s.startMinimized
       document.getElementById('setTray').checked = !!s.minimizeToTray
       document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
+      document.getElementById('setIbAuto').checked = s.inputBridgeAutoActivate !== false
       document.getElementById('setOsdEnabled').checked = !!s.osdEnabled
       document.getElementById('setOsdTheme').value = s.osdTheme || 'compact'
       renderGpuOptions(s.osdGpu || 'auto')
@@ -2598,6 +2891,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         startMinimized: document.getElementById('setStartMin').checked,
         minimizeToTray: document.getElementById('setTray').checked,
         steamGridDbKey: document.getElementById('setSgdbKey').value.trim(),
+        inputBridgeAutoActivate: document.getElementById('setIbAuto').checked,
       })
     }
 
