@@ -60,8 +60,6 @@ LangString S_WelcomeText ${LANG_GERMAN} "Dein Spiele-Launcher mit Streaming, Gam
 LangString S_WelcomeText ${LANG_ENGLISH} "Your game launcher with streaming, gaming OSD and automatic HDR.$\r$\n$\r$\nLumora is open source (AGPL v3) and consists entirely of our own signed code.$\r$\n$\r$\nClick Next to continue."
 LangString S_RunLumora ${LANG_GERMAN} "Lumora jetzt starten"
 LangString S_RunLumora ${LANG_ENGLISH} "Launch Lumora now"
-LangString S_MigrateAsk ${LANG_GERMAN} "Vorhandene Lumora-Version (Electron) durch die native App ERSETZEN?$\n$\nJa = Umstieg: gleiches Verzeichnis, die Electron-Version wird sauber deinstalliert.$\nNein = parallel zum Testen (eigener Ordner, Electron bleibt unberuehrt)."
-LangString S_MigrateAsk ${LANG_ENGLISH} "REPLACE the existing (Electron) Lumora version with the native app?$\n$\nYes = migrate: same folder, the Electron version is uninstalled cleanly.$\nNo = install side by side for testing (own folder, Electron untouched)."
 LangString S_RemoveData ${LANG_GERMAN} "Sollen auch deine Einstellungen, Spielzeiten und die Spiele-Bibliothek entfernt werden?$\n$\nJa = alles restlos entfernen ($APPDATA\lumora)$\nNein = Einstellungen behalten (empfohlen, falls du Lumora spaeter erneut installierst)"
 LangString S_RemoveData ${LANG_ENGLISH} "Also remove your settings, playtimes and game library?$\n$\nYes = remove everything ($APPDATA\lumora)$\nNo = keep settings (recommended if you might reinstall Lumora later)"
 
@@ -88,21 +86,14 @@ Function .onInit
     Goto lbl_done
   ${EndIf}
 
-  ; --- 2) Frische Installation: Sprachauswahl (entfaellt bei /S automatisch) ---
+  ; --- 2) Frische Installation: Sprachauswahl (entfaellt bei /S automatisch),
+  ;        immer eigener Ordner. Eine evtl. vorhandene Electron-Version wird in
+  ;        der Install-Section IMMER sauber deinstalliert (Beta-Parallel-Modus
+  ;        ist Geschichte - sonst bleibt sie bei Alt-Parallel-Installationen
+  ;        fuer immer liegen).
   !insertmacro MUI_LANGDLL_DISPLAY
-
-  ; --- 3) Electron-Bestand? Nur DANN die Umstiegs-Frage - und nie im Silent-Modus ---
-  ${If} ${FileExists} "$LOCALAPPDATA\Programs\lumora\Uninstall Lumora.exe"
-  ${AndIfNot} ${Silent}
-    MessageBox MB_YESNO|MB_ICONQUESTION "$(S_MigrateAsk)" IDYES lbl_migrate
-  ${EndIf}
-  ; Standard: eigener Ordner (auch Silent-Frischinstallation landet hier)
   StrCpy $Migrate "0"
   StrCpy $INSTDIR "$LOCALAPPDATA\Programs\lumora-native"
-  Goto lbl_done
-lbl_migrate:
-  StrCpy $Migrate "1"
-  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\lumora"
 lbl_done:
 FunctionEnd
 
@@ -113,15 +104,31 @@ Section "Lumora"
   nsExec::Exec 'taskkill /F /IM lumora-capture-native.exe'
   nsExec::Exec 'taskkill /F /IM lumora-media-relay.exe'
 
-  ; --- Beim Electron-Umstieg (kein Update-Lauf) zuerst die Electron-App abloesen ---
+  Sleep 400
+
+  ; --- Vorhandene Electron-Version IMMER sauber abloesen (auch bei Silent-Updates:
+  ;     Alt-Parallel-Installationen aus der Beta-Phase blieben sonst fuer immer liegen).
+  ;     Nur wenn wir nicht selbst in diesen Ordner installieren (migrierte Installation).
+  ${If} ${FileExists} "$LOCALAPPDATA\Programs\lumora\Uninstall Lumora.exe"
+  ${AndIfNot} $INSTDIR == "$LOCALAPPDATA\Programs\lumora"
+    DetailPrint "Deinstalliere die alte Lumora-Version (Electron)..."
+    nsExec::Exec 'taskkill /F /IM Lumora.exe'
+    Sleep 700
+    ; _?= laesst den electron-builder-Uninstaller SYNCHRON laufen (kein Selbst-Kopieren);
+    ; er entfernt Electron-Dateien + Registry (inkl. GUID-Uninstall-Key + Autostart).
+    ExecWait '"$LOCALAPPDATA\Programs\lumora\Uninstall Lumora.exe" /S _?=$LOCALAPPDATA\Programs\lumora'
+    Sleep 500
+    ; Reste restlos entfernen (Chromium-DLLs/pak bleiben vom Uninstaller teils liegen)
+    RMDir /r "$LOCALAPPDATA\Programs\lumora"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "com.lumora.app"
+  ${EndIf}
+  ; Beim Umstieg IN den Electron-Ordner (migrierte Alt-Installation) wie bisher:
   ${If} $Migrate == "1"
   ${AndIf} $IsUpdate == "0"
     nsExec::Exec 'taskkill /F /IM Lumora.exe'
     Sleep 700
     ${If} ${FileExists} "$INSTDIR\Uninstall Lumora.exe"
       DetailPrint "Deinstalliere die vorhandene Electron-Version..."
-      ; _?= laesst den electron-builder-Uninstaller SYNCHRON laufen (kein Selbst-Kopieren);
-      ; er entfernt Electron-Dateien + Registry (inkl. GUID-Uninstall-Key + Autostart).
       ExecWait '"$INSTDIR\Uninstall Lumora.exe" /S _?=$INSTDIR'
       Sleep 500
       Delete "$INSTDIR\Uninstall Lumora.exe"
@@ -131,8 +138,6 @@ Section "Lumora"
       Delete "$INSTDIR\*.pak"
     ${EndIf}
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "com.lumora.app"
-  ${Else}
-    Sleep 400
   ${EndIf}
 
   SetOutPath "$INSTDIR"
