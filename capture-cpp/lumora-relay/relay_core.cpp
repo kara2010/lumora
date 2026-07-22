@@ -4,6 +4,8 @@
 #include <condition_variable>
 #include <cstring>
 #include <random>
+#include <atomic>
+#include <cstdio>
 
 using std::string;
 using std::vector;
@@ -63,10 +65,37 @@ struct RelayCore::Session {
     uint64_t vLastPts = 0, aLastPts = 0; bool vTsSet = false, aTsSet = false;
     uint32_t vTs = 0, aTs = 0;
     uint64_t bytesSent = 0;         // selbst gezaehlt (pc->bytesSent() zaehlt nur Data-Channels)
+    // Diagnose je Zuschauer. Bisher war von aussen NICHT erkennbar, ob ein Zuschauer
+    // ueberhaupt jemals sein erstes Keyframe bekommt (vFirst-Tor) oder ob Senden fehlschlaegt:
+    // der Rueckgabewert von send() wurde nur fuer bytesSent benutzt, Exceptions verschluckte
+    // ein leeres catch. Genau das kostete uns die Fehlersuche "Verbindung steht, kein Bild".
+    uint64_t sendOk = 0, sendFail = 0, sendEx = 0;
+    bool gateLogged = false;        // "erstes Keyframe durchgelassen" schon gemeldet?
+    int64_t openedMs = 0;           // wann das Tor aufging (0 = nie)
 };
 
+// Verworfene Pakete SICHTBAR machen. libjuice meldet einen vollen Sendepuffer nur mit
+// JLOG_INFO("Send failed, buffer is full") - auf Log-Level Warning war das unsichtbar,
+// obwohl genau dort Pakete im EIGENEN Prozess verloren gehen (nicht blockierender
+// Socket: was nicht in den Puffer passt, ist weg). Wir hoeren jetzt auf Info, geben
+// aber nicht die volle Flut aus, sondern zaehlen nur diesen Fall und melden ihn 1x/s.
+std::atomic<uint64_t> g_sendBufFull{ 0 };
+static void relayLogFilter(rtc::LogLevel lev, std::string msg) {
+    if (msg.find("buffer is full") != std::string::npos) {
+        uint64_t n = ++g_sendBufFull;
+        static std::atomic<uint64_t> lastReport{ 0 };
+        uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        uint64_t prev = lastReport.load();
+        if (now != prev && lastReport.compare_exchange_strong(prev, now))
+            printf("relay: SENDEPUFFER VOLL - %llu Pakete im eigenen Prozess verworfen\n",
+                   (unsigned long long)n);
+        return;
+    }
+    if (lev <= rtc::LogLevel::Warning) printf("relay: %s\n", msg.c_str());
+}
 RelayCore::RelayCore(const RelayConfig& cfg) : cfg_(cfg) {
-    rtc::InitLogger(rtc::LogLevel::Warning);
+    rtc::InitLogger(rtc::LogLevel::Info, relayLogFilter);
 }
 RelayCore::~RelayCore() {
     std::lock_guard<std::mutex> lk(mx_);
@@ -144,9 +173,18 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
                 s->vCfg = make_shared<rtc::RtpPacketizationConfig>(
                     (rtc::SSRC)0x4C4D5257, "lumora-video", (uint8_t)av1Pt, rtc::AV1RtpPacketizer::ClockRate);
                 s->vCfg->midId = findMidId(&desc); s->vCfg->mid = desc.mid();
+                // Sende-SSRC signalisieren: nur dann ordnet libdatachannel eingehendes
+                // RTCP (NACK/PLI/RR) unserem Track zu - sonst wird es verworfen und es
+                // findet KEINE Paketwiederholung statt (jeder Verlust bleibt sichtbar).
+                desc.addSSRC((uint32_t)0x4C4D5257, "lumora-video");
+                track->setDescription(desc);
                 auto pk = make_shared<rtc::AV1RtpPacketizer>(rtc::AV1RtpPacketizer::Packetization::TemporalUnit, s->vCfg);
                 pk->addToChain(make_shared<rtc::RtcpSrReporter>(s->vCfg));
                 pk->addToChain(make_shared<rtc::RtcpNackResponder>());
+                // Taktung: Keyframes sind gemessen 400-800 KB und gingen bisher als
+                // Schwall raus (in ~1-3 ms). Der Empfaenger verlor daraus 5-47 %.
+                // Token-Bucket verteilt sie ueber das Bildintervall.
+                pk->addToChain(make_shared<rtc::PacingHandler>(60e6, std::chrono::milliseconds(2)));
                 track->setMediaHandler(pk);
                 track->onMessage([](rtc::binary) {}, nullptr);   // RTCP-Rueckkanal konsumieren
                 s->video = track;
@@ -156,9 +194,12 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
             s->vCfg = make_shared<rtc::RtpPacketizationConfig>(
                 (rtc::SSRC)0x4C4D5256, "lumora-video", (uint8_t)pt, rtc::H264RtpPacketizer::ClockRate);
             s->vCfg->midId = findMidId(&desc); s->vCfg->mid = desc.mid();
+            desc.addSSRC((uint32_t)0x4C4D5256, "lumora-video");   // s.o. - ohne SSRC kein NACK
+            track->setDescription(desc);
             auto pk = make_shared<rtc::H264RtpPacketizer>(rtc::NalUnit::Separator::StartSequence, s->vCfg);
             pk->addToChain(make_shared<rtc::RtcpSrReporter>(s->vCfg));
             pk->addToChain(make_shared<rtc::RtcpNackResponder>());
+            pk->addToChain(make_shared<rtc::PacingHandler>(60e6, std::chrono::milliseconds(2)));
             track->setMediaHandler(pk);
             track->onMessage([](rtc::binary) {}, nullptr);   // RTCP-Rueckkanal konsumieren
             s->video = track;
@@ -309,7 +350,8 @@ void RelayCore::pushVideoAU(const uint8_t* au, size_t len, uint64_t pts90k) {
 
     for (auto& s : sessions_) {
         if (!s->video || !s->video->isOpen() || !s->vCfg || s->vAv1) continue;
-        if (s->vFirst) { if (!hasIdr) continue; s->vFirst = false; }   // sauberer Einstieg am IDR
+        if (s->vFirst) { if (!hasIdr) continue; s->vFirst = false; s->openedMs = nowMs(); }   // sauberer Einstieg am IDR
+        if (!s->gateLogged) { s->gateLogged = true; printf("relay: %s H264 erstes IDR durchgelassen (%zu Bytes)\n", s->id.substr(0, 6).c_str(), len); }
         if (!s->vTsSet) { s->vTs = s->vCfg->startTimestamp; s->vTsSet = true; }
         else {
             int64_t d = (int64_t)pts90k - (int64_t)s->vLastPts;
@@ -319,8 +361,9 @@ void RelayCore::pushVideoAU(const uint8_t* au, size_t len, uint64_t pts90k) {
         s->vLastPts = pts90k;
         s->vCfg->timestamp = s->vTs;
         try {
-            if (s->video->send(reinterpret_cast<const std::byte*>(au), len)) s->bytesSent += len;
-        } catch (...) {}
+            if (s->video->send(reinterpret_cast<const std::byte*>(au), len)) { s->bytesSent += len; ++s->sendOk; }
+            else ++s->sendFail;
+        } catch (...) { ++s->sendEx; }
     }
 }
 
@@ -351,7 +394,8 @@ void RelayCore::pushVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k) {
     bytesIn_ += len; lastIngestMs_ = nowMs();
     for (auto& s : sessions_) {
         if (!s->vAv1 || !s->video || !s->video->isOpen() || !s->vCfg) continue;
-        if (s->vFirst) { if (!key) continue; s->vFirst = false; }      // sauberer Einstieg am Keyframe
+        if (s->vFirst) { if (!key) continue; s->vFirst = false; s->openedMs = nowMs(); }   // sauberer Einstieg am Keyframe
+        if (!s->gateLogged) { s->gateLogged = true; printf("relay: %s AV1 erstes Keyframe durchgelassen (%zu Bytes)\n", s->id.substr(0, 6).c_str(), len); }
         if (!s->vTsSet) { s->vTs = s->vCfg->startTimestamp; s->vTsSet = true; }
         else {
             int64_t d = (int64_t)pts90k - (int64_t)s->vLastPts;
@@ -361,8 +405,23 @@ void RelayCore::pushVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k) {
         s->vLastPts = pts90k;
         s->vCfg->timestamp = s->vTs;
         try {
-            if (s->video->send(reinterpret_cast<const std::byte*>(tu), len)) s->bytesSent += len;
-        } catch (...) {}
+            if (s->video->send(reinterpret_cast<const std::byte*>(tu), len)) { s->bytesSent += len; ++s->sendOk; }
+            else ++s->sendFail;
+        } catch (...) { ++s->sendEx; }
+    }
+}
+
+// Je Zuschauer eine Zeile. "wartet-auf-Keyframe" ist der entscheidende Zustand: steht ein
+// Zuschauer dauerhaft darauf, bekommt er nie ein Bild, obwohl die Verbindung offen ist.
+void RelayCore::logSessionDiag() {
+    std::lock_guard<std::mutex> lk(mx_);
+    for (auto& s : sessions_) {
+        const char* st = !s->video ? "kein-Video" : (s->vFirst ? "WARTET-AUF-KEYFRAME" : "laeuft");
+        printf("relay: %s %s %s gesendet=%lluKB ok=%llu fehlgeschlagen=%llu ausnahmen=%llu %s\n",
+               s->id.substr(0, 6).c_str(), s->vAv1 ? "AV1" : "H264", st,
+               (unsigned long long)(s->bytesSent / 1024), (unsigned long long)s->sendOk,
+               (unsigned long long)s->sendFail, (unsigned long long)s->sendEx,
+               s->pc && s->pc->remoteAddress() ? s->pc->remoteAddress()->c_str() : "?");
     }
 }
 

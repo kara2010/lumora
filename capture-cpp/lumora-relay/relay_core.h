@@ -60,6 +60,7 @@ public:
     bool ingestAlive() const;                            // Ingest in den letzten 3s gesehen?
     uint64_t framesIn() const { return framesIn_; }
     uint64_t bytesIn() const;                            // Ingest-Bytes gesamt (Video-AUs + Opus-Pakete)
+    void logSessionDiag();                               // je Zuschauer: Codec, Keyframe-Tor, Sendefehler
 
 private:
     struct Session;
