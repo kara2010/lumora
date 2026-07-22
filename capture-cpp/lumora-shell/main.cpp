@@ -599,6 +599,7 @@ static bool bcVerifyDoormanSig(const std::string& body, const std::string& sig, 
 // --- Tuersteher-Freigabefenster (kleines Always-on-top mit doorman.html, wie Electron) ---
 #define WM_SHELL_DOORMSG (WM_APP + 4)
 #define WM_SHELL_DOORSYNC (WM_APP + 5)
+#define WM_SHELL_DOORSIZE (WM_APP + 6)   // wParam=Anzahl Anfragen, lParam=MAKELPARAM(breite,hoehe) in CSS-px
 static HWND g_doorHwnd = nullptr;
 static ComPtr<ICoreWebView2Controller> g_doorCtrl;
 static ComPtr<ICoreWebView2> g_doorWv;
@@ -606,6 +607,20 @@ static void onWebMessage(const std::wstring& raw, HWND replyWnd);   // (weiter u
 static LRESULT CALLBACK doorWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
     case WM_SHELL_DOORMSG: { auto* s = (std::wstring*)l; if (s) { if (g_doorWv) g_doorWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
+    // Die Seite meldet nach dem Rendern ihre echte Kartengroesse: Fenster exakt darauf
+    // zuschneiden (sonst schwarzer Rahmen), mittig am oberen Bildschirmrand platzieren
+    // und ERST JETZT zeigen - dadurch blitzt die leere Ansicht nicht mehr auf.
+    case WM_SHELL_DOORSIZE: {
+        int count = (int)w, cw = (int)LOWORD(l), chh = (int)HIWORD(l);
+        if (cw < 100 || chh < 60) return 0;
+        UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
+        int pw = MulDiv(cw, dpi, 96), ph = MulDiv(chh, dpi, 96);
+        MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTOPRIMARY), &mi);
+        int x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - pw) / 2;   // mittig oben (wie frueher)
+        SetWindowPos(h, HWND_TOPMOST, x, mi.rcWork.top + 16, pw, ph,
+                     SWP_NOACTIVATE | (count > 0 ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+        return 0;
+    }
     case WM_SIZE: if (g_doorCtrl) { RECT rc; GetClientRect(h, &rc); g_doorCtrl->put_Bounds(rc); } return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -650,6 +665,14 @@ static void createDoormanWindow() {
                                     if (SUCCEEDED(a->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_doorHwnd); CoTaskMemFree(j); }
                                     return S_OK;
                                 }).Get(), nullptr);
+                            // Erst wenn die Seite steht, den aktuellen Stand nachliefern: ein vorher
+                            // gepostetes doorman-list ginge ins Leere (Empfaenger noch nicht registriert)
+                            // -> genau das zeigte "Keine Anfragen" bis zum naechsten Sync.
+                            g_doorWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+                                    if (g_doorHwnd) PostMessageW(g_doorHwnd, WM_SHELL_DOORSYNC, 0, 0);
+                                    return S_OK;
+                                }).Get(), nullptr);
                             g_doorWv->Navigate(L"https://app.lumora/doorman.html");
                             return S_OK;
                         }).Get());
@@ -664,8 +687,9 @@ static void bcSyncDoorman() {   // pending-Anfragen ans Freigabefenster; zeigen 
     if (g_doorHwnd) {
         json m = { {"channel", "doorman-list"}, {"payloads", json::array({ pend, de })} };
         PostMessageW(g_doorHwnd, WM_SHELL_DOORMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
+        // NICHT hier zeigen: erst wenn die Seite gerendert hat und ihre Groesse meldet
+        // (WM_SHELL_DOORSIZE) - sonst blitzt kurz die leere "Keine Anfragen"-Karte auf.
         if (pend.empty()) ShowWindow(g_doorHwnd, SW_HIDE);
-        else ShowWindow(g_doorHwnd, SW_SHOWNOACTIVATE);
     }
     sendToUi("doorman-list", pend);   // Haupt-UI weiter mitinformieren
 }
@@ -2731,6 +2755,14 @@ static json handleChannel(const std::string& channel, const json& args) {
         return { {"ok", r.status >= 200 && r.status < 300} };
     }
     // ---- Tuersteher-Verwaltung (1:1) ----
+    // Groessenmeldung der Tuersteher-Seite (nach jedem Rendern): Fenster passgenau
+    // zuschneiden + mittig oben zeigen. Fensteroperationen gehoeren dem UI-Thread -> PostMessage.
+    if (channel == "doorman-size" && args.size() >= 2 && args[0].is_number() && args[1].is_number()) {
+        int cw = args[0].get<int>(), chh = args[1].get<int>();
+        int count = args.size() >= 3 && args[2].is_number() ? args[2].get<int>() : 1;
+        if (g_doorHwnd) PostMessageW(g_doorHwnd, WM_SHELL_DOORSIZE, (WPARAM)count, MAKELPARAM(cw, chh));
+        return true;
+    }
     if (channel == "doorman-decide" && args.size() >= 2 && args[0].is_string() && args[1].is_string()) {
         std::string vid = args[0].get<std::string>(), mode = args[1].get<std::string>();
         if (vid.empty()) return false;
