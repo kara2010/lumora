@@ -919,7 +919,12 @@ int main(int argc, char** argv) {
     if (!rebuildScaler()) { printf("FEHLER: Scaler-Init fehlgeschlagen\n"); return 3; }
 
     auto newEncoder = [&]() -> Encoder* { return useQsv ? (Encoder*)new QsvEncoder() : (useAmf ? (Encoder*)new AmfEncoder() : (Encoder*)new NvencEncoder()); };
-    auto av1Kbit = [&](int kbit) { int k = (kbit + 1) / 2; return k < 500 ? 500 : k; };
+    // AV1 bekommt die EINGESTELLTE Bitrate, nicht mehr die halbe. Die alte Halbierung
+    // unterstellte die aus Software-Encodern bekannte ~50%-Ersparnis; beim Echtzeit-
+    // Encoding auf der GPU sind es real eher 20-30%, bei schnellem Material (Rennspiel)
+    // noch weniger. Sie deckelte AV1 zudem unbeabsichtigt bei 25 Mbit, weil die Auswahl
+    // bei 50 endet. Wer sparen will, waehlt jetzt bewusst einen kleineren Wert.
+    auto av1Kbit = [&](int kbit) { return kbit < 500 ? 500 : kbit; };
     Encoder* encoder = nullptr;      // H.264 (PID_VIDEO) - bedarfsgesteuert, aber Warm-Default
     Encoder* encoderAv1 = nullptr;   // AV1 (PID_VIDEO_AV1) - nur wenn ein AV1-Zuschauer verbunden ist
     // Bedarfsgesteuertes Encoding: Der Relay meldet der Shell, welche Codecs die aktuellen

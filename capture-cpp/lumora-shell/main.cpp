@@ -1084,14 +1084,10 @@ static std::string bcQualityLabel(const json& cfg) {
     std::string enc = cfg.value("encoder", ""); size_t us = enc.find('_'); if (us != std::string::npos) enc = enc.substr(us + 1);
     for (auto& c : enc) c = (char)toupper((unsigned char)c);
     int mbit = (int)(cfg.value("kbit", 8000) / 1000);
-    // AV1 laeuft bewusst mit der HALBEN Bitrate (etwa doppelte Effizienz -> gleiche Qualitaet).
-    // Das MUSS sichtbar sein, sonst wirkt "50 eingestellt, 25 kommt an" wie ein Fehler.
-    if (g_wantAv1) {
-        int av1 = (mbit + 1) / 2; if (av1 < 1) av1 = 1;
-        return h + " \xC2\xB7 " + std::to_string(cfg.value("fps", 60)) + " fps \xC2\xB7 AV1 "
-             + std::to_string(av1) + " Mbit (\xE2\x89\x99 " + std::to_string(mbit) + " Mbit H.264) \xC2\xB7 " + enc;
-    }
-    return h + " \xC2\xB7 " + std::to_string(cfg.value("fps", 60)) + " fps \xC2\xB7 " + std::to_string(mbit) + " Mbit \xC2\xB7 " + enc;
+    // Eingestellte Bitrate gilt fuer BEIDE Codecs unveraendert (frueher lief AV1 mit der
+    // Haelfte - "50 eingestellt, 25 kommt an" war fuer niemanden nachvollziehbar).
+    return h + " \xC2\xB7 " + std::to_string(cfg.value("fps", 60)) + " fps \xC2\xB7 "
+         + std::to_string(mbit) + " Mbit" + (g_wantAv1 ? " AV1" : "") + " \xC2\xB7 " + enc;
 }
 // Nativen Capture-Helfer starten (Args + Steuerdateien + Exit-Watch mit Auto-Neustart).
 static void bcStartNative(const json& cfg);
@@ -1209,8 +1205,7 @@ static void bcViewerTick() {
     std::string cur = g_wantAv1 ? (g_wantH264 ? "h264+av1" : "av1") : "h264";
     if (cur != g_lastCodec) {
         g_lastCodec = cur; bcWriteCodecControl(g_wantH264, g_wantAv1); bcLogStream("codec-bedarf -> " + cur);
-        // Qualitaets-Anzeige mitziehen: AV1 laeuft mit halber Bitrate, das soll der
-        // Streamer sehen ("AV1 25 Mbit (≙ 50 Mbit H.264)") statt sich zu wundern.
+        // Qualitaets-Anzeige mitziehen (zeigt den aktiven Codec neben der Bitrate).
         g_bcState["quality"] = bcQualityLabel(bcStreamCfg(g_bcState.value("encoder", "")));
         bcPushState();
     }
