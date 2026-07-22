@@ -789,8 +789,12 @@
                 <!-- Body -->
                 <path d="M40 120 Q40 70 90 66 L310 66 Q360 70 360 120 Q372 210 320 230 Q290 244 262 214 L138 214 Q110 244 80 230 Q28 210 40 120 Z" fill="var(--card,#20202a)" stroke="var(--border,#444)" stroke-width="2"/>
                 <!-- Trigger + Bumper -->
-                <rect class="ctl" data-t="LT" x="74" y="40" width="52" height="16" rx="7"/><text x="100" y="48">LT</text>
-                <rect class="ctl" data-t="RT" x="274" y="40" width="52" height="16" rx="7"/><text x="300" y="48">RT</text>
+                <rect class="ctl" data-t="LT" x="74" y="40" width="52" height="16" rx="7"/>
+                <rect id="ibFillLT" class="trigger-fill" x="74" y="40" width="0" height="16" rx="7"/>
+                <text x="100" y="48">LT</text>
+                <rect class="ctl" data-t="RT" x="274" y="40" width="52" height="16" rx="7"/>
+                <rect id="ibFillRT" class="trigger-fill" x="326" y="40" width="0" height="16" rx="7"/>
+                <text x="300" y="48">RT</text>
                 <rect class="ctl" data-t="LB" x="74" y="58" width="52" height="13" rx="6"/><text x="100" y="65" style="font-size:9px">LB</text>
                 <rect class="ctl" data-t="RB" x="274" y="58" width="52" height="13" rx="6"/><text x="300" y="65" style="font-size:9px">RB</text>
                 <!-- Linker Stick: Ring = LS-Klick, Chips darunter = X/Y-Achse (klar & belegbar) -->
@@ -2607,8 +2611,13 @@ async function ibRenameProfile() {
   const name = await lumoraPrompt(window.tr('Profilname:'), p.name || ''); if (!name) return
   p.name = name; ibSave(); ibRenderProfiles()
 }
-function ibDeleteProfile() {
+async function ibDeleteProfile() {
   if (!ibCurrent) return
+  const name = ibProf()?.name || ibCurrent
+  const msg = window.LANG === 'en'
+    ? `Delete profile “${name}”? All button/axis mappings and game links for it will be lost.`
+    : `Profil „${name}" wirklich löschen? Alle Tasten-/Achsenzuordnungen und Spiel-Verknüpfungen dafür gehen verloren.`
+  if (!await lumoraConfirm(msg)) return
   delete ibProfiles.profiles[ibCurrent]
   for (const g of Object.keys(ibProfiles.gameLinks)) if (ibProfiles.gameLinks[g] === ibCurrent) delete ibProfiles.gameLinks[g]
   ibCurrent = Object.keys(ibProfiles.profiles)[0] || null
@@ -2767,18 +2776,29 @@ ipcRenderer.on('input-bridge-state', (e, st) => {
   const o = st.out || {}
   const out = st.feeding ? `\n→ Pad: LX ${o.lx} LY ${o.ly} RX ${o.rx} RY ${o.ry} LT ${o.lt} RT ${o.rt} Btn 0x${(o.buttons || 0).toString(16)}` : ''
   el.textContent = (axes || window.tr('Keine Achsen erkannt – Gerät bewegen.')) + '\n' + btns + out
-  if (st.feeding) ibAnimatePad(o)
+  // g_report (das gemappte Ergebnis) wird in der Shell IMMER berechnet, sobald der
+  // Monitor laeuft - "feeding" betrifft nur, ob das ECHTE virtuelle Pad gespeist wird
+  // (erst nach "Aktivieren"). Fuer die Live-Vorschau beim Zuordnen ist das egal: die
+  // Werte in st.out sind schon jetzt korrekt, deshalb hier OHNE die feeding-Bedingung
+  // animieren - man sieht das Mapping sofort, ohne vorher aktivieren zu muessen.
+  ibAnimatePad(o)
 })
-// Live-Ausgabe am Controller-SVG zeigen (Sticks bewegen, gedrueckte Tasten leuchten).
+// Live-Ausgabe am Controller-SVG: Sticks bewegen sich, Knoepfe leuchten, LT/RT fuellen
+// sich proportional (0-255) - direkt sichtbar, ob und wie weit ein Pedal/Regler wirkt.
 function ibAnimatePad(o) {
   const dL = document.getElementById('ibDotL'), dR = document.getElementById('ibDotR')
   if (dL) { dL.setAttribute('cx', 100 + (o.lx || 0) / 32767 * 13); dL.setAttribute('cy', 108 - (o.ly || 0) / 32767 * 13) }
   if (dR) { dR.setAttribute('cx', 238 + (o.rx || 0) / 32767 * 13); dR.setAttribute('cy', 166 - (o.ry || 0) / 32767 * 13) }
+  const fillLT = document.getElementById('ibFillLT'), fillRT = document.getElementById('ibFillRT')
+  if (fillLT) fillLT.setAttribute('width', Math.round((o.lt || 0) / 255 * 52))
+  if (fillRT) { const w = Math.round((o.rt || 0) / 255 * 52); fillRT.setAttribute('width', w); fillRT.setAttribute('x', 326 - w) }
   const B = o.buttons || 0, mask = { A:0x1000,B:0x2000,X:0x4000,Y:0x8000,DPAD_UP:0x0001,DPAD_DOWN:0x0002,DPAD_LEFT:0x0004,DPAD_RIGHT:0x0008,START:0x0010,BACK:0x0020,LS:0x0040,RS:0x0080,LB:0x0100,RB:0x0200 }
+  const axisGlow = { LX: Math.abs(o.lx || 0) / 32767, LY: Math.abs(o.ly || 0) / 32767, RX: Math.abs(o.rx || 0) / 32767, RY: Math.abs(o.ry || 0) / 32767 }
   document.querySelectorAll('#ibPad .ctl').forEach(el => {
     const t = el.getAttribute('data-t')
-    let on = mask[t] ? (B & mask[t]) : (t === 'LT' ? (o.lt || 0) > 30 : t === 'RT' ? (o.rt || 0) > 30 : false)
-    el.style.filter = on ? 'brightness(1.8)' : ''
+    if (mask[t]) { el.style.filter = (B & mask[t]) ? 'brightness(1.8)' : ''; return }
+    if (t in axisGlow) { el.style.filter = axisGlow[t] > 0.06 ? `brightness(${(1 + axisGlow[t] * 0.9).toFixed(2)})` : ''; return }
+    if (t === 'LT' || t === 'RT') el.style.filter = ''   // Fuellbalken uebernimmt hier die Anzeige
   })
 }
 // Aktiv/inaktiv (manuell, auto beim Spielstart, Spielende, Fehler).
