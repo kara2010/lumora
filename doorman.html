@@ -80,11 +80,16 @@
   // passgenau zu (sonst schwarzer Rahmen drumherum), zentriert es oben und zeigt es
   // erst jetzt an. Doppelt per rAF, damit das Layout (Schriften/Umbruch) steht.
   function reportSize() {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    // KEIN requestAnimationFrame: solange das Fenster noch versteckt ist, drosselt/pausiert
+    // Chromium rAF - die Meldung kaeme nie und das Fenster wuerde nie gezeigt (Henne-Ei).
+    // getBoundingClientRect erzwingt das Layout ohnehin synchron.
+    const send = () => {
       const r = $('card').getBoundingClientRect()
       const w = Math.ceil(r.width) + 16, h = Math.ceil(r.height) + 16   // + 2x8px Rand der Karte
       ipcRenderer.invoke('doorman-size', w, h, queue.length)
-    }))
+    }
+    send()
+    setTimeout(send, 120)   // zweite Messung, falls Schrift/Umbruch die Hoehe noch aendert
   }
   ipcRenderer.on('doorman-list', (e, list, isDe) => { queue = Array.isArray(list) ? list : []; de = !!isDe; applyLang(); render(); reportSize() })
   applyLang(); render()

@@ -612,7 +612,11 @@ static LRESULT CALLBACK doorWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     // und ERST JETZT zeigen - dadurch blitzt die leere Ansicht nicht mehr auf.
     case WM_SHELL_DOORSIZE: {
         int count = (int)w, cw = (int)LOWORD(l), chh = (int)HIWORD(l);
-        if (cw < 100 || chh < 60) return 0;
+        // Unplausible Messwerte NICHT zum Abbruch nehmen (sonst bliebe das Fenster fuer
+        // immer unsichtbar) - auf sinnvolle Standardmasse zurueckfallen und trotzdem zeigen.
+        if (cw < 200 || cw > 1200) cw = 360;
+        if (chh < 80 || chh > 900) chh = 200;
+        KillTimer(h, 2);   // Sicherheitsnetz nicht mehr noetig, echte Groesse ist da
         UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
         int pw = MulDiv(cw, dpi, 96), ph = MulDiv(chh, dpi, 96);
         MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTOPRIMARY), &mi);
@@ -621,6 +625,9 @@ static LRESULT CALLBACK doorWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                      SWP_NOACTIVATE | (count > 0 ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
         return 0;
     }
+    // Sicherheitsnetz: bleibt die Groessenmeldung der Seite aus (Renderer haengt/langsam),
+    // wird das Fenster trotzdem gezeigt - lieber unpassend gross als gar nicht sichtbar.
+    case WM_TIMER: if (w == 2) { KillTimer(h, 2); if (!IsWindowVisible(h)) ShowWindow(h, SW_SHOWNOACTIVATE); } return 0;
     case WM_SIZE: if (g_doorCtrl) { RECT rc; GetClientRect(h, &rc); g_doorCtrl->put_Bounds(rc); } return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -687,9 +694,11 @@ static void bcSyncDoorman() {   // pending-Anfragen ans Freigabefenster; zeigen 
     if (g_doorHwnd) {
         json m = { {"channel", "doorman-list"}, {"payloads", json::array({ pend, de })} };
         PostMessageW(g_doorHwnd, WM_SHELL_DOORMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
-        // NICHT hier zeigen: erst wenn die Seite gerendert hat und ihre Groesse meldet
+        // Normalfall: erst zeigen, wenn die Seite gerendert hat und ihre Groesse meldet
         // (WM_SHELL_DOORSIZE) - sonst blitzt kurz die leere "Keine Anfragen"-Karte auf.
-        if (pend.empty()) ShowWindow(g_doorHwnd, SW_HIDE);
+        // Sicherheitsnetz (Timer 2): kommt binnen 1,2 s keine Meldung, wird trotzdem gezeigt.
+        if (pend.empty()) { KillTimer(g_doorHwnd, 2); ShowWindow(g_doorHwnd, SW_HIDE); }
+        else if (!IsWindowVisible(g_doorHwnd)) SetTimer(g_doorHwnd, 2, 1200, nullptr);
     }
     sendToUi("doorman-list", pend);   // Haupt-UI weiter mitinformieren
 }
