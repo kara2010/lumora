@@ -1,0 +1,11 @@
+{ "_hinweis": "Webseiten-Ueberarbeitung (Eingabe-Bruecke-Landingpage, Transparenz, Footer) - VORBEREITET in Commit f20e4fe, live erst zum Release! Deploy: node _testlab/deploy-client.js _testlab/plan-website-release.json",
+  "files": [
+    { "local": "Z:/website/eingabe-bruecke.html", "remote": "eingabe-bruecke.html" },
+    { "local": "Z:/website/index.html", "remote": "index.html" },
+    { "local": "Z:/website/gamepad.html", "remote": "gamepad.html" },
+    { "local": "Z:/website/gaming-osd.html", "remote": "gaming-osd.html" },
+    { "local": "Z:/website/streaming.html", "remote": "streaming.html" },
+    { "local": "Z:/website/discord-alternative.html", "remote": "discord-alternative.html" },
+    { "local": "Z:/website/portfreigabe.html", "remote": "portfreigabe.html" },
+    { "local": "Z:/website/sitemap.xml", "remote": "sitemap.xml" }
+  ] }
