@@ -135,6 +135,15 @@ struct NvencEncoder : Encoder {
         // Abfrage mit UNSUPPORTED_PARAM - das ist zugleich unser Faehigkeits-Check.
         if (nv.nvEncGetEncodePresetConfigEx(enc, codec, NV_ENC_PRESET_P4_GUID, NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY, &pc) != NV_ENC_SUCCESS) return false;
         pc.presetCfg.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR; pc.presetCfg.rcParams.averageBitRate = mbit * 1000000;
+        // Keyframe-Lawine begrenzen: ohne VBV-Deckel liess der Treiber-Default Keyframes
+        // von 780 KB zu (8x das mittlere Bild bei 50 Mbit/60 fps) - die gingen als
+        // Line-Rate-Burst raus und rissen bei entfernten Zuschauern 5-47 % Verlust.
+        // VBV = 4 Bildbudgets: Keyframe max ~4x Mittel, Encoder verteilt den Rest auf
+        // die Folgebilder. maxBitRate schon HIER setzen (bisher erst in setBitrate -
+        // der Encoder verhielt sich vor/nach der ersten Bitratenaenderung verschieden).
+        pc.presetCfg.rcParams.maxBitRate = mbit * 1000000;
+        pc.presetCfg.rcParams.vbvBufferSize = (uint32_t)((uint64_t)mbit * 1000000 * 4 / (fps > 0 ? fps : 60));
+        pc.presetCfg.rcParams.vbvInitialDelay = pc.presetCfg.rcParams.vbvBufferSize;
         // GOP = 1s (nicht 2s): halbiert die Wartezeit bis zum ersten Bild fuer neue
         // Zuschauer/die Vorschau (gleiche Erkenntnis wie im FFmpeg-Pfad, s. main.js bcEncoderArgs).
         pc.presetCfg.gopLength = fps; pc.presetCfg.frameIntervalP = 1;
@@ -147,6 +156,10 @@ struct NvencEncoder : Encoder {
     }
     void setBitrate(int kbit) override {   // CBR-Bitrate live umstellen (nahtlos, kein Stream-Abriss)
         pc.presetCfg.rcParams.averageBitRate = kbit * 1000; pc.presetCfg.rcParams.maxBitRate = kbit * 1000;
+        // VBV mitziehen - sonst begrenzt nach einem Abstieg auf 8 Mbit noch der alte
+        // 50-Mbit-Deckel (wirkungslos) bzw. nach einem Aufstieg ein zu kleiner.
+        pc.presetCfg.rcParams.vbvBufferSize = (uint32_t)((uint64_t)kbit * 1000 * 4 / (ip.frameRateNum > 0 ? ip.frameRateNum : 60));
+        pc.presetCfg.rcParams.vbvInitialDelay = pc.presetCfg.rcParams.vbvBufferSize;
         NV_ENC_RECONFIGURE_PARAMS rp{ NV_ENC_RECONFIGURE_PARAMS_VER }; rp.reInitEncodeParams = ip;
         nv.nvEncReconfigureEncoder(enc, &rp);
     }
@@ -187,6 +200,9 @@ struct AmfEncoder : Encoder {
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD, AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CBR);
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_FILLER_DATA, false);
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE, (amf_int64)mbit * 1000000);
+            // Keyframe-Lawine begrenzen (wie NVENC): Peak = Target, VBV = 4 Bildbudgets.
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE, (amf_int64)mbit * 1000000);
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_VBV_BUFFER_SIZE, (amf_int64)mbit * 1000000 * 4 / (fps > 0 ? fps : 60));
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMESIZE, ::AMFConstructSize(w, h));
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMERATE, ::AMFConstructRate(fps, 1));
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_GOP_SIZE, (amf_int64)fps);
@@ -210,6 +226,9 @@ struct AmfEncoder : Encoder {
         encoder->SetProperty(AMF_VIDEO_ENCODER_PROFILE, AMF_VIDEO_ENCODER_PROFILE_BASELINE);
         encoder->SetProperty(AMF_VIDEO_ENCODER_FILLER_DATA_ENABLE, false);
         encoder->SetProperty(AMF_VIDEO_ENCODER_TARGET_BITRATE, (amf_int64)mbit * 1000000);
+        // Keyframe-Lawine begrenzen (wie NVENC): Peak = Target, VBV = 4 Bildbudgets.
+        encoder->SetProperty(AMF_VIDEO_ENCODER_PEAK_BITRATE, (amf_int64)mbit * 1000000);
+        encoder->SetProperty(AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE, (amf_int64)mbit * 1000000 * 4 / (fps > 0 ? fps : 60));
         encoder->SetProperty(AMF_VIDEO_ENCODER_FRAMESIZE, ::AMFConstructSize(w, h));
         encoder->SetProperty(AMF_VIDEO_ENCODER_FRAMERATE, ::AMFConstructRate(fps, 1));
         // GOP = 1s (nicht 2s): halbiert die Wartezeit bis zum ersten Bild fuer neue
@@ -250,7 +269,11 @@ struct AmfEncoder : Encoder {
         amf::AMFDataPtr data;
         while (encoder->QueryOutput(&data) == AMF_OK && data) { amf::AMFBufferPtr b(data); if (b) out.emplace_back((uint8_t*)b->GetNative(), (uint8_t*)b->GetNative() + b->GetSize()); data = nullptr; }
     }
-    void setBitrate(int kbit) override { encoder->SetProperty(isAv1 ? AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE : AMF_VIDEO_ENCODER_TARGET_BITRATE, (amf_int64)kbit * 1000); }   // AMF: Bitrate live (kbit)
+    void setBitrate(int kbit) override {   // AMF: Bitrate live (kbit); Peak+VBV mitziehen (s. init)
+        encoder->SetProperty(isAv1 ? AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE : AMF_VIDEO_ENCODER_TARGET_BITRATE, (amf_int64)kbit * 1000);
+        encoder->SetProperty(isAv1 ? AMF_VIDEO_ENCODER_AV1_PEAK_BITRATE : AMF_VIDEO_ENCODER_PEAK_BITRATE, (amf_int64)kbit * 1000);
+        encoder->SetProperty(isAv1 ? AMF_VIDEO_ENCODER_AV1_VBV_BUFFER_SIZE : AMF_VIDEO_ENCODER_VBV_BUFFER_SIZE, (amf_int64)kbit * 1000 * 4 / (encFps > 0 ? encFps : 60));
+    }
 };
 
 // Intel-QSV via oneVPL (MFXVideoENCODE). Struktur wie NVENC/AMF. HINWEIS: kompiliert und
@@ -274,6 +297,20 @@ struct QsvEncoder : Encoder {
                            // nicht nur das geaenderte Feld).
     const char* name() override { return "QSV"; }
     ~QsvEncoder() { if (session) { if (pendingSyncp) MFXVideoCORE_SyncOperation(session, pendingSyncp, 100000); if (inited) MFXVideoENCODE_Close(session); MFXClose(session); } if (loader) MFXUnload(loader); }
+    // Bitrate + VBV konsistent setzen. Zwei Fixes in einem:
+    // 1) TargetKbps/MaxKbps sind mfxU16 (max 65535) - der alte (mfxU16)kbit-Cast kippte ab
+    //    66 Mbit still um (200000 -> 3392 kbit). BRCParamMultiplier skaliert alle BRC-Felder,
+    //    damit auch grosse Werte korrekt ankommen.
+    // 2) BufferSizeInKB = 4 Bildbudgets: begrenzt die Keyframe-Groesse (Lawinen-Fix wie
+    //    NVENC/AMF) statt "0 = Treiber-Auto" mit sehr grosszuegigem CPB.
+    void applyRate(int kbit, int fps) {
+        mfxU16 mult = (mfxU16)(kbit / 65536 + 1);
+        par.mfx.BRCParamMultiplier = mult;
+        par.mfx.TargetKbps = (mfxU16)(kbit / mult); par.mfx.MaxKbps = (mfxU16)(kbit / mult);
+        int bufKB = (int)((int64_t)kbit * 1000 * 4 / (fps > 0 ? fps : 60) / 8 / 1000);
+        par.mfx.BufferSizeInKB = (mfxU16)((bufKB / mult) > 1 ? (bufKB / mult) : 1);
+        par.mfx.InitialDelayInKB = par.mfx.BufferSizeInKB;
+    }
     // WICHTIGER BEFUND (Log-Beweise 2026-07-21, auf echter Intel-Hardware reproduziert, siehe
     // HANDOFF-INTEL-QSV-DEBUG.md): MFXVideoENCODE_Init schlaegt mit IOPattern=VIDEO_MEMORY
     // (D3D11-Zero-Copy) auf diesem Geraet IMMER mit status=-15 (MFX_ERR_INVALID_VIDEO_PARAM)
@@ -329,7 +366,8 @@ struct QsvEncoder : Encoder {
         mfxIMPL implVal = 0; if (MFXQueryIMPL(session, &implVal) == MFX_ERR_NONE) printf("QSV-DEBUG: MFXQueryIMPL=0x%x (Impl=%u ViaMask=0x%x)\n", (unsigned)implVal, (unsigned)MFX_IMPL_BASETYPE(implVal), (unsigned)(implVal & 0xFF00));
         par = mfxVideoParam{};
         par.mfx.CodecId = codecId; par.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
-        par.mfx.RateControlMethod = MFX_RATECONTROL_CBR; par.mfx.TargetKbps = (mfxU16)(mbit * 1000); par.mfx.MaxKbps = (mfxU16)(mbit * 1000);
+        par.mfx.RateControlMethod = MFX_RATECONTROL_CBR;
+        applyRate(mbit * 1000, fps);
         par.mfx.FrameInfo.FourCC = MFX_FOURCC_NV12; par.mfx.FrameInfo.ChromaFormat = MFX_CHROMAFORMAT_YUV420; par.mfx.FrameInfo.PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
         par.mfx.FrameInfo.FrameRateExtN = fps; par.mfx.FrameInfo.FrameRateExtD = 1;
         par.mfx.FrameInfo.Width = (mfxU16)((w + 15) & ~15); par.mfx.FrameInfo.Height = (mfxU16)((h + 15) & ~15);
@@ -383,7 +421,7 @@ struct QsvEncoder : Encoder {
         // Bearbeitung ist. Ergebnis wird hier verworfen (verliert hoechstens 1 Frame,
         // vernachlaessigbar bei einer seltenen manuellen Bitrate-Aenderung).
         if (pendingSyncp) { MFXVideoCORE_SyncOperation(session, pendingSyncp, 100000); pendingSyncp = nullptr; }
-        par.mfx.TargetKbps = (mfxU16)kbit; par.mfx.MaxKbps = (mfxU16)kbit;
+        applyRate(kbit, par.mfx.FrameInfo.FrameRateExtN > 0 ? par.mfx.FrameInfo.FrameRateExtN : 60);
         mfxStatus st = MFXVideoENCODE_Reset(session, &par);
         if (st < MFX_ERR_NONE) printf("QSV-DEBUG: MFXVideoENCODE_Reset (Bitrate) fehlgeschlagen, status=%d\n", (int)st);
     }
