@@ -633,6 +633,12 @@ static void createDoormanWindow() {
                             if (FAILED(r2) || !ctrl || !g_doorHwnd) return r2;
                             g_doorCtrl = ctrl; g_doorCtrl->get_CoreWebView2(&g_doorWv);
                             RECT rc; GetClientRect(g_doorHwnd, &rc); g_doorCtrl->put_Bounds(rc);
+                            // WebView2 rendert sonst WEISS hinter der Karte - doorman.html ist
+                            // transparent mit 8px Rand, dadurch sah man einen weissen Kasten drumherum.
+                            // Fensterlos gehostet ist echte Transparenz nicht moeglich -> deckendes
+                            // Dunkel passend zur Karte/Fensterklasse (RGB 15,15,15).
+                            { ComPtr<ICoreWebView2Controller2> c2; g_doorCtrl.As(&c2);
+                              if (c2) { COREWEBVIEW2_COLOR clr{ 255, 15, 15, 15 }; c2->put_DefaultBackgroundColor(clr); } }
                             ComPtr<ICoreWebView2_3> wv3; g_doorWv.As(&wv3);
                             if (wv3) wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
                             std::wstring shim = SHIM_JS; size_t vp = shim.find(L"%SHELL_VERSION%");
@@ -944,6 +950,17 @@ static void bcWriteCodecControl(bool h264, bool av1) {
     std::string v = av1 ? (h264 ? "h264+av1" : "av1") : "h264";
     writeFile(tempPath(L"lumora-codec.txt"), v);
 }
+// Bedarfs-Zustand (bcViewerTick). MUSS bei jedem Stream-Start zurueckgesetzt werden,
+// sonst glaubt die Shell noch den Stand des VORIGEN Streams, schreibt nichts Neues und
+// die Steuerdatei (vom Start auf "h264" gesetzt) passt nicht mehr zur Codec-Zuteilung
+// des Relays -> Vorschau bekommt AV1, Capture liefert H.264 -> schwarzes Bild.
+static bool g_wantH264 = true, g_wantAv1 = false;
+static ULONGLONG g_av1GoneAt = 0, g_h264GoneAt = 0;
+static std::string g_lastCodec;
+static void bcResetCodecDemand() {
+    g_wantH264 = true; g_wantAv1 = false; g_av1GoneAt = 0; g_h264GoneAt = 0;
+    g_lastCodec = "h264";           // deckt sich mit dem, was bcStartNative gleich schreibt
+}
 // Relay starten + aktiver Ready-Check (TCP-Probe auf den RTSP-Port, wie das Original).
 static std::wstring g_mtxCfgPath;   // fuer den Crash-Neustart gemerkt
 // Relay-Absturz mitten im Stream (nicht gewollt beendet): neu starten - der native
@@ -1051,6 +1068,7 @@ static void bcStartNative(const json& cfg) {
     if (cfg.value("mode", "") == "window" && cfg.value("hwnd", 0ll)) args += L" --window --hwnd " + std::to_wstring(cfg.value("hwnd", 0ll));
     else args += L" --monitor " + std::to_wstring(cfg.value("outputIdx", 0));   // gewaehlter Bildschirm
     bcWriteHdrControl();
+    bcResetCodecDemand();               // Bedarfs-Zustand des VORIGEN Streams verwerfen
     bcWriteCodecControl(true, false);   // Warm-Default H.264 vor Capture-Start (bcViewerTick zieht bei Bedarf AV1 nach)
     g_bcCapKey = std::to_string(cfg.value("mode", "") == "window" ? cfg.value("hwnd", 0ll) : 0) + "|" + std::to_string(cfg.value("fps", 60)) + "|" + std::to_string(cfg.value("scaleH", 0));
     bcWriteBitrateControl(cfg.value("kbit", 8000));
@@ -1117,7 +1135,10 @@ static void bcViewerTick() {
     // Bedarfsgesteuertes Encoding: Codec-Bedarf der aktuellen Zuschauer vom Relay holen und
     // dem Capture signalisieren. Modus h264 erzwingt reines H.264. Hysterese: einen Codec erst
     // nach ~10s ohne Bedarf abschalten (verhindert Encoder-Flattern bei NAT-Reconnects).
-    static bool wantH264 = true, wantAv1 = false; static ULONGLONG av1GoneAt = 0, h264GoneAt = 0;
+    // Zustand liegt GLOBAL und wird bei jedem Stream-Start zurueckgesetzt (bcResetCodecDemand) -
+    // als function-static ueberlebte er das Stream-Ende und log damit gegen die Steuerdatei:
+    // Shell glaubte "av1", Datei sagte "h264" -> Vorschau bekam AV1, Capture lieferte nur
+    // H.264 -> dauerhaft schwarzes Bild.
     std::string mode = loadSettings().value("streamCodec", "auto");
     auto r = luart::httpGet("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/paths/get/live", L"", 1500);
     json j = json::parse(r.body, nullptr, false);
@@ -1125,14 +1146,13 @@ static void bcViewerTick() {
     bool needAv1 = (mode != "h264") && j.is_object() && j.value("needAV1", false);
     ULONGLONG now = GetTickCount64();
     // H.264 ist Warm-Default (immer mindestens einer). AV1 folgt dem Bedarf mit Hysterese.
-    if (needH264 || mode == "h264") { wantH264 = true; h264GoneAt = 0; }
-    else if (!wantH264) {} else { if (!h264GoneAt) h264GoneAt = now; if (now - h264GoneAt > 10000 && wantAv1) wantH264 = false; }
-    if (needAv1) { wantAv1 = true; av1GoneAt = 0; }
-    else if (wantAv1) { if (!av1GoneAt) av1GoneAt = now; if (now - av1GoneAt > 10000) wantAv1 = false; }
-    if (!wantH264 && !wantAv1) wantH264 = true;   // nie leer
-    static std::string lastCodec;
-    std::string cur = wantAv1 ? (wantH264 ? "h264+av1" : "av1") : "h264";
-    if (cur != lastCodec) { lastCodec = cur; bcWriteCodecControl(wantH264, wantAv1); bcLogStream("codec-bedarf -> " + cur); }
+    if (needH264 || mode == "h264") { g_wantH264 = true; g_h264GoneAt = 0; }
+    else if (g_wantH264) { if (!g_h264GoneAt) g_h264GoneAt = now; if (now - g_h264GoneAt > 10000 && g_wantAv1) g_wantH264 = false; }
+    if (needAv1) { g_wantAv1 = true; g_av1GoneAt = 0; }
+    else if (g_wantAv1) { if (!g_av1GoneAt) g_av1GoneAt = now; if (now - g_av1GoneAt > 10000) g_wantAv1 = false; }
+    if (!g_wantH264 && !g_wantAv1) g_wantH264 = true;   // nie leer
+    std::string cur = g_wantAv1 ? (g_wantH264 ? "h264+av1" : "av1") : "h264";
+    if (cur != g_lastCodec) { g_lastCodec = cur; bcWriteCodecControl(g_wantH264, g_wantAv1); bcLogStream("codec-bedarf -> " + cur); }
 }
 // Live-Umstellung (bcDoRestartFfmpeg-Kern): Bitrate + Quelle ueber die Steuerdateien,
 // Vollneustart des Helfers nur bei fps/scaleH-Aenderung.
