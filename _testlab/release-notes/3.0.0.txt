@@ -2,12 +2,18 @@ Lumora 3.0.0 – die komplett neu gebaute Version
 
 Lumora läuft ab dieser Version durchgängig auf eigenem, nativem Code – ohne Electron, ohne FFmpeg, ohne fremden Streaming-Server. Das Ergebnis: winziger Download, schnellerer Start, stabileres Streaming.
 
-• Download von rund 171 MB auf etwa 3,5 MB geschrumpft – gleiche Funktionen, ein Bruchteil der Größe.
-• Deutlich stabileres Streaming: Ruckeln bei entfernten Zuschauern behoben, verlorene Bildpakete werden nachgefordert, AV1 wird nur an Geräte mit passendem Decoder gesendet, die automatische Qualitätsanpassung reagiert ruhiger.
-• Neue Eingabe-Brücke: macht aus Joystick, Lenkrad oder Flightstick ein virtuelles Xbox-Gamepad – für Spiele, die nur Gamepads kennen, inklusive Microsoft-Store-/Game-Pass-Titeln. Mit visueller Zuordnung, Live-Anzeige am Controller und Profilen pro Spiel.
-• Automatisches HDR pro Spiel, FPS-/Hardware-OSD und volle Gamepad-Bedienung des Launchers – alles wie gewohnt, jetzt nativ.
-• Zahlreiche behobene Abstürze und Anzeigefehler: Speicherleck beim Encoder-Wechsel, schwarze Fenster, Fenstergröße nach Windows-Neustart, hängendes Schließen.
-• App vollständig auf Deutsch und Englisch, aufgeräumte Dialoge im einheitlichen Design.
+• Download von rund 171 MB auf etwa 3,5 MB geschrumpft – gleiche Funktionen, ein Bruchteil der Größe, weniger Speicherverbrauch.
+• Streaming von Grund auf stabiler: Ruckeln bei entfernten Zuschauern behoben (Bilddaten an der Quelle begrenzt), verlorene Pakete werden nachgefordert – auch 4K/60 fps mit mehreren Zuschauern läuft rund.
+• AV1 nur an Geräte mit passendem Hardware-Decoder; schwächere Rechner bekommen automatisch H.264 – flüssiges Bild statt Ruckler.
+• Ruhigere, ehrlichere Qualitätsanpassung: kein überzogenes Herunterregeln bei kurzen Empfangsproblemen, keine stille Bitraten-Halbierung bei AV1 mehr.
+• Bedarfsgesteuertes Encoding: AV1 und H.264 laufen nur dann parallel, wenn wirklich beide Sorten Zuschauer da sind – kein unnötiger Doppel-Encode.
+• Neue Eingabe-Brücke: macht aus Joystick, Lenkrad oder Flightstick ein virtuelles Xbox-Gamepad – mit visueller Zuordnung, Live-Mitschau, Auto-Kalibrierung, Achse↔Trigger/Knopf↔Achse (kombinierte Pedale), getrennten Geräten und Profilen pro Spiel. Auch barrierefrei.
+• Automatisches HDR pro Spiel und das Gaming-OSD (FPS, GPU/CPU) mit eigenem Code – ohne HDRTray oder PresentMon, mit korrekterer FPS-Anzeige.
+• Zutrittsschutz für den Stream: nur wer freigegeben ist, sieht zu – jede Anfrage als Fenster über dem Spiel, mit Stammgast- und Sperrliste.
+• Eigener Komponenten-Updater: tauscht nur die geänderten Teile und bietet bei Bedarf einen Neustart an.
+• Speicherleck und mehrere Abstürze behoben (Encoder-Wechsel, schwarze Fenster, Fenstergröße nach Windows-Neustart, hängendes Schließen); Funk-Gamepad fliegt nicht mehr aus der Verbindung und reagiert sofort nach dem Start.
+• Aufgeräumte Oberfläche mit eigenen Dialogen und runden Fensterecken, vollständig auf Deutsch und Englisch.
+• Alle Programmdateien und der Installer sind signiert (Certum).
 
 Bestehende Installationen aktualisieren sich automatisch.
 
@@ -16,11 +22,17 @@ Lumora 3.0.0 – the completely rebuilt version
 
 From this version on, Lumora runs entirely on its own native code – no Electron, no FFmpeg, no third-party streaming server. The result: a tiny download, faster startup, more stable streaming.
 
-• Download shrunk from around 171 MB to about 3.5 MB – same features, a fraction of the size.
-• Much more stable streaming: stutter for remote viewers fixed, lost video packets are re-requested, AV1 is only sent to devices with a matching decoder, and the automatic quality adjustment reacts more calmly.
-• New input bridge: turns a joystick, wheel or flight stick into a virtual Xbox gamepad – for games that only recognise gamepads, including Microsoft Store / Game Pass titles. With visual mapping, a live controller display and per-game profiles.
-• Automatic per-game HDR, an FPS / hardware OSD and full gamepad control of the launcher – all as before, now native.
-• Numerous fixed crashes and display glitches: a memory leak on encoder switch, black windows, window size after a Windows restart, hanging on close.
-• App fully available in German and English, with tidied-up dialogs in a consistent design.
+• Download shrunk from around 171 MB to about 3.5 MB – same features, a fraction of the size, lower memory use.
+• Streaming stable from the ground up: stutter for remote viewers fixed (video data capped at the source), lost packets are re-requested – even 4K/60 fps with multiple viewers stays smooth.
+• AV1 only to devices with a matching hardware decoder; weaker machines automatically get H.264 – a smooth picture instead of stutter.
+• Calmer, more honest quality adjustment: no over-throttling on brief reception hiccups, no more silent bitrate halving for AV1.
+• Demand-driven encoding: AV1 and H.264 only run in parallel when both kinds of viewers are actually present – no needless double encode.
+• New input bridge: turns a joystick, wheel or flight stick into a virtual Xbox gamepad – with visual mapping, a live input view, auto-calibration, axis↔trigger/button↔axis (combined pedals), separate devices and per-game profiles. Accessible too.
+• Automatic per-game HDR and the gaming OSD (FPS, GPU/CPU) on our own code – without HDRTray or PresentMon, with a more accurate FPS readout.
+• Access control for your stream: only approved people can watch – each request as a window over the game, with a regulars and a block list.
+• Own component updater: swaps only the changed parts and offers a restart when needed.
+• Memory leak and several crashes fixed (encoder switch, black windows, window size after a Windows restart, hanging on close); the wireless gamepad no longer drops out and responds immediately after start.
+• Tidied-up interface with own dialogs and rounded window corners, fully in German and English.
+• All program files and the installer are signed (Certum).
 
 Existing installations update automatically.
