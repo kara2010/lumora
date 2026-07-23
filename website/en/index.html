@@ -1371,11 +1371,19 @@
           <span class="release-tag">current</span>
         </div>
         <ul>
-          <li><strong>Completely rebuilt</strong>: Lumora now runs entirely on its own native code – no Electron, no FFmpeg, no third-party streaming server. The download shrinks from around 171&nbsp;MB to about 3.5&nbsp;MB, with the same feature set and a faster start.</li>
-          <li><strong>Much more stable streaming</strong>: stutter for remote viewers fixed, lost video packets are re-requested, AV1 is only sent to devices with a matching decoder, and the automatic quality adjustment reacts more calmly.</li>
-          <li><strong>New: input bridge</strong> – turns a joystick, wheel or flight stick into a virtual Xbox gamepad, for games that only recognise gamepads (including Microsoft Store / Game Pass titles). With visual mapping, a live controller display and per-game profiles. <a href="eingabe-bruecke.html" style="color:var(--accent2)">Learn more →</a></li>
-          <li><strong>Numerous fixed crashes and display glitches</strong>: a memory leak on encoder switch, black windows, window size after a Windows restart, hanging on close.</li>
-          <li><strong>App fully available in German and English</strong>, with tidied-up dialogs in a consistent design.</li>
+          <li><strong>Completely rebuilt – no Electron</strong>: Lumora now runs entirely on its own native code, without FFmpeg and without a third-party streaming server. The download shrinks from around 171&nbsp;MB to about <strong>3.5&nbsp;MB</strong>, with the same feature set, a noticeably faster start and lower memory use.</li>
+          <li><strong>Streaming stable from the ground up</strong>: the stutter for remote viewers is fixed – the video data is cleanly capped at the source, lost packets are re-requested automatically, and the stream stays smooth even at 4K/60&nbsp;fps with multiple viewers.</li>
+          <li><strong>AV1 only where it truly runs smoothly</strong>: the stream is sent in AV1 only to devices with a matching hardware decoder – weaker machines automatically get H.264 and thus a smooth picture instead of stutter.</li>
+          <li><strong>Calmer, more honest quality adjustment</strong>: a viewer's brief reception hiccup no longer makes Lumora over-throttle or oscillate; the configured bitrate is respected (no more silent halving for AV1).</li>
+          <li><strong>Demand-driven encoding</strong>: AV1 and H.264 are only produced in parallel when both kinds of viewers are actually present – no needless double encode that burdens weak hardware.</li>
+          <li><strong>New: input bridge</strong> – turns a joystick, wheel or flight stick into a virtual Xbox gamepad, for games that only recognise gamepads (including Microsoft Store / Game Pass titles). With visual mapping right on the pictured controller, a live view of your inputs, auto-calibration, axis↔trigger and button↔axis (combined pedals too), separate devices (wheel + separate pedals) and per-game profiles. Accessible too. <a href="eingabe-bruecke.html" style="color:var(--accent2)">Learn more →</a></li>
+          <li><strong>Automatic per-game HDR</strong> and the <strong>gaming OSD</strong> (FPS, GPU/CPU stats) now run on our own code – without extra tools like HDRTray or PresentMon, with a more accurate FPS readout.</li>
+          <li><strong>Access control for your stream</strong>: when enabled, only people you explicitly approve can watch – each request appears as a small window over the game, with a regulars and a block list.</li>
+          <li><strong>Own component updater</strong>: updates now swap only the changed parts and offer a restart when needed – fast and reliable, without the full installer.</li>
+          <li><strong>Memory leak &amp; crashes fixed</strong>: a leak on encoder switch (which caused stutter up to a crash) is gone; likewise black windows (after minimized autostart and with access control), the loss of window size after a Windows restart, and the app hanging on close.</li>
+          <li><strong>Gamepad more reliable</strong>: a wirelessly connected Xbox controller no longer dropped out; Lumora responds to the gamepad immediately after start, without having to click with the mouse first.</li>
+          <li><strong>Tidied-up interface</strong>: own, design-matched dialogs instead of the grey system boxes, rounded window corners, and the app is fully translated into German and English.</li>
+          <li><strong>Signed &amp; trusted</strong>: all program files and the installer are digitally signed (Certum) – Windows shows the verified publisher.</li>
         </ul>
       </div>
       <div class="release">
