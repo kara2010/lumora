@@ -1,0 +1,12 @@
+Streaming-Stabilität deutlich verbessert + mehrere Absturz-/Anzeigefehler behoben:
+
+• Stream-Ruckeln bei entfernten Zuschauern behoben: Keyframes wurden bis zu 8x größer als nötig, das überlastete Netzwerkpuffer unterwegs – jetzt an der Quelle begrenzt.
+• Verlorene Pakete wurden nicht mehr nachgefordert – ein einzelner Aussetzer blieb dadurch bis zum nächsten Keyframe sichtbar. Behoben.
+• AV1 wird nur noch an Geräte mit Hardware-Decoder gesendet – auf schwächerer Hardware lief die Software-Dekodierung sonst der Bildrate davon und sah wie ein Netzwerkproblem aus.
+• Die automatische Bitraten-Anpassung reagierte auf kurze Aussetzer beim Zuschauer-Beitritt zu heftig und hielt die Qualität danach unnötig lange niedrig. Entschärft.
+• Speicherleck behoben, das bei häufigem Encoder-Wechsel zu Rucklern und im schlimmsten Fall zum Absturz führen konnte.
+• Fenstergröße und -position werden jetzt auch nach einem echten Windows-Neustart wiederhergestellt (vorher nur beim normalen Schließen).
+• Schwarzes Fenster nach minimiertem Autostart sowie beim Zutrittsschutz-Dialog behoben.
+• Eingabe-Brücke: aktiviert sich nicht mehr grundlos ohne angeschlossenes Gerät (konnte echte Controller aus der Verbindung werfen); Profil-Löschen fragt jetzt nach; der Controller auf dem Bildschirm animiert live mit, während man zuordnet.
+• Eigene, zum Design passende Dialoge statt der hässlichen System-Boxen.
+• Schließen der App blockierte bis zu 8 Sekunden, wenn der Gruppen-Server langsam war – jetzt im Hintergrund.

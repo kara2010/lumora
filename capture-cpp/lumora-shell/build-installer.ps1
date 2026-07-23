@@ -7,7 +7,17 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "0.2.7"   # 0.2.7: FIX Encoder-Destruktoren (Speicherleck/Absturz), Eingabe-Bruecke visuell + Auto-Kalibrierung
+$version = "0.2.11"  # 0.2.11: Streaming-Stabilitaet (Keyframe-VBV-Deckel, NACK/SSRC-Fix, Regelungs-
+                     #         Ueberreaktion entschaerft, AV1 nur mit HW-Decoder), Speicherleck-Fix
+                     #         Encoder-Neustart, Fenstergroesse nach Windows-Neustart, schwarzes
+                     #         Tuersteher-/Hauptfenster behoben, Eingabe-Bruecke greift nur mit
+                     #         angeschlossenem Geraet + Profil-Loeschen fragt nach + Live-Controller-
+                     #         Animation, eigener Dialog statt haesslicher System-Boxen, Ueber-Dialog
+                     #         auf nativen Stand, Gruppen-Austritt beim Schliessen entblockt
+                     # 0.2.10: Reihenfolge Einstellungs-Reiter zurueckgetauscht - Darstellung vor Steuerung
+                     # 0.2.9: Reihenfolge Einstellungs-Reiter - Steuerung zwischen Allgemein und Darstellung
+                     # 0.2.8: Beta-Schalter "Nativer Aufnahme-Modus" entfernt - der native Weg ist jetzt fest aktiv
+                     # 0.2.7: FIX Encoder-Destruktoren (Speicherleck/Absturz), Eingabe-Bruecke visuell + Auto-Kalibrierung
                      # 0.2.6: Komponenten-Update bietet Neustart an (Shell-Tausch -> neue Version laeuft)
                      # 0.2.5: bedarfsgesteuertes AV1/H.264-Encoding, Player-Codec-Anzeige-Fix
                      # 0.2.4: AV1-Doppel-Encode, Eingabe-Bruecke, Komponenten-Updater, Statistik, libjuice-Patch
