@@ -75,7 +75,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/#app",
         "name": "Lumora",
-        "softwareVersion": "2.2.20",
+        "softwareVersion": "3.0.0",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1097,7 +1097,7 @@
   </div>
   <div class="hero-actions">
     <button class="btn-dl" onclick="startDownload()">
-      ⬇ Download &nbsp;·&nbsp; 171 MB
+      ⬇ Download &nbsp;·&nbsp; 3,5 MB
     </button>
     <a class="btn-ghost" href="#features">
       ✨ Neu: Game-Streaming &amp; OSD
@@ -1309,6 +1309,13 @@
         </div>
       </div>
       <div class="feature">
+        <div class="feature-icon">🕹️</div>
+        <div>
+          <h3>Eingabe-Brücke: Joystick &amp; Lenkrad für jedes Spiel</h3>
+          <p>Macht aus Joystick, Lenkrad oder Flightstick ein virtuelles Xbox-Gamepad – für Spiele, die nur Gamepads kennen, inklusive Microsoft-Store-/Xbox-Titeln wie Forza, wo sonst nichts greift. Visuelle Zuordnung, Auto-Kalibrierung, Profile pro Spiel. Auch barrierefrei: Knopf statt Achse und umgekehrt. <a href="eingabe-bruecke.html" style="color:var(--accent2)">Wie die Eingabe-Brücke funktioniert →</a></p>
+        </div>
+      </div>
+      <div class="feature">
         <div class="feature-icon">⌨️</div>
         <div>
           <h3>Frei belegbarer Hotkey</h3>
@@ -1373,8 +1380,20 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">2.2.20</span>
+          <span class="release-ver">3.0.0</span>
           <span class="release-tag">aktuell</span>
+        </div>
+        <ul>
+          <li><strong>Komplett neu gebaut</strong>: Lumora läuft jetzt durchgängig auf eigenem, nativem Code – ohne Electron, ohne FFmpeg, ohne fremden Streaming-Server. Der Download schrumpft von rund 171&nbsp;MB auf etwa 3,5&nbsp;MB, bei gleichem Funktionsumfang und schnellerem Start.</li>
+          <li><strong>Deutlich stabileres Streaming</strong>: Ruckeln bei entfernten Zuschauern behoben, verlorene Bildpakete werden nachgefordert, AV1 wird nur an Geräte mit passendem Decoder gesendet, und die automatische Qualitätsanpassung reagiert ruhiger.</li>
+          <li><strong>Neu: Eingabe-Brücke</strong> – macht aus Joystick, Lenkrad oder Flightstick ein virtuelles Xbox-Gamepad, für Spiele, die nur Gamepads kennen (inklusive Microsoft-Store-/Xbox-Titeln wie Forza). Mit visueller Zuordnung, Live-Anzeige am Controller und Profilen pro Spiel. <a href="eingabe-bruecke.html" style="color:var(--accent2)">Mehr dazu →</a></li>
+          <li><strong>Zahlreiche behobene Abstürze und Anzeigefehler</strong>: Speicherleck beim Encoder-Wechsel, schwarze Fenster, Fenstergröße nach Windows-Neustart, hängendes Schließen.</li>
+          <li><strong>App vollständig auf Deutsch und Englisch</strong>, mit aufgeräumten Dialogen im einheitlichen Design.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">2.2.20</span>
         </div>
         <ul>
           <li><strong>Signiert &amp; vertrauenswürdig</strong>: Lumora ist jetzt digital signiert (Certum Code Signing). Windows zeigt statt „Unbekannter Herausgeber" den geprüften Herausgeber, und die harte Blockade durch Smart App Control entfällt. Eine mögliche SmartScreen-Erstmeldung baut sich ab, sobald die Signatur Reputation gesammelt hat.</li>
@@ -1416,6 +1435,7 @@
           <li>Die Stream-Vorschau springt beim Livegehen wieder zuverlässig in den Blick.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.16</span>
@@ -1471,7 +1491,6 @@
           <li><strong>Web-Player</strong>: dezente Wiedergabedauer-Anzeige · Bedienelemente per Tipp ein- und ausblendbar · Standard-Empfangspuffer auf 300&nbsp;ms erhöht (ruhigeres Bild bei schwankender Leitung).</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.10</span>
@@ -1614,7 +1633,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (13)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (18)</button>
   </div>
 </section>
 
@@ -2028,7 +2047,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (13)';
+    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (18)';
   }
 
   function toggleFeatures() {

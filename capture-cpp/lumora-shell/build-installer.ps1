@@ -7,7 +7,29 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "0.2.11"  # 0.2.11: Streaming-Stabilitaet (Keyframe-VBV-Deckel, NACK/SSRC-Fix, Regelungs-
+$version = "3.0.0"   # 3.0.0: erstes offizielles Release der nativen Version (loest die Electron-
+                     #        Linie 2.2.x ab). Buendelt die gesamte 0.2.x-Reihe: eigener C++-Stack
+                     #        statt Electron/FFmpeg/mediamtx, Streaming-Stabilitaet, Eingabe-Bruecke,
+                     #        Speicherleck-/Blackout-Fixes. Download 171 MB -> ~3,5 MB. App durchgaengig
+                     #        uebersetzt, Ueber-Dialog + Versionsressource korrekt (vorher 0.1.0).
+$prev_0_2_13 = "" # 0.2.13: Aufgabenplanung nach Electron->nativ-Umstieg repariert (alte OSD-
+                     #         Broker-Aufgaben werden beim Installieren entfernt + Pfad-Abgleich
+                     #         gegen die aktuelle exe), RTSS-FPS-Quelle schliesst dwm.exe aus
+                     #         (zeigte sonst die Desktop-Hz statt der Spiel-Framerate), eigener
+                     #         FPS-Broker bevorzugt jetzt das Vordergrundfenster statt "wer
+                     #         praesentiert am meisten" (gleiches Symptom bei begrenzter fps),
+                     #         Eingabe-Bruecke: Achsen/Knoepfe pro Quellgeraet (vid/pid) getrennt
+                     #         (Lenken loeste Bremsen aus, wenn Lenkrad + Pedalset dieselbe
+                     #         Achsen-Usage nutzten), build-installer prueft cmake-Exit-Code
+                     #         (stiller Compile-Fehler lieferte sonst die ALTE exe weiter)
+$prev_0_2_12 = "" # 0.2.12: AMD-Blackout-Fixes (Codec-Reconcile-Reihenfolge, AMF INPUT_FULL-Drain,
+                     #         Codec-Race Vorschau vs. Push -> Relay-Default h264 + --codec-Spawn-Arg,
+                     #         AV1-Faehigkeit persistiert), Relay-Sende-Thread (4K-Framedrops mit
+                     #         Zuschauern), AMF SPEED-Preset (4K-Encode neben 4K-Decode), Router-Phase
+                     #         parallelisiert (~halbe Wartezeit auf den oeffentlichen Link), Stream-Link
+                     #         Auto-Kopieren + deutliche Rueckmeldung (Electron-Paritaet), Kopier-Klick
+                     #         waehrend der Vorbereitung wird vorgemerkt statt abgewiesen
+$prev_0_2_11 = "" # 0.2.11: Streaming-Stabilitaet (Keyframe-VBV-Deckel, NACK/SSRC-Fix, Regelungs-
                      #         Ueberreaktion entschaerft, AV1 nur mit HW-Decoder), Speicherleck-Fix
                      #         Encoder-Neustart, Fenstergroesse nach Windows-Neustart, schwarzes
                      #         Tuersteher-/Hauptfenster behoben, Eingabe-Bruecke greift nur mit
@@ -26,10 +48,38 @@ $version = "0.2.11"  # 0.2.11: Streaming-Stabilitaet (Keyframe-VBV-Deckel, NACK/
                      # 0.2.1: BF6-HDR-Fix, Gamepad-Fokus, GPU-Name, Bitrate-Presets 35/50
                      # 0.2.0: eigener Relay (mediamtx-Abloesung), native HDR, ETW-FPS, libvpl statisch
 
-# 1) Shell frisch bauen
-$cmake = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-& $cmake --build "$shell\build" --config Release | Out-Null
-if (-not (Test-Path "$shell\build\Release\lumora_shell.exe")) { throw "Shell-Build fehlgeschlagen" }
+# 1) Shell frisch bauen (cmake PC-unabhaengig suchen: VS2022 BuildTools ODER VS2026 Community -
+# die Entwicklungs-PCs haben unterschiedliche Toolchains; build\ ist jeweils lokal konfiguriert)
+$cmake = @(
+  "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe",
+  "C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $cmake) { throw "cmake.exe nicht gefunden (VS2022 BuildTools / VS2026 Community)" }
+
+# app.rc-Versionsressource aus $version patchen, damit die exe (und damit der "Ueber"-Dialog
+# via shellVersion()/GetFileVersionInfo) NIE wieder von der Installer-Version abweicht. Genau
+# das war lange kaputt: app.rc stand fix auf 0,1,0,0 -> "Ueber" zeigte 0.1.0, egal welche
+# Installer-Version. $version ("3.0.0") -> Komma-Form "3,0,0,0" und Punkt-Form "3.0.0.0".
+$verParts = ($version -split '\.') + @('0','0','0','0') | Select-Object -First 4
+$verComma = $verParts -join ','
+$verDot   = $verParts -join '.'
+$rcPath = "$shell\app.rc"
+$rc = Get-Content $rcPath -Raw
+$rc = [regex]::Replace($rc, 'FILEVERSION\s+\d+,\d+,\d+,\d+', "FILEVERSION $verComma")
+$rc = [regex]::Replace($rc, 'PRODUCTVERSION\s+\d+,\d+,\d+,\d+', "PRODUCTVERSION $verComma")
+$rc = [regex]::Replace($rc, '("FileVersion",\s*")\d+\.\d+\.\d+\.\d+(")', "`${1}$verDot`${2}")
+$rc = [regex]::Replace($rc, '("ProductVersion",\s*")\d+\.\d+\.\d+\.\d+(")', "`${1}$verDot`${2}")
+[IO.File]::WriteAllText($rcPath, $rc, (New-Object Text.UTF8Encoding($false)))
+Write-Output "app.rc auf $verDot gepatcht"
+
+# Alte exe VOR dem Build wegraeumen + Exit-Code pruefen - sonst liefert ein stiller
+# Compile-Fehler (Out-Null verschluckt die Meldung) unbemerkt die ALTE exe weiter, und der
+# Installer wird faelschlich als "erfolgreich" mit unveraendertem Inhalt neu gebaut (real
+# passiert: neuer Code kompilierte nicht, Installer war bit-identisch zum vorherigen Stand).
+Remove-Item "$shell\build\Release\lumora_shell.exe" -ErrorAction SilentlyContinue
+& $cmake --build "$shell\build" --config Release
+if ($LASTEXITCODE -ne 0) { throw "Shell-Build fehlgeschlagen (cmake/msbuild Exit-Code $LASTEXITCODE) - siehe Ausgabe oben" }
+if (-not (Test-Path "$shell\build\Release\lumora_shell.exe")) { throw "Shell-Build fehlgeschlagen (keine exe erzeugt)" }
 
 # 2) Staging aufbauen
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue

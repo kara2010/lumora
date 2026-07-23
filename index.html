@@ -1090,6 +1090,31 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  // --- 3.0.0: fehlende Uebersetzungen (Eingabe-Bruecke-Panel, Stream, Fehlermeldungen) ---
+  "Jetzt neu starten": "Restart now",
+  "Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild\" verwenden.": "No matches. Try a different search term or use \"Custom image\".",
+  "Knöpfe: –": "Buttons: –",
+  "Mehrere Grafikkarten erkannt. „Automatisch\" nimmt die dedizierte (schnelle) Karte – falls die Anzeige nicht stimmt, hier fest einstellen.": "Multiple graphics cards detected. \"Automatic\" picks the dedicated (fast) one – if the reading looks wrong, set it manually here.",
+  "Noch kein Profil – mit „+ Neu\" anlegen": "No profile yet – create one via \"+ New\"",
+  "ist bereit – zum Aktivieren neu starten.": "is ready – restart to activate.",
+  "– nicht verbunden": "– not connected",
+  "— nicht belegt (klicken zum Zuweisen)": "— not mapped (click to assign)",
+  "⚠️ <b>Kein Bild.</b> Läuft dein Spiel im <b>exklusiven Vollbild</b>? Stelle es auf <b>randloses Fenster</b> („Borderless\"/„Fenster-Vollbild\") um – dann kann Lumora aufnehmen, ohne ins Spiel einzugreifen.": "⚠️ <b>No image.</b> Is your game in <b>exclusive fullscreen</b>? Switch it to <b>borderless window</b> (\"Borderless\"/\"Windowed fullscreen\") – then Lumora can capture without interfering with the game.",
+  "❌ Vermittlungs-Server nicht erreichbar – Internet prüfen (oder die Skript-URL unter „Eigener Vermittlungs-Server\").": "❌ Signaling server unreachable – check your internet (or the script URL under \"Custom signaling server\").",
+  "= schon belegt (Quelle darunter). Bei aktivem Pad bewegt sich der Controller live mit.": "= already mapped (source below). With an active pad the controller moves along live.",
+  "Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.": "controller (original + virtual pad). If Steam Input is active, disable the original device there, otherwise inputs arrive twice.",
+  "Das Profil gilt für das gewählte Gerät („Alle Geräte\" = jede Quelle wird gemappt, z. B. Lenkrad + separate Pedale).": "The profile applies to the selected device (\"All devices\" = every source is mapped, e.g. wheel + separate pedals).",
+  "Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Xbox-Titeln wie Forza, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z. B. Knopf = Vollgas) und umgekehrt.": "input device (joystick, wheel, flight stick …) into a virtual Xbox gamepad. This lets you control games that only recognise gamepads – including Microsoft Store / Xbox titles like Forza, where Steam Input doesn't work. Great for accessibility too: single buttons can replace axes (e.g. button = full throttle) and vice versa.",
+  "Klick auf ein Bauteil des Controllers unten – dann am Gerät den gewünschten Knopf drücken oder die Achse bewegen.": "Click a part of the controller below – then press the desired button or move the axis on your device.",
+  "Nur nötig, wenn der Test oben „nicht erreichbar\" meldet. Zugangsdaten kommen vom Relay-Anbieter oder deinem eigenen coturn-Server („turn:\" nicht nötig).": "Only needed if the test above reports \"unreachable\". Credentials come from your relay provider or your own coturn server (\"turn:\" prefix not needed).",
+  "Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.": "Buffer: short = low latency, longer = smoother on an unstable connection. Auto-adjust: temporarily lowers the bitrate when viewers (e.g. on mobile data) report poor reception – and raises it again once things are stable.",
+  "Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Eine Gruppe erstellst du mit „Freunde dazuholen\" am laufenden Stream.": "See each other in the grid – ideal for gaming together on a Discord call. Create a group via \"Invite friends\" on a running stream.",
+  "Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein. Jeder neue Zuschauer wird dir einzeln zur Freigabe angezeigt (Fenster überm Spiel); ein Ablehnen gilt nur kurz.": "Off by default. When on, only people you explicitly approve can watch your stream – even someone who knows the link or IP can't get in unasked. Each new viewer is shown to you individually for approval (window over the game); a rejection only lasts briefly.",
+  "Startet das Spiel (egal ob über Lumora oder direkt), aktiviert sich das verknüpfte Profil automatisch – aber erst, wenn das Spiel wirklich läuft. Beim Beenden geht das virtuelle Pad wieder aus.": "When the game starts (whether via Lumora or directly), the linked profile activates automatically – but only once the game is really running. On exit the virtual pad turns off again.",
+  "Zeigt rohe Geräte-Eingaben und (bei aktivem Pad) das Ergebnis am virtuellen Controller.": "Shows raw device inputs and (with an active pad) the result on the virtual controller.",
+  "ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps & Features.": "(official source, one Windows security prompt). Removable via Apps & Features.",
+  "★ Stammgäste": "★ Regulars",
+  "🔒 Nur freigegebene Zuschauer": "🔒 Approved viewers only",
   'Wird geladen…': 'Loading…',
   'HDR-Feinabstimmung (nur bei HDR-Spielen)': 'HDR fine-tuning (HDR games only)',
   'Kurve': 'Curve',
@@ -1136,6 +1161,11 @@ const I18N_EN = {
   'Schieberegler': 'Slider', 'Drehregler': 'Dial', 'Achse 0x': 'Axis 0x',
   '👉 jetzt drücken / bewegen …': '👉 press or move it now …',
   'Zuweisen': 'Assign', 'Zuordnung entfernen': 'Remove mapping',
+  'Feineinstellungen': 'Fine-tuning', 'Deadzone': 'Deadzone', 'Kurve': 'Curve',
+  'Invertieren': 'Invert', 'Bereich': 'Range', 'von': 'from', 'bis': 'to',
+  '1 = linear, höher = feinfühliger um die Mitte': '1 = linear, higher = finer around center',
+  'Für geteilte Achsen, z. B. kombiniertes Gas/Bremse-Pedal. Leer = ganze Achse; „bis“ kleiner als „von“ kehrt die Richtung um.': 'For split axes, e.g. a combined throttle/brake pedal. Empty = full axis; "to" smaller than "from" reverses direction.',
+  '🎮 PlayStation-Controller erkannt – Standard-Belegung übernommen. Alles anpassbar.': '🎮 PlayStation controller detected – default mapping applied. Everything stays adjustable.',
   ' — belegt: ': ' — mapped: ', ' — nicht belegt (klicken zum Zuweisen)': ' — not mapped (click to assign)',
   'Profilname:': 'Profile name:', 'Profil ': 'Profile ',
   'Noch kein Profil': 'No profile yet', 'Noch kein Profil – mit „+ Neu" anlegen': 'No profile yet – create one via "+ New"',
@@ -1424,6 +1454,7 @@ const I18N_EN = {
   '❌ Das hat nicht geklappt – bitte nochmal versuchen.': '❌ That did not work – please try again.',
   'ℹ️ Füge zuerst den Gruppen-Code oder -Link eines Freundes ein.': "ℹ️ Paste a friend's group code or link first.",
   '⏳ Link wird noch vorbereitet – gleich ist er da.': '⏳ Link is still being prepared – almost there.',
+  '⏳ Link wird noch vorbereitet – er wird automatisch kopiert, sobald er fertig ist.': '⏳ Link is still being prepared – it will be copied automatically once ready.',
   '📋 Link kopiert – in Discord mit Strg+V einfügen': '📋 Link copied – paste in Discord with Ctrl+V',
   '👥 Gruppe auf einem anderen PC in deinem Netzwerk gefunden – automatisch beigetreten.': '👥 Group found on another PC in your network – joined automatically.',
   '🎮 Controller verbunden': '🎮 Controller connected',
@@ -2571,6 +2602,8 @@ ipcRenderer.on('osd-setup-status', (e, msg, done) => {
 // Profile liegen in %APPDATA%\lumora\input-profiles.json (Shell liest/schreibt sie als
 // Ganzes ueber input-bridge-get/save-profiles). Capture = "Zuweisen"-Modus der Shell.
 let ibProfiles = null, ibCurrent = null, ibCaptureTarget = null, ibDevices = []
+let ibTweakOpen = {}   // je Achsen-Ziel: Feineinstellungen (⚙) auf-/zugeklappt
+function ibToggleTweaks(target) { ibTweakOpen[target] = !ibTweakOpen[target]; ibRenderMap() }
 const IB_AXES = [['LX','Linker Stick X'],['LY','Linker Stick Y'],['RX','Rechter Stick X'],['RY','Rechter Stick Y'],['LT','Linker Trigger'],['RT','Rechter Trigger']]
 const IB_BTNS = [['A','A'],['B','B'],['X','X'],['Y','Y'],['LB','LB (Schulter links)'],['RB','RB (Schulter rechts)'],['BACK','Back / View'],['START','Start / Menü'],['LS','Linker Stick (Klick)'],['RS','Rechter Stick (Klick)'],['DPAD_UP','Steuerkreuz ▲'],['DPAD_DOWN','Steuerkreuz ▼'],['DPAD_LEFT','Steuerkreuz ◀'],['DPAD_RIGHT','Steuerkreuz ▶']]
 const IB_AXIS_NAMES = { 0x30:'X', 0x31:'Y', 0x32:'Z', 0x33:'Rx', 0x34:'Ry', 0x35:'Rz', 0x36:'Schieberegler', 0x37:'Drehregler', 0x39:'POV-Hat' }
@@ -2644,8 +2677,38 @@ function ibSetDevice(val) {
     const [vid, pid] = val.split(':')
     const d = ibDevices.find(x => x.vid === vid && x.pid === pid)
     p.device = { vid, pid, name: d ? d.name : '' }
+    ibMaybeAutoMap(p, vid)
   }
   ibSave()
+}
+// Bekannte Controller automatisch vorbelegen - nur wenn das Profil noch KEINE Zuordnungen
+// hat (nichts ueberschreiben). PlayStation (Sony VID 054C): DualShock 4 + DualSense melden
+// dieselben Basis-Usages (USB wie Bluetooth im Standardmodus): Sticks X/Y/Z/Rz, Trigger
+// analog auf Rx/Ry (Ruhe=0), Hat 0x39, Knoepfe 1=Quadrat 2=Kreuz 3=Kreis 4=Dreieck
+// 5=L1 6=R1 9=Share/Create 10=Options 11=L3 12=R3 13=PS. (L2/R2-Digitalknoepfe 7/8 bewusst
+// nicht gemappt - die Analogachsen decken sie ab; Touchpad-Klick 14 hat kein XInput-Ziel.)
+function ibMaybeAutoMap(p, vid) {
+  const empty = !p.axes.length && !p.buttons.length && !p.axisToButton.length && !p.buttonToAxis.length
+  if (!empty || String(vid).toUpperCase() !== '054C') return
+  // Geraet mit eintaggen (wie beim manuellen Zuweisen) - verhindert Kollisionen, falls
+  // spaeter noch ein zweites Geraet (z.B. separates Pedal-Set) ins selbe Profil kommt.
+  const dev = { vid: p.device ? p.device.vid : '', pid: p.device ? p.device.pid : '' }
+  p.axes = [
+    { usagePage: 1, usage: 0x30, target: 'LX', deadzone: 0.1, curve: 1, invert: false, ...dev },
+    { usagePage: 1, usage: 0x31, target: 'LY', deadzone: 0.1, curve: 1, invert: false, ...dev },
+    { usagePage: 1, usage: 0x32, target: 'RX', deadzone: 0.1, curve: 1, invert: false, ...dev },
+    { usagePage: 1, usage: 0x35, target: 'RY', deadzone: 0.1, curve: 1, invert: false, ...dev },
+    { usagePage: 1, usage: 0x33, target: 'LT', deadzone: 0.05, curve: 1, invert: false, ...dev },
+    { usagePage: 1, usage: 0x34, target: 'RT', deadzone: 0.05, curve: 1, invert: false, ...dev },
+    { usagePage: 1, usage: 0x39, target: 'DPAD', ...dev },
+  ]
+  p.buttons = [
+    { usage: 2, target: 'A', ...dev }, { usage: 3, target: 'B', ...dev }, { usage: 1, target: 'X', ...dev }, { usage: 4, target: 'Y', ...dev },
+    { usage: 5, target: 'LB', ...dev }, { usage: 6, target: 'RB', ...dev }, { usage: 9, target: 'BACK', ...dev }, { usage: 10, target: 'START', ...dev },
+    { usage: 11, target: 'LS', ...dev }, { usage: 12, target: 'RS', ...dev }, { usage: 13, target: 'GUIDE', ...dev },
+  ]
+  ibRenderMap()
+  streamToast(window.tr('🎮 PlayStation-Controller erkannt – Standard-Belegung übernommen. Alles anpassbar.'))
 }
 // Zuordnungs-Tabelle: pro Xbox-Ziel die aktuelle Quelle + Regler (nur Achsen-Ziele).
 function ibSourceLabel(p, target) {
@@ -2691,19 +2754,39 @@ function ibRenderMap() {
   const row = (key, label, isAxis) => {
     const capturing = ibCaptureTarget === key
     const ax = isAxis ? p.axes.find(a => a.target === key) : null
-    const tweaks = ax ? `
-      <input type="number" title="Deadzone (0–0.9)" min="0" max="0.9" step="0.05" value="${ax.deadzone ?? 0}" style="width:56px" onchange="ibTweak('${key}','deadzone',this.value)">
-      <input type="number" title="Kurve (1 = linear)" min="0.2" max="4" step="0.1" value="${ax.curve ?? 1}" style="width:56px" onchange="ibTweak('${key}','curve',this.value)">
-      <label title="Invertieren" style="display:flex;align-items:center;gap:3px">⇅<input type="checkbox" ${ax.invert ? 'checked' : ''} onchange="ibTweak('${key}','invert',this.checked)"></label>
-      <input type="number" title="Bereich von (0–1) – für geteilte Achsen, z. B. kombiniertes Gas/Bremse-Pedal. Leer = ganze Achse." placeholder="von" min="0" max="1" step="0.05" value="${typeof ax.min === 'number' ? ax.min : ''}" style="width:52px" onchange="ibTweak('${key}','min',this.value)">
-      <input type="number" title="Bereich bis (0–1). „bis“ kleiner als „von“ kehrt die Richtung um (Bremse)." placeholder="bis" min="0" max="1" step="0.05" value="${typeof ax.max === 'number' ? ax.max : ''}" style="width:52px" onchange="ibTweak('${key}','max',this.value)">` : ''
+    const open = !!ibTweakOpen[key]
+    // Feineinstellungen: aufgeraeumt in einem aufklappbaren ⚙-Bereich mit beschrifteten
+    // Slidern statt fuenf unbeschrifteter Zahlenfelder in der Zeile (User-Wunsch).
+    const gear = ax ? `<button class="btn-browse ib-gear${open ? ' on' : ''}" title="${window.tr('Feineinstellungen')}" onclick="ibToggleTweaks('${key}')">⚙</button>` : ''
+    const tweaks = (ax && open) ? `
+      <div class="ib-tweaks">
+        <label><span>${window.tr('Deadzone')}</span>
+          <input type="range" min="0" max="0.9" step="0.05" value="${ax.deadzone ?? 0}"
+                 oninput="this.nextElementSibling.textContent=Math.round(this.value*100)+' %'" onchange="ibTweak('${key}','deadzone',this.value)">
+          <em>${Math.round((ax.deadzone ?? 0) * 100)} %</em>
+        </label>
+        <label title="${window.tr('1 = linear, höher = feinfühliger um die Mitte')}"><span>${window.tr('Kurve')}</span>
+          <input type="range" min="0.2" max="4" step="0.1" value="${ax.curve ?? 1}"
+                 oninput="this.nextElementSibling.textContent=(+this.value).toFixed(1)" onchange="ibTweak('${key}','curve',this.value)">
+          <em>${(+(ax.curve ?? 1)).toFixed(1)}</em>
+        </label>
+        <label class="ib-tw-switch"><span>${window.tr('Invertieren')}</span>
+          <span class="switch"><input type="checkbox" ${ax.invert ? 'checked' : ''} onchange="ibTweak('${key}','invert',this.checked)"><span class="switch-slider"></span></span>
+        </label>
+        <label title="${window.tr('Für geteilte Achsen, z. B. kombiniertes Gas/Bremse-Pedal. Leer = ganze Achse; „bis“ kleiner als „von“ kehrt die Richtung um.')}">
+          <span>${window.tr('Bereich')}</span>
+          <input type="number" placeholder="${window.tr('von')}" min="0" max="1" step="0.05" value="${typeof ax.min === 'number' ? ax.min : ''}" onchange="ibTweak('${key}','min',this.value)">
+          <b>–</b>
+          <input type="number" placeholder="${window.tr('bis')}" min="0" max="1" step="0.05" value="${typeof ax.max === 'number' ? ax.max : ''}" onchange="ibTweak('${key}','max',this.value)">
+        </label>
+      </div>` : ''
     return `<div class="setting-toggle-row" style="gap:8px">
       <span class="setting-toggle-label" style="min-width:150px">${label}</span>
       <span style="flex:1;opacity:.8">${capturing ? window.tr('👉 jetzt drücken / bewegen …') : ibSourceLabel(p, key)}</span>
-      ${tweaks}
+      ${gear}
       <button class="btn-browse" onclick="ibAssign('${key}')">${capturing ? '…' : window.tr('Zuweisen')}</button>
       <button class="btn-browse" onclick="ibClear('${key}')" title="${window.tr('Zuordnung entfernen')}">✕</button>
-    </div>`
+    </div>${tweaks}`
   }
   el.innerHTML = IB_AXES.map(([k, l]) => row(k, window.tr(l), true)).join('') + IB_BTNS.map(([k, l]) => row(k, window.tr(l), false)).join('')
   ibRenderController()
@@ -2736,10 +2819,15 @@ document.getElementById('ibPad')?.addEventListener('click', e => {
 function ibHatToggle(on) {
   const p = ibProf(); if (!p) return
   p.axes = p.axes.filter(a => a.target !== 'DPAD')
-  if (on) p.axes.push({ usagePage: 1, usage: 0x39, target: 'DPAD' })
+  if (on) p.axes.push({ usagePage: 1, usage: 0x39, target: 'DPAD', vid: p.device ? p.device.vid : '', pid: p.device ? p.device.pid : '' })
   ibSave(); ibRenderMap()
 }
 // Capture-Ergebnis aus der Shell: Quelle dem wartenden Ziel zuordnen.
+// hit.vid/hit.pid: welches physische Geraet den Treffer geliefert hat - wird in die
+// Zuordnung mitgespeichert (Fix "Lenken loest Bremsen aus"). Ohne dieses Tag wurden
+// Achsen/Knoepfe nur nach usagePage/usage abgeglichen; bei ZWEI gleichzeitig genutzten
+// Geraeten (z.B. Lenkrad + separates Pedal-Set - beide melden unabhaengig voneinander
+// generische Achsen wie X/Y/Z) konnte ein Geraet die Werte des anderen ueberschreiben.
 ipcRenderer.on('input-bridge-captured', (e, hit) => {
   const p = ibProf(), target = ibCaptureTarget
   ibCaptureTarget = null
@@ -2747,18 +2835,19 @@ ipcRenderer.on('input-bridge-captured', (e, hit) => {
   ibClear(target)   // alte Zuordnung dieses Ziels ersetzen (ibClear speichert schon)
   const isAxisTarget = IB_AXES.some(([k]) => k === target)
   const isTrigger = target === 'LT' || target === 'RT'
+  const dev = { vid: hit.vid || '', pid: hit.pid || '' }
   if (hit.type === 'axis' && isAxisTarget && isTrigger && typeof hit.base === 'number') {
     // Auto-Kalibrierung: Ruhelage (hit.base) soll 0 ergeben. Invert so, dass Druecken
     // zu hohen Werten fuehrt; Deadzone knapp ueber der (ggf. invertierten) Ruhelage.
     const invert = hit.val < hit.base
     const restAfter = invert ? (1 - hit.base) : hit.base
     const dz = Math.min(0.9, Math.max(0.03, restAfter + 0.03))
-    p.axes.push({ usagePage: hit.usagePage, usage: hit.usage, target, deadzone: +dz.toFixed(2), curve: 1, invert })
+    p.axes.push({ usagePage: hit.usagePage, usage: hit.usage, target, deadzone: +dz.toFixed(2), curve: 1, invert, ...dev })
   }
-  else if (hit.type === 'axis' && isAxisTarget) p.axes.push({ usagePage: hit.usagePage, usage: hit.usage, target, deadzone: isTrigger ? 0.05 : 0.1, curve: 1, invert: false })
-  else if (hit.type === 'axis') p.axisToButton.push({ usagePage: hit.usagePage, usage: hit.usage, threshold: 0.7, target })
-  else if (isAxisTarget) p.buttonToAxis.push({ usage: hit.usage, target, value: 1 })
-  else p.buttons.push({ usage: hit.usage, target })
+  else if (hit.type === 'axis' && isAxisTarget) p.axes.push({ usagePage: hit.usagePage, usage: hit.usage, target, deadzone: isTrigger ? 0.05 : 0.1, curve: 1, invert: false, ...dev })
+  else if (hit.type === 'axis') p.axisToButton.push({ usagePage: hit.usagePage, usage: hit.usage, threshold: 0.7, target, ...dev })
+  else if (isAxisTarget) p.buttonToAxis.push({ usage: hit.usage, target, value: 1, ...dev })
+  else p.buttons.push({ usage: hit.usage, target, ...dev })
   ibSave(); ibRenderMap()
 })
 // Live-Monitor (kommt nur, solange der Tab offen ist -> input-bridge-monitor an/aus).
@@ -3686,7 +3775,13 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function copyStreamLink() {
       const el = document.getElementById('streamLink')
-      if (_streamOpening || !el.value) { streamToast(window.tr('⏳ Link wird noch vorbereitet – gleich ist er da.')); return }
+      if (_streamOpening || !el.value) {
+        // Wunsch VORMERKEN statt nur abweisen: die Shell kopiert automatisch, sobald der
+        // Link final ist (gleicher Weg wie das Auto-Kopieren beim Start-Klick).
+        ipcRenderer.invoke('queue-copy-link').catch(() => {})
+        streamToast(window.tr('⏳ Link wird noch vorbereitet – er wird automatisch kopiert, sobald er fertig ist.'))
+        return
+      }
       el.select()
       navigator.clipboard.writeText(el.value).catch(() => { try { document.execCommand('copy') } catch {} })
       flashCopied()

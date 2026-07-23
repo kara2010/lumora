@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "2.2.20",
+        "softwareVersion": "3.0.0",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1055,6 +1055,7 @@
           <a href="streaming.html"><span class="di" aria-hidden="true">📡</span><span class="dtxt">Game streaming<span class="dsub">Via link in 1080p60 – up to 4K</span></span></a>
           <a href="gaming-osd.html"><span class="di" aria-hidden="true">📊</span><span class="dtxt">Gaming OSD<span class="dsub">FPS, GPU &amp; CPU without Afterburner</span></span></a>
           <a href="gamepad.html"><span class="di" aria-hidden="true">🎮</span><span class="dtxt">Gamepad control<span class="dsub">Couch gaming on the TV</span></span></a>
+          <a href="eingabe-bruecke.html"><span class="di" aria-hidden="true">🕹️</span><span class="dtxt">Input bridge<span class="dsub">Joystick as an Xbox controller</span></span></a>
           <a href="discord-alternative.html"><span class="di" aria-hidden="true">💬</span><span class="dtxt">Discord comparison<span class="dsub">Streaming without Nitro</span></span></a>
           <a href="portfreigabe.html"><span class="di" aria-hidden="true">🔌</span><span class="dtxt">Port forwarding<span class="dsub">Router guide when it won't connect</span></span></a>
         </div>
@@ -1083,7 +1084,7 @@
   </div>
   <div class="hero-actions">
     <button class="btn-dl" onclick="startDownload()">
-      ⬇ Download &nbsp;·&nbsp; 171 MB
+      ⬇ Download &nbsp;·&nbsp; 3.5 MB
     </button>
     <a class="btn-ghost" href="#features">
       ✨ New: Game streaming &amp; OSD
@@ -1295,6 +1296,13 @@
         </div>
       </div>
       <div class="feature">
+        <div class="feature-icon">🕹️</div>
+        <div>
+          <h3>Input bridge: joystick &amp; wheel for any game</h3>
+          <p>Turns a joystick, wheel or flight stick into a virtual Xbox gamepad – for games that only recognise gamepads, including Microsoft Store / Xbox titles like Forza, where nothing else works. Visual mapping, auto-calibration, per-game profiles. Accessible too: button instead of axis and vice versa. <a href="eingabe-bruecke.html" style="color:var(--accent2)">How the input bridge works →</a></p>
+        </div>
+      </div>
+      <div class="feature">
         <div class="feature-icon">⌨️</div>
         <div>
           <h3>Freely bindable hotkey</h3>
@@ -1359,8 +1367,20 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">2.2.20</span>
+          <span class="release-ver">3.0.0</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>Completely rebuilt</strong>: Lumora now runs entirely on its own native code – no Electron, no FFmpeg, no third-party streaming server. The download shrinks from around 171&nbsp;MB to about 3.5&nbsp;MB, with the same feature set and a faster start.</li>
+          <li><strong>Much more stable streaming</strong>: stutter for remote viewers fixed, lost video packets are re-requested, AV1 is only sent to devices with a matching decoder, and the automatic quality adjustment reacts more calmly.</li>
+          <li><strong>New: input bridge</strong> – turns a joystick, wheel or flight stick into a virtual Xbox gamepad, for games that only recognise gamepads (including Microsoft Store / Xbox titles like Forza). With visual mapping, a live controller display and per-game profiles. <a href="eingabe-bruecke.html" style="color:var(--accent2)">Learn more →</a></li>
+          <li><strong>Numerous fixed crashes and display glitches</strong>: a memory leak on encoder switch, black windows, window size after a Windows restart, hanging on close.</li>
+          <li><strong>App fully available in German and English</strong>, with tidied-up dialogs in a consistent design.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">2.2.20</span>
         </div>
         <ul>
           <li><strong>Signed &amp; trusted</strong>: Lumora is now digitally signed (Certum Code Signing). Windows shows the verified publisher instead of “Unknown publisher”, and the hard Smart App Control block is gone. Any initial SmartScreen notice fades as the signature builds reputation.</li>
@@ -1402,6 +1422,7 @@
           <li>The stream preview reliably scrolls into view again when you go live.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.16</span>
@@ -1457,7 +1478,6 @@
           <li><strong>Web player</strong>: subtle playback-duration display · controls toggled by tapping · default receive buffer raised to 300&nbsp;ms (smoother picture on shaky connections).</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.10</span>
@@ -1600,7 +1620,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (13)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (18)</button>
   </div>
 </section>
 
@@ -1853,6 +1873,7 @@
     <a class="drawer-item" href="streaming.html"><span class="ico" aria-hidden="true">📡</span><span class="txt">Game streaming<span class="sub">Via link in 1080p60 – up to 4K</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="gaming-osd.html"><span class="ico" aria-hidden="true">📊</span><span class="txt">Gaming OSD<span class="sub">FPS, GPU &amp; CPU without Afterburner</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="gamepad.html"><span class="ico" aria-hidden="true">🎮</span><span class="txt">Gamepad control<span class="sub">Couch gaming on the TV</span></span><span class="chev" aria-hidden="true">›</span></a>
+    <a class="drawer-item" href="eingabe-bruecke.html"><span class="ico" aria-hidden="true">🕹️</span><span class="txt">Input bridge<span class="sub">Joystick as an Xbox controller</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="discord-alternative.html"><span class="ico" aria-hidden="true">💬</span><span class="txt">Discord comparison<span class="sub">Streaming without Nitro</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="portfreigabe.html"><span class="ico" aria-hidden="true">🔌</span><span class="txt">Port forwarding<span class="sub">Router guide when it won't connect</span></span><span class="chev" aria-hidden="true">›</span></a>
     <p class="drawer-group-label">This page</p>
@@ -1997,7 +2018,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Show less' : 'Show older versions (13)';
+    btn.textContent = open ? 'Show less' : 'Show older versions (18)';
   }
 
   function toggleFeatures() {

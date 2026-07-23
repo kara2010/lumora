@@ -1,0 +1,26 @@
+Lumora 3.0.0 – die komplett neu gebaute Version
+
+Lumora läuft ab dieser Version durchgängig auf eigenem, nativem Code – ohne Electron, ohne FFmpeg, ohne fremden Streaming-Server. Das Ergebnis: winziger Download, schnellerer Start, stabileres Streaming.
+
+• Download von rund 171 MB auf etwa 3,5 MB geschrumpft – gleiche Funktionen, ein Bruchteil der Größe.
+• Deutlich stabileres Streaming: Ruckeln bei entfernten Zuschauern behoben, verlorene Bildpakete werden nachgefordert, AV1 wird nur an Geräte mit passendem Decoder gesendet, die automatische Qualitätsanpassung reagiert ruhiger.
+• Neue Eingabe-Brücke: macht aus Joystick, Lenkrad oder Flightstick ein virtuelles Xbox-Gamepad – für Spiele, die nur Gamepads kennen, inklusive Microsoft-Store-/Xbox-Titeln wie Forza. Mit visueller Zuordnung, Live-Anzeige am Controller und Profilen pro Spiel.
+• Automatisches HDR pro Spiel, FPS-/Hardware-OSD und volle Gamepad-Bedienung des Launchers – alles wie gewohnt, jetzt nativ.
+• Zahlreiche behobene Abstürze und Anzeigefehler: Speicherleck beim Encoder-Wechsel, schwarze Fenster, Fenstergröße nach Windows-Neustart, hängendes Schließen.
+• App vollständig auf Deutsch und Englisch, aufgeräumte Dialoge im einheitlichen Design.
+
+Bestehende Installationen aktualisieren sich automatisch.
+
+===EN===
+Lumora 3.0.0 – the completely rebuilt version
+
+From this version on, Lumora runs entirely on its own native code – no Electron, no FFmpeg, no third-party streaming server. The result: a tiny download, faster startup, more stable streaming.
+
+• Download shrunk from around 171 MB to about 3.5 MB – same features, a fraction of the size.
+• Much more stable streaming: stutter for remote viewers fixed, lost video packets are re-requested, AV1 is only sent to devices with a matching decoder, and the automatic quality adjustment reacts more calmly.
+• New input bridge: turns a joystick, wheel or flight stick into a virtual Xbox gamepad – for games that only recognise gamepads, including Microsoft Store / Xbox titles like Forza. With visual mapping, a live controller display and per-game profiles.
+• Automatic per-game HDR, an FPS / hardware OSD and full gamepad control of the launcher – all as before, now native.
+• Numerous fixed crashes and display glitches: a memory leak on encoder switch, black windows, window size after a Windows restart, hanging on close.
+• App fully available in German and English, with tidied-up dialogs in a consistent design.
+
+Existing installations update automatically.
