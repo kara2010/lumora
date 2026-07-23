@@ -1371,8 +1371,8 @@
           <span class="release-tag">current</span>
         </div>
         <ul>
-          <li><strong>Completely rebuilt – no Electron</strong>: Lumora now runs entirely on its own native code, without FFmpeg and without a third-party streaming server. The download shrinks from around 171&nbsp;MB to about <strong>3.5&nbsp;MB</strong>, with the same feature set, a noticeably faster start and lower memory use.</li>
-          <li><strong>Streaming stable from the ground up</strong>: the stutter for remote viewers is fixed – the video data is cleanly capped at the source, lost packets are re-requested automatically, and the stream stays smooth even at 4K/60&nbsp;fps with multiple viewers.</li>
+          <li><strong>Completely rebuilt – native instead of Electron</strong>: Lumora now runs entirely on its own C++ code instead of the Electron framework and external tools. The download shrinks from around 171&nbsp;MB to about <strong>3.5&nbsp;MB</strong>, with the same feature set, a noticeably faster start and lower memory use.</li>
+          <li><strong>More stable streaming</strong>: the stutter for remote viewers is fixed – the video data is cleanly capped at the source and lost packets are re-requested automatically. Even with multiple viewers the stream runs noticeably smoother.</li>
           <li><strong>AV1 only where it truly runs smoothly</strong>: the stream is sent in AV1 only to devices with a matching hardware decoder – weaker machines automatically get H.264 and thus a smooth picture instead of stutter.</li>
           <li><strong>Calmer, more honest quality adjustment</strong>: a viewer's brief reception hiccup no longer makes Lumora over-throttle or oscillate; the configured bitrate is respected (no more silent halving for AV1).</li>
           <li><strong>Demand-driven encoding</strong>: AV1 and H.264 are only produced in parallel when both kinds of viewers are actually present – no needless double encode that burdens weak hardware.</li>

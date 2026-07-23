@@ -1384,8 +1384,8 @@
           <span class="release-tag">aktuell</span>
         </div>
         <ul>
-          <li><strong>Komplett neu gebaut – ohne Electron</strong>: Lumora läuft jetzt durchgängig auf eigenem, nativem Code, ohne FFmpeg und ohne fremden Streaming-Server. Der Download schrumpft von rund 171&nbsp;MB auf etwa <strong>3,5&nbsp;MB</strong>, bei gleichem Funktionsumfang, spürbar schnellerem Start und weniger Speicherverbrauch.</li>
-          <li><strong>Streaming von Grund auf stabiler</strong>: Das Ruckeln bei entfernten Zuschauern ist behoben – die Bilddaten werden an der Quelle sauber begrenzt, verlorene Pakete werden automatisch nachgefordert, und der Stream läuft auch bei 4K/60&nbsp;fps mit mehreren Zuschauern rund.</li>
+          <li><strong>Komplett neu gebaut – nativ statt Electron</strong>: Lumora läuft jetzt durchgängig auf eigenem C++-Code statt auf dem Electron-Framework und externen Werkzeugen. Der Download schrumpft von rund 171&nbsp;MB auf etwa <strong>3,5&nbsp;MB</strong>, bei gleichem Funktionsumfang, spürbar schnellerem Start und weniger Speicherverbrauch.</li>
+          <li><strong>Streaming stabiler</strong>: Das Ruckeln bei entfernten Zuschauern ist behoben – die Bilddaten werden an der Quelle sauber begrenzt und verlorene Pakete automatisch nachgefordert. Auch bei mehreren Zuschauern läuft der Stream spürbar flüssiger.</li>
           <li><strong>AV1 nur, wo es wirklich flüssig läuft</strong>: Der Stream geht in AV1 nur an Geräte mit passendem Hardware-Decoder – schwächere Rechner bekommen automatisch H.264 und damit ein flüssiges Bild statt Rucklern.</li>
           <li><strong>Ruhigere, ehrlichere Qualitätsanpassung</strong>: Bei kurzen Empfangsproblemen eines Zuschauers regelt Lumora nicht mehr überzogen herunter und pendelt nicht; die eingestellte Bitrate wird eingehalten (keine stille Halbierung mehr bei AV1).</li>
           <li><strong>Bedarfsgesteuertes Encoding</strong>: AV1 und H.264 werden nur dann parallel erzeugt, wenn wirklich beide Sorten Zuschauer da sind – kein unnötiger Doppel-Encode, der schwache Hardware belastet.</li>
