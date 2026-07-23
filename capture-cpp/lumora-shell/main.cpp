@@ -3417,8 +3417,15 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (loadSettings().value("minimizeToTray", false) && !g_quitting) { ShowWindow(h, SW_HIDE); return 0; }   // in den Infobereich statt beenden
         if (g_bcState.value("active", false)) stopBroadcast();   // Stream + Kindprozesse sauber beenden
         if (!g_group.is_null()) {   // fullTeardown: Gruppe beim App-Ende sauber verlassen (nicht serverseitig haengen lassen)
-            std::string code = g_group.value("code", ""); json leave = { {"id", groupMemberId()} };
-            groupRelay("leave", { {"code", code} }, &leave); g_group = nullptr;
+            // Hintergrund-Thread wie beim UPnP-Router-Abbau ein paar Zeilen weiter unten
+            // (stopBroadcast): der Aufruf geht an einen ENTFERNTEN Server mit 8s-Timeout -
+            // synchron auf dem UI-Thread blockierte das Schliessen bis zu 8s, wenn der Server
+            // langsam/nicht erreichbar ist. Bei einem echten Windows-Neustart reicht Windows'
+            // Geduld dafuer nicht (der Prozess wird zwangsbeendet, bevor der Aufruf fertig ist) -
+            // und selbst beim normalen Schliessen wirkte die App in diesem Fall eingefroren.
+            std::string code = g_group.value("code", ""); std::string mid = groupMemberId();
+            std::thread([code, mid]() { json leave = { {"id", mid} }; groupRelay("leave", { {"code", code} }, &leave); }).detach();
+            g_group = nullptr;
         }
         destroyTray();
         saveWindowState(h); DestroyWindow(h); return 0;
