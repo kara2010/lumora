@@ -3662,6 +3662,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     HWND hwnd = CreateWindowExW(0, L"LumoraShell", L"Lumora", WS_OVERLAPPEDWINDOW,
         wx, wy, wwidth, wheight, nullptr, nullptr, hInst, nullptr);
     g_hwnd = hwnd;
+    // Runde Fensterecken (Windows 11): unser eigener WM_NCCALCSIZE-Zuschnitt (Custom-
+    // Titelleiste statt Systemrahmen) unterdrueckt DWMs automatische Rundung, die
+    // Electron/Chromium-Fenster ohne Weiteres bekommen - seit dem Umstieg wirkten unsere
+    // Fenster deshalb eckig. Gleiche Behandlung wie schon beim Tuersteher-Fenster.
+    { DWM_WINDOW_CORNER_PREFERENCE cp = DWMWCP_ROUND;
+      DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cp, sizeof(cp)); }
     // Frame-Neuberechnung erzwingen (WM_NCCALCSIZE greift sonst erst bei der naechsten Groessenaenderung)
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     // --minimized (Autostart): versteckt starten (Tray uebernimmt); sonst normal/maximiert.
