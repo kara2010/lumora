@@ -4,8 +4,8 @@
 IDI_ICON1 ICON "app.ico"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION 3,0,0,0
+ PRODUCTVERSION 3,0,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -18,12 +18,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Karsten Radermacher"
             VALUE "FileDescription", "Lumora"
-            VALUE "FileVersion", "0.1.0.0"
+            VALUE "FileVersion", "3.0.0.0"
             VALUE "InternalName", "lumora-shell"
             VALUE "LegalCopyright", "\xA9 Karsten Radermacher"
             VALUE "OriginalFilename", "lumora-shell.exe"
             VALUE "ProductName", "Lumora"
-            VALUE "ProductVersion", "0.1.0.0"
+            VALUE "ProductVersion", "3.0.0.0"
         END
     END
     BLOCK "VarFileInfo"
