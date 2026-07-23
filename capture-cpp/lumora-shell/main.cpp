@@ -3400,6 +3400,19 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         else if (arg.find("--minimized") == std::string::npos) showMainWindow();   // wie Electron: --minimized-Zweitstart holt NICHT nach vorne
         return TRUE;
     }
+    case WM_QUERYENDSESSION:
+        // Windows-Neustart/Abmelden/Herunterfahren: WM_CLOSE kommt hier NICHT zuverlaessig -
+        // der Prozess kann nach kurzer Frist zwangsbeendet werden, ohne den normalen
+        // Schliessen-Pfad zu durchlaufen. Genau das liess die Fenstergroesse/-position nach
+        // einem echten Neustart verloren gehen (saveWindowState() hing bisher AUSSCHLIESSLICH
+        // an WM_CLOSE). Hier sofort sichern, bevor Windows den Prozess beendet.
+        saveWindowState(h);
+        return TRUE;   // Beenden zulassen
+    case WM_ENDSESSION:
+        // Zur Sicherheit erneut sichern (falls die Sitzung erst hier tatsaechlich endet) -
+        // schreibt nur dieselbe Datei neu, kein Risiko.
+        if (w) saveWindowState(h);
+        return 0;
     case WM_CLOSE:
         if (loadSettings().value("minimizeToTray", false) && !g_quitting) { ShowWindow(h, SW_HIDE); return 0; }   // in den Infobereich statt beenden
         if (g_bcState.value("active", false)) stopBroadcast();   // Stream + Kindprozesse sauber beenden
