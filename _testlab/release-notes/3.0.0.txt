@@ -1,9 +1,9 @@
 Lumora 3.0.0 – die komplett neu gebaute Version
 
-Lumora läuft ab dieser Version durchgängig auf eigenem, nativem Code – ohne Electron, ohne FFmpeg, ohne fremden Streaming-Server. Das Ergebnis: winziger Download, schnellerer Start, stabileres Streaming.
+Lumora läuft ab dieser Version durchgängig auf eigenem, nativem C++-Code statt auf dem Electron-Framework und externen Werkzeugen. Das Ergebnis: winziger Download, schnellerer Start, stabileres Streaming.
 
 • Download von rund 171 MB auf etwa 3,5 MB geschrumpft – gleiche Funktionen, ein Bruchteil der Größe, weniger Speicherverbrauch.
-• Streaming von Grund auf stabiler: Ruckeln bei entfernten Zuschauern behoben (Bilddaten an der Quelle begrenzt), verlorene Pakete werden nachgefordert – auch 4K/60 fps mit mehreren Zuschauern läuft rund.
+• Streaming stabiler: Ruckeln bei entfernten Zuschauern behoben (Bilddaten an der Quelle begrenzt), verlorene Pakete werden nachgefordert – auch bei mehreren Zuschauern spürbar flüssiger.
 • AV1 nur an Geräte mit passendem Hardware-Decoder; schwächere Rechner bekommen automatisch H.264 – flüssiges Bild statt Ruckler.
 • Ruhigere, ehrlichere Qualitätsanpassung: kein überzogenes Herunterregeln bei kurzen Empfangsproblemen, keine stille Bitraten-Halbierung bei AV1 mehr.
 • Bedarfsgesteuertes Encoding: AV1 und H.264 laufen nur dann parallel, wenn wirklich beide Sorten Zuschauer da sind – kein unnötiger Doppel-Encode.
@@ -20,10 +20,10 @@ Bestehende Installationen aktualisieren sich automatisch.
 ===EN===
 Lumora 3.0.0 – the completely rebuilt version
 
-From this version on, Lumora runs entirely on its own native code – no Electron, no FFmpeg, no third-party streaming server. The result: a tiny download, faster startup, more stable streaming.
+From this version on, Lumora runs entirely on its own native C++ code instead of the Electron framework and external tools. The result: a tiny download, faster startup, more stable streaming.
 
 • Download shrunk from around 171 MB to about 3.5 MB – same features, a fraction of the size, lower memory use.
-• Streaming stable from the ground up: stutter for remote viewers fixed (video data capped at the source), lost packets are re-requested – even 4K/60 fps with multiple viewers stays smooth.
+• More stable streaming: stutter for remote viewers fixed (video data capped at the source), lost packets are re-requested – noticeably smoother even with multiple viewers.
 • AV1 only to devices with a matching hardware decoder; weaker machines automatically get H.264 – a smooth picture instead of stutter.
 • Calmer, more honest quality adjustment: no over-throttling on brief reception hiccups, no more silent bitrate halving for AV1.
 • Demand-driven encoding: AV1 and H.264 only run in parallel when both kinds of viewers are actually present – no needless double encode.
