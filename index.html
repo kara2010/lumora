@@ -97,10 +97,10 @@
         <button class="detail-nav-tab active" data-view="library" onclick="showLibraryView()">Bibliothek</button>
         <button class="detail-nav-tab" data-view="allgemein" onclick="showSettings('allgemein')">Allgemein</button>
         <button class="detail-nav-tab" data-view="darstellung" onclick="showSettings('darstellung')">Darstellung</button>
-        <button class="detail-nav-tab" data-view="overlay" onclick="showSettings('overlay')">Overlay</button>
         <button class="detail-nav-tab" data-view="steuerung" onclick="showSettings('steuerung')">Steuerung</button>
-        <button class="detail-nav-tab" data-view="stream" onclick="showSettings('stream')">Stream</button>
+        <button class="detail-nav-tab" data-view="overlay" onclick="showSettings('overlay')">Overlay</button>
         <button class="detail-nav-tab" data-view="eingabe" onclick="showSettings('eingabe')">Eingabe</button>
+        <button class="detail-nav-tab" data-view="stream" onclick="showSettings('stream')">Stream</button>
       </nav>
       <div class="empty-state" id="emptyState">
         <div class="empty-icon">🎮</div>
@@ -530,11 +530,6 @@
                   <input type="checkbox" id="setStreamAdaptive" onchange="onStreamSettingChange()">
                 </div>
                 <p class="settings-hint" style="margin-top:8px">Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.</p>
-                <div class="setting-toggle-row" style="margin-top:10px">
-                  <span class="setting-toggle-label">Nativer Aufnahme-Modus (Beta)</span>
-                  <input type="checkbox" id="setStreamNative" onchange="onStreamSettingChange()">
-                </div>
-                <p class="settings-hint" style="margin-top:8px">Beta: ein einziger, FFmpeg-freier Aufnahme-Helfer (nativ, C++) statt der bisherigen Kette – schlanker und schneller. Aus = bewährter Weg. Bei Problemen einfach wieder abschalten.</p>
                 <div id="hdrTuneBox" style="margin-top:16px">
                   <div class="dl-head" style="margin-bottom:7px">HDR-Feinabstimmung <span style="opacity:.7; font-weight:400">(nur bei HDR-Spielen)</span></div>
                   <div class="osd-field">
@@ -3063,7 +3058,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('streamBufferVal').textContent = sbuf + ' ms'
       document.getElementById('setStreamAdaptive').checked = s.streamAdaptive !== false
       document.getElementById('setStreamDoorman').checked = !!s.streamDoorman
-      document.getElementById('setStreamNative').checked = !!s.streamNativeHelper
       renderDoormanLists()
       const hmode = Math.max(0, Math.min(3, parseInt(s.streamHdrMode, 10) || 0))
       const hexp = Math.max(0.15, Math.min(1.2, Number(s.streamHdrExposure) || 0.3937))
@@ -3741,7 +3735,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         streamCodec: document.getElementById('setStreamCodec').value,
         streamAdaptive: document.getElementById('setStreamAdaptive').checked,
         streamDoorman: document.getElementById('setStreamDoorman').checked,
-        streamNativeHelper: document.getElementById('setStreamNative').checked,
       })
     }
     // Jitter-Puffer der Zuschauer: getrennt gespeichert, damit die Regler-Bewegung
