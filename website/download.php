@@ -1,6 +1,27 @@
 <?php
 define('COUNTER_FILE', __DIR__ . '/data/count.txt');
-define('DOWNLOAD_FILE', __DIR__ . '/updates/Lumora Setup 2.2.20.exe');
+
+// Auszuliefernde Datei NICHT mehr hart verdrahten (das lieferte nach dem 3.0.0-Release
+// noch die alte 181-MB-Electron-exe aus). Stattdessen die aktuell veroeffentlichte Version
+// aus dem Update-Feed native-update.json ziehen - den aktualisiert der Release-Build immer.
+// So folgt der Download automatisch jedem Release; nur wenn der Feed fehlt/kaputt ist, greift
+// der Fallback.
+function currentDownloadFile() {
+    $fallback = __DIR__ . '/updates/Lumora-Native-Setup-3.0.0.exe';
+    $feed = __DIR__ . '/updates/native-update.json';
+    if (is_file($feed)) {
+        $j = json_decode((string) file_get_contents($feed), true);
+        if (!empty($j['url'])) {
+            // basename schuetzt vor Pfad-Manipulation; Datei muss lokal existieren
+            $cand = __DIR__ . '/updates/' . basename((string) $j['url']);
+            if (is_file($cand)) {
+                return $cand;
+            }
+        }
+    }
+    return $fallback;
+}
+define('DOWNLOAD_FILE', currentDownloadFile());
 
 // ?count – nur Zählerstand zurückgeben (wird per JS beim Laden abgerufen)
 if (isset($_GET['count'])) {
