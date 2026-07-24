@@ -7,7 +7,10 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.0.0"   # 3.0.0: erstes offizielles Release der nativen Version (loest die Electron-
+$version = "3.0.1"   # 3.0.1: OSD-Overlay auf Panel-Groesse verkleinert (blockierte als Vollbild-Overlay
+                     #        auf manchen Systemen die Desktop-Symbole, auch nach dem Deaktivieren);
+                     #        Edit-Modus-Ende SWP_FRAMECHANGED-Fix; Relay/Capture tragen jetzt das App-Icon.
+$prev_3_0_0 = ""  # 3.0.0: erstes offizielles Release der nativen Version (loest die Electron-
                      #        Linie 2.2.x ab). Buendelt die gesamte 0.2.x-Reihe: eigener C++-Stack
                      #        statt Electron/FFmpeg/mediamtx, Streaming-Stabilitaet, Eingabe-Bruecke,
                      #        Speicherleck-/Blackout-Fixes. Download 171 MB -> ~3,5 MB. App durchgaengig

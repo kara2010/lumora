@@ -1,6 +1,6 @@
 {
   "name": "lumora",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "license": "AGPL-3.0-only",
   "author": "Karsten Radermacher",
   "description": "Lumora – Game Launcher mit automatischem HDR",
@@ -12,7 +12,14 @@
   "build": {
     "appId": "com.lumora.app",
     "productName": "Lumora",
-    "protocols": [{ "name": "Lumora", "schemes": ["lumora"] }],
+    "protocols": [
+      {
+        "name": "Lumora",
+        "schemes": [
+          "lumora"
+        ]
+      }
+    ],
     "files": [
       "**/*",
       "!_testlab${/*}",
@@ -32,7 +39,10 @@
       "!installer.nsh"
     ],
     "compression": "maximum",
-    "electronLanguages": ["en-US", "de"],
+    "electronLanguages": [
+      "en-US",
+      "de"
+    ],
     "asarUnpack": [
       "**/*.node",
       "**/node_modules/koffi/**",
@@ -49,7 +59,9 @@
       "icon": "icon.ico",
       "signtoolOptions": {
         "sign": "./sign.js",
-        "signingHashAlgorithms": ["sha256"]
+        "signingHashAlgorithms": [
+          "sha256"
+        ]
       }
     },
     "nsis": {
@@ -60,7 +72,10 @@
       "include": "installer.nsh",
       "multiLanguageInstaller": true,
       "displayLanguageSelector": true,
-      "installerLanguages": ["de_DE", "en_US"]
+      "installerLanguages": [
+        "de_DE",
+        "en_US"
+      ]
     },
     "extraResources": [
       {
