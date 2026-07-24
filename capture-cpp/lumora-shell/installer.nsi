@@ -106,6 +106,15 @@ Section "Lumora"
 
   Sleep 400
 
+  ; Alte geplante Aufgaben (OSD-Broker) IMMER entfernen, egal ob Update oder
+  ; Umstieg von Electron: sie zeigten sonst nach dem exe-Wechsel weiter auf den
+  ; alten Pfad (Electron-Lumora.exe bzw. eine fruehere native exe), schtasks /run
+  ; startete dann nichts Sichtbares. fpsTaskPresent()/senseTaskPresent() pruefen nur
+  ; auf Existenz, nicht auf den Ziel-Pfad - darum hier hart weg, die App registriert
+  ; sie beim naechsten OSD-Einschalten sauber mit dem aktuellen Pfad neu.
+  nsExec::Exec 'schtasks /Delete /F /TN LumoraOSD-FPS'
+  nsExec::Exec 'schtasks /Delete /F /TN LumoraOSD-Sensors'
+
   ; --- Vorhandene Electron-Version IMMER sauber abloesen (auch bei Silent-Updates:
   ;     Alt-Parallel-Installationen aus der Beta-Phase blieben sonst fuer immer liegen).
   ;     Nur wenn wir nicht selbst in diesen Ordner installieren (migrierte Installation).

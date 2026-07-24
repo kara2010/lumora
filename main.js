@@ -126,6 +126,9 @@ function loadAppSettings() {
   // steht, wird auf den neuen (300 ms) gehoben; bewusst abweichend eingestellte
   // Werte bleiben unangetastet, der Regler bleibt frei bedienbar.
   if (appSettings.streamBufferMs === 120) appSettings.streamBufferMs = 300
+  // Beta-Schalter entfernt: der native C++-Aufnahme-Helfer ist jetzt der einzige Weg,
+  // ungeachtet dessen was in aelteren app-settings.json noch gespeichert war.
+  appSettings.streamNativeHelper = true
 }
 
 function saveAppSettings() {
@@ -5374,8 +5377,8 @@ function bcStartFfmpeg(cfg) {
   broadcastState.quality = bcQualityLabel(cfg)
   broadcastState.adaptKbit = (bcAdaptLevel > 0 && appSettings.streamAdaptive !== false) ? cfg.kbit : 0
   bcPushState()
-  // Test-Schalter (opt-in): EIN nativer C++-Helfer (Capture+Encode+Opus, publisht per
-  // UDP/MPEG-TS an mediamtx) statt FFmpeg + C#-Capture + Audio-Helfer. Alter Weg = Default.
+  // EIN nativer C++-Helfer (Capture+Encode+Opus, publisht per UDP/MPEG-TS an mediamtx)
+  // statt FFmpeg + C#-Capture + Audio-Helfer. War Beta-Schalter, jetzt der einzige Weg.
   if (appSettings.streamNativeHelper) return bcStartNative(cfg)
   if (cfg.mode === 'window') return bcStartWindowCapture(cfg)
   // Monitor-Weg (ddagrab): der Ton kommt vom parallelen Audio-Helfer ueber fd 3 -
@@ -5396,7 +5399,7 @@ function bcWriteSourceControl(cfg) {
   try { fs.writeFileSync(path.join(app.getPath('temp'), 'lumora-source.txt'), (cfg.mode === 'window' && cfg.hwnd) ? ('hwnd ' + cfg.hwnd) : 'monitor') } catch {}
 }
 let bcNatKbit = 0   // zuletzt an den nativen Helfer gemeldete Bitrate (nur echte Wechsel toasten)
-// Nativer Ein-Prozess-Weg (Test-Schalter streamNativeHelper): der C++-Helfer captured +
+// Nativer Ein-Prozess-Weg: der C++-Helfer captured +
 // encodet selbst (HDR/Scale/NVENC/AMF/QSV) und published per UDP/MPEG-TS an mediamtx
 // (Pfad MTX_PATH, source: udp+mpegts). Ersetzt FFmpeg + C#-Capture + Audio-Helfer in EINEM
 // Prozess. Handle in ffProc -> Stop (stopBroadcast) und Restart (bcDoRestartFfmpeg) greifen

@@ -195,9 +195,11 @@ struct AmfEncoder : Encoder {
             // das ist zugleich unser Faehigkeits-Check. Eigener Property-Namespace (AV1_*),
             // sonst gleiche Philosophie wie der AVC-Pfad unten: CBR, Low-Latency, kein Filler,
             // Keyframe alle 1s mit Sequence-Header (Zuschauer-Einstieg).
-            if (f->CreateComponent(context, AMFVideoEncoder_AV1, &encoder) != AMF_OK) return false;
+            AMF_RESULT cr = f->CreateComponent(context, AMFVideoEncoder_AV1, &encoder);
+            if (cr != AMF_OK) { printf("AV1-PROBE: CreateComponent status=%d\n", (int)cr); return false; }
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_USAGE, AMF_VIDEO_ENCODER_AV1_USAGE_LOW_LATENCY);
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD, AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CBR);
+            encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET, AMF_VIDEO_ENCODER_AV1_QUALITY_PRESET_SPEED);   // s. H.264-Pfad (VCN-Engine-Entlastung)
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_FILLER_DATA, false);
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE, (amf_int64)mbit * 1000000);
             // Keyframe-Lawine begrenzen (wie NVENC): Peak = Target, VBV = 4 Bildbudgets.
@@ -207,7 +209,9 @@ struct AmfEncoder : Encoder {
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_FRAMERATE, ::AMFConstructRate(fps, 1));
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_GOP_SIZE, (amf_int64)fps);
             encoder->SetProperty(AMF_VIDEO_ENCODER_AV1_HEADER_INSERTION_MODE, AMF_VIDEO_ENCODER_AV1_HEADER_INSERTION_MODE_KEY_FRAME_ALIGNED);
-            return encoder->Init(amf::AMF_SURFACE_NV12, w, h) == AMF_OK;
+            AMF_RESULT ir = encoder->Init(amf::AMF_SURFACE_NV12, w, h);
+            if (ir != AMF_OK) printf("AV1-PROBE: Init status=%d (%dx%d)\n", (int)ir, w, h);
+            return ir == AMF_OK;
         }
         if (f->CreateComponent(context, AMFVideoEncoderVCE_AVC, &encoder) != AMF_OK) return false;
         // USAGE zuerst (setzt Defaults); danach unsere Werte. WebRTC-sauber wie NVENC:
@@ -216,6 +220,11 @@ struct AmfEncoder : Encoder {
         encoder->SetProperty(AMF_VIDEO_ENCODER_USAGE, AMF_VIDEO_ENCODER_USAGE_LOW_LATENCY);
         encoder->SetProperty(AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD, AMF_VIDEO_ENCODER_RATE_CONTROL_METHOD_CBR);
         encoder->SetProperty(AMF_VIDEO_ENCODER_LOWLATENCY_MODE, true);
+        // QUALITY_PRESET_SPEED statt AMF-Default (Balanced): bei 4K60 + parallelem 4K-Decode
+        // (Vorschau/Videowiedergabe) auf derselben VCN-Engine schaffte der Default nur ~52fps
+        // Encode (SubmitInput AMF_INPUT_FULL ~1x/s, real gemessen 2026-07-23). SPEED entlastet
+        // die Engine; der Qualitaetsverlust ist bei CBR/hohen Bitraten gering.
+        encoder->SetProperty(AMF_VIDEO_ENCODER_QUALITY_PRESET, AMF_VIDEO_ENCODER_QUALITY_PRESET_SPEED);
         // AMF defaultet unter LOW_LATENCY auf Profile MAIN (CABAC) - real auf AMD bestaetigt
         // (mediamtx meldet "profile":"Main" fuer den einkommenden Track). Viele WebRTC-Decoder
         // (v.a. Firefox' eingebetteter OpenH264, aber auch etliche Chromium-Sandboxes/Hardware-
@@ -247,10 +256,25 @@ struct AmfEncoder : Encoder {
         // (auf AMD real reproduziert; NVENC liest synchron und hat das Problem nicht).
         // Darum: eigene AMF-Surface pro Frame, nv12 hineinkopieren - AMF liest eine Surface,
         // die wir nie wieder anfassen.
+        // Ausgaenge IMMER zuerst drainieren - unabhaengig davon, ob der Submit unten klappt.
+        // KERNBUG (Video-Blackout nach ~30-50s, Log-belegt 2026-07-23 11:26, vAU-Zaehler im
+        // Relay eingefroren, Ton lief weiter): SubmitInput liefert bei einer Lastspitze (z.B.
+        // paralleles HW-Decode des YouTube-Fensters auf derselben iGPU) AMF_INPUT_FULL. Der
+        // alte Code wertete ALLES != AMF_OK als Fehler und kehrte VOR QueryOutput zurueck -
+        // die Eingangsqueue wurde nie geleert, jeder Folge-Submit scheiterte wieder an
+        // INPUT_FULL, der Encoder blieb fuer immer still verstopft. Darum: erst drainieren,
+        // dann submitten; bei INPUT_FULL nach dem Drain EINMAL wiederholen, sonst diesen
+        // Frame auslassen (der naechste Tick versucht es erneut - kein Dauerstau mehr).
+        auto drain = [&]() {
+            amf::AMFDataPtr data;
+            while (encoder->QueryOutput(&data) == AMF_OK && data) { amf::AMFBufferPtr b(data); if (b) out.emplace_back((uint8_t*)b->GetNative(), (uint8_t*)b->GetNative() + b->GetSize()); data = nullptr; }
+        };
+        drain();
         amf::AMFSurfacePtr surf;
-        if (context->AllocSurface(amf::AMF_MEMORY_DX11, amf::AMF_SURFACE_NV12, encW, encH, &surf) != AMF_OK) return;
+        AMF_RESULT ar = context->AllocSurface(amf::AMF_MEMORY_DX11, amf::AMF_SURFACE_NV12, encW, encH, &surf);
+        if (ar != AMF_OK) { logEncErr("AllocSurface", (int)ar); return; }
         ID3D11Texture2D* dst = (ID3D11Texture2D*)surf->GetPlaneAt(0)->GetNative();
-        if (!dst) return;
+        if (!dst) { logEncErr("GetNative", 0); return; }
         d3dctx->CopyResource(dst, nv12);   // gleiche Immediate-Context-Reihenfolge: nach Blt+Flush
         // AMF-Sonderfall (bekannter WHEP-Kernbug, bereits fuer den alten FFmpeg/h264_amf-Pfad
         // dokumentiert, s. main.js "AMF-Sonderfall"): der Encoder haelt sich unter LOW_LATENCY
@@ -265,9 +289,17 @@ struct AmfEncoder : Encoder {
             else surf->SetProperty(AMF_VIDEO_ENCODER_FORCE_PICTURE_TYPE, amf_int64(AMF_VIDEO_ENCODER_PICTURE_TYPE_IDR));
         }
         frameNo++;
-        if (encoder->SubmitInput(surf) != AMF_OK) return;
-        amf::AMFDataPtr data;
-        while (encoder->QueryOutput(&data) == AMF_OK && data) { amf::AMFBufferPtr b(data); if (b) out.emplace_back((uint8_t*)b->GetNative(), (uint8_t*)b->GetNative() + b->GetSize()); data = nullptr; }
+        AMF_RESULT sr = encoder->SubmitInput(surf);
+        if (sr == AMF_INPUT_FULL) { drain(); sr = encoder->SubmitInput(surf); }
+        if (sr != AMF_OK) { logEncErr("SubmitInput", (int)sr); return; }
+        drain();
+    }
+    // Encoder-Fehler ratenbegrenzt loggen (1x/s statt 60x/s): frueher waren diese Pfade
+    // KOMPLETT still - ein dauerhafter Fehler sah aus wie "laeuft", nur ohne Bild.
+    uint64_t lastErrLog = 0;
+    void logEncErr(const char* what, int code) {
+        uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (now != lastErrLog) { lastErrLog = now; printf("AMF-FEHLER: %s status=%d (%s)\n", what, code, isAv1 ? "AV1" : "H264"); }
     }
     void setBitrate(int kbit) override {   // AMF: Bitrate live (kbit); Peak+VBV mitziehen (s. init)
         encoder->SetProperty(isAv1 ? AMF_VIDEO_ENCODER_AV1_TARGET_BITRATE : AMF_VIDEO_ENCODER_TARGET_BITRATE, (amf_int64)kbit * 1000);
@@ -976,8 +1008,14 @@ int main(int argc, char** argv) {
     // Encoder-Menge auf einen Sollzustand bringen (zwischen zwei Frames aufgerufen -> sicher).
     // curKbit traegt die aktuelle Bitrate; wird weiter unten initialisiert - hier lokal gehalten.
     auto reconcile = [&](bool wantH264, bool wantAv1, int kbit) {
-        if (!wantH264 && !wantAv1) wantH264 = true;   // Sicherung: nie beide aus
+        // REIHENFOLGE ENTSCHEIDEND (Blackout-Bug, real auf AMD ohne AV1-Support): erst die
+        // Faehigkeit anwenden, DANN die "nie beide aus"-Sicherung. Andersherum passierte bei
+        // codec-bedarf "av1" auf av1Capable=false-Hardware: Sicherung sah wantAv1=true und
+        // griff nicht, danach strich der Faehigkeits-Filter AV1 -> BEIDE Encoder aus, der
+        // Helfer lief leer weiter (Frames-live-Zaehler ohne Codec-Label, nur noch Ton im TS,
+        // vAU-Zaehler im Relay eingefroren - Log-belegt 2026-07-23 10:36).
         if (!av1Capable) wantAv1 = false;
+        if (!wantH264 && !wantAv1) wantH264 = true;   // Sicherung: nie beide aus
         if (wantH264 && !encoder) { Encoder* e = newEncoder(); if (e->init(dev.get(), outW, outH, fps, kbit / 1000 > 0 ? kbit / 1000 : 1)) { encoder = e; printf("codec: H.264 dazu\n"); } else { delete e; } }
         else if (!wantH264 && encoder) { delete encoder; encoder = nullptr; printf("codec: H.264 weg\n"); }
         if (wantAv1 && !encoderAv1) { Encoder* e = newEncoder(); int am = av1Kbit(kbit) / 1000; if (am < 1) am = 1; if (e->init(dev.get(), outW, outH, fps, am, true)) { encoderAv1 = e; printf("codec: AV1 dazu\n"); } else { delete e; } }

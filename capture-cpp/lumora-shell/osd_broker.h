@@ -62,16 +62,30 @@ inline int runFpsBroker(const std::wstring& binDir) {
         if (appTick && (uint32_t)(now - appTick) < 3000) lastFreshApp = now;
         if ((uint32_t)(now - startTick) > 8000 && (uint32_t)(now - lastFreshApp) > 5000) break;   // App zu / OSD aus
         double tmax = 0; int outFps = 0, outFtX100 = 0; uint32_t bestPid = 0;
+        // Vordergrundfenster bevorzugen (wie RTSS' dwLastForegroundApp): sonst gewinnt
+        // "wer praesentiert am meisten" - ein staerker praesentierender Hintergrundprozess
+        // (Overlay/Browser/Launcher) schlaegt dann ein absichtlich niedriger limitiertes
+        // Spiel, und dessen (ggf. an die Desktop-Hz gekoppelte) Rate landet im OSD statt
+        // der echten Spiel-Framerate (real beobachtet: Spiel auf 120 fps begrenzt, OSD
+        // zeigte die Monitor-Aktualisierungsrate).
+        DWORD fgPid = 0; { HWND fg = GetForegroundWindow(); if (fg) GetWindowThreadProcessId(fg, &fgPid); }
+        std::string fgKey = fgPid ? std::to_string(fgPid) : std::string();
         {
             std::lock_guard<std::mutex> lk(mx);
             for (auto& [pid, e] : frames) if (!e.times.empty()) tmax = (std::max)(tmax, e.times.back());
+            auto countRecent = [&](const Frames& e) { int c = 0; for (int i = (int)e.times.size() - 1; i >= 0 && e.times[i] >= tmax - 0.5; --i) c++; return c; };
             int bestC = 0;
-            for (auto& [pid, e] : frames) {
-                int c = 0;
-                for (int i = (int)e.times.size() - 1; i >= 0 && e.times[i] >= tmax - 0.5; --i) c++;
-                if (c > bestC) { bestC = c; outFps = (int)(c / 0.5 + 0.5); outFtX100 = (int)(e.ft.back() * 100 + 0.5); bestPid = (uint32_t)atoi(pid.c_str()); }
+            auto fgIt = fgKey.empty() ? frames.end() : frames.find(fgKey);
+            if (fgIt != frames.end() && (bestC = countRecent(fgIt->second)) >= 2) {
+                outFps = (int)(bestC / 0.5 + 0.5); outFtX100 = (int)(fgIt->second.ft.back() * 100 + 0.5); bestPid = fgPid;
+            } else {
+                bestC = 0;
+                for (auto& [pid, e] : frames) {
+                    int c = countRecent(e);
+                    if (c > bestC) { bestC = c; outFps = (int)(c / 0.5 + 0.5); outFtX100 = (int)(e.ft.back() * 100 + 0.5); bestPid = (uint32_t)atoi(pid.c_str()); }
+                }
+                if (bestC < 2) { outFps = 0; outFtX100 = 0; }
             }
-            if (bestC < 2) { outFps = 0; outFtX100 = 0; }
         }
         mem[0] = FPS_MAGIC; mem[1] = now; mem[2] = (uint32_t)outFps; mem[3] = (uint32_t)outFtX100; mem[4] = 0; mem[5] = bestPid;
     }

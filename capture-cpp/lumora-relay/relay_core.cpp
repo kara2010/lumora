@@ -96,10 +96,49 @@ static void relayLogFilter(rtc::LogLevel lev, std::string msg) {
 }
 RelayCore::RelayCore(const RelayConfig& cfg) : cfg_(cfg) {
     rtc::InitLogger(rtc::LogLevel::Info, relayLogFilter);
+    sender_ = std::thread([this] { sendLoop(); });   // Sende-Thread (s. pushVideoAU im Header)
 }
 RelayCore::~RelayCore() {
+    qRun_ = false; qcv_.notify_all();
+    if (sender_.joinable()) sender_.join();
     std::lock_guard<std::mutex> lk(mx_);
     sessions_.clear();
+}
+
+// Ingest-seitige Enqueue-Stubs + Sende-Thread (Entkopplung, s. Header). Queue-Limit 240
+// Eintraege (~2s Video + Ton bei 60fps): laeuft der Sende-Thread dauerhaft hinterher
+// (langsamer Zuschauer), fliegt das AELTESTE raus - der Ingest blockiert NIE.
+void RelayCore::pushVideoAU(const uint8_t* au, size_t len, uint64_t pts90k) {
+    std::lock_guard<std::mutex> lk(qmx_);
+    if (q_.size() >= 240) { q_.pop_front(); ++qDropped_; }
+    q_.push_back({ 0, std::vector<uint8_t>(au, au + len), pts90k });
+    qcv_.notify_one();
+}
+void RelayCore::pushVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k) {
+    std::lock_guard<std::mutex> lk(qmx_);
+    if (q_.size() >= 240) { q_.pop_front(); ++qDropped_; }
+    q_.push_back({ 1, std::vector<uint8_t>(tu, tu + len), pts90k });
+    qcv_.notify_one();
+}
+void RelayCore::pushAudioFrame(const uint8_t* pkt, size_t len, uint64_t pts90k) {
+    std::lock_guard<std::mutex> lk(qmx_);
+    if (q_.size() >= 240) { q_.pop_front(); ++qDropped_; }
+    q_.push_back({ 2, std::vector<uint8_t>(pkt, pkt + len), pts90k });
+    qcv_.notify_one();
+}
+void RelayCore::sendLoop() {
+    for (;;) {
+        QItem it;
+        {
+            std::unique_lock<std::mutex> lk(qmx_);
+            qcv_.wait(lk, [this] { return !q_.empty() || !qRun_; });
+            if (!qRun_ && q_.empty()) return;
+            it = std::move(q_.front()); q_.pop_front();
+        }
+        if (it.kind == 0) sendVideoAU(it.data.data(), it.data.size(), it.pts);
+        else if (it.kind == 1) sendVideoAuAv1(it.data.data(), it.data.size(), it.pts);
+        else sendAudioFrame(it.data.data(), it.data.size(), it.pts);
+    }
 }
 
 void RelayCore::setIceConfig(vector<string> hosts, vector<RelayIceServer> servers) {
@@ -111,6 +150,7 @@ void RelayCore::setIceConfig(vector<string> hosts, vector<RelayIceServer> server
 void RelayCore::setCodecMode(const string& mode) {
     std::lock_guard<std::mutex> lk(mx_);
     codecMode_ = (mode == "h264" || mode == "av1") ? mode : "auto";
+    printf("relay: codec-mode -> %s\n", codecMode_.c_str());
 }
 
 void RelayCore::codecDemand(bool& needH264, bool& needAv1) {
@@ -261,6 +301,9 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
         dropClosed();
         sessions_.push_back(sess);
     }
+    // Codec-Zuteilung sichtbar machen (Beweis fuer die Reihenfolge Push vs. Connect im Log)
+    printf("relay: %s Session neu -> %s (Modus %s)\n", sess->id.substr(0, 6).c_str(),
+           sess->vAv1 ? "AV1" : (sess->video ? "H264" : "ohne Video"), codecMode.c_str());
     outSessionId = sess->id;
     return sdp;
 }
@@ -335,7 +378,7 @@ static void scanAnnexB(const uint8_t* d, size_t n, bool& hasIdr, size_t& spsPpsE
     }
 }
 
-void RelayCore::pushVideoAU(const uint8_t* au, size_t len, uint64_t pts90k) {
+void RelayCore::sendVideoAU(const uint8_t* au, size_t len, uint64_t pts90k) {
     bool hasIdr; size_t spsPpsEnd;
     scanAnnexB(au, len, hasIdr, spsPpsEnd);
 
@@ -382,7 +425,7 @@ static bool av1HasSeqHdr(const uint8_t* d, size_t n) {
     return false;
 }
 
-void RelayCore::pushVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k) {
+void RelayCore::sendVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k) {
     bool key = av1HasSeqHdr(tu, len);
     std::lock_guard<std::mutex> lk(mx_);
     av1Active_.store(true);
@@ -420,7 +463,7 @@ void RelayCore::logSessionDiag() {
     }
 }
 
-void RelayCore::pushAudioFrame(const uint8_t* pkt, size_t len, uint64_t pts90k) {
+void RelayCore::sendAudioFrame(const uint8_t* pkt, size_t len, uint64_t pts90k) {
     std::lock_guard<std::mutex> lk(mx_);
     bytesIn_ += len; lastIngestMs_ = nowMs();
     for (auto& s : sessions_) {

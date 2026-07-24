@@ -14,15 +14,18 @@
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);   // Shell liest zeilenweise vom Pipe
     uint16_t ingestPort = 8558, whepPort = 8889, ctrlPort = 9997, icePort = 8189;
+    const char* codecMode = nullptr;   // Codec-Modus ab Prozessstart (Race-Fix, s. relay_core.h)
     for (int i = 1; i < argc - 1; ++i) {
         if (!strcmp(argv[i], "--ingest-port")) ingestPort = (uint16_t)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--whep-port")) whepPort = (uint16_t)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ctrl-port")) ctrlPort = (uint16_t)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ice-port")) icePort = (uint16_t)atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--codec")) codecMode = argv[++i];
     }
 
     RelayConfig cfg; cfg.icePort = icePort;
     RelayCore core(cfg);
+    if (codecMode) core.setCodecMode(codecMode);   // VOR dem ersten Lauschen - keine Session kann den Default sehen
 
     TsDemux demux;
     demux.onVideoAU = [&](const uint8_t* au, size_t len, uint64_t pts) { core.pushVideoAU(au, len, pts); };
@@ -41,9 +44,17 @@ int main(int argc, char** argv) {
 
     // Status einmal pro Minute (landet via Shell-Pipe im Stream-Log)
     uint64_t lastAUs = 0;
+    // TEMP-DIAGNOSE (AU-Stall auf AMD): alle 10s die komplette Ingest-Kette beziffern -
+    // datagrams (recv) -> tsPackets (188er) -> videoAUs (PES komplett). Zeigt exakt,
+    // WELCHE Stufe beim realen Stall stehenbleibt.
     for (int tick = 0;; ++tick) {
         std::this_thread::sleep_for(std::chrono::seconds(10));
         core.logSessionDiag();          // je Zuschauer alle 10s (Keyframe-Tor, Sendefehler)
+        printf("relay-diag: dgram=%llu tsPkt=%llu vAU=%llu av1TU=%llu ton=%llu ccErr=%llu qDrop=%llu\n",
+               (unsigned long long)ingest.datagrams, (unsigned long long)demux.tsPackets,
+               (unsigned long long)demux.videoAUs, (unsigned long long)demux.videoAUsAv1,
+               (unsigned long long)demux.audioFrames, (unsigned long long)demux.ccErrors,
+               (unsigned long long)core.queueDropped());
         if (tick % 6 != 5) continue;    // Gesamtstatus weiter nur 1x/min
         uint64_t aus = demux.videoAUs;
         printf("relay: %llu AUs (+%llu/min), %llu AV1-TUs, %llu Ton, %zu Zuschauer, ccErr=%llu\n",

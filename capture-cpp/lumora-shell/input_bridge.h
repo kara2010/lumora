@@ -114,12 +114,16 @@ inline USHORT tgtButtonMask(Tgt t) {
     default: return 0;
     }
 }
+// vid/pid je Eintrag: welches PHYSISCHE Geraet diese Zuordnung erzeugt hat (leer =
+// unbekannt/altes Profil vor diesem Fix -> Fallback "irgendein Geraet", altes Verhalten).
+// Noetig, weil ein Profil bewusst mehrere Geraete gleichzeitig kombinieren darf (z.B.
+// Lenkrad + separates Pedal-Set als zwei USB-HID-Geraete) - siehe g_vals/g_btns unten.
 struct AxisMap { USHORT usagePage = 1, usage = 0; Tgt target = Tgt::NONE;
                  double deadzone = 0, curve = 1.0; bool invert = false;
-                 double mn = 0, mx = 1; bool hasRange = false; };
-struct BtnMap  { USHORT usage = 0; Tgt target = Tgt::NONE; };
-struct AxisBtn { USHORT usagePage = 1, usage = 0; double threshold = 0.7; Tgt target = Tgt::NONE; };
-struct BtnAxis { USHORT usage = 0; Tgt target = Tgt::NONE; double value = 1.0; };
+                 double mn = 0, mx = 1; bool hasRange = false; std::string vid, pid; };
+struct BtnMap  { USHORT usage = 0; Tgt target = Tgt::NONE; std::string vid, pid; };
+struct AxisBtn { USHORT usagePage = 1, usage = 0; double threshold = 0.7; Tgt target = Tgt::NONE; std::string vid, pid; };
+struct BtnAxis { USHORT usage = 0; Tgt target = Tgt::NONE; double value = 1.0; std::string vid, pid; };
 struct Profile {
     std::string vid, pid;                 // leer = jedes Geraet
     std::vector<AxisMap> axes;
@@ -127,6 +131,12 @@ struct Profile {
     std::vector<AxisBtn> axisToButton;
     std::vector<BtnAxis> buttonToAxis;
 };
+// vid/pid aus einem JSON-Eintrag lesen + normalisieren (Grosschreibung wie ueberall sonst).
+inline void readDevTag(const json& j, std::string& vid, std::string& pid) {
+    vid = j.value("vid", ""); pid = j.value("pid", "");
+    for (auto& c : vid) c = (char)toupper((unsigned char)c);
+    for (auto& c : pid) c = (char)toupper((unsigned char)c);
+}
 inline Profile parseProfile(const json& p) {
     Profile r;
     if (p.contains("device") && p["device"].is_object()) {
@@ -138,6 +148,7 @@ inline Profile parseProfile(const json& p) {
         AxisMap m; m.usagePage = (USHORT)a.value("usagePage", 1); m.usage = (USHORT)a.value("usage", 0);
         m.target = tgtFromStr(a.value("target", "")); m.deadzone = a.value("deadzone", 0.0);
         m.curve = a.value("curve", 1.0); m.invert = a.value("invert", false);
+        readDevTag(a, m.vid, m.pid);
         if (a.contains("min") && a["min"].is_number() && a.contains("max") && a["max"].is_number()) {
             m.mn = a["min"].get<double>(); m.mx = a["max"].get<double>(); m.hasRange = (m.mx != m.mn);   // mn>mx erlaubt (invertierter Bereich, z.B. Bremse einer kombinierten Pedalachse)
         }
@@ -145,16 +156,19 @@ inline Profile parseProfile(const json& p) {
     }
     for (auto& b : p.value("buttons", json::array())) {
         BtnMap m; m.usage = (USHORT)b.value("usage", 0); m.target = tgtFromStr(b.value("target", ""));
+        readDevTag(b, m.vid, m.pid);
         if (m.target != Tgt::NONE && m.usage) r.buttons.push_back(m);
     }
     for (auto& a : p.value("axisToButton", json::array())) {
         AxisBtn m; m.usagePage = (USHORT)a.value("usagePage", 1); m.usage = (USHORT)a.value("usage", 0);
         m.threshold = a.value("threshold", 0.7); m.target = tgtFromStr(a.value("target", ""));
+        readDevTag(a, m.vid, m.pid);
         if (m.target != Tgt::NONE && m.usage) r.axisToButton.push_back(m);
     }
     for (auto& b : p.value("buttonToAxis", json::array())) {
         BtnAxis m; m.usage = (USHORT)b.value("usage", 0); m.target = tgtFromStr(b.value("target", ""));
         m.value = b.value("value", 1.0);
+        readDevTag(b, m.vid, m.pid);
         if (m.target != Tgt::NONE && m.usage) r.buttonToAxis.push_back(m);
     }
     return r;
@@ -167,7 +181,10 @@ struct DevCache {                         // Preparsed-Data + Caps je Geraet (ei
     std::vector<HIDP_BUTTON_CAPS> bcaps;
     std::string vid, pid;
     bool bad = false;
+    bool usesReportIds = false;           // irgendein Cap mit ReportID != 0 -> Multi-Report-Geraet
+    std::set<BYTE> diagSeen;              // Diagnose: je Report-ID einmal die Struktur loggen
 };
+inline std::function<void(const std::string&)> g_diag;   // optionales Diagnose-Log (Shell haengt bcLogStream ein)
 inline std::mutex g_mx;                   // schuetzt Profil + Monitor-Flags (Bridge-Thread vs. IPC)
 inline Profile g_profile;
 inline std::atomic<bool> g_running{ false };   // Thread lebt
@@ -178,11 +195,50 @@ inline std::atomic<LONG> g_vigemSlot{ -1 };    // XInput-UserIndex des virtuelle
 inline HWND g_bridgeWnd = nullptr;
 inline std::thread g_thread;
 
-// Laufende Eingabewerte (Key = usagePage<<16 | usage), normalisiert 0..1; Buttons als Usage-Set.
-inline std::map<DWORD, double> g_vals;
-inline std::set<USHORT> g_btns;
-inline std::map<DWORD, double> g_capBase;      // Capture: Ausgangslage zum Vergleich
-inline std::set<USHORT> g_capBtns;
+// Laufende Eingabewerte, gescopt PRO URSPRUNGSGERAET (vid/pid) + usagePage/usage -
+// normalisiert 0..1; Buttons als (Geraet, Usage)-Set. OHNE das Geraet im Key wuerden
+// zwei gleichzeitig genutzte physische Geraete (z.B. Lenkrad + separates Pedal-Set,
+// beide melden generische Achsen wie X/Y/Z unabhaengig voneinander) sich gegenseitig
+// ueberschreiben, sobald sie zufaellig dieselbe usagePage/usage benutzen - real
+// beobachtet: Lenken loeste Bremsen aus, weil die Lenkachse des Rads und die
+// Bremsachse des Pedal-Sets denselben Key trafen.
+struct AxisKey {
+    std::string vid, pid; DWORD pu;   // pu = usagePage<<16 | usage
+    bool operator<(const AxisKey& o) const {
+        if (vid != o.vid) return vid < o.vid;
+        if (pid != o.pid) return pid < o.pid;
+        return pu < o.pu;
+    }
+};
+struct BtnKey {
+    std::string vid, pid; USHORT usage;
+    bool operator<(const BtnKey& o) const {
+        if (vid != o.vid) return vid < o.vid;
+        if (pid != o.pid) return pid < o.pid;
+        return usage < o.usage;
+    }
+};
+inline std::map<AxisKey, double> g_vals;
+inline std::set<BtnKey> g_btns;
+inline std::map<AxisKey, double> g_capBase;      // Capture: Ausgangslage zum Vergleich
+inline std::set<BtnKey> g_capBtns;
+// Wert/Zustand einer Zuordnung nachschlagen: mit Geraete-Tag (neu zugewiesen) exakt
+// dieses Geraet, ohne Tag (altes Profil vor diesem Fix) das erste passende - altes,
+// unveraendertes Verhalten fuer bestehende Ein-Geraet-Profile.
+inline const double* findAxisVal(const std::string& vid, const std::string& pid, USHORT usagePage, USHORT usage) {
+    DWORD pu = ((DWORD)usagePage << 16) | usage;
+    if (!vid.empty()) {
+        auto it = g_vals.find(AxisKey{ vid, pid, pu });
+        return it == g_vals.end() ? nullptr : &it->second;
+    }
+    for (auto& [k, v] : g_vals) if (k.pu == pu) return &v;
+    return nullptr;
+}
+inline bool findBtnPressed(const std::string& vid, const std::string& pid, USHORT usage) {
+    if (!vid.empty()) return g_btns.count(BtnKey{ vid, pid, usage }) > 0;
+    for (auto& k : g_btns) if (k.usage == usage) return true;
+    return false;
+}
 
 inline PVIGEM_CLIENT g_vigem = nullptr;
 inline PVIGEM_TARGET g_target = nullptr;
@@ -221,6 +277,8 @@ inline DevCache& devCache(HANDLE hDev) {
         USHORT n = caps.NumberInputButtonCaps; c.bcaps.resize(n);
         HidP_GetButtonCaps(HidP_Input, c.bcaps.data(), &n, pp); c.bcaps.resize(n);
     }
+    for (auto& vc : c.vcaps) if (vc.ReportID != 0) c.usesReportIds = true;
+    for (auto& bc : c.bcaps) if (bc.ReportID != 0) c.usesReportIds = true;
     UINT nsz = 0; GetRawInputDeviceInfoW(hDev, RIDI_DEVICENAME, nullptr, &nsz);
     if (nsz) { std::wstring nm(nsz, 0); if (GetRawInputDeviceInfoW(hDev, RIDI_DEVICENAME, &nm[0], &nsz) != (UINT)-1) vidPidFromName(nm, c.vid, c.pid); }
     return c;
@@ -262,12 +320,11 @@ inline void setAxisTarget(XUSB_REPORT& r, Tgt t, double shaped) {
 inline void rebuildReport() {
     XUSB_REPORT r{};
     for (auto& m : g_profile.axes) {
-        DWORD key = ((DWORD)m.usagePage << 16) | m.usage;
-        auto it = g_vals.find(key); if (it == g_vals.end()) continue;
+        const double* pv = findAxisVal(m.vid, m.pid, m.usagePage, m.usage); if (!pv) continue;
         if (m.target == Tgt::DPAD) {                    // Hat-Switch (Usage 0x39) -> DPad
             // Der Parser legt Hats als Richtungsindex/8 ab; neutral (raw ausserhalb
             // LogicalMin..Max) = -1. 8 Richtungen im Uhrzeigersinn ab "oben".
-            double v = it->second;
+            double v = *pv;
             if (v < 0) continue;                        // neutral
             int dir = (int)floor(v * 8.0 + 0.5) % 8;
             static const USHORT DIRS[8] = {
@@ -279,17 +336,16 @@ inline void rebuildReport() {
             continue;
         }
         bool trig = m.target == Tgt::LT || m.target == Tgt::RT;
-        setAxisTarget(r, m.target, shapeAxis(it->second, m, trig));
+        setAxisTarget(r, m.target, shapeAxis(*pv, m, trig));
     }
     for (auto& m : g_profile.buttons)
-        if (g_btns.count(m.usage)) r.wButtons |= tgtButtonMask(m.target);
+        if (findBtnPressed(m.vid, m.pid, m.usage)) r.wButtons |= tgtButtonMask(m.target);
     for (auto& m : g_profile.axisToButton) {
-        DWORD key = ((DWORD)m.usagePage << 16) | m.usage;
-        auto it = g_vals.find(key);
-        if (it != g_vals.end() && it->second >= m.threshold) r.wButtons |= tgtButtonMask(m.target);
+        const double* pv = findAxisVal(m.vid, m.pid, m.usagePage, m.usage);
+        if (pv && *pv >= m.threshold) r.wButtons |= tgtButtonMask(m.target);
     }
     for (auto& m : g_profile.buttonToAxis)
-        if (g_btns.count(m.usage)) setAxisTarget(r, m.target, m.value);
+        if (findBtnPressed(m.vid, m.pid, m.usage)) setAxisTarget(r, m.target, m.value);
     g_report = r;
     if (g_feeding.load() && g_vigem && g_target) vigem_target_x360_update(g_vigem, g_target, r);
 }
@@ -303,9 +359,9 @@ inline void pushMonitor(bool force = false) {
     g_lastPush = now;
     json axes = json::array();
     for (auto& [key, v] : g_vals)
-        axes.push_back({ {"usagePage", (key >> 16) & 0xFFFF}, {"usage", key & 0xFFFF}, {"value", v} });
+        axes.push_back({ {"usagePage", (key.pu >> 16) & 0xFFFF}, {"usage", key.pu & 0xFFFF}, {"value", v} });
     json btns = json::array();
-    for (auto u : g_btns) btns.push_back(u);
+    for (auto& k : g_btns) btns.push_back(k.usage);
     g_push("input-bridge-state", {
         {"axes", axes}, {"buttons", btns},
         {"out", { {"lx", g_report.sThumbLX}, {"ly", g_report.sThumbLY}, {"rx", g_report.sThumbRX},
@@ -317,22 +373,24 @@ inline void pushMonitor(bool force = false) {
 // Ausgangslage melden - neu gedrueckter Knopf gewinnt vor bewegter Achse.
 inline void captureCheck() {
     if (!g_capture.load() || !g_push) return;
-    for (auto u : g_btns) {
-        if (g_capBtns.count(u)) continue;
+    for (auto& k : g_btns) {
+        if (g_capBtns.count(k)) continue;
         g_capture = false;
-        g_push("input-bridge-captured", { {"type", "button"}, {"usage", u} });
+        // vid/pid mit ausliefern - die UI taggt die neue Zuordnung damit auf GENAU dieses
+        // Geraet, statt (wie vor diesem Fix) blind auf jedes Geraet mit derselben Usage zu passen.
+        g_push("input-bridge-captured", { {"type", "button"}, {"usage", k.usage}, {"vid", k.vid}, {"pid", k.pid} });
         return;
     }
     for (auto& [key, v] : g_vals) {
         auto it = g_capBase.find(key);
         double base = it == g_capBase.end() ? v : it->second;
         if (it == g_capBase.end()) { g_capBase[key] = v; continue; }   // Achse erst jetzt gesehen: Basis merken
-        if ((key & 0xFFFF) == 0x39) continue;          // Hat zaehlt als DPad, nicht als Achse zuweisen
+        if ((key.pu & 0xFFFF) == 0x39) continue;          // Hat zaehlt als DPad, nicht als Achse zuweisen
         if (fabs(v - base) < 0.30) continue;           // 30 % Weg = bewusste Bewegung
         g_capture = false;
         // base = Ruhelage (0..1), val = Auslenkung -> UI kann Trigger auto-kalibrieren
         // (Deadzone/Invert so, dass die Ruhelage = 0 ist, egal wo die Achse ruht).
-        g_push("input-bridge-captured", { {"type", "axis"}, {"usagePage", (key >> 16) & 0xFFFF}, {"usage", key & 0xFFFF}, {"base", base}, {"val", v} });
+        g_push("input-bridge-captured", { {"type", "axis"}, {"usagePage", (key.pu >> 16) & 0xFFFF}, {"usage", key.pu & 0xFFFF}, {"base", base}, {"val", v}, {"vid", key.vid}, {"pid", key.pid} });
         return;
     }
 }
@@ -359,7 +417,7 @@ inline void onRawInput(HRAWINPUT hRaw) {
             ULONG raw = 0;
             if (HidP_GetUsageValue(HidP_Input, vc.UsagePage, 0, u, &raw, pp, report, repLen) != HIDP_STATUS_SUCCESS) continue;
             LONG lmin = vc.LogicalMin, lmax = vc.LogicalMax;
-            DWORD key = ((DWORD)vc.UsagePage << 16) | u;
+            AxisKey key{ c.vid, c.pid, ((DWORD)vc.UsagePage << 16) | u };
             if (u == 0x39 && vc.UsagePage == 0x01) {
                 LONG v = (LONG)raw;
                 LONG count = lmax - lmin + 1;
@@ -376,15 +434,53 @@ inline void onRawInput(HRAWINPUT hRaw) {
             }
         }
     }
-    // Buttons (Button-Caps, UsagePage 0x09): gedrueckte Usages einsammeln.
-    g_btns.clear();
-    for (auto& bc : c.bcaps) {
-        ULONG n = HidP_MaxUsageListLength(HidP_Input, bc.UsagePage, pp);
-        if (!n) continue;
-        static std::vector<USAGE> usages; usages.resize(n);
-        if (HidP_GetUsages(HidP_Input, bc.UsagePage, 0, usages.data(), &n, pp, report, repLen) != HIDP_STATUS_SUCCESS) continue;
-        for (ULONG i = 0; i < n; ++i) g_btns.insert(usages[i]);
-        break;   // Button-Page einmal reicht (GetUsages liefert alle Usages der Page)
+    // Buttons: NUR die Zustaende der Knoepfe ersetzen, die im AKTUELLEN Report enthalten
+    // sind (Multi-Report-Fix, 2. Stufe - real gemeldet: "Gas bricht beim Lenken ab, nach
+    // Stufe 1 besser, aber nicht weg"). Stufe 1 verhinderte, dass reine ACHSEN-Reports die
+    // Knoepfe loeschen. Verbleibende Luecke: verteilt ein Geraet seine Knoepfe auf MEHRERE
+    // Report-IDs, ersetzte ein Knopf-Report weiterhin den KOMPLETTEN Zustand - gehaltene
+    // Knoepfe aus dem jeweils ANDEREN Report gingen verloren. Jetzt wird per Report-ID
+    // exakt abgeglichen: erst die zu DIESEM Report gehoerenden Knopf-Bereiche austragen,
+    // dann die in DIESEM Report gedrueckten wieder eintragen - fremde Reports unberuehrt.
+    {
+        BYTE repId = c.usesReportIds ? (BYTE)report[0] : 0;
+        std::set<USHORT> pages; bool any = false;
+        for (auto& bc : c.bcaps) {
+            if (bc.ReportID != repId) continue;              // Knopf-Cap gehoert zu einem anderen Report
+            USHORT uMin = bc.IsRange ? bc.Range.UsageMin : bc.NotRange.Usage;
+            USHORT uMax = bc.IsRange ? bc.Range.UsageMax : bc.NotRange.Usage;
+            for (USHORT u = uMin; u <= uMax; ++u) g_btns.erase(BtnKey{ c.vid, c.pid, u });
+            pages.insert(bc.UsagePage); any = true;
+        }
+        if (any) for (USHORT page : pages) {
+            ULONG n = HidP_MaxUsageListLength(HidP_Input, page, pp);
+            if (!n) continue;
+            static std::vector<USAGE> usages; usages.resize(n);
+            if (HidP_GetUsages(HidP_Input, page, 0, usages.data(), &n, pp, report, repLen) != HIDP_STATUS_SUCCESS) continue;
+            for (ULONG i = 0; i < n; ++i) g_btns.insert(BtnKey{ c.vid, c.pid, usages[i] });
+        }
+        // Diagnose (nur bei offenem Eingabe-Tab, 1x je Report-ID): Struktur des Geraets
+        // sichtbar machen - welche Reports existieren, was tragen sie. Landet im Stream-Log.
+        if (g_diag && g_monitor.load() && !c.diagSeen.count(repId)) {
+            c.diagSeen.insert(repId);
+            std::string axes;
+            for (auto& vc : c.vcaps) {
+                if (vc.ReportID != repId) continue;
+                USHORT uMin = vc.IsRange ? vc.Range.UsageMin : vc.NotRange.Usage;
+                USHORT uMax = vc.IsRange ? vc.Range.UsageMax : vc.NotRange.Usage;
+                for (USHORT u = uMin; u <= uMax; ++u) { char b[16]; snprintf(b, sizeof(b), "%s0x%02X", axes.empty() ? "" : ",", u); axes += b; }
+            }
+            std::string btns;
+            for (auto& bc : c.bcaps) {
+                if (bc.ReportID != repId) continue;
+                USHORT uMin = bc.IsRange ? bc.Range.UsageMin : bc.NotRange.Usage;
+                USHORT uMax = bc.IsRange ? bc.Range.UsageMax : bc.NotRange.Usage;
+                char b[24]; snprintf(b, sizeof(b), "%s%u-%u", btns.empty() ? "" : ",", uMin, uMax); btns += b;
+            }
+            g_diag("bridge-diag: dev " + c.vid + ":" + c.pid + " report=" + std::to_string(repId) +
+                   " len=" + std::to_string((int)repLen) + " achsen=[" + axes + "] knoepfe=[" + btns + "]" +
+                   (c.usesReportIds ? " (multi-report)" : " (single-report)"));
+        }
     }
     if (deviceMatches(c, g_profile)) rebuildReport();
     captureCheck();
