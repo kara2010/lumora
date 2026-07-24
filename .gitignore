@@ -67,3 +67,9 @@ capture-cpp/lumora-relay/build/
 _testlab/debug-archiv/
 # FFmpeg-Build-Umgebung (nur alter Electron-Zweig; enthaelt >100MB Binaries)
 _testlab/ffmpeg-build/
+
+# Interne Entwickler-Notizen (Session-Handoffs, Debug-Protokolle, Release-Checkliste
+# mit Infrastruktur-Details) - bleiben lokal, gehoeren nicht ins oeffentliche Repo.
+HANDOFF-*.md
+_testlab/HANDOFF-*.md
+RELEASE.md
