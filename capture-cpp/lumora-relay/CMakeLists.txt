@@ -10,7 +10,8 @@ set(LDC ${TP}/libdatachannel-relay)
 set(MBED ${TP}/mbedtls/install)
 
 add_executable(lumora_relay
-  main.cpp relay_core.cpp ts_demux.cpp ingest.cpp whep_server.cpp ctrl_server.cpp)
+  main.cpp relay_core.cpp ts_demux.cpp ingest.cpp whep_server.cpp ctrl_server.cpp
+  app.rc)
 
 target_include_directories(lumora_relay PRIVATE
   ${LDC}/include
