@@ -121,6 +121,12 @@
   .t-tiles .lbl, .t-tiles .track, .t-tiles canvas { display: none; }
 
   /* -------- Live-Edit -------- */
+  /* NORMALBETRIEB (kein Edit): das Fenster ist genau panelgross -> Panel fix oben-links
+     mit 14px Rand. Die Bildschirm-Ecke macht allein die Fensterposition (Shell). !important,
+     um die Theme-Zentrierung (Leiste/Kacheln) und pos-*-Regeln zu ueberschreiben. Im
+     Edit-Modus (body.edit) greift das NICHT -> dort bleibt die Vollbild-Eckplatzierung. */
+  body:not(.edit) #panel { position: static !important; margin: 14px !important;
+    left: auto !important; right: auto !important; top: auto !important; bottom: auto !important; transform: none !important; }
   body.edit #panel { outline: 2px dashed #4f8ef7; outline-offset: 5px; cursor: move; }
   #editbar { display: none; position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
     z-index: 10; flex-direction: column; gap: 9px; white-space: nowrap; padding: 11px 14px;
@@ -204,6 +210,29 @@
   const panel = document.getElementById('panel');
   const has = (cat, f) => (cfg.fields[cat] || []).includes(f);
   const esc = s => String(s == null ? '' : s);
+
+  // ---- Fenster-Groesse an den Panel-Inhalt melden -------------------------------------
+  // Die Shell verkleinert das OSD-Fenster auf GENAU diese Flaeche (der WebView2-Inhalt
+  // rendert weiter Vollbild, nur das Fenster + der DComp-Visual werden verschoben). Damit
+  // deckt das Overlay nie mehr den ganzen Desktop ab und kann Desktop-Symbole nicht
+  // blockieren - egal wie das Click-through auf dem jeweiligen System reagiert.
+  // Im Edit-Modus NICHT melden (dort ist das Fenster absichtlich Vollbild + interaktiv).
+  function reportBounds() {
+    if (!ipcRenderer || editing) return;
+    const r = panel.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return;
+    const dpr = window.devicePixelRatio || 1, M = 14;   // Rand ums Panel (ersetzt das alte margin)
+    const corner = ['tl','tr','bl','br'].find(c => document.body.classList.contains('pos-' + c)) || 'tl';
+    const horiz = document.body.classList.contains('theme-strip') || document.body.classList.contains('theme-tiles');
+    ipcRenderer.invoke('osd-bounds', {
+      w: Math.ceil((r.width  + 2 * M) * dpr),
+      h: Math.ceil((r.height + 2 * M) * dpr),
+      corner, horiz
+    });
+  }
+  let _rbRaf = 0;
+  function scheduleBounds() { if (_rbRaf) return; _rbRaf = requestAnimationFrame(() => { _rbRaf = 0; reportBounds(); }); }
+  try { new ResizeObserver(scheduleBounds).observe(panel); } catch (e) {}
 
   // ---- kleine HTML-Helfer ----
   // Wertspan mit data-role für Live-Updates: <span data-role="gpu.temp">–</span><i>°C</i>
@@ -354,6 +383,7 @@
     drawFtGraph();
     lastFpsTextAt = 0;   // FPS-Zahl sofort setzen (nicht auf die Drosselung warten)
     paintValues();       // aktuelle Werte gleich einsetzen
+    scheduleBounds();    // neue Panel-Groesse an die Shell (Fenster nachziehen)
   }
 
   // ===================== Werte einsetzen ================================
@@ -417,6 +447,7 @@
     if (c.corner) { document.body.classList.remove('pos-tl','pos-tr','pos-bl','pos-br'); document.body.classList.add('pos-' + c.corner); }
     if (c.opacity != null) { cfg.opacity = c.opacity; document.documentElement.style.setProperty('--panel-op', c.opacity); }
     if (rebuild) renderPanel();
+    else scheduleBounds();               // Ecke/Deckkraft ohne Rebuild -> Fenster trotzdem nachziehen
     if (editing) renderEditbar(false);   // Live-Edit-Leiste mitziehen (ohne den Slider zu ueberschreiben)
   }
 
@@ -424,7 +455,7 @@
   let editing = false, drag = null;
   function setEdit(on) { editing = on; document.body.classList.toggle('edit', on);
     if (on) renderEditbar(true);
-    if (!on) { panel.style.left = panel.style.top = panel.style.right = panel.style.bottom = ''; } }
+    if (!on) { panel.style.left = panel.style.top = panel.style.right = panel.style.bottom = ''; scheduleBounds(); } }
 
   // --- Live-Edit-Leiste: Design durchschalten, Deckkraft, Werte an/aus ---------
   function renderEditbar(full) {

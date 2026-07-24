@@ -2698,6 +2698,15 @@ static ComPtr<IDCompositionDevice> g_dcompDev;
 static ComPtr<IDCompositionTarget> g_dcompTarget;
 static ComPtr<IDCompositionVisual> g_dcompVisual;
 static ComPtr<ICoreWebView2CompositionController> g_osdComp;
+// Panel-Flaeche (physische px, Monitor-relativ), die osd.html via 'osd-bounds' meldet.
+// Das OSD-Fenster wird auf genau diese Flaeche verkleinert (der WebView2-Inhalt rendert
+// weiter Vollbild, nur Fenster + DComp-Visual werden versetzt) -> das Overlay deckt nie
+// mehr den ganzen Desktop ab und kann Desktop-Symbole nicht blockieren.
+static int g_osdW = 0, g_osdH = 0;        // gewuenschte Fenstergroesse (physische px) inkl. Rand
+static std::string g_osdCorner = "tl";    // Ziel-Ecke (tl/tr/bl/br)
+static bool g_osdHoriz = false;           // zentrierte Themes (Leiste/Kacheln) -> oben/unten mittig
+static bool g_osdHavePanel = false;
+static RECT osdMonitorRect() { HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY); MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi); return mi.rcMonitor; }
 static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     // Live-Edit: Maus-Ereignisse ans WebView2 durchreichen - der Composition-Modus
     // bekommt sie NICHT automatisch (SendMouseInput ist Pflicht, MS-Doku).
@@ -2715,6 +2724,8 @@ static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_NCHITTEST: return g_osdEdit ? HTCLIENT : HTTRANSPARENT;
     case WM_SETCURSOR: if (!g_osdEdit) return TRUE; SetCursor(LoadCursorW(nullptr, IDC_ARROW)); return TRUE;
     case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_osdWv) g_osdWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
+    // Controller-Bounds = Fenster-Client (der WebView2-Viewport ist das kleine Fenster;
+    // osd.html rendert das Panel oben-links passend hinein). DPI-natuerlich.
     case WM_SIZE: if (g_osdCtrl) { RECT rc; GetClientRect(h, &rc); g_osdCtrl->put_Bounds(rc); } return 0;
     case WM_DESTROY: return 0;
     }
@@ -2730,7 +2741,7 @@ static void createOsdWindow() {
     // WS_EX_LAYERED (das killte das WebView2-Rendering); click-through via WS_EX_TRANSPARENT.
     HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi);
-    int w = mi.rcMonitor.right - mi.rcMonitor.left, hgt = mi.rcMonitor.bottom - mi.rcMonitor.top - 1;
+    int w = 480, hgt = 360;   // Startgroesse (versteckt); osd.html meldet die echte Panel-Flaeche -> Fenster wird nachgezogen
     // Click-through zu FREMDEN Fenstern verlangt WS_EX_LAYERED|WS_EX_TRANSPARENT
     // (HTTRANSPARENT wirkt nur thread-intern - MS-Doku; User-Befund: nichts mehr
     // anklickbar). Mit WS_EX_NOREDIRECTIONBITMAP ist LAYERED unkritisch: es gibt
@@ -2790,7 +2801,37 @@ static void createOsdWindow() {
                 return S_OK;
             }).Get());
 }
-static void showOsd() { createOsdWindow(); sensorsInit(); ensureOsdSetup(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 200, nullptr); SetTimer(g_hwnd, TIMER_OSDFPS, 33, nullptr); if (g_osdHwnd) { ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE); SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); if (g_osdLoaded) applyOsdConfig(); } }
+// Fenster auf die gemeldete Panel-Flaeche setzen und den DComp-Visual passend verschieben.
+// Im Edit-Modus stattdessen Vollbild (dort ist das Overlay absichtlich interaktiv).
+static void applyOsdWindowGeometry() {
+    if (!g_osdHwnd) return;
+    RECT mon = osdMonitorRect();
+    int monW = mon.right - mon.left, monH = mon.bottom - mon.top;
+    if (g_osdEdit) {   // Edit: Vollbild + interaktiv; osd.html positioniert das Panel per pos-* an der Ecke
+        SetWindowPos(g_osdHwnd, HWND_TOPMOST, mon.left, mon.top, monW, monH - 1, SWP_NOACTIVATE);
+        return;
+    }
+    if (!g_osdHavePanel || g_osdW < 1 || g_osdH < 1) return;
+    int w = g_osdW > monW ? monW : g_osdW;
+    int hh = g_osdH > monH ? monH : g_osdH;
+    // Das Panel sitzt (per CSS-Rand) oben-links im Fenster; die Bildschirm-Ecke macht allein die
+    // Fensterposition. Zentrierte Themes (Leiste/Kacheln) -> horizontal mittig.
+    bool right = (g_osdCorner.size() > 1 && g_osdCorner[1] == 'r');
+    bool bottom = (!g_osdCorner.empty() && g_osdCorner[0] == 'b');
+    int x = g_osdHoriz ? (monW - w) / 2 : (right ? monW - w : 0);
+    int y = bottom ? monH - hh : 0;
+    SetWindowPos(g_osdHwnd, HWND_TOPMOST, mon.left + x, mon.top + y, w, hh, SWP_NOACTIVATE);
+}
+// Zeigt das OSD - aber erst, wenn die Panel-Groesse bekannt ist (sonst waere es kurz
+// Vollbild). Ohne bekannte Groesse holt der 'osd-bounds'-Handler das Zeigen nach.
+static void osdEnsureVisible() {
+    if (!g_osdHwnd || !loadSettings().value("osdEnabled", false)) return;
+    applyOsdWindowGeometry();
+    if (!g_osdEdit && !g_osdHavePanel) return;
+    ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE);
+    SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+static void showOsd() { createOsdWindow(); sensorsInit(); ensureOsdSetup(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 200, nullptr); SetTimer(g_hwnd, TIMER_OSDFPS, 33, nullptr); if (g_osdLoaded) applyOsdConfig(); osdEnsureVisible(); }
 static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); KillTimer(g_hwnd, TIMER_OSDFPS); shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
 // Live-Edit-Modus (Alt+Shift+O, wie Electrons setOsdEditMode): Overlay wird kurz
@@ -2802,6 +2843,7 @@ static void setOsdEditMode(bool on) {
         showOsd();
         if (!g_osdHwnd) return;
         g_osdEdit = true;
+        applyOsdWindowGeometry();   // Edit: Fenster auf Vollbild (ganze interaktive Flaeche)
         // Anklickbar machen: NUR TRANSPARENT+NOACTIVATE weg (LAYERED MUSS bleiben - es
         // traegt die DComp-Transparenz). OHNE SWP_FRAMECHANGED wird der Style-Wechsel
         // nicht wirksam -> Fenster faengt die Maus nicht -> KEIN Klick erreicht das
@@ -2816,6 +2858,10 @@ static void setOsdEditMode(bool on) {
         if (g_osdHwnd) {
             LONG_PTR ex = GetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE);
             SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+            // Ohne SWP_FRAMECHANGED wird der Ex-Style-Wechsel NICHT wirksam (der Rein-Weg
+            // macht es genauso) - sonst bliebe das Overlay nach dem Edit klickbar/mausdicht.
+            SetWindowPos(g_osdHwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+            applyOsdWindowGeometry();   // zurueck auf die Panel-Flaeche schrumpfen
         }
         sendToOsd("osd-edit", false);
     }
@@ -3297,6 +3343,21 @@ static json handleChannel(const std::string& channel, const json& args) {
     // "Fertig" kommt OHNE Argument (osd.html: invoke('osd-edit-done')) -> MUSS vor den
     // args>=1-Guard, sonst wird es verschluckt und der Live-Edit laesst sich nicht
     // schliessen (genau der User-Befund: "Fertig hat keine Wirkung").
+    // osd.html meldet die Panel-Flaeche (physische px, Monitor-relativ) -> Fenster darauf
+    // verkleinern. Damit kann das Overlay nie den ganzen Desktop abdecken.
+    if (channel == "osd-bounds" && args.size() >= 1 && args[0].is_object()) {
+        auto& r = args[0];
+        int w = (int)r.value("w", 0.0), h = (int)r.value("h", 0.0);
+        if (w > 0 && h > 0) {
+            g_osdW = w; g_osdH = h;
+            g_osdCorner = r.value("corner", std::string("tl"));
+            g_osdHoriz = r.value("horiz", false);
+            g_osdHavePanel = true;
+            if (!g_osdEdit) applyOsdWindowGeometry();
+            osdEnsureVisible();   // erstes Zeigen nachholen, falls beim showOsd die Groesse noch fehlte
+        }
+        return true;
+    }
     if (channel == "osd-edit-done") { setOsdEditMode(false); return true; }
     if (channel.rfind("osd-edit-", 0) == 0 && args.size() >= 1) {
         json s = loadSettings();
