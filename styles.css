@@ -2398,3 +2398,20 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 /* Fuellbalken fuer LT/RT: waechst proportional zum tatsaechlichen Ausschlag (0-255),
    damit man beim Zuordnen sofort sieht, WIE WEIT ein Pedal/Regler wirkt - nicht nur ob. */
 #ibPad .trigger-fill { fill: var(--accent, #7ab7ff); opacity: .55; pointer-events: none; transition: width .05s linear, x .05s linear; }
+
+/* Eingabebruecke: Feineinstellungen (⚙-Aufklappbereich pro Achse) - beschriftete
+   Slider statt nackter Zahlenfelder; abgesetzte Box im App-Look. */
+.ib-gear.on { background: var(--accent-bg); border-color: var(--accent-border); }
+.ib-tweaks {
+  display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center;
+  margin: 2px 0 8px 150px; padding: 10px 14px;
+  background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px; font-size: 12.5px;
+}
+.ib-tweaks label { display: flex; align-items: center; gap: 8px; }
+.ib-tweaks label > span:first-child { opacity: .75; min-width: 68px; }
+.ib-tweaks input[type="range"] { width: 110px; accent-color: var(--accent, #4F8EF7); }
+.ib-tweaks em { font-style: normal; opacity: .9; min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+.ib-tweaks input[type="number"] { width: 56px; }
+.ib-tweaks b { opacity: .5; font-weight: 400; }
+.ib-tw-switch .switch { transform: scale(.85); }

@@ -647,13 +647,23 @@
     // 20-47% "lost", Frames stark schwankend). H.264 dekodiert jede GPU in Hardware.
     // Kein AV1 im Angebot -> der Relay waehlt pro Zuschauer automatisch H.264.
     try {
-      if (navigator.mediaCapabilities && vtr.setCodecPreferences && window.RTCRtpReceiver && RTCRtpReceiver.getCapabilities) {
-        var mc = await navigator.mediaCapabilities.decodingInfo({ type: 'webrtc',
-          video: { contentType: 'video/AV1', width: 3840, height: 2160, framerate: 60, bitrate: 25000000 } })
-        if (!mc.powerEfficient) {
-          var cs = RTCRtpReceiver.getCapabilities('video').codecs.filter(function (c) { return !/av01|AV1/i.test(c.mimeType) })
-          if (cs.length) { vtr.setCodecPreferences(cs); console.log('[codec] kein AV1-Hardware-Decoder -> H.264 angefordert') }
-        } else { console.log('[codec] AV1-Hardware-Decoder vorhanden') }
+      // Laufzeit-Wächter (s. unten) hat AV1 auf DIESEM Geraet als kaputt markiert
+      // ("Hardware meldet ja, dekodiert aber nicht" - real erlebt): fuer den Rest der
+      // Browsersitzung hart H.264 anfordern, AV1 gar nicht erst anbieten.
+      var forceH264 = false
+      try { forceH264 = sessionStorage.getItem('lumoraForceH264') === '1' } catch (e) {}
+      if (vtr.setCodecPreferences && window.RTCRtpReceiver && RTCRtpReceiver.getCapabilities) {
+        if (forceH264) {
+          var csF = RTCRtpReceiver.getCapabilities('video').codecs.filter(function (c) { return !/av01|AV1/i.test(c.mimeType) })
+          if (csF.length) { vtr.setCodecPreferences(csF); console.log('[codec] AV1 zuvor gescheitert -> H.264 erzwungen') }
+        } else if (navigator.mediaCapabilities) {
+          var mc = await navigator.mediaCapabilities.decodingInfo({ type: 'webrtc',
+            video: { contentType: 'video/AV1', width: 3840, height: 2160, framerate: 60, bitrate: 25000000 } })
+          if (!mc.powerEfficient) {
+            var cs = RTCRtpReceiver.getCapabilities('video').codecs.filter(function (c) { return !/av01|AV1/i.test(c.mimeType) })
+            if (cs.length) { vtr.setCodecPreferences(cs); console.log('[codec] kein AV1-Hardware-Decoder -> H.264 angefordert') }
+          } else { console.log('[codec] AV1-Hardware-Decoder vorhanden') }
+        }
       }
     } catch (e) { console.log('[codec] Faehigkeits-Check nicht verfuegbar:', e && e.message) }
     pc.ontrack = function (e) {
@@ -670,6 +680,27 @@
         status('Live', 'live')
         _connected = true; applyVol()   // ggf. die grosse Ton-Aufforderung zeigen
         setTimeout(function () { overlay.classList.add('hidden') }, 1200)
+        // Decode-Wächter: kommen zwar Daten an, wird aber nach 4s KEIN einziges Bild
+        // dekodiert und der ausgehandelte Codec ist AV1, streikt der AV1-Decoder dieses
+        // Geraets (trotz positiver Faehigkeits-Abfrage - real erlebt: schwarzes Bild bei
+        // vollem Datenfluss). Dann: AV1 fuer diese Browsersitzung sperren und mit
+        // H.264-only neu verbinden - der Zuschauer merkt nur einen kurzen Aussetzer.
+        setTimeout(async function () {
+          if (window._pc !== pc || pc.connectionState !== 'connected') return
+          try {
+            var st = await pc.getStats(), dec = -1, bytes = 0, codec = '', codecs = {}
+            st.forEach(function (r) {
+              if (r.type === 'codec') codecs[r.id] = r.mimeType || ''
+              if (r.type === 'inbound-rtp' && r.kind === 'video') { dec = r.framesDecoded || 0; bytes = r.bytesReceived || 0; codec = r.codecId || '' }
+            })
+            if (dec === 0 && bytes > 100000 && /av01|AV1/i.test(codecs[codec] || '')) {
+              console.warn('[codec] AV1 ausgehandelt, aber 0 Bilder dekodiert (' + bytes + ' Bytes empfangen) -> Fallback auf H.264')
+              try { sessionStorage.setItem('lumoraForceH264', '1') } catch (e) {}
+              status('Video-Decoder streikt – wechsle auf H.264…', 'err')
+              retry()
+            }
+          } catch (e) {}
+        }, 4000)
       } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         status('Verbindung verloren – neuer Versuch…', 'err')
         _connected = false; applyVol()

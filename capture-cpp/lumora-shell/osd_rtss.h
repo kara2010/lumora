@@ -27,6 +27,12 @@ inline const char* apiName(uint32_t flags) {
 // (msedgewebview2.exe) statt der Haupt-exe (bei Electron war es die Lumora.exe).
 // Ohne Ausschluss gewinnt abwechselnd Lumoras eigene UI-Praesentation den
 // "zuletzt aktiv"-Vergleich -> falsche FPS/springende Position (bei Electron gemessen).
+//
+// dwm.exe (Windows Desktop Window Manager) wird von RTSS ebenfalls als praesentierender
+// Prozess gehookt und laeuft IMMER mit der Desktop-Aktualisierungsrate, unabhaengig vom
+// Spiel (real gemeldet: Spiel intern auf 120 fps begrenzt, OSD zeigte die Monitor-Hz).
+// Besonders im Borderless-Fenstermodus kann DWM den "zuletzt aktiv"-Vergleich gewinnen -
+// ohne Ausschluss landet dann dessen Presentrate statt der echten Spiel-Framerate im OSD.
 inline std::string selfExeLower() {
     wchar_t p[MAX_PATH] = {}; GetModuleFileNameW(nullptr, p, MAX_PATH);
     std::wstring w = p; size_t s = w.find_last_of(L'\\');
@@ -40,7 +46,7 @@ inline bool isSelf(const App* e) {
     std::string s(nm);   // stoppt am ersten NUL
     size_t bs = s.find_last_of('\\'); std::string bn = (bs == std::string::npos) ? s : s.substr(bs + 1);
     for (auto& c : bn) c = (char)tolower((unsigned char)c);
-    return bn == self || bn == "msedgewebview2.exe";
+    return bn == self || bn == "msedgewebview2.exe" || bn == "dwm.exe";
 }
 
 inline bool available() {

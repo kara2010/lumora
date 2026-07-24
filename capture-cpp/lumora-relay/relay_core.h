@@ -4,10 +4,13 @@
 // UDP/TS-Ingest (ingest.cpp) und HTTP (whep_server/ctrl_server).
 #pragma once
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace rtc { class PeerConnection; class Track; struct RtpPacketizationConfig; }
@@ -50,9 +53,16 @@ public:
 
     // Ingest (vom TS-Demuxer): Annex-B-AU / AV1-Temporal-Unit / rohes Opus-Paket mit 90kHz-PTS.
     // H.264 geht an H.264-Sessions, AV1 an AV1-Sessions (Codec-Wahl pro Zuschauer per SDP).
+    // ENTKOPPELT (4K-Framedrop-Fix, Log-belegt 2026-07-23): diese Calls legen nur noch in
+    // eine Queue; ein eigener Sende-Thread verteilt an die Sessions. Vorher liefen die
+    // WebRTC-Sends SYNCHRON im Ingest-Thread - sobald ein Zuschauer verbunden war, leerte
+    // der Ingest den Loopback-UDP-Puffer langsamer, der Rueckstau bremste den sendenden
+    // Capture-Helfer zu Bursts und AMFs Low-Latency-Eingangsqueue lief ueber (SubmitInput
+    // AMF_INPUT_FULL ~1x/s ab Viewer-Connect, real nur ~52 statt 60 AUs/s bei 4K/25Mbit).
     void pushVideoAU(const uint8_t* au, size_t len, uint64_t pts90k);
     void pushVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k);
     void pushAudioFrame(const uint8_t* pkt, size_t len, uint64_t pts90k);
+    uint64_t queueDropped() const { return qDropped_.load(); }   // Diagnose: verworfene Queue-Eintraege
 
     // true sobald der Ingest AV1 liefert -> erst dann wird AV1 im SDP-Answer gewaehlt
     bool av1Active() const { return av1Active_.load(); }
@@ -65,6 +75,18 @@ public:
 private:
     struct Session;
     void dropClosed();                                   // getrennte/geschlossene Sessions ausraeumen
+    // Sende-Queue (s. pushVideoAU): Ingest-Thread legt ab, sendLoop() verteilt.
+    struct QItem { int kind; std::vector<uint8_t> data; uint64_t pts; };   // kind: 0=H264 1=AV1 2=Audio
+    void sendLoop();
+    void sendVideoAU(const uint8_t* au, size_t len, uint64_t pts90k);
+    void sendVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k);
+    void sendAudioFrame(const uint8_t* pkt, size_t len, uint64_t pts90k);
+    std::deque<QItem> q_;
+    std::mutex qmx_;
+    std::condition_variable qcv_;
+    std::atomic<bool> qRun_{ true };
+    std::atomic<uint64_t> qDropped_{ 0 };
+    std::thread sender_;
     RelayConfig cfg_;
     mutable std::mutex mx_;
     std::vector<std::shared_ptr<Session>> sessions_;
@@ -72,7 +94,12 @@ private:
     uint64_t bytesIn_ = 0;
     int64_t lastIngestMs_ = 0;
     std::atomic<bool> av1Active_{ false };               // Ingest liefert (auch) AV1
-    std::string codecMode_ = "auto";                     // auto|av1|h264 (von der Shell gesetzt)
+    // Default "h264" statt "auto" (Race-Fix, Log-belegt 2026-07-23 12:00): die Vorschau
+    // reconnectet beim Stream-NEUstart schneller, als die Shell den Codec-Modus pushen kann -
+    // unter "auto" bekam sie in diesem Fenster eine AV1-Session, die auf Hardware ohne
+    // AV1-Encoder nie Bild bekommt. H.264 funktioniert immer; AV1 gibt es erst, wenn der
+    // Modus explizit (per --codec beim Spawn oder Push) freigeschaltet wurde.
+    std::string codecMode_ = "h264";                     // auto|av1|h264 (von der Shell gesetzt)
     // SPS/PPS-Cache: neuen Sessions fehlt sonst bis zum naechsten IDR (max 1s GOP) der Parametersatz
     std::vector<uint8_t> lastSpsPps_;
 };

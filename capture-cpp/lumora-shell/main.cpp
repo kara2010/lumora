@@ -847,6 +847,10 @@ static ULONGLONG g_bcPinholeSetAt = 0;   // fuer die 12h-IPv6-Pinhole-Erneuerung
 #define TIMER_IPWATCH 109   // IP-Wechsel-Watcher (5 min): Zwangstrennung/IP-Wechsel nachziehen
 static void bcRegisterWatchLink(); static void bcUnregisterWatchLink();   // (Gruppen-Modul weiter unten)
 static void notifyForwardIssue();   // Tray-Balloon "Portfreigabe noetig" (Definition nach dem Tray)
+static void bcMaybeCopyLink();      // Auto-Copy des Stream-Links nach der Router-Phase (Definition ebd.)
+extern std::string g_bcCopyPending; // "" | "ui" | "hotkey" (Definition bei bcMaybeCopyLink)
+static json groupJoinCode(const std::string& code);   // Gruppen-Beitritts-Kern (Definition im Gruppen-Modul)
+extern json g_group;                // aktive Gruppe oder null (Definition im Gruppen-Modul)
 static bool g_bcForwardNotified = false;   // Balloon nur einmal je Stream
 
 static void bcPushState() { sendToUi("broadcast-status", g_bcState); }
@@ -901,6 +905,19 @@ static std::string runCaptureOutput(const std::wstring& cmdLine, DWORD timeoutMs
     return out;
 }
 // Kindprozess mit stdout/stderr-Capture starten; Reader-Thread schreibt ins Stream-Log.
+// AV1-Faehigkeit des Capture-Helfers (Zeile "codec=av1|h264" auf dessen stdout, kommt nach
+// dem Encoder-Init). Default FALSE: bis zur Meldung handelt der Relay nur H.264-Sessions aus -
+// H.264 laeuft immer ("immer warm"). Ohne diese Rueckkopplung entschied der Relay die Codec-
+// Wahl blind nach dem Settings-Modus (auto -> AV1 erlaubt): auf Hardware OHNE AV1-Encoder
+// bekam die Vorschau eine AV1-Session, der Bedarf kippte auf "av1", der Helfer konnte nicht
+// liefern -> Blackout (Log-belegt 2026-07-23 10:36, AMD-iGPU ohne AV1). Maschinenfest, wird
+// bewusst NICHT je Stream zurueckgesetzt, sondern in den Settings persistiert ("capAv1"):
+// beim naechsten App-/Stream-Start ist die Faehigkeit VOR dem Relay-Start bekannt und der
+// initiale Codec-Push sofort korrekt (keine Luecke, in der die Vorschau eine AV1-Session
+// bekommen koennte, die die Hardware nie bedienen kann).
+static bool g_capAv1 = false;
+static bool g_capAv1Loaded = false;
+static void bcPushCodecConfig();
 static bool spawnChild(ChildProc& cp, const std::wstring& cmdLine, const char* logPrefix) {
     SECURITY_ATTRIBUTES sa{ sizeof(sa) }; sa.bInheritHandle = TRUE;
     HANDLE rd = nullptr, wr = nullptr;
@@ -924,6 +941,14 @@ static bool spawnChild(ChildProc& cp, const std::wstring& cmdLine, const char* l
                 std::string line = acc.substr(0, nl); acc = acc.substr(nl + 1);
                 while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
                 if (!line.empty()) bcLogStream(pfx + line);
+                // Faehigkeitsmeldung des Capture-Helfers abgreifen (s. g_capAv1 oben).
+                if (pfx == "nat: " && line.rfind("codec=", 0) == 0) {
+                    bool cap = line.find("av1") != std::string::npos;
+                    if (cap != g_capAv1) {
+                        g_capAv1 = cap; bcPushCodecConfig();
+                        json s = loadSettings(); s["capAv1"] = cap; writeFile(settingsPath(), s.dump(2));   // persistieren (s.o.)
+                    }
+                }
             }
         }
         CloseHandle(rd);
@@ -992,10 +1017,20 @@ static void bcPushIceConfig(const std::vector<std::string>& hosts) {
     luart::httpPost("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/config/ice", body.dump(), 2000);
 }
 // Codec-Modus (auto|av1|h264) an den Relay pushen - bestimmt die Codec-Wahl pro Zuschauer.
+// Effektiv = Settings-Modus BEGRENZT durch die Hardware-Faehigkeit (g_capAv1): kann der
+// Encoder kein AV1, wird dem Relay hart "h264" gemeldet, egal was eingestellt ist - sonst
+// handelt er AV1-Sessions aus, die nie Bild bekommen koennen.
+// Effektiver Codec-Modus = Settings-Modus BEGRENZT durch die (persistierte) Hardware-Faehigkeit.
+static std::string bcEffectiveCodecMode() {
+    json st = loadSettings();
+    if (!g_capAv1Loaded) { g_capAv1Loaded = true; g_capAv1 = st.value("capAv1", false); }   // persistierte Faehigkeit (s. g_capAv1)
+    return g_capAv1 ? st.value("streamCodec", "auto") : "h264";
+}
 static void bcPushCodecConfig() {
-    std::string mode = loadSettings().value("streamCodec", "auto");
-    luart::httpPost("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/config/codec",
+    std::string mode = bcEffectiveCodecMode();
+    auto r = luart::httpPost("http://127.0.0.1:" + std::to_string(MTX_API_PORT) + "/v3/config/codec",
                     json({ {"mode", mode} }).dump(), 2000);
+    bcLogStream("codec-push -> " + mode + " (http " + std::to_string(r.status) + ")");
 }
 // Gewuenschte Encoder-Menge an den Capture-Helfer signalisieren (bedarfsgesteuert).
 // Inhalt: "h264" | "av1" | "h264+av1". Nie leer (Warm-Default h264).
@@ -1038,8 +1073,12 @@ bool bcStartMtx(const std::wstring& cfgPath) {
     bool native = bcNativeRelay();
     std::wstring relay = binDir() + (native ? L"\\lumora-media-relay.exe" : L"\\mediamtx.exe");
     if (GetFileAttributesW(relay.c_str()) == INVALID_FILE_ATTRIBUTES) { native = false; relay = binDir() + L"\\mediamtx.exe"; }
-    // nativer Relay: keine Config-Datei (ICE kommt per Push nach dem Ready-Check)
-    std::wstring cmd = native ? (L"\"" + relay + L"\"") : (L"\"" + relay + L"\" \"" + cfgPath + L"\"");
+    // nativer Relay: keine Config-Datei (ICE kommt per Push nach dem Ready-Check). Der
+    // Codec-Modus geht als CLI-Argument mit - ab dem ALLERERSTEN Lauschen korrekt, damit
+    // die sofort reconnectende Vorschau nie in ein "auto"-Fenster faellt (Race, s. Push).
+    std::string cm = bcEffectiveCodecMode();
+    std::wstring cmd = native ? (L"\"" + relay + L"\" --codec " + std::wstring(cm.begin(), cm.end()))
+                              : (L"\"" + relay + L"\" \"" + cfgPath + L"\"");
     if (!spawnChild(g_mtx, cmd, "mtx: ")) return false;
     bcMtxExitWatch(g_mtx.proc);
     // Readiness: nativ = Control-API-Port (lauscht zuletzt), mediamtx = RTSP-Port (wie das Original)
@@ -1246,6 +1285,7 @@ static void bcApplyCfg(const json& cfg) {
     }
     // Vollneustart (fps/scaleH geaendert): Zuschauer einfrieren, Helfer neu.
     g_bcSwitches++;
+    sendToUi("switch-freeze", { {"kind", "full"} });   // EIGENE Vorschau friert das letzte Bild ein (wie externe Zuschauer per SSE)
     bcBroadcastSwitch("full", cfg.value("kbit", 8000));
     { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_cap); }
     bcStartNative(cfg);
@@ -1349,6 +1389,7 @@ static json startBroadcast() {
     if (!bcStartMtx(cfgPath)) {
         bcLogStream("start: FEHLGESCHLAGEN (Relay startet nicht - Port belegt? Electron-Lumora aktiv?)");
         sendToUi("stream-error", "Stream-Start fehlgeschlagen: Relay startet nicht. Laeuft Lumora doppelt (Electron-Version streamt)?");
+        g_bcCopyPending.clear();   // Start fehlgeschlagen - nichts zu kopieren
         g_bcState = { {"active", false} }; bcPushState();
         { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_mtx); }
         return g_bcState;
@@ -1357,6 +1398,7 @@ static json startBroadcast() {
     if (!g_streamSrvUp) {
         sendToUi("stream-error", "Stream-Start fehlgeschlagen: Port 8787 wird von einem anderen Programm belegt.");
         { std::lock_guard<std::mutex> lk(g_launchMx); killChild(g_mtx); }
+        g_bcCopyPending.clear();   // Start fehlgeschlagen - nichts zu kopieren
         g_bcState = { {"active", false} }; bcPushState();
         return g_bcState;
     }
@@ -1374,30 +1416,44 @@ static json startBroadcast() {
         ULONGLONG t0 = GetTickCount64();
         json s = loadSettings();
         bool forceV6 = s.value("streamForceIPv6", false);
-        std::string pubIp = luupnp::getExternalIp();
-        std::string pubIp6 = luupnp::publicIPv6();
+        // BESCHLEUNIGT (vorher 4-7s, alles sequenziell): der IPv6-Zweig (eigene Adresse +
+        // 2 Firewall-Pinholes, eigene IGDv2-Discovery) ist vom IPv4-Zweig (externe IP +
+        // Hairpin-Check + 2 Portfreigaben) komplett unabhaengig -> parallel. Die beiden
+        // Portfreigaben untereinander ebenfalls (FritzBoxen brauchen je ~1-2s, weil sie
+        // jede Freigabe persistieren). Inhaltlich identisches Verhalten/Ergebnis.
+        std::string pubIp, pubIp6;
         bool tcpOk = false, udpOk = false, v6Ok = false, v4Occupied = false;
-        if (!pubIp6.empty()) {   // Pinholes (TCP-Signalisierung + UDP-Medien)
-            std::string t6 = luupnp::addPinhole(pubIp6, BROADCAST_PORT, "TCP");
-            std::string u6 = luupnp::addPinhole(pubIp6, MTX_ICE_UDP, "UDP");
+        std::string v4Group;   // laeuft auf der ANDEREN eigenen Instanz im Netz eine Gruppe? -> Auto-Join (s.u.)
+        std::thread tv6([&]() {
+            pubIp6 = luupnp::publicIPv6();
+            if (pubIp6.empty()) return;
+            std::string t6 = luupnp::addPinhole(pubIp6, BROADCAST_PORT, "TCP");   // Signalisierung
+            std::string u6 = luupnp::addPinhole(pubIp6, MTX_ICE_UDP, "UDP");      // Medien
             if (!t6.empty()) g_bcPinholeIds.push_back(t6);
             if (!u6.empty()) g_bcPinholeIds.push_back(u6);
             v6Ok = !t6.empty() && !u6.empty();
             if (v6Ok) g_bcPinholeSetAt = GetTickCount64();   // Startzeit fuer die 12h-Erneuerung
-        }
+        });
+        pubIp = luupnp::getExternalIp();   // waermt zugleich den resolveControl-Cache fuer mapPort
         if (!forceV6 && !pubIp.empty()) {
             // Zweiter PC im selben Netz: antwortet unter der oeffentlichen IPv4 schon eine
             // ANDERE Lumora-Instanz, deren Mapping NICHT stehlen (Hairpin-Check, 1.5s wie Electron).
             auto r = luart::httpGet("http://" + pubIp + ":" + std::to_string(BROADCAST_PORT) + "/instanz", L"", 1500);
             json j = json::parse(r.body, nullptr, false);
-            if (r.status == 200 && j.is_object() && j.value("lumora", false) && !j.value("id", json()).is_null()) v4Occupied = true;   // fremde (Electron-)Instanz mit Identitaet
+            if (r.status == 200 && j.is_object() && j.value("lumora", false) && !j.value("id", json()).is_null()) {
+                v4Occupied = true;   // fremde (Electron-/Zweit-)Instanz mit Identitaet
+                if (j.contains("group") && j["group"].is_string()) v4Group = j["group"].get<std::string>();
+            }
         }
         if (!v4Occupied && !forceV6) {
+            std::thread tudp([&]() { udpOk = luupnp::mapPort(MTX_ICE_UDP, "UDP", "Lumora Stream Medien"); });
             tcpOk = luupnp::mapPort(BROADCAST_PORT, "TCP", "Lumora Stream");
-            udpOk = luupnp::mapPort(MTX_ICE_UDP, "UDP", "Lumora Stream Medien");
+            tudp.join();
             if (tcpOk || udpOk) g_bcV4Mapped = true;
         }
+        tv6.join();
         if (!g_bcState.value("active", false)) {   // waehrend der Router-Phase gestoppt
+            g_bcCopyPending.clear();   // Sicherheitsnetz: nach dem Stopp nichts mehr kopieren
             for (auto& id : g_bcPinholeIds) luupnp::deletePinhole(id);
             g_bcPinholeIds.clear();
             return;
@@ -1431,6 +1487,16 @@ static json startBroadcast() {
         g_bcState["opening"] = false;
         bcPushState();
         if (g_bcState.value("internet", false)) bcRegisterWatchLink();   // schoene stream.php-Teilen-URL statt IP
+        bcMaybeCopyLink();   // Auto-Copy JETZT (Link final - stream.php-URL oder IP-Fallback)
+        // Zweiter eigener PC im selben Netz: laeuft auf der anderen Lumora-Instanz bereits
+        // eine Gruppe, automatisch per Raumcode beitreten - der Nutzer startet auf Rechner 2
+        // nur den Stream und ist dabei, ohne Code-Kopieren (1:1 Electron-Verhalten).
+        if (!v4Group.empty() && g_group.is_null()) {
+            bcLogStream("gruppe: Auto-Join in Raum " + v4Group + " (andere eigene Instanz im Netz)");
+            json st = groupJoinCode(v4Group);
+            if (st.is_object() && st.value("active", false)) sendToUi("group-autojoin", json::object());
+            else bcLogStream("gruppe: Auto-Join fehlgeschlagen: " + st.dump());
+        }
     }).detach();
     return g_bcState;
 }
@@ -1480,11 +1546,68 @@ static json stopBroadcast() {
     return g_bcState;
 }
 
+// Quellen-Liste (Monitore nativ + Fenster via Helfer --list). Genutzt vom IPC-Handler
+// "list-sources" UND vom Quellen-Watcher (sources-updated-Push bei Fensteraenderungen).
+static json enumSources() {
+    json out = json::array();
+    struct MonCtx { json* out; int i; };
+    MonCtx mc{ &out, 0 };
+    EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR hm, HDC, LPRECT, LPARAM lp) -> BOOL {
+        auto* c = (MonCtx*)lp;
+        MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi);
+        std::string label = "Bildschirm " + std::to_string(c->i + 1) + " \xE2\x80\x93 " +
+            std::to_string(mi.rcMonitor.right - mi.rcMonitor.left) + "\xC3\x97" + std::to_string(mi.rcMonitor.bottom - mi.rcMonitor.top);
+        if (mi.dwFlags & MONITORINFOF_PRIMARY) label += " \xC2\xB7 Haupt";
+        c->out->push_back({ {"value", "screen:" + std::to_string(c->i)}, {"label", label}, {"icon", ""}, {"kind", "screen"} });
+        c->i++;
+        return TRUE;
+    }, (LPARAM)&mc);
+    // Fenster: Helfer --list (Zeilen "hwnd\ttitel\ticonDataUrl")
+    std::string raw = runCaptureOutput(L"\"" + binDir() + L"\\lumora-capture-native.exe\" --list", 15000);
+    std::istringstream ls(raw); std::string line;
+    while (std::getline(ls, line)) {
+        while (!line.empty() && (line.back() == '\r')) line.pop_back();
+        size_t t1 = line.find('\t'); if (t1 == std::string::npos) continue;
+        size_t t2 = line.find('\t', t1 + 1);
+        std::string hwnd = line.substr(0, t1);
+        std::string title = t2 == std::string::npos ? line.substr(t1 + 1) : line.substr(t1 + 1, t2 - t1 - 1);
+        std::string icon = t2 == std::string::npos ? "" : line.substr(t2 + 1);
+        if (hwnd.empty() || title.empty()) continue;
+        std::string tl = title; for (auto& c : tl) c = (char)tolower((unsigned char)c);
+        if (tl == "lumora" || title == "Program Manager") continue;   // eigene App/Desktop ausblenden (wie Electron)
+        // Helfer liefert ROHES PNG-Base64 - das data-URL-Praefix ergaenzt die App (User-Befund: Icons kaputt)
+        out.push_back({ {"value", "window:" + hwnd}, {"label", title}, {"icon", icon.empty() ? "" : "data:image/png;base64," + icon}, {"kind", "window"} });
+    }
+    return out;
+}
+// Quellen-Watcher (sources-updated, 1:1 Electron-Verhalten): billiger Fenster-Fingerprint
+// alle 3s (EnumWindows, KEIN Helfer-Spawn); nur bei ECHTER Aenderung (Fenster auf/zu/
+// umbenannt) wird die volle Liste im Worker enumeriert und an die UI gepusht.
+static uint64_t g_srcFp = 0; static std::atomic<bool> g_srcEnumBusy{ false };
+static void srcWatchTick() {
+    if (!IsWindowVisible(g_hwnd) || g_srcEnumBusy) return;   // UI zu/keine Anzeige -> sparen
+    uint64_t fp = 1469598103934665603ull;   // FNV-1a ueber (hwnd, Titel-Laenge) sichtbarer Fenster
+    EnumWindows([](HWND h, LPARAM lp) -> BOOL {
+        if (!IsWindowVisible(h) || GetWindowTextLengthW(h) == 0) return TRUE;
+        int cloaked = 0; DwmGetWindowAttribute(h, 14 /*DWMWA_CLOAKED*/, &cloaked, sizeof(cloaked));
+        if (cloaked) return TRUE;
+        auto* f = (uint64_t*)lp;
+        uint64_t v = (uint64_t)(uintptr_t)h ^ ((uint64_t)GetWindowTextLengthW(h) << 48);
+        *f = (*f ^ v) * 1099511628211ull;
+        return TRUE;
+    }, (LPARAM)&fp);
+    if (fp == g_srcFp) return;
+    bool first = (g_srcFp == 0); g_srcFp = fp;
+    if (first) return;   // Erstlauf: nur Referenz merken, kein Push
+    g_srcEnumBusy = true;
+    std::thread([]() { sendToUi("sources-updated", enumSources()); g_srcEnumBusy = false; }).detach();
+}
+
 // --- Modul: Gruppe + Vermittlung + Teilen-URL (1:1 aus main.js) ------------------
 #define TIMER_GROUP 105   // 8s-Anwesenheits-Heartbeat
 #define TIMER_WATCH 106   // 20s-Refresh der Einzelstream-Registrierung
 static const char* GROUP_RELAY_DEFAULT = "https://lumora-streaming.de/gruppe.php";
-static json g_group = nullptr;                       // {code, members, relayFails} oder null
+json g_group = nullptr;                              // {code, members, relayFails} oder null (extern-deklariert weiter oben)
 static std::string g_accessKey, g_watchCode, g_prevWatchCode;
 static ULONGLONG g_prevWatchAt = 0;
 static std::atomic<bool> g_groupTickBusy{ false };
@@ -1541,6 +1664,22 @@ static json groupPublicState() {
              {"members", members}, {"relayUnreachable", g_group.value("relayFails", 0) > 0} };
 }
 static void groupPushState() { sendToUi("group-status", groupPublicState()); }
+static std::string bcShareUrl();   // Definition weiter unten (braucht g_watchCode)
+// Beitritts-Kern (Code ist bereits validiert, eigener Stream laeuft): Vermittlung updaten,
+// Gruppe uebernehmen, Heartbeat/LAN-Beacon starten. Genutzt vom IPC-Handler "group-join"
+// UND vom Auto-Join des Router-Threads (zweiter eigener PC im selben Netz).
+static json groupJoinCode(const std::string& code) {
+    json self = groupSelfEntry();
+    json r = groupRelay("update", { {"code", code} }, &self);
+    if (!r.is_object() || !r.value("ok", false)) return { {"active", false}, {"error", r.is_object() ? r.value("error", "relay-unreachable") : "relay-unreachable"} };
+    g_group = { {"code", code}, {"members", r.value("members", json::array())}, {"relayFails", 0} };
+    json s = loadSettings(); s["groupLastCode"] = code; writeFile(settingsPath(), s.dump(2));
+    SetTimer(g_hwnd, TIMER_GROUP, 8000, nullptr);
+    lulan::beaconStart(g_group.value("code", ""), groupDisplayName(), groupMemberId());   // eigene Gruppe im LAN bewerben
+    groupPushState();
+    g_bcState["link"] = bcShareUrl(); bcPushState();
+    return groupPublicState();
+}
 static std::string bcShareUrl() {
     if (!g_group.is_null()) return groupRelayUrl() + "?code=" + g_group.value("code", "");
     if (!g_watchCode.empty()) return streamShareUrl() + "?s=" + g_watchCode;
@@ -1821,6 +1960,37 @@ static void destroyTray() {
 }
 // Tray-Balloon "Portfreigabe noetig" (Pendant zu Electrons Notification). Nur mit
 // aktivem Tray-Icon; sonst zeigt die UI die Anleitung ohnehin (broadcastState.forwardHint).
+// "Link automatisch kopieren, SOBALD er feststeht" (1:1 aus main.js bcMaybeCopyLink): beim
+// Start-Klick der UI ('ui') bzw. Hotkey-Start ('hotkey') gemerkt; ausgeloest am ENDE der
+// Router-Phase (nach der stream.php-Registrierung - Erfolg ODER Fehlschlag), denn der Link
+// durchlaeuft zwei Stufen (roher IP-Link -> schoene stream.php-URL). Vorher zu kopieren
+// gaebe dem Nutzer genau die falsche (rohe) Adresse.
+std::string g_bcCopyPending;   // "" | "ui" | "hotkey" (extern-deklariert weiter oben)
+static void bcMaybeCopyLink() {
+    if (g_bcCopyPending.empty()) return;
+    std::string mode = g_bcCopyPending; g_bcCopyPending.clear();
+    std::string link = g_bcState.value("link", "");
+    if (link.empty()) return;
+    if (mode == "hotkey") {
+        // Nutzer ist im Spiel, UI unsichtbar -> Win32-Clipboard (fokus-unabhaengig) + Tray-Balloon.
+        std::wstring wl(link.begin(), link.end());
+        if (OpenClipboard(g_hwnd)) {
+            EmptyClipboard();
+            HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, (wl.size() + 1) * sizeof(wchar_t));
+            if (h) { memcpy(GlobalLock(h), wl.c_str(), (wl.size() + 1) * sizeof(wchar_t)); GlobalUnlock(h); SetClipboardData(CF_UNICODETEXT, h); }
+            CloseClipboard();
+        }
+        if (g_trayOn) {
+            NOTIFYICONDATAW n{}; n.cbSize = sizeof(n); n.hWnd = g_hwnd; n.uID = 1; n.uFlags = NIF_INFO;
+            wcscpy_s(n.szInfoTitle, L"\U0001F4CB Stream-Link kopiert");
+            wcscpy_s(n.szInfo, L"Einfach im Chat einfügen (Strg+V) – z. B. in deinem Discord-Channel.");
+            n.dwInfoFlags = NIIF_INFO;
+            Shell_NotifyIconW(NIM_MODIFY, &n);
+        }
+        return;
+    }
+    sendToUi("copy-stream-link", link);   // UI kopiert + zeigt Toast/Blink (Handler existiert bereits)
+}
 static void notifyForwardIssue() {
     if (g_bcForwardNotified || !g_trayOn) return;
     g_bcForwardNotified = true;
@@ -1903,6 +2073,7 @@ static void registerProtocol() {
 // Installer (Phase 4) - sonst wuerde die Beta-Shell der produktiven Electron-App den
 // lumora://-Handler wegnehmen. Verarbeiten kann die Shell die Links aber schon (Argument
 // beim Start bzw. WM_COPYDATA einer Zweitinstanz).
+static std::string g_coldDeepLink;   // Kaltstart-Deep-Link, wird per TIMER_COLDLINK nachgereicht (s. wWinMain)
 static void handleDeepLink(const std::string& url) {
     std::smatch m;
     if (std::regex_search(url, m, std::regex("^lumora://join/([A-Za-z0-9]+)", std::regex::icase))) {
@@ -1928,6 +2099,8 @@ static void sendToOsd(const std::string& channel, const json& payload);
 #define TIMER_OSDDATA 107
 #define TIMER_OSDFPS 110   // schneller Frametime-Graph-Tick (~30 Hz), getrennt von den 5-Hz-Sensoren
 #define TIMER_LANPUSH 111  // LAN-Gruppen (Beacon-Empfang) alle 5 s an die UI melden
+#define TIMER_COLDLINK 112 // Kaltstart-Deep-Link (lumora://...) nachreichen, sobald die UI geladen ist
+#define TIMER_SRCWATCH 113 // Quellen-Watcher: Fenster-Fingerprint alle 3s -> sources-updated bei Aenderung
 // --- OSD-Sensorik Teil 1 (treiberfrei): PDH-CPU/GPU-Last, RAM, DXGI-VRAM.
 // Temp/Takt/Power (NVML/ADL/PawnIO) + FPS (PresentMon) folgen als Teil 2.
 static PDH_HQUERY g_pdhQ = nullptr;
@@ -2130,9 +2303,20 @@ static std::wstring pawnioDirW() {
     return std::wstring(pf) + L"\\PawnIO";
 }
 static bool pawnioInstalled() { return GetFileAttributesW((pawnioDirW() + L"\\PawnIOLib.dll").c_str()) != INVALID_FILE_ATTRIBUTES; }
+// Prueft nicht nur, OB die Aufgabe existiert, sondern ob ihre Action auf DIESE exe
+// zeigt. Grund: nach einem Umstieg Electron->nativ (oder wenn der Installationsordner
+// sich sonst aendert) blieb eine alte Aufgabe bestehen, die noch auf die alte exe zeigte -
+// schtasks /run startete dann nichts Sichtbares (Pfad ungueltig bzw. falsche Version).
+// Der Installer raeumt das beim Update selbst mit auf, das hier ist die zusaetzliche
+// Absicherung fuer alle anderen Faelle (z.B. Installationsordner manuell verschoben).
 static bool schtaskPresent(const wchar_t* task) {
-    std::string out = runCaptureOutput(std::wstring(L"schtasks /query /tn \"") + task + L"\"", 8000);
-    return !out.empty() && out.find("ERROR") == std::string::npos && out.find("FEHLER") == std::string::npos;
+    std::string out = runCaptureOutput(
+        std::wstring(L"powershell -NoProfile -Command \"(Get-ScheduledTask -TaskName '") + task +
+        L"' -ErrorAction SilentlyContinue).Actions.Execute\"", 8000);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
+    if (out.empty()) return false;
+    wchar_t exeW[MAX_PATH]; GetModuleFileNameW(nullptr, exeW, MAX_PATH);
+    return _wcsicmp(widen(out).c_str(), exeW) == 0;
 }
 static bool fpsTaskPresent()   { return schtaskPresent(L"LumoraOSD-FPS"); }
 static bool senseTaskPresent() { return schtaskPresent(L"LumoraOSD-Sensors"); }
@@ -2657,7 +2841,26 @@ static void rebuildKbHotkeys() {
     add(s.value("osdHotkey", "Alt+O"), toggleOsdSetting);
     add(s.value("osdEditHotkey", "Alt+Shift+O"), []() { setOsdEditMode(!g_osdEdit); });
     add(s.value("osdAbHotkey", "Alt+B"), []() { lurtss::toggleAbOsd(); });
-    add(s.value("streamHotkey", ""), []() { std::thread([]() { if (g_bcState.value("active", false)) stopBroadcast(); else startBroadcast(); }).detach(); });
+    add(s.value("streamHotkey", ""), []() {
+        // Vordergrundfenster JETZT lesen (im Hotkey-Kontext, nicht im Worker - sonst waere
+        // evtl. schon ein anderes Fenster fokussiert): das gerade gespielte SPIEL wird die
+        // Stream-Quelle (1:1 Electron-Hotkey-Verhalten; eigene Fenster -> letztes Spiel).
+        HWND fg = GetForegroundWindow();
+        if (!fg || fg == g_hwnd || fg == g_osdHwnd) fg = g_prevGameHwnd;
+        std::thread([fg]() {
+            bool wasActive = g_bcState.value("active", false);
+            if (wasActive) { g_bcCopyPending.clear(); stopBroadcast(); }
+            else {
+                if (fg && IsWindow(fg)) {
+                    json s2 = loadSettings(); s2["streamSource"] = "window:" + std::to_string((long long)(intptr_t)fg);
+                    writeFile(settingsPath(), s2.dump(2));
+                    sendToUi("stream-source-changed", json::object());   // UI zieht die Quellen-Anzeige nach
+                }
+                g_bcCopyPending = "hotkey"; startBroadcast();   // Link nach Router-Phase in die Zwischenablage + Tray-Balloon (Nutzer ist im Spiel)
+            }
+            sendToUi("stream-toggle-sound", { {"on", !wasActive} });   // akustische Rueckmeldung - man sieht die UI nicht
+        }).detach();
+    });
     std::lock_guard<std::mutex> lk(g_kbMx);
     g_kbHotkeys = std::move(list);
 }
@@ -2835,8 +3038,19 @@ static json handleChannel(const std::string& channel, const json& args) {
     }
     if (channel == "scan-games") return lushell::scanGames(args.size() >= 1 ? args[0] : json::array());   // Steam+Xbox+Ordner (weitere Stores folgen)
     // ---- Streaming (nativer Weg; V1 = LAN-Phase, Router-Phase folgt) ----
-    if (channel == "start-broadcast") return startBroadcast();
-    if (channel == "stop-broadcast") return stopBroadcast();
+    if (channel == "start-broadcast") {
+        // {copyLink:true} vom Start-Klick der UI: Link nach der Router-Phase automatisch in
+        // die Zwischenablage (1:1 Electron-Verhalten; die UI zeigt Toast + gruenes Blinken).
+        g_bcCopyPending = (args.size() >= 1 && args[0].is_object() && args[0].value("copyLink", false)) ? "ui" : "";
+        return startBroadcast();
+    }
+    if (channel == "stop-broadcast") { g_bcCopyPending.clear(); return stopBroadcast(); }
+    if (channel == "queue-copy-link") {   // Kopier-Klick waehrend der Router-Phase: vormerken (s. bcMaybeCopyLink)
+        if (!g_bcState.value("active", false)) return { {"ok", false} };
+        g_bcCopyPending = "ui";
+        if (!g_bcState.value("opening", true)) bcMaybeCopyLink();   // Link schon final (Race mit dem Klick) -> sofort
+        return { {"ok", true} };
+    }
     if (channel == "broadcast-status") return g_bcState;
     if (channel == "list-viewers") {
         json out = json::array();
@@ -2924,39 +3138,8 @@ static json handleChannel(const std::string& channel, const json& args) {
         json s2 = loadSettings();
         return { {"mode", s2.value("streamHdrMode", 0)}, {"exposure", s2.value("streamHdrExposure", 0.3937)} };
     }
-    if (channel == "list-sources") {
-        // Monitore nativ (Label wie Electron: "Bildschirm N - WxH [· Haupt]") + Fenster via Helfer --list
-        json out = json::array();
-        struct MonCtx { json* out; int i; };
-        MonCtx mc{ &out, 0 };
-        EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR hm, HDC, LPRECT, LPARAM lp) -> BOOL {
-            auto* c = (MonCtx*)lp;
-            MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi);
-            std::string label = "Bildschirm " + std::to_string(c->i + 1) + " \xE2\x80\x93 " +
-                std::to_string(mi.rcMonitor.right - mi.rcMonitor.left) + "\xC3\x97" + std::to_string(mi.rcMonitor.bottom - mi.rcMonitor.top);
-            if (mi.dwFlags & MONITORINFOF_PRIMARY) label += " \xC2\xB7 Haupt";
-            c->out->push_back({ {"value", "screen:" + std::to_string(c->i)}, {"label", label}, {"icon", ""}, {"kind", "screen"} });
-            c->i++;
-            return TRUE;
-        }, (LPARAM)&mc);
-        // Fenster: Helfer --list (Zeilen "hwnd\ttitel\ticonDataUrl")
-        std::string raw = runCaptureOutput(L"\"" + binDir() + L"\\lumora-capture-native.exe\" --list", 15000);
-        std::istringstream ls(raw); std::string line;
-        while (std::getline(ls, line)) {
-            while (!line.empty() && (line.back() == '\r')) line.pop_back();
-            size_t t1 = line.find('\t'); if (t1 == std::string::npos) continue;
-            size_t t2 = line.find('\t', t1 + 1);
-            std::string hwnd = line.substr(0, t1);
-            std::string title = t2 == std::string::npos ? line.substr(t1 + 1) : line.substr(t1 + 1, t2 - t1 - 1);
-            std::string icon = t2 == std::string::npos ? "" : line.substr(t2 + 1);
-            if (hwnd.empty() || title.empty()) continue;
-            std::string tl = title; for (auto& c : tl) c = (char)tolower((unsigned char)c);
-            if (tl == "lumora" || title == "Program Manager") continue;   // eigene App/Desktop ausblenden (wie Electron)
-            // Helfer liefert ROHES PNG-Base64 - das data-URL-Praefix ergaenzt die App (User-Befund: Icons kaputt)
-            out.push_back({ {"value", "window:" + hwnd}, {"label", title}, {"icon", icon.empty() ? "" : "data:image/png;base64," + icon}, {"kind", "window"} });
-        }
-        return out;
-    }
+    if (channel == "list-sources") return enumSources();
+    if (channel == "r-log") { if (args.size() >= 1 && args[0].is_string()) bcLogStream("ui: " + args[0].get<std::string>()); return nullptr; }
     if (channel == "test-connectivity") return runConnectivityTest();
     // ---- Gruppe (gruppe.php-Vermittlung) ----
     if (channel == "group-start") {
@@ -2992,16 +3175,7 @@ static json handleChannel(const std::string& channel, const json& args) {
             if (!g_bcState.value("active", false)) return { {"active", false}, {"error", "stream-start-failed"} };
         }
         for (int i = 0; i < 40 && g_bcState.value("opening", true); ++i) Sleep(500);
-        json self = groupSelfEntry();
-        json r = groupRelay("update", { {"code", code} }, &self);
-        if (!r.is_object() || !r.value("ok", false)) return { {"active", false}, {"error", r.is_object() ? r.value("error", "relay-unreachable") : "relay-unreachable"} };
-        g_group = { {"code", code}, {"members", r.value("members", json::array())}, {"relayFails", 0} };
-        json s = loadSettings(); s["groupLastCode"] = code; writeFile(settingsPath(), s.dump(2));
-        SetTimer(g_hwnd, TIMER_GROUP, 8000, nullptr);
-        lulan::beaconStart(g_group.value("code", ""), groupDisplayName(), groupMemberId());   // eigene Gruppe im LAN bewerben
-        groupPushState();
-        g_bcState["link"] = bcShareUrl(); bcPushState();
-        return groupPublicState();
+        return groupJoinCode(code);
     }
     if (channel == "group-leave") {
         if (g_group.is_null()) return groupPublicState();
@@ -3230,7 +3404,7 @@ static bool isSlowChannel(const std::string& c) {
     return c == "scan-games" || c == "fetch-cover" || c == "fetch-hero" || c == "fetch-game-info" ||
            c == "fetch-image-url" || c == "search-steam" || c == "search-msstore" || c == "search-sgdb" ||
            c == "launch-game" ||   // HDR-Wartezeit (3s) + AUMID-Suche
-           c == "start-broadcast" || c == "stop-broadcast" || c == "list-sources" ||   // Relay-Ready/Helfer-Lauf
+           c == "start-broadcast" || c == "stop-broadcast" || c == "queue-copy-link" || c == "list-sources" ||   // Relay-Ready/Helfer-Lauf
            c == "list-viewers" || c == "kick-viewer" || c == "preview-whep" || c == "preview-whep-stop" ||
            c == "group-start" || c == "group-join" || c == "group-leave" || c == "group-status" ||
            c == "test-connectivity" ||   // STUN+UPnP-Proben ~10s   // Vermittlungs-Netz
@@ -3347,6 +3521,8 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_VIEWER) { bcViewerTick(); return 0; }
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
         if (w == TIMER_IPWATCH) { bcIpWatchTick(); return 0; }
+        if (w == TIMER_COLDLINK) { KillTimer(h, TIMER_COLDLINK); if (!g_coldDeepLink.empty()) { handleDeepLink(g_coldDeepLink); g_coldDeepLink.clear(); } return 0; }
+        if (w == TIMER_SRCWATCH) { srcWatchTick(); return 0; }
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
         if (w == TIMER_XINPUT) { xinputTick(); return 0; }
         if (w == TIMER_LANPUSH) {   // im LAN entdeckte Gruppen an die UI (veraltete raus)
@@ -3680,14 +3856,21 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     applyAutostart();
     registerProtocol();   // lumora://-Handler auf die native exe (Umstieg von Electron)
     setupAutoUpdate();    // 4 s nach Start still nach einer neueren Version schauen
-    // Deep-Link als Startargument (lumora://...) direkt verarbeiten
-    for (int i = 1; i < argc; ++i) { std::string a = narrow(argv[i]); if (a.rfind("lumora://", 0) == 0) handleDeepLink(a); }
+    // Deep-Link als Startargument (lumora://... - KALTSTART ueber den "Mit Lumora
+    // mitstreamen"-Grid-Button): NICHT sofort verarbeiten! Das WebView2 laedt asynchron;
+    // ein sofortiges sendToUi("deep-join") verpufft im WM_SHELL_REPLY-Handler (g_webview
+    // noch null) und die App oeffnete sich nur, ohne in den Stream-Tab/Beitritts-Flow zu
+    // springen (real gemeldet). Wie Electron (bcColdLink, 1200ms nach ready): Link merken
+    // und per Timer nachreichen, wenn die UI ihre Listener registriert hat.
+    for (int i = 1; i < argc; ++i) { std::string a = narrow(argv[i]); if (a.rfind("lumora://", 0) == 0) { g_coldDeepLink = a; SetTimer(hwnd, TIMER_COLDLINK, 2500, nullptr); } }
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
     timeBeginPeriod(1);                              // praeziser Hintergrund-Poll (wie Electron/RTSS)
     SetTimer(hwnd, TIMER_XINPUT, 40, nullptr);       // nativer Gamepad-Hotkey-Poll (25 Hz)
     lubridge::init(sendToUi);                        // Eingabe-Bruecke: Push-Kanal verdrahten (Thread startet erst bei Nutzung)
+    lubridge::g_diag = [](const std::string& s) { bcLogStream(s); };   // HID-Report-Diagnose ins Stream-Log (1x je Report-ID bei offenem Eingabe-Tab)
     lulan::listenStart();                            // LAN-Beacon-Empfang ab Start (fremde Gruppen sehen)
     SetTimer(hwnd, TIMER_LANPUSH, 5000, nullptr);    // im LAN sichtbare Gruppen an die UI
+    SetTimer(hwnd, TIMER_SRCWATCH, 3000, nullptr);   // Quellen-Watcher (sources-updated bei Fensteraenderungen)
     syncOsdVisibility();   // OSD-Overlay gemaess Einstellung anzeigen
 
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
