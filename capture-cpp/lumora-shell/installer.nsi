@@ -187,9 +187,11 @@ wv2ok:
   ${EndIf}
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
-  ; Update-Lauf im Silent-Modus (Auto-Update): App direkt wieder starten
+  ; Silent-Install = immer Auto-Update-Kontext (electron-updater beim Electron->nativ-
+  ; Umstieg ODER der native Updater): die App danach IMMER wieder starten - auch beim
+  ; ERST-Umstieg von Electron (dort ist IsUpdate=0, Frisch-Pfad). Ohne das bliebe Lumora
+  ; nach dem stillen Update aus, und der Nutzer muesste es von Hand neu oeffnen.
   ${If} ${Silent}
-  ${AndIf} $IsUpdate == "1"
     Exec '"$INSTDIR\lumora-shell.exe"'
   ${EndIf}
 SectionEnd
