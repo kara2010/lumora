@@ -2,10 +2,13 @@
 
 🇬🇧 [English version](README.md)
 
-Ein store-übergreifender Game-Launcher für Windows mit automatischem HDR,
-Game-Streaming und Gaming-OSD. Lumora findet installierte Spiele aus mehreren
-Stores, zeigt sie in einer einheitlichen, schön kuratierten Bibliothek und
-schaltet beim Spielstart automatisch HDR ein.
+Ein nativer, store-übergreifender Game-Launcher für Windows mit Game-Streaming,
+einer Eingabe-Brücke, automatischem HDR und Gaming-OSD. Lumora findet
+installierte Spiele aus mehreren Stores, zeigt sie in einer einheitlichen,
+kuratierten Bibliothek und streamt auf Wunsch ein laufendes Spiel per Link an
+jeden Browser. Seit Version 3.0.0 läuft es durchgängig auf eigenem, nativem
+C++-Code – ohne Electron, ohne FFmpeg, ohne fremden Streaming-Server – bei
+einem Download von rund 3,5 MB.
 
 Download & Infos: <https://lumora-streaming.de/>
 
@@ -13,12 +16,22 @@ Download & Infos: <https://lumora-streaming.de/>
 
 - **Store-übergreifend** – findet Spiele von Steam, Microsoft Store / Xbox,
   EA, Epic, GOG u. a. und scannt automatisch alle Laufwerke.
+- **Game-Streaming per Link** – ein laufendes Spiel direkt an jeden Browser
+  streamen (eigene C++-Aufnahme + Hardware-Encoder → eigenes WebRTC/WHEP-Relay).
+  Standardmäßig Full HD (1080p60), auf Wunsch bis 4K; AV1 oder H.264 je nach
+  Decoder des Zuschauers; direkte Peer-to-Peer-Verbindung (inklusive
+  IPv6-Direktweg); Gruppen-Streams mit Raumcodes; auf Wunsch Zutrittsschutz,
+  der vor jedem Zuschauer erst fragt.
+- **Eingabe-Brücke** – macht aus Joystick, Lenkrad oder Flightstick einen
+  virtuellen Xbox-360-Controller (über den signierten Open-Source-Treiber
+  ViGEmBus), damit Geräte, die sich als DirectInput melden, auch in Spielen
+  funktionieren, die nur XInput akzeptieren. Visuelle Zuordnung, Live-Monitor
+  der Eingaben, Auto-Kalibrierung, Achse↔Trigger und Knopf↔Achse, getrennte
+  Geräte (Lenkrad + Pedale) und Profile pro Spiel.
 - **Automatisches HDR** – aktiviert HDR beim Spielstart und schaltet danach
-  zurück (via `HDRCmd.exe`).
-- **Game-Streaming per Link** – bis 4K/60 fps direkt an jeden Browser
-  (FFmpeg-Hardware-Encoder → mediamtx → WebRTC/WHEP), Gruppen-Streams mit
-  Raumcodes, adaptive Bitrate, nahtloser Qualitätswechsel.
+  zurück (nativ, ohne externes Werkzeug).
 - **Gaming-OSD** – FPS, GPU- und CPU-Werte im Spiel, ohne Afterburner & Co.
+  (eigene ETW-basierte Frame-Messung).
 - **Gamepad-Steuerung** – die gesamte Oberfläche ist per Xbox-Controller
   bedienbar (Couch-Gaming am TV).
 - **Cover & Artwork** – Cover, Hero-Banner, Beschreibung, Genre und
@@ -29,27 +42,51 @@ Download & Infos: <https://lumora-streaming.de/>
   nach Name, Spielzeit oder zuletzt gespielt.
 - **Spielzeit-Tracking** – zuverlässige Erfassung pro Spiel, launcher-übergreifend.
 - **Komfort** – Autostart, Start im Infobereich (Tray), Akzentfarbe.
+- **Signiert** – alle Programmdateien und der Installer sind digital signiert
+  (Certum Code Signing).
 
 ## Technik
 
-Electron-App (`main.js` Backend, `index.html`/`styles.css` Renderer),
-NSIS-Installer via electron-builder. Nutzerdaten liegen unter
-`%APPDATA%\lumora\` (`games.json`, `prefs.json`, `app-settings.json`).
+Seit 3.0.0 besteht Lumora aus nativen C++-Helfern (siehe [`capture-cpp/`](capture-cpp/)):
+
+- **lumora-shell** – die App selbst; bettet die Web-Oberfläche (`index.html` /
+  `styles.css`) in ein WebView2-Fenster ein und übernimmt Tray, Hotkeys,
+  Autostart, Launcher-Scan und Orchestrierung.
+- **lumora-capture-native** – Bildschirmaufnahme, Skalierung / HDR und
+  Hardware-Encoding (NVENC / AMF / QSV, AV1 & H.264, Opus-Audio), ausgegeben
+  als MPEG-TS über UDP.
+- **lumora-media-relay** – das eingebaute WebRTC/WHEP-Relay (libdatachannel),
+  das den früheren mediamtx-Server ersetzt.
+- **lumora-elevate** – ein kleiner Einmal-Helfer für die wenigen Vorgänge,
+  die erhöhte Rechte brauchen.
+
+Die Eingabe-Brücke nutzt einen systemweiten virtuellen Controller über
+[ViGEmBus](https://github.com/nefarius/ViGEmBus) (auf Wunsch von der offiziellen
+Quelle installiert, Signatur geprüft). Nutzerdaten liegen unter
+`%APPDATA%\lumora\`. Den signierten NSIS-Installer erzeugt
+[`capture-cpp/lumora-shell/build-installer.ps1`](capture-cpp/lumora-shell/build-installer.ps1).
 
 ### Entwicklung
 
+Jeder Helfer baut mit CMake (Visual Studio 2022, x64), z. B. die Shell:
+
 ```powershell
-npm install
-npm start                 # App lokal starten
-npx electron-builder --win   # Installer bauen -> dist\Lumora Setup <version>.exe
+cmake -S capture-cpp/lumora-shell -B capture-cpp/lumora-shell/build -G "Visual Studio 17 2022" -A x64
+cmake --build capture-cpp/lumora-shell/build --config Release
 ```
 
-Hilfs- und Diagnose-Skripte liegen in [`_testlab/`](_testlab/) (Deploy,
-Launcher-Check, Artwork-Check) und sind vom Build ausgeschlossen.
+Den vollständigen signierten Installer (Shell + gestagete Helfer) baut:
 
-Die gebündelten Binaries (`bin/`: FFmpeg LGPL-Build, mediamtx,
-`lumora-capture` aus [`capture/`](capture/) per `dotnet publish`) sind nicht
-im Repo – Bezugsquellen stehen in der [`.gitignore`](.gitignore).
+```powershell
+cd capture-cpp/lumora-shell
+powershell -NoProfile -ExecutionPolicy Bypass -File ./build-installer.ps1
+```
+
+Hilfs- und Diagnose-Skripte liegen in [`_testlab/`](_testlab/) und sind vom
+Build ausgeschlossen. Die gebündelten Helfer-Binaries unter `bin/` sind nicht
+im Repo – sie werden aus [`capture-cpp/`](capture-cpp/) gebaut. Die früheren
+Electron-Einstiegspunkte (`main.js`, electron-builder) bleiben als Alt-Pfad im
+Baum, den 3.0.0 ablöst.
 
 ## Website
 
