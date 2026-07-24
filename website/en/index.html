@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0a0a0f">
-  <title>Game Launcher for All Stores – Auto HDR &amp; Gaming OSD | Lumora</title>
-  <meta name="description" content="Free game launcher for Windows: all your stores in one place, automatic HDR, gaming OSD (FPS/GPU/CPU without Afterburner) and game streaming via link. Download free.">
-  <meta name="keywords" content="game launcher, all games in one place, Steam Epic GOG Xbox together, game library Windows, launcher with gamepad, couch gaming PC, living room gaming, auto HDR, FPS counter, OSD overlay, show GPU CPU temperature, stream game via link, watch 4K game in browser, IPv6 streaming without port forwarding, free">
+  <title>Native Game Launcher with Streaming, Auto HDR &amp; Input Bridge | Lumora</title>
+  <meta name="description" content="Lumora is a native Windows launcher for all your stores – Steam, Epic, GOG, Xbox &amp; more in one library. With game streaming via link, automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and an FPS/hardware OSD. Free, open source, 3.5 MB.">
+  <meta name="keywords" content="joystick as Xbox controller, use wheel in game, HOTAS as gamepad, virtual Xbox controller, flight stick XInput, input bridge, device as gamepad, game launcher, all games in one place, Steam Epic GOG Xbox together, game library Windows, launcher with gamepad, couch gaming PC, auto HDR, FPS counter, OSD overlay, show GPU CPU temperature, stream game via link, watch 4K game in browser, IPv6 streaming without port forwarding, free">
   <meta name="robots" content="index, follow">
   <meta name="author" content="Lumora">
   <link rel="canonical" href="https://lumora-streaming.de/en/">
@@ -22,14 +22,14 @@
   <meta property="og:type"        content="website">
   <meta property="og:site_name"   content="Lumora">
   <meta property="og:url"         content="https://lumora-streaming.de/en/">
-  <meta property="og:title"       content="Lumora – All your games. Auto HDR. Streaming. Gaming OSD.">
-  <meta property="og:description" content="Steam, Epic, GOG, Xbox, EA & more in one beautiful cover library – fully gamepad-controlled. Auto HDR per game. New: stream your game live via a link – smooth Full HD (1080p60), up to 4K (connection incl. IPv6 direct path automatic), FPS, GPU & CPU display in-game without Afterburner/RTSS. Free for Windows 10 / 11.">
+  <meta property="og:title"       content="Lumora – native game launcher with streaming, auto HDR and an input bridge">
+  <meta property="og:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.5 MB, for Windows 10 / 11.">
   <meta property="og:locale"      content="en_US">
 
   <!-- Twitter Card -->
   <meta name="twitter:card"        content="summary_large_image">
-  <meta name="twitter:title"       content="Lumora – All your games. Auto HDR. Streaming. Gaming OSD.">
-  <meta name="twitter:description" content="Steam, Epic, GOG, Xbox, EA & more in one beautiful cover library – fully gamepad-controlled. Auto HDR per game. New: stream your game live via a link – smooth Full HD (1080p60), up to 4K (connection incl. IPv6 direct path automatic), FPS, GPU & CPU display in-game without Afterburner/RTSS. Free for Windows 10 / 11.">
+  <meta name="twitter:title"       content="Lumora – native game launcher with streaming, auto HDR and an input bridge">
+  <meta name="twitter:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.5 MB, for Windows 10 / 11.">
   <meta name="twitter:image"       content="https://lumora-streaming.de/screenshot.png">
 
   <!-- og:image -->
@@ -742,21 +742,21 @@
 <!-- HERO -->
 <section class="hero">
   <div class="hero-badge">⬡ Free · Windows 10 / 11</div>
-  <h1>All your games. One launcher.<br><em>With automatic HDR, streaming and a gaming OSD.</em></h1>
-  <p>Steam, Epic, GOG, Xbox &amp; more — Lumora unifies your whole game collection in one beautiful cover library. At your desk with a mouse, on the couch entirely with a gamepad. With automatic HDR, a performance OSD <strong>without Afterburner &amp; co.</strong> and game streaming via a link.</p>
+  <h1>A native launcher for all your games.<br><em>With game streaming, automatic HDR and an input bridge.</em></h1>
+  <p>Lumora unifies Steam, Epic, GOG, Xbox &amp; more in one cover library — at your desk with a mouse, on the couch with a gamepad. Plus streaming a game via a link, automatic HDR per game, a joystick, wheel or flight stick as a virtual Xbox controller, and an FPS/hardware OSD <strong>without Afterburner &amp; co.</strong> Native C++ code, 3.5 MB, open source.</p>
   <div class="hero-pills">
-    <span class="hero-pill">🗂 All stores unified</span>
-    <span class="hero-pill">🌈 Fully automatic HDR</span>
+    <span class="hero-pill">🗂 All stores in one library</span>
+    <span class="hero-pill">📡 Streaming via link (up to 4K)</span>
+    <span class="hero-pill">🌈 Automatic HDR per game</span>
+    <span class="hero-pill">🕹 Device as an Xbox controller</span>
     <span class="hero-pill">📊 OSD without extra tools</span>
-    <span class="hero-pill">📡 1080p60 streaming via link</span>
-    <span class="hero-pill">🎮 100% gamepad-ready</span>
   </div>
   <div class="hero-actions">
     <button class="btn-dl" onclick="startDownload()">
       ⬇ Download &nbsp;·&nbsp; 3.5 MB
     </button>
     <a class="btn-ghost" href="#features">
-      ✨ New: Game streaming &amp; OSD
+      See all features
     </a>
   </div>
 
@@ -1043,15 +1043,13 @@
           <li><strong>Completely rebuilt – native instead of Electron</strong>: Lumora now runs entirely on its own C++ code instead of the Electron framework and external tools. The download shrinks from around 171&nbsp;MB to about <strong>3.5&nbsp;MB</strong>, with the same feature set, a noticeably faster start and lower memory use.</li>
           <li><strong>More stable streaming</strong>: the stutter for remote viewers is fixed – the video data is cleanly capped at the source and lost packets are re-requested automatically. Even with multiple viewers the stream runs noticeably smoother.</li>
           <li><strong>AV1 only where it truly runs smoothly</strong>: the stream is sent in AV1 only to devices with a matching hardware decoder – weaker machines automatically get H.264 and thus a smooth picture instead of stutter.</li>
-          <li><strong>Calmer, more honest quality adjustment</strong>: a viewer's brief reception hiccup no longer makes Lumora over-throttle or oscillate; the configured bitrate is respected (no more silent halving for AV1).</li>
+          <li><strong>Calmer quality adjustment</strong>: a viewer's brief reception hiccup no longer makes Lumora over-throttle or oscillate; the configured bitrate is respected reliably.</li>
           <li><strong>Demand-driven encoding</strong>: AV1 and H.264 are only produced in parallel when both kinds of viewers are actually present – no needless double encode that burdens weak hardware.</li>
           <li><strong>New: input bridge</strong> – turns a joystick, wheel or flight stick into a virtual Xbox gamepad, for games that only recognise gamepads (including Microsoft Store / Game Pass titles). With visual mapping right on the pictured controller, a live view of your inputs, auto-calibration, axis↔trigger and button↔axis (combined pedals too), separate devices (wheel + separate pedals) and per-game profiles. Accessible too. <a href="eingabe-bruecke.html" style="color:var(--accent2)">Learn more →</a></li>
           <li><strong>Automatic per-game HDR</strong> and the <strong>gaming OSD</strong> (FPS, GPU/CPU stats) now run on our own code – without extra tools like HDRTray or PresentMon, with a more accurate FPS readout.</li>
           <li><strong>Access control for your stream</strong>: when enabled, only people you explicitly approve can watch – each request appears as a small window over the game, with a regulars and a block list.</li>
           <li><strong>Own component updater</strong>: updates now swap only the changed parts and offer a restart when needed – fast and reliable, without the full installer.</li>
-          <li><strong>Memory leak &amp; crashes fixed</strong>: a leak on encoder switch (which caused stutter up to a crash) is gone; likewise black windows (after minimized autostart and with access control), the loss of window size after a Windows restart, and the app hanging on close.</li>
-          <li><strong>Gamepad more reliable</strong>: a wirelessly connected Xbox controller no longer dropped out; Lumora responds to the gamepad immediately after start, without having to click with the mouse first.</li>
-          <li><strong>Tidied-up interface</strong>: own, design-matched dialogs instead of the grey system boxes, rounded window corners, and the app is fully translated into German and English.</li>
+          <li><strong>Tidied-up interface</strong>: consistent, design-matched dialogs throughout, rounded window corners, and the app is fully translated into German and English.</li>
           <li><strong>Signed &amp; trusted</strong>: all program files and the installer are digitally signed (Certum) – Windows shows the verified publisher.</li>
         </ul>
       </div>
