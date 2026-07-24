@@ -1,0 +1,15 @@
+Lumora 3.0.1 – Fehlerbehebungen
+
+• OSD blockiert den Desktop nicht mehr: Das Gaming-Overlay war ein bildschirmfüllendes Fenster und konnte auf manchen Systemen dazu führen, dass sich Desktop-Symbole nicht mehr anklicken ließen (auch nach dem Ausschalten des OSD). Das Overlay ist jetzt nur noch so groß wie die Anzeige selbst – der restliche Desktop bleibt immer frei bedienbar.
+• Kleinere Korrektur beim Beenden des OSD-Bearbeiten-Modus.
+• Die mitgelieferten Hilfsprogramme tragen jetzt das Lumora-Symbol.
+
+Bestehende Installationen aktualisieren sich automatisch.
+===EN===
+Lumora 3.0.1 – Bug fixes
+
+• The OSD no longer blocks the desktop: the gaming overlay used to be a full-screen window and could, on some systems, make desktop icons unclickable (even after turning the OSD off). The overlay is now only as large as the readout itself – the rest of the desktop always stays usable.
+• Minor fix when leaving the OSD edit mode.
+• The bundled helper programs now carry the Lumora icon.
+
+Existing installations update automatically.
