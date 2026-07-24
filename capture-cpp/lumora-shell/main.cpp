@@ -2101,6 +2101,7 @@ static void sendToOsd(const std::string& channel, const json& payload);
 #define TIMER_LANPUSH 111  // LAN-Gruppen (Beacon-Empfang) alle 5 s an die UI melden
 #define TIMER_COLDLINK 112 // Kaltstart-Deep-Link (lumora://...) nachreichen, sobald die UI geladen ist
 #define TIMER_SRCWATCH 113 // Quellen-Watcher: Fenster-Fingerprint alle 3s -> sources-updated bei Aenderung
+#define TIMER_OSDPRELOAD 114 // one-shot ~3s nach Start: OSD-WebView2 vorwaermen -> Oeffnen ist sofort statt "Gedenksekunde"
 // --- OSD-Sensorik Teil 1 (treiberfrei): PDH-CPU/GPU-Last, RAM, DXGI-VRAM.
 // Temp/Takt/Power (NVML/ADL/PawnIO) + FPS (PresentMon) folgen als Teil 2.
 static PDH_HQUERY g_pdhQ = nullptr;
@@ -2831,7 +2832,13 @@ static void osdEnsureVisible() {
     ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE);
     SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
-static void showOsd() { createOsdWindow(); sensorsInit(); ensureOsdSetup(); brokersEnsure(); SetTimer(g_hwnd, TIMER_OSDDATA, 200, nullptr); SetTimer(g_hwnd, TIMER_OSDFPS, 33, nullptr); if (g_osdLoaded) applyOsdConfig(); osdEnsureVisible(); }
+static void showOsd() {
+    createOsdWindow();                 // idempotent; per TIMER_OSDPRELOAD schon beim Start vorgewaermt -> hier sofort da
+    if (g_osdLoaded) applyOsdConfig();
+    osdEnsureVisible();                // ZUERST zeigen (Fenster ist warm) - kein Warten auf die Daten-Quellen
+    SetTimer(g_hwnd, TIMER_OSDDATA, 200, nullptr); SetTimer(g_hwnd, TIMER_OSDFPS, 33, nullptr);
+    sensorsInit(); ensureOsdSetup(); brokersEnsure();   // Datenquellen danach - blockieren das Erscheinen nicht mehr
+}
 static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); KillTimer(g_hwnd, TIMER_OSDFPS); shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
 // Live-Edit-Modus (Alt+Shift+O, wie Electrons setOsdEditMode): Overlay wird kurz
@@ -3583,6 +3590,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
         if (w == TIMER_IPWATCH) { bcIpWatchTick(); return 0; }
         if (w == TIMER_COLDLINK) { KillTimer(h, TIMER_COLDLINK); if (!g_coldDeepLink.empty()) { handleDeepLink(g_coldDeepLink); g_coldDeepLink.clear(); } return 0; }
+        if (w == TIMER_OSDPRELOAD) { KillTimer(h, TIMER_OSDPRELOAD); createOsdWindow(); return 0; }   // WebView2 vorwaermen (bleibt versteckt, bis das OSD aktiviert wird)
         if (w == TIMER_SRCWATCH) { srcWatchTick(); return 0; }
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
         if (w == TIMER_XINPUT) { xinputTick(); return 0; }
@@ -3925,6 +3933,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // und per Timer nachreichen, wenn die UI ihre Listener registriert hat.
     for (int i = 1; i < argc; ++i) { std::string a = narrow(argv[i]); if (a.rfind("lumora://", 0) == 0) { g_coldDeepLink = a; SetTimer(hwnd, TIMER_COLDLINK, 2500, nullptr); } }
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
+    SetTimer(hwnd, TIMER_OSDPRELOAD, 3000, nullptr); // OSD-WebView2 ~3s nach Start vorwaermen (Browser-Prozess laeuft dann schon) -> Oeffnen sofort
     timeBeginPeriod(1);                              // praeziser Hintergrund-Poll (wie Electron/RTSS)
     SetTimer(hwnd, TIMER_XINPUT, 40, nullptr);       // nativer Gamepad-Hotkey-Poll (25 Hz)
     lubridge::init(sendToUi);                        // Eingabe-Bruecke: Push-Kanal verdrahten (Thread startet erst bei Nutzung)
