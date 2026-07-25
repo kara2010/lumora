@@ -130,63 +130,111 @@
   body:not(.edit) #panel { position: static !important; margin: 14px !important;
     left: auto !important; right: auto !important; top: auto !important; bottom: auto !important; transform: none !important; }
   body.edit #panel { outline: 2px dashed #4f8ef7; outline-offset: 5px; cursor: move; }
-  #editbar { display: none; position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
-    z-index: 10; flex-direction: column; gap: 9px; white-space: nowrap; padding: 11px 14px;
-    background: rgba(15,17,24,.96); border: 1px solid rgba(255,255,255,.16); border-radius: 12px;
+  /* ===== Live-Edit-Leiste: Lumora-Look (Glas-Panel, Sektionen, Akzent #4f8ef7) ===== */
+  #editbar { display: none; position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
+    z-index: 10; flex-direction: column; gap: 10px; white-space: nowrap; padding: 13px 16px 11px;
+    background: linear-gradient(180deg, rgba(24,27,38,.97), rgba(14,16,23,.97));
+    border: 1px solid rgba(255,255,255,.10); border-radius: 14px;
+    box-shadow: 0 18px 48px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+    backdrop-filter: blur(14px) saturate(1.2);
     color: #d8d8e2; font-family: 'Segoe UI','DejaVu Sans',sans-serif; font-weight: 400; font-size: 13px; text-shadow: none; }
-  body.edit #editbar { display: flex; }
+  /* Akzent-Verlaufsrahmen (feiner Ring, oben links + unten rechts blau angehaucht) */
+  #editbar::before { content: ''; position: absolute; inset: -1px; border-radius: 15px; padding: 1px;
+    background: linear-gradient(125deg, rgba(79,142,247,.55), rgba(255,255,255,.10) 30%, rgba(255,255,255,.05) 70%, rgba(79,142,247,.4));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
+  body.edit #editbar { display: flex; animation: eb-in .22s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes eb-in { from { opacity: 0; transform: translateX(-50%) translateY(10px) scale(.97); }
+                     to   { opacity: 1; transform: translateX(-50%) translateY(0)    scale(1); } }
   /* Leiste IMMER gegenueber vom OSD, damit sie es nie verdeckt (v.a. horizontale
      Themes, die oben/unten mittig sitzen): OSD oben -> Leiste unten und umgekehrt. */
-  body.pos-tl #editbar, body.pos-tr #editbar { top: auto; bottom: 14px; }
-  body.pos-bl #editbar, body.pos-br #editbar { top: 14px; bottom: auto; }
+  body.pos-tl #editbar, body.pos-tr #editbar { top: auto; bottom: 16px; }
+  body.pos-bl #editbar, body.pos-br #editbar { top: 16px; bottom: auto; }
   #editbar b { color: #fff; font-weight: 600; }
-  .eb-corners { display: grid; grid-template-columns: repeat(2, 20px); grid-auto-rows: 20px; gap: 3px; }
-  .eb-corners.horiz { grid-template-columns: 20px; }   /* nur oben/unten -> untereinander */
-  .eb-corner { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #b8bcc8;
-    border-radius: 4px; cursor: pointer; font-size: 11px; line-height: 1; padding: 0; }
-  .eb-corner:hover { border-color: #4f8ef7; color: #fff; }
-  .eb-corner.on { border-color: #4f8ef7; color: #4f8ef7; background: rgba(79,142,247,.2); }
-  .eb-top { display: flex; align-items: center; gap: 18px; }
-  .eb-ctl { display: flex; align-items: center; gap: 8px; }
-  .eb-lbl { color: #9aa0b0; font-size: 12px; }
-  .eb-arrow { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #fff;
-    width: 22px; height: 22px; border-radius: 6px; cursor: pointer; font-size: 15px; line-height: 1; padding: 0; }
-  .eb-arrow:hover { background: rgba(255,255,255,.18); }
-  .eb-theme { min-width: 78px; text-align: center; color: #fff; font-weight: 600; }
-  #ebOpacity { width: 92px; accent-color: #4f8ef7; }
-  .eb-fields { display: flex; flex-direction: column; gap: 5px; }
+  .eb-top { display: flex; align-items: stretch; gap: 0; }
+  /* Sektionen als "Karten": Label OBEN, Kontrolle darunter, feine Trenner dazwischen */
+  .eb-ctl { display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 2px 18px 0; }
+  .eb-ctl:first-child { padding-left: 4px; }
+  .eb-ctl + .eb-ctl { border-left: 1px solid rgba(255,255,255,.07); }
+  .eb-row { display: flex; align-items: center; gap: 9px; min-height: 34px; }
+  .eb-lbl { color: #7e879c; font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+  /* Design-Pfeile: rund, weich, mit Druck-Feedback */
+  .eb-arrow { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); color: #e8eaf2;
+    width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 0 2px;
+    transition: background .15s, border-color .15s, transform .1s; }
+  .eb-arrow:hover { background: rgba(79,142,247,.22); border-color: rgba(79,142,247,.65); }
+  .eb-arrow:active { transform: scale(.88); }
+  .eb-theme { min-width: 84px; text-align: center; color: #fff; font-weight: 600; font-size: 13.5px; letter-spacing: .01em; }
+  /* Deckkraft-Regler: eigene Optik (Track + Akzent-Daumen mit Glow) */
+  #ebOpacity { -webkit-appearance: none; appearance: none; width: 104px; height: 20px; background: transparent; cursor: pointer; }
+  #ebOpacity::-webkit-slider-runnable-track { height: 4px; border-radius: 999px;
+    background: linear-gradient(90deg, rgba(79,142,247,.9), rgba(79,142,247,.35)); }
+  #ebOpacity::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px;
+    border-radius: 50%; background: #fff; border: 2px solid #4f8ef7;
+    box-shadow: 0 0 0 4px rgba(79,142,247,.18), 0 1px 4px rgba(0,0,0,.5); transition: box-shadow .15s; }
+  #ebOpacity:hover::-webkit-slider-thumb { box-shadow: 0 0 0 6px rgba(79,142,247,.28), 0 1px 4px rgba(0,0,0,.5); }
+  /* Positions-Ecken: Mini-Monitor-Raster */
+  .eb-corners { display: grid; grid-template-columns: repeat(2, 22px); grid-auto-rows: 22px; gap: 4px;
+    padding: 5px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.08); border-radius: 8px; }
+  .eb-corners.horiz { grid-template-columns: 22px; }   /* nur oben/unten -> untereinander */
+  .eb-corner { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: #99a0b2;
+    border-radius: 5px; cursor: pointer; font-size: 11px; line-height: 1; padding: 0;
+    transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
+  .eb-corner:hover { border-color: rgba(79,142,247,.7); color: #fff; background: rgba(79,142,247,.14); }
+  .eb-corner.on { border-color: #4f8ef7; color: #fff; background: rgba(79,142,247,.32);
+    box-shadow: 0 0 8px rgba(79,142,247,.45), inset 0 0 4px rgba(79,142,247,.35); }
+  /* Wert-Chips: Pillen mit Akzent-Glow im aktiven Zustand */
+  .eb-fields { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
   .eb-frow { display: flex; align-items: center; gap: 6px; }
-  .eb-grp { min-width: 30px; font-size: 11px; color: #9aa0b0; letter-spacing: .04em; }
-  .eb-chip { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); color: #b8bcc8;
-    border-radius: 999px; padding: 2px 10px; font-size: 11px; cursor: pointer; }
-  .eb-chip:hover { border-color: #4f8ef7; color: #dfe3ee; }
-  .eb-chip.on { background: rgba(79,142,247,.22); border-color: #4f8ef7; color: #fff; }
-  .eb-hint { color: #7a8090; font-size: 11px; }
-  #editDone { background: #4f8ef7; color: #fff; border: none; border-radius: 7px; padding: 6px 15px; font-size: 13px; font-weight: 600; cursor: pointer; margin-left: auto; }
-  #editDone:hover { background: #6ba0f8; }
+  /* Gruppen in den OSD-Farben (GPU gruen, CPU orange, FPS weiss) mit Farbpunkt - stellt die
+     visuelle Verbindung zum Panel her */
+  .eb-grp { min-width: 40px; font-size: 10px; font-weight: 700; letter-spacing: .12em; display: flex; align-items: center; gap: 5px; }
+  .eb-grp::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px currentColor; }
+  .eb-frow:nth-child(1) .eb-grp { color: var(--nv); }
+  .eb-frow:nth-child(2) .eb-grp { color: var(--amd); }
+  .eb-frow:nth-child(3) .eb-grp { color: #e8eaf2; }
+  .eb-chip { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); color: #a8aebe;
+    border-radius: 999px; padding: 3px 11px; font-size: 11px; cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
+  .eb-chip:hover { border-color: rgba(79,142,247,.7); color: #eef1f8; background: rgba(79,142,247,.10); }
+  .eb-chip.on { background: linear-gradient(180deg, rgba(95,155,249,.42), rgba(63,126,232,.26)); border-color: #4f8ef7; color: #fff;
+    box-shadow: 0 0 8px rgba(79,142,247,.4), inset 0 1px 0 rgba(255,255,255,.18); }
+  .eb-hint { color: #6f7688; font-size: 11px; text-align: center; padding-top: 2px; }
+  .eb-hint b { color: #9aa2b5; font-weight: 600; }
+  /* Fertig: Akzent-Verlauf mit sanftem Lift */
+  #editDone::before { content: '✓'; margin-right: 7px; font-weight: 700; }
+  #editDone { align-self: center; background: linear-gradient(180deg, #5f9bf9, #3f7ee8); color: #fff; border: 1px solid rgba(255,255,255,.18);
+    border-radius: 9px; padding: 7px 18px; font-size: 13px; font-weight: 600; cursor: pointer; margin-left: 18px;
+    box-shadow: 0 4px 14px rgba(63,126,232,.4), inset 0 1px 0 rgba(255,255,255,.25);
+    transition: transform .12s, box-shadow .15s, filter .15s; }
+  #editDone:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(63,126,232,.5), inset 0 1px 0 rgba(255,255,255,.25); }
+  #editDone:active { transform: translateY(0) scale(.97); }
 </style>
 </head>
-<body class="pos-tl theme-compact">
+<body class="pos-tl theme-bar">
   <div id="editbar">
     <div class="eb-top">
       <div class="eb-ctl">
         <span class="eb-lbl">Design</span>
-        <button class="eb-arrow" id="ebPrev" title="Vorheriges Design">‹</button>
-        <span class="eb-theme" id="ebThemeName">Kompakt</span>
-        <button class="eb-arrow" id="ebNext" title="Nächstes Design">›</button>
+        <div class="eb-row">
+          <button class="eb-arrow" id="ebPrev" title="Vorheriges Design">‹</button>
+          <span class="eb-theme" id="ebThemeName">Kompakt</span>
+          <button class="eb-arrow" id="ebNext" title="Nächstes Design">›</button>
+        </div>
       </div>
       <div class="eb-ctl">
         <span class="eb-lbl">Deckkraft</span>
-        <input type="range" id="ebOpacity" min="0.2" max="0.95" step="0.05">
+        <div class="eb-row"><input type="range" id="ebOpacity" min="0.2" max="0.95" step="0.05"></div>
       </div>
       <div class="eb-ctl">
         <span class="eb-lbl">Position</span>
-        <div class="eb-corners" id="ebCorners"></div>
+        <div class="eb-row"><div class="eb-corners" id="ebCorners"></div></div>
       </div>
       <button id="editDone">Fertig</button>
     </div>
     <div class="eb-fields" id="ebFields"></div>
-    <div class="eb-hint">Ziehen = Position &nbsp;·&nbsp; Mausrad = Größe</div>
+    <div class="eb-hint"><b>Ziehen</b> = Position &nbsp;·&nbsp; <b>Mausrad</b> = Größe</div>
   </div>
   <div id="panel"></div>
 
@@ -199,7 +247,7 @@
     cpu: ['load','temp','clock','power','ram'],
     fps: ['fps','frametime','graph'],
   };
-  let cfg = { theme: 'compact', fields: JSON.parse(JSON.stringify(ALL)), accent: '#74e857', opacity: 0.55 };
+  let cfg = { theme: 'bar', fields: JSON.parse(JSON.stringify(ALL)), accent: '#74e857', opacity: 0.55 };   // Standard-Design: Balken
   // Fuer die Live-Edit-Leiste: Design-Namen + Kurzlabels der waehlbaren Werte
   const EB_THEMES = [['compact','Kompakt'],['min','Minimal'],['bar','Balken'],['neon','Neon'],['strip','Leiste'],['tiles','Kacheln']];
   const EB_FLD = {
@@ -533,6 +581,21 @@
   });
   window.addEventListener('wheel', (e) => { if (!editing || e.target.closest('#editbar')) return; e.preventDefault(); if (ipcRenderer) ipcRenderer.invoke('osd-edit-scale', e.deltaY < 0 ? 1 : -1); }, { passive: false });
   document.getElementById('editDone').addEventListener('click', () => { if (ipcRenderer) ipcRenderer.invoke('osd-edit-done'); });
+
+  // Edit-Fenster (?editbg=1): eingefrorener Desktop-Schnappschuss als Hintergrund - sieht aus
+  // wie Transparenz, ist aber ein normales interaktives Fenster (echtes Per-Pixel gibt es nur
+  // im Composition-ANZEIGE-Overlay; dort ist der Body wie bisher transparent).
+  try {
+    if (new URLSearchParams(location.search).get('editbg')) {
+      // WICHTIG: html/body auf volle Hoehe - sonst ist die Hintergrund-Bezugsbox nur so hoch
+      // wie der INHALT (Panel) und der Schnappschuss wird in den oberen Streifen gequetscht
+      // (User-Befund "Bildschirm nach oben gequetscht"; darunter blieb es schwarz).
+      document.documentElement.style.height = '100%';
+      document.body.style.height = '100%';
+      // Schnappschuss + dezente Abdunkelung: wirkt wie "Desktop leicht gedimmt" (Edit-Fokus).
+      document.body.style.background = 'linear-gradient(rgba(8,10,14,.4), rgba(8,10,14,.4)), #000 url(https://data.lumora/osd-edit-bg.bmp?v=' + Date.now() + ') 0 0 / 100% 100% no-repeat';
+    }
+  } catch (e) {}
 
   let ipcRenderer = null;
   try { ipcRenderer = require('electron').ipcRenderer; } catch (e) {}

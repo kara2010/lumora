@@ -16,6 +16,9 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <dxgi1_4.h>
+#include <dxgi1_5.h>
+#include <d3d11.h>
+#pragma comment(lib, "d3d11.lib")
 #include <dcomp.h>
 #pragma comment(lib, "dcomp.lib")
 #include <bcrypt.h>
@@ -2748,7 +2751,9 @@ static json readGpuPdh() {
     return { {"brand", brand}, {"name", name}, {"load", load}, {"temp", nullptr}, {"power", nullptr}, {"clock", nullptr}, {"vram", vram} };
 }
 static void osdDataTick() {
-    if (!g_osdHwnd || !IsWindowVisible(g_osdHwnd)) return;
+    // Auch bei OFFENEM Edit-Fenster liefern (Overlay ist dann versteckt): sonst zeigt der
+    // Live-Edit nur Striche statt Werten (real passiert - wirkte "wie ein anderes OSD").
+    if (!g_osdEdit && (!g_osdHwnd || !IsWindowVisible(g_osdHwnd))) return;
     // Oberste Lage NACHDRUECKEN (wie Electrons moveTop je Anzeige): ein startendes
     // Spiel setzt sich sonst ueber das TOPMOST-Overlay (User-Befund: OSD weg im Spiel).
     if (!g_osdEdit) SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -2779,24 +2784,37 @@ static void osdDataTick() {
 // Schneller FPS/Frametime-Tick (~30 Hz) fuer den lebendigen Frametime-Graphen; die
 // Zahlen drosselt osd.html selbst auf lesbare ~4 Hz (1:1 aus main.js startFps).
 static void osdFpsTick() {
-    if (!g_osdHwnd || !IsWindowVisible(g_osdHwnd)) return;
+    if (!g_osdEdit && (!g_osdHwnd || !IsWindowVisible(g_osdHwnd))) return;   // Edit-Fenster braucht die FPS ebenfalls
     if (loadSettings().value("osdSetupDeclined", false)) return;   // dann liefert der Sensor-Tick fps:"—"
     json f = readFps();   // RTSS oder PresentMon-Broker je nach osdFpsSource (Quelle gecacht)
     if (f.is_object()) sendToOsd("osd-data", { {"fps", f["fps"]}, {"frametime", f["frametime"]} });
     else { sendToOsd("osd-data", { {"fps", "\xE2\x80\xA6"} }); if (!g_fpsUseRtss) brokersEnsure(); }
 }
+// Live-Edit-Fenster (windowed WebView2, eigene Instanz von osd.html im Edit-Zustand).
+static HWND g_osdEditHwnd = nullptr;
+static ComPtr<ICoreWebView2Controller> g_osdEditCtrl;
+static ComPtr<ICoreWebView2> g_osdEditWv;
 static void sendToOsd(const std::string& channel, const json& payload) {   // threadsicher wie sendToUi
-    if (!g_osdHwnd) return;
     json m = { {"channel", channel}, {"payload", payload} };
-    PostMessageW(g_osdHwnd, WM_SHELL_OSDMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
+    // Daten/Config an BEIDE Instanzen (Anzeige-Overlay + Edit-Fenster). Das 'osd-edit'-Signal
+    // geht NIE hier durch (nur gezielt ans Edit-Fenster) - sonst haengt das Anzeige-Overlay
+    // im Edit-Zustand fest (real passiert: Editbar im kleinen Panel, keine Werte mehr).
+    if (g_osdHwnd) PostMessageW(g_osdHwnd, WM_SHELL_OSDMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
+    if (g_osdEditHwnd) PostMessageW(g_osdEditHwnd, WM_SHELL_OSDMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
+}
+static void sendToOsdEdit(const std::string& channel, const json& payload) {   // NUR ans Edit-Fenster
+    if (!g_osdEditHwnd) return;
+    json m = { {"channel", channel}, {"payload", payload} };
+    PostMessageW(g_osdEditHwnd, WM_SHELL_OSDMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
 }
 static void applyOsdConfig() {
-    if (!g_osdWv) return;
+    if (!g_osdWv && !g_osdEditWv) return;
     json s = loadSettings();
     double z = (std::max)(0.4, (std::min)(3.0, s.value("osdScale", 1.0)));
     if (g_osdCtrl) g_osdCtrl->put_ZoomFactor(z);
+    if (g_osdEditCtrl) g_osdEditCtrl->put_ZoomFactor(z);   // Mausrad-Groesse wirkt live auch im Edit-Fenster
     sendToOsd("osd-config", { {"corner", s.value("osdCorner", "tl")}, {"opacity", s.value("osdOpacity", 0.55)},
-                              {"theme", s.value("osdTheme", "compact")}, {"fields", s.value("osdFields", json())},
+                              {"theme", s.value("osdTheme", "bar")}, {"fields", s.value("osdFields", json())},
                               {"accent", s.value("osdAccent", "#74e857")} });
 }
 static ComPtr<IDCompositionDevice> g_dcompDev;
@@ -2812,40 +2830,16 @@ static std::string g_osdCorner = "tl";    // Ziel-Ecke (tl/tr/bl/br)
 static bool g_osdHoriz = false;           // zentrierte Themes (Leiste/Kacheln) -> oben/unten mittig
 static bool g_osdHavePanel = false;
 static RECT osdMonitorRect() { HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY); MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi); return mi.rcMonitor; }
+// Das Anzeige-Overlay ist IMMER click-through und traegt KEINE Edit-Verantwortung mehr.
+// Der Live-Edit laeuft in einem EIGENEN windowed WebView2-Fenster (createOsdEditWindow) mit
+// eingefrorenem Desktop als Hintergrund: dort verarbeitet WebView2 Maus/Pointer/Capture/DPI
+// selbst - wie Hauptfenster/Tuersteher, die nachweislich funktionieren. Die handgebaute
+// SendMouseInput-Weiterleitung des Composition-Modus ist ENDGUELTIG raus: Klicks gingen je
+// nach Hintergrund/Z-Order/DPI verloren oder daneben (mehrfach real gemessen, nie stabil).
 static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    // DIAG (temporaer, VOR der Bedingung): kommt der Klick hier an, und woran scheitert die Weiterleitung?
-    if (m == WM_LBUTTONDOWN)
-        bcLogStream("osd-raw-click: edit=" + std::to_string(g_osdEdit ? 1 : 0) + " comp=" + std::to_string(g_osdComp ? 1 : 0)
-            + " ctrl=" + std::to_string(g_osdCtrl ? 1 : 0) + " pt=(" + std::to_string(GET_X_LPARAM(l)) + "," + std::to_string(GET_Y_LPARAM(l)) + ")");
-    // Live-Edit: Maus-Ereignisse ans WebView2 durchreichen - der Composition-Modus
-    // bekommt sie NICHT automatisch (SendMouseInput ist Pflicht, MS-Doku).
-    if (g_osdEdit && g_osdComp && ((m >= WM_MOUSEMOVE && m <= WM_MBUTTONDBLCLK) || m == WM_MOUSEWHEEL || m == WM_MOUSELEAVE)) {
-        POINT pt{ GET_X_LPARAM(l), GET_Y_LPARAM(l) };
-        UINT32 mouseData = 0;
-        if (m == WM_MOUSEWHEEL) { mouseData = (UINT32)GET_WHEEL_DELTA_WPARAM(w); ScreenToClient(h, &pt); }   // Wheel liefert Screen-Koordinaten
-        // Maus-CAPTURE fuer Drags: ohne SetCapture verliert das Fenster die Maus, sobald sie beim
-        // Ziehen den Treffbereich verlaesst - das WM_LBUTTONUP kommt dann NIE im WebView an und
-        // das Panel "klebt" an der Maus (bewegt sich ohne gedrueckte Taste weiter).
-        if (m == WM_LBUTTONDOWN) SetCapture(h);
-        if (m == WM_LBUTTONUP) ReleaseCapture();
-        // PHYSISCHE Fensterkoordinaten -> WebView-DIPs teilen! SendMouseInput erwartet DIP-
-        // Koordinaten; bei Monitor-Skalierung (rasterizationScale, z.B. 3.0 bei 4K/300%) landete
-        // sonst jede Eingabe um den DPI-Faktor zu weit rechts/unten. Gemessener Befund (echte
-        // Klicks, 4K/300%): nur nahe (0,0) traf es ~, sonst Klick-daneben/3x-verstaerkte Drags -
-        // Panel "sprang unkontrolliert" und Buttons unten waren unerreichbar. Seit 3.0.0 so
-        // (Electron rechnete DPI selbst um, der Composition-Pfad muss es von Hand tun).
-        double rs = 1.0; ComPtr<ICoreWebView2Controller3> c3;
-        if (g_osdCtrl && SUCCEEDED(g_osdCtrl.As(&c3)) && c3) c3->get_RasterizationScale(&rs);
-        if (rs > 0.01 && rs != 1.0) { pt.x = (LONG)(pt.x / rs + 0.5); pt.y = (LONG)(pt.y / rs + 0.5); }
-        g_osdComp->SendMouseInput((COREWEBVIEW2_MOUSE_EVENT_KIND)m, (COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS)LOWORD(w), mouseData, pt);
-        return 0;
-    }
     switch (m) {
-    // CLICK-THROUGH (ausser im Edit-Modus): WS_EX_TRANSPARENT wirkt OHNE WS_EX_LAYERED
-    // nicht auf Hit-Tests (User-Befund: OSD blockierte Maus, Hand-Cursor). HTTRANSPARENT
-    // reicht alle Maus-Ereignisse ans darunterliegende Fenster durch.
-    case WM_NCHITTEST: return g_osdEdit ? HTCLIENT : HTTRANSPARENT;
-    case WM_SETCURSOR: if (!g_osdEdit) return TRUE; SetCursor(LoadCursorW(nullptr, IDC_ARROW)); return TRUE;
+    case WM_NCHITTEST: return HTTRANSPARENT;
+    case WM_SETCURSOR: return TRUE;
     case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_osdWv) g_osdWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
     // Controller-Bounds = Fenster-Client (der WebView2-Viewport ist das kleine Fenster;
     // osd.html rendert das Panel oben-links passend hinein). DPI-natuerlich.
@@ -2924,16 +2918,197 @@ static void createOsdWindow() {
                 return S_OK;
             }).Get());
 }
+// --- Live-Edit-Fenster: NORMAL gehostetes (windowed) WebView2 mit derselben osd.html ---
+// Input (Maus/Pointer/Capture/DPI) macht WebView2 nativ - der einzige hier nachweislich
+// zuverlaessige Pfad (Hauptfenster/Tuersteher). Die "Transparenz" liefert ein beim Oeffnen
+// aufgenommener Desktop-Schnappschuss als Seitenhintergrund (Standard-Trick der Snipping-
+// Tools): sieht aus wie durchsichtig, ist aber ein normales, voll interaktives Fenster.
+// Das ECHTE Anzeige-OSD bleibt unveraendert das per-pixel-transparente Composition-Overlay.
+// 1) DXGI Desktop Duplication: erfasst auch Hardware-Video-Overlays (MPO, z.B. Vollbild-
+//    YouTube) und liefert bei HDR via DuplicateOutput1 eine fertige SDR-Konvertierung -
+//    GDI-BitBlt sieht solche Flaechen nur SCHWARZ (real gemessen). "Jede Lebenslage".
+static bool captureDesktopPixels(std::vector<uint8_t>& px, int& w, int& h) {
+    auto fail = [](const char* step, HRESULT hr) { char b[16]; sprintf_s(b, "%08X", (unsigned)hr); bcLogStream(std::string("osd-edit-capture: ") + step + " hr=0x" + b); return false; };
+    ComPtr<ID3D11Device> dev; ComPtr<ID3D11DeviceContext> ctx;
+    HRESULT hr0 = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                                    nullptr, 0, D3D11_SDK_VERSION, &dev, nullptr, &ctx);
+    if (FAILED(hr0)) return fail("D3D11CreateDevice", hr0);
+    ComPtr<IDXGIDevice> dxdev; dev.As(&dxdev); if (!dxdev) return fail("IDXGIDevice", E_NOINTERFACE);
+    ComPtr<IDXGIAdapter> adp; dxdev->GetAdapter(&adp); if (!adp) return fail("GetAdapter", E_FAIL);
+    ComPtr<IDXGIOutput> out; hr0 = adp->EnumOutputs(0, &out);
+    if (FAILED(hr0) || !out) return fail("EnumOutputs", hr0);   // primaerer Monitor
+    ComPtr<IDXGIOutputDuplication> dup;
+    ComPtr<IDXGIOutput5> out5;
+    if (SUCCEEDED(out.As(&out5)) && out5) {   // erzwingt BGRA8 (HDR wird von Windows nach SDR gewandelt)
+        DXGI_FORMAT fmts[] = { DXGI_FORMAT_B8G8R8A8_UNORM };
+        HRESULT h5 = out5->DuplicateOutput1(dev.Get(), 0, 1, fmts, &dup);
+        if (FAILED(h5)) { fail("DuplicateOutput1 (versuche Fallback)", h5); dup = nullptr; }
+    }
+    if (!dup) { ComPtr<IDXGIOutput1> out1; HRESULT h1 = out.As(&out1);
+        if (FAILED(h1) || !out1) return fail("IDXGIOutput1", h1);
+        h1 = out1->DuplicateOutput(dev.Get(), &dup);
+        if (FAILED(h1) || !dup) return fail("DuplicateOutput", h1); }
+    // Statischer Desktop: AcquireNextFrame meldet nur AENDERUNGEN - ohne Aenderung laeuft alles in
+    // Timeouts. Einmal den ganzen Desktop neu zeichnen lassen erzwingt einen Frame (Standard-Trick).
+    InvalidateRect(nullptr, nullptr, FALSE);
+    HRESULT lastHr = S_OK;
+    for (int i = 0; i < 12; ++i) {
+        DXGI_OUTDUPL_FRAME_INFO fi{}; ComPtr<IDXGIResource> res;
+        HRESULT hr = dup->AcquireNextFrame(250, &fi, &res);
+        lastHr = hr;
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { if (i == 5) InvalidateRect(nullptr, nullptr, FALSE); continue; }
+        if (FAILED(hr) || !res) return fail("AcquireNextFrame", hr);
+        // Der ALLERERSTE Acquire liefert einen leeren Platzhalter (LastPresentTime==0, komplett
+        // schwarz, noch im nativen Format) - GEMESSEN mit captest.exe: Frame[0] mean=0.0, erst
+        // Frame[1] traegt das echte Bild (BGRA8, mean=106). Solche Frames ueberspringen!
+        if (fi.LastPresentTime.QuadPart == 0) { dup->ReleaseFrame(); continue; }
+        ComPtr<ID3D11Texture2D> tex; res.As(&tex);
+        if (!tex) { dup->ReleaseFrame(); return fail("ID3D11Texture2D", E_NOINTERFACE); }
+        D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
+        bool bgra = (d.Format == DXGI_FORMAT_B8G8R8A8_UNORM);
+        bool fp16 = (d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);   // HDR-Desktop (scRGB)
+        if (!bgra && !fp16) { dup->ReleaseFrame(); return fail("unerwartetes Format", (HRESULT)d.Format); }
+        D3D11_TEXTURE2D_DESC sd = d; sd.Usage = D3D11_USAGE_STAGING; sd.BindFlags = 0; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; sd.MiscFlags = 0;
+        ComPtr<ID3D11Texture2D> stg;
+        HRESULT hs = dev->CreateTexture2D(&sd, nullptr, &stg);
+        if (FAILED(hs) || !stg) { dup->ReleaseFrame(); return fail("CreateTexture2D staging", hs); }
+        ctx->CopyResource(stg.Get(), tex.Get());
+        dup->ReleaseFrame();
+        D3D11_MAPPED_SUBRESOURCE map{};
+        hs = ctx->Map(stg.Get(), 0, D3D11_MAP_READ, 0, &map);
+        if (FAILED(hs)) return fail("Map", hs);
+        w = (int)d.Width; h = (int)d.Height;
+        px.resize((size_t)w * h * 4);
+        if (bgra) {
+            for (int y = 0; y < h; ++y) memcpy(px.data() + (size_t)y * w * 4, (const uint8_t*)map.pData + (size_t)y * map.RowPitch, (size_t)w * 4);
+        } else {
+            // HDR (scRGB, half-float): 1.0 = SDR-Weiss. Fuer den Hintergrund reicht ein simples
+            // Clamp + Gamma (kein Farbmanagement noetig - es ist ein Schnappschuss, kein Mastering).
+            auto halfToFloat = [](uint16_t hf) -> float {
+                uint32_t s = (uint32_t)(hf & 0x8000) << 16, e = (hf >> 10) & 0x1F, m = hf & 0x3FF, f;
+                if (e == 0) f = s;                                    // Denormale ~0 fuer unseren Zweck
+                else if (e == 31) f = s | 0x7F800000u | (m << 13);
+                else f = s | ((e - 15 + 127) << 23) | (m << 13);
+                float r; memcpy(&r, &f, 4); return r;
+            };
+            for (int y = 0; y < h; ++y) {
+                const uint16_t* row = (const uint16_t*)((const uint8_t*)map.pData + (size_t)y * map.RowPitch);
+                uint8_t* dstRow = px.data() + (size_t)y * w * 4;
+                for (int x = 0; x < w; ++x) {
+                    float r = halfToFloat(row[x * 4 + 0]), g = halfToFloat(row[x * 4 + 1]), b = halfToFloat(row[x * 4 + 2]);
+                    auto to8 = [](float v) -> uint8_t { v = v < 0 ? 0 : (v > 1 ? 1 : v); return (uint8_t)(powf(v, 1.0f / 2.2f) * 255.0f + 0.5f); };
+                    dstRow[x * 4 + 0] = to8(b); dstRow[x * 4 + 1] = to8(g); dstRow[x * 4 + 2] = to8(r); dstRow[x * 4 + 3] = 255;   // BGRA fuer BMP
+                }
+            }
+        }
+        ctx->Unmap(stg.Get(), 0);
+        return true;
+    }
+    return fail("AcquireNextFrame nur Timeouts", lastHr);
+}
+static bool captureDesktopBmp(const std::wstring& path) {
+    std::vector<uint8_t> px; int w = 0, h = 0;
+    if (!captureDesktopPixels(px, w, h)) {
+        // 2) GDI-Fallback (z.B. Duplication in RDP-/Sonder-Sessions nicht verfuegbar)
+        bcLogStream("osd-edit: Duplication nicht verfuegbar -> GDI-Fallback");
+        RECT mon = osdMonitorRect();
+        w = mon.right - mon.left; h = mon.bottom - mon.top;
+        HDC sdc = GetDC(nullptr); if (!sdc) return false;
+        HDC mdc = CreateCompatibleDC(sdc);
+        HBITMAP bmp = CreateCompatibleBitmap(sdc, w, h);
+        HGDIOBJ old = SelectObject(mdc, bmp);
+        BOOL ok = BitBlt(mdc, 0, 0, w, h, sdc, mon.left, mon.top, SRCCOPY | CAPTUREBLT);
+        BITMAPINFOHEADER gih{}; gih.biSize = sizeof(gih); gih.biWidth = w; gih.biHeight = -h; gih.biPlanes = 1; gih.biBitCount = 32; gih.biCompression = BI_RGB;
+        px.assign((size_t)w * h * 4, 0);
+        if (ok) ok = (GetDIBits(mdc, bmp, 0, h, px.data(), (BITMAPINFO*)&gih, DIB_RGB_COLORS) == h);
+        SelectObject(mdc, old); DeleteObject(bmp); DeleteDC(mdc); ReleaseDC(nullptr, sdc);
+        if (!ok) return false;
+    }
+    BITMAPINFOHEADER bih{}; bih.biSize = sizeof(bih); bih.biWidth = w; bih.biHeight = -h; bih.biPlanes = 1; bih.biBitCount = 32; bih.biCompression = BI_RGB;
+    BITMAPFILEHEADER bfh{}; bfh.bfType = 0x4D42;
+    bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+    bfh.bfSize = bfh.bfOffBits + (DWORD)px.size();
+    FILE* f = nullptr; _wfopen_s(&f, path.c_str(), L"wb");
+    if (!f) return false;
+    fwrite(&bfh, sizeof(bfh), 1, f); fwrite(&bih, sizeof(bih), 1, f); fwrite(px.data(), 1, px.size(), f);
+    fclose(f); return true;
+}
+static LRESULT CALLBACK osdEditWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_osdEditWv) g_osdEditWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
+    case WM_SIZE: if (g_osdEditCtrl) { RECT rc; GetClientRect(h, &rc); g_osdEditCtrl->put_Bounds(rc); } return 0;
+    case WM_DESTROY: return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+static void createOsdEditWindow() {
+    if (g_osdEditHwnd) return;
+    static bool reg = false;
+    if (!reg) { WNDCLASSW wc{}; wc.lpfnWndProc = osdEditWndProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"LumoraOsdEdit"; wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH); RegisterClassW(&wc); reg = true; }
+    // Desktop-Schnappschuss VOR dem Fenster (sonst ist das Edit-Fenster selbst im Bild).
+    captureDesktopBmp(dataDir() + L"\\osd-edit-bg.bmp");
+    RECT mon = osdMonitorRect();
+    g_osdEditHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        L"LumoraOsdEdit", L"Lumora OSD", WS_POPUP | WS_VISIBLE,
+        mon.left, mon.top, mon.right - mon.left, mon.bottom - mon.top - 1,
+        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!g_osdEditHwnd) { bcLogStream("osd-edit: CreateWindowExW fehlgeschlagen err=" + std::to_string(GetLastError())); return; }
+    SetForegroundWindow(g_osdEditHwnd);   // best effort; Fenster ist topmost + klickbar, erster Klick aktiviert sonst
+    wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
+    std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(res) || !env || !g_osdEditHwnd) { bcLogStream("osd-edit: Environment fehlt " + std::to_string(res)); return res; }
+                env->CreateCoreWebView2Controller(g_osdEditHwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [](HRESULT r2, ICoreWebView2Controller* ctrl) -> HRESULT {
+                            if (FAILED(r2) || !ctrl || !g_osdEditHwnd) { bcLogStream("osd-edit: Controller-Init " + std::to_string(r2)); return r2; }
+                            g_osdEditCtrl = ctrl; g_osdEditCtrl->get_CoreWebView2(&g_osdEditWv);
+                            if (!g_osdEditWv) return E_NOINTERFACE;
+                            RECT rc; GetClientRect(g_osdEditHwnd, &rc); g_osdEditCtrl->put_Bounds(rc);
+                            { json s = loadSettings();
+                              double z = (std::max)(0.4, (std::min)(3.0, s.value("osdScale", 1.0)));
+                              g_osdEditCtrl->put_ZoomFactor(z); }
+                            ComPtr<ICoreWebView2_3> wv3; g_osdEditWv.As(&wv3);
+                            if (wv3) {
+                                wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                                wv3->SetVirtualHostNameToFolderMapping(L"data.lumora", dataDir().c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);   // liefert osd-edit-bg.bmp
+                            }
+                            std::wstring shim = SHIM_JS; size_t vp = shim.find(L"%SHELL_VERSION%");
+                            if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
+                            g_osdEditWv->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
+                            g_osdEditWv->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* a) -> HRESULT {
+                                    LPWSTR j = nullptr;
+                                    if (SUCCEEDED(a->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_osdEditHwnd); CoTaskMemFree(j); }
+                                    return S_OK;
+                                }).Get(), nullptr);
+                            g_osdEditWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+                                    bcLogStream("osd-edit: geladen -> Edit-Modus aktivieren");
+                                    applyOsdConfig();                       // Theme/Felder/Deckkraft in die frische Instanz
+                                    sendToOsdEdit("osd-edit", true);        // NUR das Edit-Fenster in den Edit-Zustand
+                                    if (g_osdEditCtrl) g_osdEditCtrl->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+                                    return S_OK;
+                                }).Get(), nullptr);
+                            g_osdEditWv->Navigate(L"https://app.lumora/osd.html?editbg=1");
+                            return S_OK;
+                        }).Get());
+                return S_OK;
+            }).Get());
+}
+static void destroyOsdEditWindow() {
+    if (g_osdEditCtrl) g_osdEditCtrl->Close();
+    g_osdEditWv = nullptr; g_osdEditCtrl = nullptr;
+    if (g_osdEditHwnd) { DestroyWindow(g_osdEditHwnd); g_osdEditHwnd = nullptr; }
+    DeleteFileW((dataDir() + L"\\osd-edit-bg.bmp").c_str());   // Schnappschuss nicht liegen lassen
+}
 // Fenster auf die gemeldete Panel-Flaeche setzen und den DComp-Visual passend verschieben.
-// Im Edit-Modus stattdessen Vollbild (dort ist das Overlay absichtlich interaktiv).
 static void applyOsdWindowGeometry() {
     if (!g_osdHwnd) return;
     RECT mon = osdMonitorRect();
     int monW = mon.right - mon.left, monH = mon.bottom - mon.top;
-    if (g_osdEdit) {   // Edit: Vollbild + interaktiv; osd.html positioniert das Panel per pos-* an der Ecke
-        SetWindowPos(g_osdHwnd, HWND_TOPMOST, mon.left, mon.top, monW, monH - 1, SWP_NOACTIVATE);
-        return;
-    }
     if (!g_osdHavePanel || g_osdW < 1 || g_osdH < 1) return;
     int w = g_osdW > monW ? monW : g_osdW;
     int hh = g_osdH > monH ? monH : g_osdH;
@@ -2968,9 +3143,9 @@ static void osdFadeVisual(bool in) {
 // Zeigt das OSD (SW_SHOW ist "blitzschnell") und blendet per DComp sanft ein - nur wenn das OSD
 // aktiviert ist (oder im Edit-Modus). Ohne bekannte Panel-Groesse holt der 'osd-bounds'-Handler das nach.
 static void osdEnsureVisible() {
+    if (g_osdEdit) return;   // im Edit-Modus zeigt das eigene Edit-Fenster - Overlay bleibt versteckt
     bool en = loadSettings().value("osdEnabled", false);
-    if (!g_osdHwnd || (!g_osdEdit && !en)) return;
-    if (!g_osdEdit && !g_osdHavePanel) return;
+    if (!g_osdHwnd || !en || !g_osdHavePanel) return;
     KillTimer(g_hwnd, TIMER_OSDHIDE);   // ein evtl. laufendes Ausblenden abbrechen (schnelles aus->an)
     applyOsdWindowGeometry();
     ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE);
@@ -2993,51 +3168,26 @@ static void hideOsd() {
     }
 }
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
-// Live-Edit-Modus (Alt+Shift+O, wie Electrons setOsdEditMode): Overlay wird kurz
-// interaktiv (Ecke ziehen, Mausrad = Groesse, Editbar-Buttons); "Fertig" schaltet zurueck.
+// Live-Edit-Modus (Alt+Shift+O): laeuft in einem EIGENEN windowed WebView2-Fenster mit
+// Desktop-Schnappschuss als Hintergrund (createOsdEditWindow) - Klick/Drag/Rad nativ.
+// Das Anzeige-Overlay wird waehrenddessen versteckt und bleibt selbst IMMER click-through.
 static void setOsdEditMode(bool on) {
     if (on) {
+        if (g_osdEditHwnd) return;   // laeuft bereits
         json s = loadSettings();
-        if (!s.value("osdEnabled", false)) { s["osdEnabled"] = true; writeFile(settingsPath(), s.dump(2)); }
-        showOsd();
-        if (!g_osdHwnd) return;
+        if (!s.value("osdEnabled", false)) { s["osdEnabled"] = true; writeFile(settingsPath(), s.dump(2)); sendToUi("osd-config", nullptr); }
         g_osdEdit = true;
-        applyOsdWindowGeometry();   // Edit: Fenster auf Vollbild (ganze interaktive Flaeche)
-        // Anklickbar machen: NUR TRANSPARENT+NOACTIVATE weg (LAYERED MUSS bleiben - es
-        // traegt die DComp-Transparenz). OHNE SWP_FRAMECHANGED wird der Style-Wechsel
-        // nicht wirksam -> Fenster faengt die Maus nicht -> KEIN Klick erreicht das
-        // WebView (weder "Fertig" noch Design-Wahl; genau der User-Befund).
-        LONG_PTR ex = GetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE);
-        SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex & ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE));
-        SetWindowPos(g_osdHwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-        // Vordergrund + Fokus holen, damit das Composition-WebView Maus/Klick/Drag verarbeitet
-        // (ohne Fokus erreichen die Klicks es nicht). WICHTIG: das OSD MUSS dabei TOPMOST bleiben -
-        // sonst faellt es hinter andere Fenster und "verschwindet". Darum die AttachThreadInput-
-        // Foreground-Mechanik HIER inline (nicht forceForeground, das auf HWND_NOTOPMOST endet).
-        {
-            HWND fgw = GetForegroundWindow();
-            DWORD fgTid = fgw ? GetWindowThreadProcessId(fgw, nullptr) : 0;
-            DWORD myTid = GetCurrentThreadId();
-            bool att = (fgTid && fgTid != myTid && AttachThreadInput(myTid, fgTid, TRUE));
-            SetForegroundWindow(g_osdHwnd);
-            SetActiveWindow(g_osdHwnd);
-            SetFocus(g_osdHwnd);
-            if (att) AttachThreadInput(myTid, fgTid, FALSE);
-            SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);   // topmost BEHALTEN
-            if (g_osdCtrl) g_osdCtrl->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-        }
-        sendToOsd("osd-edit", true);
+        // Anzeige-Overlay SOFORT verstecken (VOR dem Desktop-Schnappschuss - sonst ist das
+        // Overlay selbst im Hintergrundbild), Datenquellen weiterlaufen lassen.
+        KillTimer(g_hwnd, TIMER_OSDHIDE);
+        if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE);
+        SetTimer(g_hwnd, TIMER_OSDDATA, 200, nullptr); SetTimer(g_hwnd, TIMER_OSDFPS, 33, nullptr);
+        sensorsInit(); ensureOsdSetup(); brokersEnsure();
+        createOsdEditWindow();
     } else {
         g_osdEdit = false;
-        if (g_osdHwnd) {
-            LONG_PTR ex = GetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE);
-            SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
-            // Ohne SWP_FRAMECHANGED wird der Ex-Style-Wechsel NICHT wirksam (der Rein-Weg
-            // macht es genauso) - sonst bliebe das Overlay nach dem Edit klickbar/mausdicht.
-            SetWindowPos(g_osdHwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-            applyOsdWindowGeometry();   // zurueck auf die Panel-Flaeche schrumpfen
-        }
-        sendToOsd("osd-edit", false);
+        destroyOsdEditWindow();
+        syncOsdVisibility();   // Anzeige-Overlay gemaess Setting wieder zeigen (neue Ecke/Groesse)
     }
 }
 static void toggleOsdSetting() {   // wie Electrons toggleOverlay (Hotkey/Gamepad/Kanal)
@@ -3664,7 +3814,8 @@ static void onWebMessage(const std::wstring& raw, HWND replyWnd) {
     std::string channel = msg.value("channel", "");
     json args = msg.contains("args") && msg["args"].is_array() ? msg["args"] : json::array();
     // Antwort ans QUELL-Fenster (Haupt-UI / Doorman / OSD) ueber dessen Marshalling-Message
-    UINT replyMsg = (replyWnd == g_doorHwnd) ? WM_SHELL_DOORMSG : (replyWnd == g_osdHwnd) ? WM_SHELL_OSDMSG : WM_SHELL_REPLY;
+    UINT replyMsg = (replyWnd == g_doorHwnd) ? WM_SHELL_DOORMSG
+                  : (replyWnd == g_osdHwnd || replyWnd == g_osdEditHwnd) ? WM_SHELL_OSDMSG : WM_SHELL_REPLY;
     if (isSlowChannel(channel)) {
         std::thread([id, channel, args, replyWnd, replyMsg]() {
             CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // ShellLink/AppsFolder im Worker

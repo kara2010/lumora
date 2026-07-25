@@ -3102,7 +3102,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
       document.getElementById('setIbAuto').checked = s.inputBridgeAutoActivate !== false
       document.getElementById('setOsdEnabled').checked = !!s.osdEnabled
-      document.getElementById('setOsdTheme').value = s.osdTheme || 'compact'
+      document.getElementById('setOsdTheme').value = s.osdTheme || 'bar'
       renderGpuOptions(s.osdGpu || 'auto')
       renderOsdFields(s.osdFields)
       document.getElementById('osdSetupRow').style.display = s.osdSetupDeclined ? 'flex' : 'none'

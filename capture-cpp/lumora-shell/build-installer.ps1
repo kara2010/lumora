@@ -7,7 +7,11 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.0.2"   # 3.0.2: Hotkey-Poll in eigenen Thread entkoppelt (schnelles Fenster-/OSD-Toggeln
+$version = "3.0.3"   # 3.0.3: OSD-Live-Editor komplett neu: eigenes windowed WebView2-Fenster mit
+                     #        Desktop-Schnappschuss (DXGI Duplication + HDR->SDR, GDI-Fallback) statt
+                     #        Composition-Input-Weiterleitung (scheiterte an DPI/Pointer-Capture);
+                     #        Bedienleiste neu gestaltet; Balken als Standard-Design.
+$prev_3_0_2 = ""  # 3.0.2: Hotkey-Poll in eigenen Thread entkoppelt (schnelles Fenster-/OSD-Toggeln
                      #        per Tastatur+Gamepad geht nicht mehr verloren/verklemmt); Fenster kommt per
                      #        Hotkey sofort bedienbar in den Vordergrund (AttachThreadInput gegen die
                      #        Foreground-Sperre + Refocus); OSD schaltet sofort pro Druck (ensureOsdSetup
