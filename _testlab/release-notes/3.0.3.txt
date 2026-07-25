@@ -1,0 +1,17 @@
+Lumora 3.0.3 – OSD-Editor rundum erneuert
+
+• Der Live-Editor des Gaming-OSD wurde komplett neu gebaut: Anfassen, Verschieben, Größe per Mausrad und alle Knöpfe funktionieren jetzt zuverlässig – auch auf Bildschirmen mit Windows-Skalierung (4K/HDR), wo Klicks zuvor daneben gingen oder durch das Overlay hindurchfielen.
+• Der Editor zeigt den Bildschirm halbtransparent im Hintergrund und das OSD mit echten Live-Werten – so wie man es erwartet.
+• Die Bedienleiste wurde neu gestaltet: klare Bereiche für Design, Deckkraft und Position, Werte-Auswahl in den OSD-Farben.
+• „Balken" ist jetzt das Standard-Design des OSD.
+
+Bestehende Installationen aktualisieren sich automatisch.
+===EN===
+Lumora 3.0.3 – OSD editor rebuilt
+
+• The gaming OSD's live editor has been rebuilt from the ground up: grabbing, dragging, resizing via mouse wheel and all buttons now work reliably – including on displays with Windows scaling (4K/HDR), where clicks used to miss or fall through the overlay.
+• The editor shows your screen semi-transparently in the background and the OSD with real live values – the way you'd expect.
+• The toolbar has been redesigned: clear sections for design, opacity and position, value toggles in the OSD's colors.
+• "Bar" is now the OSD's default design.
+
+Existing installations update automatically.

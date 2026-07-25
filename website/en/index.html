@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "3.0.2",
+        "softwareVersion": "3.0.3",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1036,8 +1036,19 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.0.2</span>
+          <span class="release-ver">3.0.3</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>OSD editor rebuilt</strong>: the gaming OSD's live editor has been rebuilt from the ground up – grabbing, dragging to any corner, resizing via mouse wheel and all controls now respond reliably, including on displays with Windows scaling (4K/HDR).</li>
+          <li><strong>Edit with see-through</strong>: the editor shows your screen semi-transparently in the background and the OSD with real live values – while arranging it you see exactly how it will look.</li>
+          <li><strong>New toolbar</strong> with clear sections for design, opacity and position; the value toggles glow in the OSD's colors (GPU/CPU/FPS).</li>
+          <li>"Bar" is now the OSD's default design.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.0.2</span>
         </div>
         <ul>
           <li><strong>Gamepad menu navigation</strong>: use the LB/RB shoulder buttons to move through the tabs (Library, General, Appearance …) – driving the whole interface from the couch is even smoother.</li>
@@ -1082,6 +1093,7 @@
           <li><strong>Signed &amp; trusted</strong>: Lumora is now digitally signed (Certum Code Signing). Windows shows the verified publisher instead of “Unknown publisher”, and the hard Smart App Control block is gone. Any initial SmartScreen notice fades as the signature builds reputation.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.19</span>
@@ -1094,7 +1106,6 @@
           <li>Polish: “Invite friends” is more prominent; the join dialog shows windows with their app icons and keeps the list up to date automatically.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.18</span>
@@ -1316,7 +1327,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (20)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (21)</button>
   </div>
 </section>
 
@@ -1714,7 +1725,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Show less' : 'Show older versions (20)';
+    btn.textContent = open ? 'Show less' : 'Show older versions (21)';
   }
 
   function toggleFeatures() {
