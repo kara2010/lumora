@@ -7,7 +7,11 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.0.3"   # 3.0.3: OSD-Live-Editor komplett neu: eigenes windowed WebView2-Fenster mit
+$version = "3.0.4"   # 3.0.4: Update-Hinweise zuverlaessig bei minimiertem Autostart: auch das stille
+                     #        Komponenten-Update meldet sich per Tray-Balloon + Nachlieferung beim
+                     #        naechsten Fenster-Oeffnen; Downgrade-Reinstall-Erkennung (veraltetes
+                     #        componentsVersion machte den Updater blind).
+$prev_3_0_3 = ""  # 3.0.3: OSD-Live-Editor komplett neu: eigenes windowed WebView2-Fenster mit
                      #        Desktop-Schnappschuss (DXGI Duplication + HDR->SDR, GDI-Fallback) statt
                      #        Composition-Input-Weiterleitung (scheiterte an DPI/Pointer-Capture);
                      #        Bedienleiste neu gestaltet; Balken als Standard-Design.
