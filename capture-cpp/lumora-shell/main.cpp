@@ -1756,6 +1756,18 @@ static bool g_pendingRestart = false;   // Komponenten-Update hat die Shell geta
 // beim Verstecken geben wir ihn exakt dorthin zurueck (1:1 aus main.js).
 static HWND g_prevGameHwnd = nullptr;
 static HWND g_osdHwnd = nullptr;   // OSD-Overlay-Fenster (nicht als "Vorgaenger" merken)
+// Gemerkte Update-Meldung, die noch nicht SICHTBAR wurde (Fenster war beim Fund versteckt/
+// minimiert). Wird beim Tray-Balloon-Klick UND bei JEDEM Fenster-Oeffnen frisch zugestellt -
+// so geht ein Update nie mehr verloren, selbst wenn der Balloon verpasst wird (real passiert:
+// Komponenten-Update bei minimiertem Autostart -> update-restart verpuffte in der unsichtbaren UI).
+static json g_pendingUpdate;
+static std::string g_pendingUpdateChannel = "update-available";
+static void deliverPendingUpdate() {
+    if (!g_pendingUpdate.is_object() || g_pendingUpdate.empty()) return;
+    sendToUi(g_pendingUpdateChannel, g_pendingUpdate);
+    bcLogStream("update: gemerkte Meldung (" + g_pendingUpdateChannel + ") beim Fenster-Oeffnen zugestellt");
+    g_pendingUpdate = json();   // zugestellt (Fenster ist sichtbar, WebView laeuft)
+}
 static void restoreGameFocus() {
     if (!g_prevGameHwnd) return;
     if (!IsWindow(g_prevGameHwnd)) { g_prevGameHwnd = nullptr; return; }   // Spiel inzwischen beendet
@@ -1816,6 +1828,7 @@ static void showMainWindow() {
     // bevor das Fenster wirklich vorne ist, und der Dokument-Fokus greift dann nicht (genau der
     // "erst nach Mausklick"-Bug). Darum den Fokus kurz danach nochmal holen, wenn der Wechsel durch ist.
     SetTimer(g_hwnd, TIMER_REFOCUS, 80, nullptr);
+    deliverPendingUpdate();   // wartende Update-Meldung JETZT sichtbar zustellen (Fenster ist offen)
 }
 static ULONGLONG g_mainShownTick = 0;   // wann showMainWindow zuletzt lief (Foreground-Nachlauf ueberbruecken)
 static void toggleMainWindow() {
@@ -2084,17 +2097,21 @@ static void notifyForwardIssue() {
 #define WM_SHELL_UPDATEBALLOON (WM_APP + 6)
 static bool g_updateBalloonPending = false;
 static std::wstring g_updBalloonVer;
-// Beim minimierten Fund gemerkte Update-Meldung: das sofortige sendToUi kann verpuffen, wenn der
-// Renderer beim Check (4s nach Start) noch nicht bereit ist (g_webview null -> Nachricht verworfen).
-// Beim Balloon-Klick ist das Fenster sichtbar und die WebView sicher bereit -> dann frisch ausliefern.
-static json g_pendingUpdate;
+// Tray-Balloon fuer beide Update-Wege: "verfuegbar" (voller Installer, Zustimmung noetig) und
+// "installiert - Neustart aktiviert es" (Komponenten-Update lief bereits still durch).
+static bool g_updBalloonRestart = false;
 static void notifyUpdateAvailable() {
-    bcLogStream(std::string("update: Tray-Balloon anzeigen (trayOn=") + (g_trayOn ? "1" : "0") + ")");
+    bcLogStream(std::string("update: Tray-Balloon anzeigen (trayOn=") + (g_trayOn ? "1" : "0") + (g_updBalloonRestart ? ", Neustart-Fall" : ", Installer-Fall") + ")");
     if (!g_trayOn) return;
     g_updateBalloonPending = true;
     NOTIFYICONDATAW n{}; n.cbSize = sizeof(n); n.hWnd = g_hwnd; n.uID = 1; n.uFlags = NIF_INFO;
-    wcscpy_s(n.szInfoTitle, (L"Lumora " + g_updBalloonVer + L" verfügbar").c_str());
-    wcscpy_s(n.szInfo, L"Ein Update steht bereit. Hier klicken, um es anzuzeigen.");
+    if (g_updBalloonRestart) {
+        wcscpy_s(n.szInfoTitle, (L"Lumora " + g_updBalloonVer + L" installiert").c_str());
+        wcscpy_s(n.szInfo, L"Ein Neustart aktiviert das Update. Hier klicken für das Neustart-Angebot.");
+    } else {
+        wcscpy_s(n.szInfoTitle, (L"Lumora " + g_updBalloonVer + L" verfügbar").c_str());
+        wcscpy_s(n.szInfo, L"Ein Update steht bereit. Hier klicken, um es anzuzeigen.");
+    }
     n.dwInfoFlags = NIIF_INFO;
     Shell_NotifyIconW(NIM_MODIFY, &n);
 }
@@ -3286,7 +3303,7 @@ static void checkForUpdates(bool manual) {
             bcLogStream("update: " + ver + " verfuegbar (installiert " + effectiveVersion() + "), Fenster " + (hidden ? "versteckt -> Tray-Balloon" : "sichtbar -> Dialog direkt"));
             // Fenster versteckt (Autostart-minimiert)? -> der Dialog ist unsichtbar. Update merken +
             // Tray-Balloon anstossen; der Klick liefert die Meldung frisch aus (WebView dann sicher bereit).
-            if (hidden) { g_pendingUpdate = payload; g_updBalloonVer = widen(ver); PostMessageW(g_hwnd, WM_SHELL_UPDATEBALLOON, 0, 0); }
+            if (hidden) { g_pendingUpdate = payload; g_pendingUpdateChannel = "update-available"; g_updBalloonVer = widen(ver); g_updBalloonRestart = false; PostMessageW(g_hwnd, WM_SHELL_UPDATEBALLOON, 0, 0); }
         } else if (manual) sendToUi("update-none", nullptr);
     }).detach();
 }
@@ -3317,12 +3334,39 @@ static void componentUpdateOnce() {
         // Wurde die Shell selbst getauscht, laeuft dieser Prozess noch die alte Version.
         // Meldung an die UI: Neustart anbieten (Zustimmung -> restart-app). Helfer/UI-Updates
         // wirken ohne Neustart und loesen die Meldung NICHT aus.
-        if (restartRequired) { g_pendingRestart = true; lulaunch::playLog(dataDir(), "comp-update: Shell getauscht -> Neustart angeboten"); sendToUi("update-restart", { {"version", applied} }); }
+        if (restartRequired) {
+            g_pendingRestart = true; lulaunch::playLog(dataDir(), "comp-update: Shell getauscht -> Neustart angeboten");
+            json payload = { {"version", applied} };
+            sendToUi("update-restart", payload);
+            // Fenster versteckt (Autostart-minimiert)? Dann verpufft der Neustart-Toast in der
+            // unsichtbaren UI (real passiert: 3.0.2 minimiert -> "kein Update angeboten"). Meldung
+            // MERKEN + Tray-Balloon: Klick ODER das naechste Fenster-Oeffnen stellt sie sichtbar zu.
+            bool hidden = g_hwnd && (!IsWindowVisible(g_hwnd) || IsIconic(g_hwnd));
+            if (hidden) {
+                g_pendingUpdate = payload; g_pendingUpdateChannel = "update-restart";
+                g_updBalloonVer = widen(applied); g_updBalloonRestart = true;
+                PostMessageW(g_hwnd, WM_SHELL_UPDATEBALLOON, 0, 0);
+            }
+        }
     }
 }
 static void setupAutoUpdate() {
     std::thread([]() {
         luupd::cleanupOldFiles(exeDir());   // .old-Reste des letzten Swaps (jetzt entsperrbar)
+        // Reinstallations-/Downgrade-Erkennung: componentsVersion behauptet einen Stand, den die
+        // EXE auf der Platte nicht traegt (z.B. aeltere Version zum Testen DRUEBER installiert).
+        // Dann zaehlt die Platte - sonst ist der Updater blind (effectiveVersion zu hoch; real
+        // passiert: 3.0.2 ueber 3.0.3 installiert -> "kein Update angeboten"). Nach jedem echten
+        // Komponenten-Update stimmen EXE-Version und componentsVersion ueberein (die Shell wird
+        // bei jedem Release mit neuer Versionsressource gebaut) - Ungleichheit = veralteter Rest.
+        {
+            json s = loadSettings();
+            std::string cv = s.value("componentsVersion", "");
+            if (!cv.empty() && cmpVer(shellVersion(), cv) != 0) {
+                lulaunch::playLog(dataDir(), "comp-update: componentsVersion " + cv + " passt nicht zur exe " + shellVersion() + " (Neuinstallation?) -> zurueckgesetzt");
+                s["componentsVersion"] = shellVersion(); writeFile(settingsPath(), s.dump(2));
+            }
+        }
         Sleep(4000);
         for (;;) {
             std::string ch = loadSettings().value("updateChannel", "auto");
@@ -3968,7 +4012,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             // der Renderer da noch lud). Sonst: Portfreigabe-Balloon -> Anleitung oeffnen.
             if (g_updateBalloonPending) {
                 g_updateBalloonPending = false;
-                if (g_pendingUpdate.is_object()) { sendToUi("update-available", g_pendingUpdate); bcLogStream("update: Balloon geklickt -> Meldung frisch ausgeliefert"); }
+                deliverPendingUpdate();   // Installer-Dialog ODER Neustart-Angebot - je nach gemerktem Kanal
             } else sendToUi("show-forward-help", nullptr);
             return 0;
         }

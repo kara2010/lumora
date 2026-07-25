@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "3.0.3",
+        "softwareVersion": "3.0.4",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1036,8 +1036,17 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.0.3</span>
+          <span class="release-ver">3.0.4</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>Reliable update notices</strong>: the silent component update now announces itself even when Lumora autostarts minimized in the background – via a tray notification, and if that is missed, automatically the next time the window is opened.</li>
+          <li><strong>Friendlier for testing</strong>: if an older version is installed over a newer one, Lumora detects this and correctly offers updates again.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.0.3</span>
         </div>
         <ul>
           <li><strong>OSD editor rebuilt</strong>: the gaming OSD's live editor has been rebuilt from the ground up – grabbing, dragging to any corner, resizing via mouse wheel and all controls now respond reliably, including on displays with Windows scaling (4K/HDR).</li>
@@ -1085,6 +1094,7 @@
           <li><strong>Signed &amp; trusted</strong>: all program files and the installer are digitally signed (Certum) – Windows shows the verified publisher.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.20</span>
@@ -1093,7 +1103,7 @@
           <li><strong>Signed &amp; trusted</strong>: Lumora is now digitally signed (Certum Code Signing). Windows shows the verified publisher instead of “Unknown publisher”, and the hard Smart App Control block is gone. Any initial SmartScreen notice fades as the signature builds reputation.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
+      
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.19</span>
@@ -1327,7 +1337,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (21)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (22)</button>
   </div>
 </section>
 
@@ -1725,7 +1735,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Show less' : 'Show older versions (21)';
+    btn.textContent = open ? 'Show less' : 'Show older versions (22)';
   }
 
   function toggleFeatures() {

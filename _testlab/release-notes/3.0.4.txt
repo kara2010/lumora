@@ -1,0 +1,13 @@
+Lumora 3.0.4 – Zuverlässige Update-Hinweise
+
+• Startet Lumora minimiert im Hintergrund (Autostart), meldet sich jetzt auch das stille Komponenten-Update zuverlässig: eine Benachrichtigung am Infobereich-Symbol bietet den Neustart an – und falls sie verpasst wird, erscheint das Angebot automatisch beim nächsten Öffnen des Fensters.
+• Wird eine ältere Version über eine neuere installiert (z. B. zum Testen), erkennt Lumora das jetzt und bietet wieder korrekt Updates an – vorher blieb der Updater in diesem Fall stumm.
+
+Bestehende Installationen aktualisieren sich automatisch.
+===EN===
+Lumora 3.0.4 – Reliable update notices
+
+• When Lumora autostarts minimized in the background, the silent component update now announces itself reliably: a tray notification offers the restart – and if it is missed, the offer automatically appears the next time the window is opened.
+• If an older version is installed over a newer one (e.g. for testing), Lumora now detects this and correctly offers updates again – previously the updater stayed silent in this case.
+
+Existing installations update automatically.

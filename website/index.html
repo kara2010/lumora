@@ -75,7 +75,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/#app",
         "name": "Lumora",
-        "softwareVersion": "3.0.3",
+        "softwareVersion": "3.0.4",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1049,8 +1049,17 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.0.3</span>
+          <span class="release-ver">3.0.4</span>
           <span class="release-tag">aktuell</span>
+        </div>
+        <ul>
+          <li><strong>Zuverlässige Update-Hinweise</strong>: Auch das stille Komponenten-Update meldet sich jetzt, wenn Lumora minimiert im Hintergrund startet – per Benachrichtigung am Infobereich-Symbol, und falls die verpasst wird, automatisch beim nächsten Öffnen des Fensters.</li>
+          <li><strong>Testfreundlicher</strong>: Wird eine ältere Version über eine neuere installiert, erkennt Lumora das und bietet wieder korrekt Updates an.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.0.3</span>
         </div>
         <ul>
           <li><strong>OSD-Editor rundum erneuert</strong>: Der Live-Editor des Gaming-OSD wurde neu gebaut – Anfassen, Verschieben in jede Ecke, Größe per Mausrad und alle Bedienknöpfe reagieren jetzt zuverlässig, auch auf Bildschirmen mit Windows-Skalierung (4K/HDR).</li>
@@ -1098,6 +1107,7 @@
           <li><strong>Signiert &amp; vertrauenswürdig</strong>: Alle Programmdateien und der Installer sind digital signiert (Certum) – Windows zeigt den geprüften Herausgeber.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.20</span>
@@ -1106,7 +1116,7 @@
           <li><strong>Signiert &amp; vertrauenswürdig</strong>: Lumora ist jetzt digital signiert (Certum Code Signing). Windows zeigt statt „Unbekannter Herausgeber" den geprüften Herausgeber, und die harte Blockade durch Smart App Control entfällt. Eine mögliche SmartScreen-Erstmeldung baut sich ab, sobald die Signatur Reputation gesammelt hat.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
+      
       <div class="release">
         <div class="release-head">
           <span class="release-ver">2.2.19</span>
@@ -1340,7 +1350,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (21)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (22)</button>
   </div>
 </section>
 
@@ -1754,7 +1764,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (21)';
+    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (22)';
   }
 
   function toggleFeatures() {
