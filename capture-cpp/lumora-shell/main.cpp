@@ -2813,12 +2813,30 @@ static bool g_osdHoriz = false;           // zentrierte Themes (Leiste/Kacheln) 
 static bool g_osdHavePanel = false;
 static RECT osdMonitorRect() { HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_DEFAULTTOPRIMARY); MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(hm, &mi); return mi.rcMonitor; }
 static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    // DIAG (temporaer, VOR der Bedingung): kommt der Klick hier an, und woran scheitert die Weiterleitung?
+    if (m == WM_LBUTTONDOWN)
+        bcLogStream("osd-raw-click: edit=" + std::to_string(g_osdEdit ? 1 : 0) + " comp=" + std::to_string(g_osdComp ? 1 : 0)
+            + " ctrl=" + std::to_string(g_osdCtrl ? 1 : 0) + " pt=(" + std::to_string(GET_X_LPARAM(l)) + "," + std::to_string(GET_Y_LPARAM(l)) + ")");
     // Live-Edit: Maus-Ereignisse ans WebView2 durchreichen - der Composition-Modus
     // bekommt sie NICHT automatisch (SendMouseInput ist Pflicht, MS-Doku).
     if (g_osdEdit && g_osdComp && ((m >= WM_MOUSEMOVE && m <= WM_MBUTTONDBLCLK) || m == WM_MOUSEWHEEL || m == WM_MOUSELEAVE)) {
         POINT pt{ GET_X_LPARAM(l), GET_Y_LPARAM(l) };
         UINT32 mouseData = 0;
         if (m == WM_MOUSEWHEEL) { mouseData = (UINT32)GET_WHEEL_DELTA_WPARAM(w); ScreenToClient(h, &pt); }   // Wheel liefert Screen-Koordinaten
+        // Maus-CAPTURE fuer Drags: ohne SetCapture verliert das Fenster die Maus, sobald sie beim
+        // Ziehen den Treffbereich verlaesst - das WM_LBUTTONUP kommt dann NIE im WebView an und
+        // das Panel "klebt" an der Maus (bewegt sich ohne gedrueckte Taste weiter).
+        if (m == WM_LBUTTONDOWN) SetCapture(h);
+        if (m == WM_LBUTTONUP) ReleaseCapture();
+        // PHYSISCHE Fensterkoordinaten -> WebView-DIPs teilen! SendMouseInput erwartet DIP-
+        // Koordinaten; bei Monitor-Skalierung (rasterizationScale, z.B. 3.0 bei 4K/300%) landete
+        // sonst jede Eingabe um den DPI-Faktor zu weit rechts/unten. Gemessener Befund (echte
+        // Klicks, 4K/300%): nur nahe (0,0) traf es ~, sonst Klick-daneben/3x-verstaerkte Drags -
+        // Panel "sprang unkontrolliert" und Buttons unten waren unerreichbar. Seit 3.0.0 so
+        // (Electron rechnete DPI selbst um, der Composition-Pfad muss es von Hand tun).
+        double rs = 1.0; ComPtr<ICoreWebView2Controller3> c3;
+        if (g_osdCtrl && SUCCEEDED(g_osdCtrl.As(&c3)) && c3) c3->get_RasterizationScale(&rs);
+        if (rs > 0.01 && rs != 1.0) { pt.x = (LONG)(pt.x / rs + 0.5); pt.y = (LONG)(pt.y / rs + 0.5); }
         g_osdComp->SendMouseInput((COREWEBVIEW2_MOUSE_EVENT_KIND)m, (COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS)LOWORD(w), mouseData, pt);
         return 0;
     }
@@ -2992,7 +3010,22 @@ static void setOsdEditMode(bool on) {
         LONG_PTR ex = GetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE);
         SetWindowLongPtrW(g_osdHwnd, GWL_EXSTYLE, ex & ~(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE));
         SetWindowPos(g_osdHwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-        SetForegroundWindow(g_osdHwnd);
+        // Vordergrund + Fokus holen, damit das Composition-WebView Maus/Klick/Drag verarbeitet
+        // (ohne Fokus erreichen die Klicks es nicht). WICHTIG: das OSD MUSS dabei TOPMOST bleiben -
+        // sonst faellt es hinter andere Fenster und "verschwindet". Darum die AttachThreadInput-
+        // Foreground-Mechanik HIER inline (nicht forceForeground, das auf HWND_NOTOPMOST endet).
+        {
+            HWND fgw = GetForegroundWindow();
+            DWORD fgTid = fgw ? GetWindowThreadProcessId(fgw, nullptr) : 0;
+            DWORD myTid = GetCurrentThreadId();
+            bool att = (fgTid && fgTid != myTid && AttachThreadInput(myTid, fgTid, TRUE));
+            SetForegroundWindow(g_osdHwnd);
+            SetActiveWindow(g_osdHwnd);
+            SetFocus(g_osdHwnd);
+            if (att) AttachThreadInput(myTid, fgTid, FALSE);
+            SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);   // topmost BEHALTEN
+            if (g_osdCtrl) g_osdCtrl->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        }
         sendToOsd("osd-edit", true);
     } else {
         g_osdEdit = false;
