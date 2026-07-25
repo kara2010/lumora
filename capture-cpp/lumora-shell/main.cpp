@@ -1744,6 +1744,7 @@ static void bcUnregisterWatchLink() {
 #define HK_OSD 3
 #define HK_OSDEDIT 5
 #define HK_OSDAB 6
+#define TIMER_REFOCUS 117   // one-shot kurz nach showMainWindow: Fokus nochmal ins WebView holen
 static NOTIFYICONDATAW g_nid{};
 static bool g_trayOn = false, g_quitting = false;
 static bool g_pendingRestart = false;   // Komponenten-Update hat die Shell getauscht -> Neustart offen
@@ -1758,6 +1759,24 @@ static void restoreGameFocus() {
     if (IsIconic(g_prevGameHwnd)) ShowWindow(g_prevGameHwnd, SW_RESTORE);   // Vollbild kickte sich beim Fokusverlust
     SetForegroundWindow(g_prevGameHwnd);
     g_prevGameHwnd = nullptr;
+}
+// Robustes Nach-vorn-Holen gegen die Windows-Foreground-Sperre. Ein SetForegroundWindow aus einem
+// nicht-aktiven Prozess (Lumora ist beim Gamepad-Hotkey nicht die Vordergrund-App) wird sonst
+// blockiert: das Fenster erscheint, BLINKT aber nur in der Taskleiste und bekommt KEINEN Fokus
+// (genau der "erst nach Mausklick"-Bug). Standard-Trick: den Eingabezustand kurz an den aktuellen
+// Vordergrund-Thread anhaengen (AttachThreadInput) - dann darf SetForegroundWindow wirklich wechseln.
+static void forceForeground(HWND hwnd) {
+    HWND fg = GetForegroundWindow();
+    DWORD fgTid = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    DWORD myTid = GetCurrentThreadId();
+    bool attached = (fgTid && fgTid != myTid && AttachThreadInput(myTid, fgTid, TRUE));
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    BringWindowToTop(hwnd);
+    SetForegroundWindow(hwnd);
+    SetActiveWindow(hwnd);
+    SetFocus(hwnd);
+    if (attached) AttachThreadInput(myTid, fgTid, FALSE);
 }
 static void showMainWindow() {
     // Diagnose "schwarzes Fenster nach --minimized-Autostart": dieselbe Fehlerklasse wie
@@ -1777,31 +1796,55 @@ static void showMainWindow() {
     // nach. Sichtbarkeit + Flaeche hier explizit nachziehen (gleicher Fund/Fix wie beim
     // Tuersteher-Fenster).
     if (g_controller) { placeWebView(g_hwnd); g_controller->put_IsVisible(TRUE); }
-    // Kurzes TOPMOST-Anheben erzwingt das echte Nach-vorn (Hintergrund-Aufruf per
-    // Hotkey/Tray wuerde sonst nur in der Taskleiste blinken); danach zuruecknehmen.
-    SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    SetForegroundWindow(g_hwnd);
-    SetWindowPos(g_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    // Fallback: Vollbild-Spiel mit Input-Besitz blockt die Windows-Foreground-Sperre
-    // (Lumora wirkt "abgestuerzt"). Dann per synthetischem Alt-Tipp entsperren + erzwingen.
+    // Echtes Nach-vorn-Holen (hebt die Foreground-Sperre per AttachThreadInput auf - sonst blinkt
+    // das Fenster nur in der Taskleiste und bleibt ohne Fokus).
+    forceForeground(g_hwnd);
+    // Fallback: Vollbild-Spiel mit Input-Besitz blockt selbst das noch. Dann per synthetischem
+    // Alt-Tipp entsperren + nochmal erzwingen.
     if (GetForegroundWindow() != g_hwnd) {
         keybd_event(VK_MENU, 0, 0, 0); keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
-        SetForegroundWindow(g_hwnd); ShowWindow(g_hwnd, SW_SHOW);
+        forceForeground(g_hwnd); ShowWindow(g_hwnd, SW_SHOW);
     }
-    // Fokus INS WebView2 setzen: Chromium liefert Gamepad-Input (navigator.getGamepads)
-    // nur bei Dokument-Fokus. Ohne das musste nach dem Gamepad-Hotkey erst einmal mit
-    // der Maus in die UI geklickt werden, bevor der Controller reagierte.
+    // Fokus INS WebView2 setzen: Chromium liefert Gamepad-Input (navigator.getGamepads) nur bei
+    // Dokument-Fokus (und die UI-Navigation prueft document.hasFocus()). Ohne das musste nach dem
+    // Gamepad-Hotkey erst einmal mit der Maus in die UI geklickt werden.
     if (g_controller) g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+    // ABER: SetForegroundWindow/der Aktivierungswechsel ist ASYNCHRON - das MoveFocus oben laeuft oft,
+    // bevor das Fenster wirklich vorne ist, und der Dokument-Fokus greift dann nicht (genau der
+    // "erst nach Mausklick"-Bug). Darum den Fokus kurz danach nochmal holen, wenn der Wechsel durch ist.
+    SetTimer(g_hwnd, TIMER_REFOCUS, 80, nullptr);
 }
+static ULONGLONG g_mainShownTick = 0;   // wann showMainWindow zuletzt lief (Foreground-Nachlauf ueberbruecken)
 static void toggleMainWindow() {
-    if (IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd) && GetForegroundWindow() == g_hwnd) {
+    // Klemme bei schnellem Hotkey-Toggeln (Gamepad/Tastatur, schon in der Electron-Version): die
+    // Richtung wurde aus GetForegroundWindow()==g_hwnd entschieden, aber der Vordergrund LAEUFT dem
+    // Zeigen nach (SetForegroundWindow/Alt-Tipp sind asynchron). Ein schneller Zweitdruck sah dann
+    // "sichtbar, aber nicht vorne" -> zeigte statt zu verstecken -> Fenster liess sich nicht schliessen.
+    // Fix: gerade selbst gezeigt (< 700 ms) zaehlt als "vorne". Das erhaelt zugleich das gewuenschte
+    // Verhalten "hinter dem Spiel sichtbar -> Hotkey holt nach vorne" fuer spaetere Druecke.
+    bool shown = IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd);
+    bool fg = (GetForegroundWindow() == g_hwnd);
+    bool ours = fg || (g_mainShownTick && GetTickCount64() - g_mainShownTick < 700);
+    if (shown && ours) {
         restoreGameFocus();   // ERST dem Spiel den Vordergrund sauber zurueckgeben, DANN verstecken
         ShowWindow(g_hwnd, SW_HIDE);
-    } else showMainWindow();
+        g_mainShownTick = 0;
+    } else {
+        showMainWindow();
+        g_mainShownTick = GetTickCount64();
+    }
 }
 // --- Gamepad-Hotkeys (nativer XInput-Poll wie Electrons pollNativeHotkeys: laeuft
 // fokusunabhaengig, auch waehrend ein Spiel im Vordergrund ist) ---
 #define TIMER_XINPUT 108
+// Hotkey-Poll laeuft in einem EIGENEN Thread (nicht mehr im UI-Timer): so hungert die schwere
+// Toggle-Arbeit (showOsd/Broker-Init, DComp-Commit, WebView2) den Eingabe-Poll nicht mehr aus.
+// Der Poll-Thread erkennt nur die Flanke und schickt das Kommando (WM_HOTKEY_CMD) an den UI-Thread;
+// selbst wenn die UI kurz beschaeftigt ist, landen die Druecke in der Nachrichten-Queue statt
+// verloren zu gehen. Genau das war die Ursache fuer "schnelles Toggeln kommt nicht an": Poll und
+// Toggle teilten sich den UI-Thread, der Toggle blockierte den Poll (nicht-deterministisch).
+#define WM_HOTKEY_CMD (WM_APP + 7)
+enum { HKC_MAIN = 1, HKC_OSD = 2, HKC_OSDEDIT = 3, HKC_AB = 4, HKC_STREAM = 5 };
 static void toggleOsdSetting();   // (unten definiert)
 static void setOsdEditMode(bool on);
 // Standard-Gamepad-API-Index -> XINPUT_GAMEPAD-Pruefung (Masken 1:1 aus main.js XI_MASK)
@@ -1867,13 +1910,29 @@ static bool gamepadComboDown(const json& combo) {
 struct KbHotkey { UINT vk; bool alt, ctrl, shift; std::function<void()> action; bool down; };
 static std::vector<KbHotkey> g_kbHotkeys;
 static std::mutex g_kbMx;
-static const ULONGLONG GP_RELEASE_MS = 150;   // Read-Aussetzer einer gehaltenen Gamepad-Kombi ueberbruecken
+// Nur einen EINZELNEN XInput-Leseaussetzer (1 Tick = 40 ms) einer GEHALTENEN Kombi ueberbruecken,
+// damit ein Glitch waehrend des Haltens keine zweite Umschaltung ausloest. Frueher 150 ms - das
+// verschluckte aber jeden bewussten schnellen Wiederholdruck innerhalb von 150 ms (Ursache des
+// "blockiert bei zu schnellem Gamepad-Toggeln", gemessen im Log als GESCHLUCKT(bruecke)).
+// Bei 125-Hz-Abtastung (8 ms/Tick) reichen 40 ms locker fuer mehrere ausgefallene Lesevorgaenge einer
+// GEHALTENEN Kombi; gleichzeitig bleiben echte schnelle Wiederholdrucke ab ~48 ms frei (~20/s, schneller
+// als ein Mensch bewusst toggelt). Frueher 150/80 ms - das verschluckte zusammen mit dem groben 40-ms-Takt
+// schnelles Gamepad-Toggeln (Kombi nie im selben Abtastfenster beisammen -> gar keine Flanke).
+static const ULONGLONG GP_RELEASE_MS = 40;
 static bool g_gpMainWas = false, g_gpOsdWas = false;
 static ULONGLONG g_gpMainSeen = 0, g_gpOsdSeen = 0;
-static void xinputTick() {   // 25 Hz; Flanke = einmal ausloesen pro Druck
+static void xinputTick() {   // 125 Hz; Flanke = einmal ausloesen pro Druck
     padPoll();   // EINE Abfrage pro Platz und Tick (leere Plaetze nur alle 2 s)
-    json s = loadSettings();
     ULONGLONG now = GetTickCount64();
+    // Settings NICHT 125x/s von der Platte lesen (I/O + Kollision mit writeFile beim Toggeln):
+    // die Hotkey-Kombis aendern sich selten -> alle 200 ms cachen reicht (Aenderung greift <=200ms).
+    static json s_cached; static ULONGLONG s_cachedAt = 0;
+    if (now - s_cachedAt > 200 || s_cached.is_null()) {
+        json fresh = loadSettings();   // bei Teil-Lesung (gleichzeitiger writeFile) liefert das {} -> alten Cache behalten
+        if (!fresh.empty()) { s_cached = fresh; s_cachedAt = now; }
+        else if (s_cached.is_null()) { s_cached = fresh; s_cachedAt = now; }   // Erststart: noch nichts im Cache
+    }
+    const json& s = s_cached;
     // 1) Gamepad-Kombis (XInput) mit Release-Debounce gegen Read-Aussetzer.
     bool rawM = gamepadComboDown(s.value("gamepadHotkey", json::array()));
     if (rawM) g_gpMainSeen = now;
@@ -1881,8 +1940,8 @@ static void xinputTick() {   // 25 Hz; Flanke = einmal ausloesen pro Druck
     bool rawO = gamepadComboDown(s.value("gamepadOsdHotkey", json::array()));
     if (rawO) g_gpOsdSeen = now;
     bool o = rawO || (g_gpOsdSeen && now - g_gpOsdSeen < GP_RELEASE_MS);
-    if (m && !g_gpMainWas) toggleMainWindow();
-    if (o && !g_gpOsdWas) toggleOsdSetting();
+    if (m && !g_gpMainWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_MAIN, 0);
+    if (o && !g_gpOsdWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_OSD, 0);
     g_gpMainWas = m; g_gpOsdWas = o;
     // 2) Tastatur-Hotkeys (steigende Flanke, EXAKTE Modifier wie main.js).
     std::lock_guard<std::mutex> lk(g_kbMx);
@@ -1895,6 +1954,22 @@ static void xinputTick() {   // 25 Hz; Flanke = einmal ausloesen pro Druck
             h.down = on;
         }
     }
+}
+// Poll-Thread: laeuft konstant mit ~125 Hz, UNABHAENGIG von der UI-Last. So kann die schwere
+// Toggle-Arbeit (auf dem UI-Thread via WM_HOTKEY_CMD) den Eingabe-Poll nicht mehr aushungern -
+// Flanken werden gepostet, nicht verloren. (Vorher lief xinputTick im UI-Timer und stand still,
+// solange ein Toggle den UI-Thread blockierte -> "schnelles Toggeln kommt nicht an".)
+static std::atomic<bool> g_hotkeyRun{ false };
+static std::thread g_hotkeyThread;
+static void startHotkeyPollThread() {
+    if (g_hotkeyRun.exchange(true)) return;   // laeuft bereits
+    g_hotkeyThread = std::thread([]() {
+        while (g_hotkeyRun.load()) { xinputTick(); Sleep(8); }
+    });
+}
+static void stopHotkeyPollThread() {
+    if (!g_hotkeyRun.exchange(false)) return;
+    if (g_hotkeyThread.joinable()) g_hotkeyThread.join();
 }
 // IP-Wechsel-Watcher (5-min-Tick, 1:1 aus main.js bcIpWatchTick): DSL-Zwangstrennung/
 // IP-Wechsel mitten im Stream nachziehen (mtx-Config, Portfreigaben, Links, Roster) +
@@ -2000,6 +2075,26 @@ static void notifyForwardIssue() {
     n.dwInfoFlags = NIIF_WARNING;
     Shell_NotifyIconW(NIM_MODIFY, &n);
 }
+// Autostart-minimiert: der Update-Dialog steckt im versteckten Fenster und war unsichtbar.
+// Loesung: Tray-Benachrichtigung statt Fenster-Pop (reisst keinen Vollbild-Spieler raus).
+// Klick auf den Balloon zeigt das Fenster -> der bereits gesendete Update-Dialog wird sichtbar.
+#define WM_SHELL_UPDATEBALLOON (WM_APP + 6)
+static bool g_updateBalloonPending = false;
+static std::wstring g_updBalloonVer;
+// Beim minimierten Fund gemerkte Update-Meldung: das sofortige sendToUi kann verpuffen, wenn der
+// Renderer beim Check (4s nach Start) noch nicht bereit ist (g_webview null -> Nachricht verworfen).
+// Beim Balloon-Klick ist das Fenster sichtbar und die WebView sicher bereit -> dann frisch ausliefern.
+static json g_pendingUpdate;
+static void notifyUpdateAvailable() {
+    bcLogStream(std::string("update: Tray-Balloon anzeigen (trayOn=") + (g_trayOn ? "1" : "0") + ")");
+    if (!g_trayOn) return;
+    g_updateBalloonPending = true;
+    NOTIFYICONDATAW n{}; n.cbSize = sizeof(n); n.hWnd = g_hwnd; n.uID = 1; n.uFlags = NIF_INFO;
+    wcscpy_s(n.szInfoTitle, (L"Lumora " + g_updBalloonVer + L" verfügbar").c_str());
+    wcscpy_s(n.szInfo, L"Ein Update steht bereit. Hier klicken, um es anzuzeigen.");
+    n.dwInfoFlags = NIIF_INFO;
+    Shell_NotifyIconW(NIM_MODIFY, &n);
+}
 // Accelerator "Alt+L" / "Ctrl+Shift+F1" -> RegisterHotKey-Parameter.
 static bool parseAccelerator(const std::string& acc, UINT& mods, UINT& vk) {
     mods = 0; vk = 0;
@@ -2102,6 +2197,7 @@ static void sendToOsd(const std::string& channel, const json& payload);
 #define TIMER_COLDLINK 112 // Kaltstart-Deep-Link (lumora://...) nachreichen, sobald die UI geladen ist
 #define TIMER_SRCWATCH 113 // Quellen-Watcher: Fenster-Fingerprint alle 3s -> sources-updated bei Aenderung
 #define TIMER_OSDPRELOAD 114 // one-shot ~3s nach Start: OSD-WebView2 vorwaermen -> Oeffnen ist sofort statt "Gedenksekunde"
+#define TIMER_OSDHIDE 115    // one-shot: Fenster erst NACH dem DComp-Ausblenden verstecken
 // --- OSD-Sensorik Teil 1 (treiberfrei): PDH-CPU/GPU-Last, RAM, DXGI-VRAM.
 // Temp/Takt/Power (NVML/ADL/PawnIO) + FPS (PresentMon) folgen als Teil 2.
 static PDH_HQUERY g_pdhQ = nullptr;
@@ -2282,13 +2378,15 @@ static bool senseBrokerAlive() {
     return shmRead(g_senseShm, s) && s.magic == SENSE_MAGIC && (uint32_t)(now - s.brokerTick) <= 3000;
 }
 static void brokersEnsure() {   // beide Aufgaben anstossen (idempotent, 4s-Spawn-Sperre)
-    if (GetTickCount64() - g_brokerSpawnAt < 4000) return;
-    g_brokerSpawnAt = GetTickCount64();
-    // WICHTIG (wie Electrons startBroker): Sections App-first erstellen UND wanted=1
-    // VOR dem Task-Start schreiben - der Broker prueft das Flag beim Hochkommen und
-    // beendet sich sonst sofort wieder ("App will keine Werte").
+    // Das wanted=1-Flag IMMER setzen (billig) - sonst zeigt das OSD bei schnellem Aus/An innerhalb
+    // der 4s-Sperre kurz keine Werte, weil hideOsd wanted=0 schrieb und der fruehere Early-Return
+    // das Wiederherstellen uebersprang. Nur der (teure) TASK-Start bleibt gedrosselt.
+    // WICHTIG (wie Electrons startBroker): Sections App-first erstellen UND wanted=1 VOR dem
+    // Task-Start schreiben - der Broker prueft das Flag beim Hochkommen und beendet sich sonst sofort.
     shmOpen(g_fpsShm, "Local\\LumoraOSDFps"); shmWriteApp(g_fpsShm, 1);
     shmOpen(g_senseShm, "Local\\LumoraOSDSense"); shmWriteApp(g_senseShm, 1);
+    if (GetTickCount64() - g_brokerSpawnAt < 4000) return;   // nur der Task-Start ist gedrosselt
+    g_brokerSpawnAt = GetTickCount64();
     std::thread([]() { runTask(L"LumoraOSD-FPS"); runTask(L"LumoraOSD-Sensors"); }).detach();
 }
 
@@ -2299,6 +2397,7 @@ static void brokersEnsure() {   // beide Aufgaben anstossen (idempotent, 4s-Spaw
 // lumora-elevate.exe -> genau EIN UAC-Dialog (zeigt Lumora, nicht "PowerShell").
 // 1:1 aus main.js ensureOsdSetup portiert.
 static std::atomic<bool> g_osdSetupRunning{ false };
+static std::atomic<bool> g_osdSetupChecked{ false };   // die (teuren) schtask-Checks pro Sitzung nur EINMAL
 static std::wstring pawnioDirW() {
     wchar_t pf[MAX_PATH]; if (!GetEnvironmentVariableW(L"ProgramFiles", pf, MAX_PATH)) wcscpy_s(pf, L"C:\\Program Files");
     return std::wstring(pf) + L"\\PawnIO";
@@ -2333,15 +2432,19 @@ static bool sensorsNeedSetup() {
     return !pawnioInstalled() || !senseTaskPresent();
 }
 static void ensureOsdSetup() {
-    if (g_osdSetupRunning.load()) return;
+    // NICHTS Teures auf dem Aufrufer-Thread (showOsd/UI): frueher liefen die schtask-Checks
+    // (fpsNeedsSetup/senseTaskPresent -> PowerShell, bis 8s je Aufruf) SYNCHRON beim OSD-Einschalten
+    // und blockierten den UI-Thread bei JEDEM Toggle. Jetzt komplett im Hintergrund + pro Sitzung nur
+    // einmal (g_osdSetupChecked). Der Sicht-Pfad bleibt so blitzschnell wie beim Hauptfenster.
+    if (g_osdSetupRunning.load() || g_osdSetupChecked.load()) return;
     if (loadSettings().value("osdSetupDeclined", false)) return;
-    bool needFps = fpsNeedsSetup();
-    bool sensorGap = sensorsNeedSetup();
-    bool needPawnio = sensorGap && !pawnioInstalled();
-    bool needSense = sensorGap && !senseTaskPresent();
-    if (!needFps && !needPawnio && !needSense) return;
     g_osdSetupRunning = true;
-    std::thread([needFps, needPawnio, needSense]() {
+    std::thread([]() {
+        bool needFps = fpsNeedsSetup();          // teure Checks JETZT im Hintergrund
+        bool sensorGap = sensorsNeedSetup();
+        bool needPawnio = sensorGap && !pawnioInstalled();
+        bool needSense = sensorGap && !senseTaskPresent();
+        if (!needFps && !needPawnio && !needSense) { g_osdSetupChecked = true; g_osdSetupRunning = false; return; }
         auto q = [](std::wstring s) { size_t p = 0; while ((p = s.find(L'\'', p)) != std::wstring::npos) { s.insert(p, 1, L'\''); p += 2; } return s; };
         // 0) Erklaer-Dialog - listet nur, was wirklich fehlt.
         std::wstring parts;
@@ -2410,6 +2513,7 @@ static void ensureOsdSetup() {
         statusDone(ok ? "OSD-Einrichtung abgeschlossen - alle Werte kommen gleich rein. ✓"
                       : "OSD-Einrichtung nicht abgeschlossen - erneut ueber Einstellungen → Overlay.");
         g_brokerSpawnAt = 0; brokersEnsure();   // Broker sofort anwerfen (Spawn-Sperre zuruecksetzen)
+        g_osdSetupChecked = true;   // in dieser Sitzung nicht erneut die PowerShell-Checks fahren
         g_osdSetupRunning = false;
     }).detach();
 }
@@ -2825,12 +2929,35 @@ static void applyOsdWindowGeometry() {
 }
 // Zeigt das OSD - aber erst, wenn die Panel-Groesse bekannt ist (sonst waere es kurz
 // Vollbild). Ohne bekannte Groesse holt der 'osd-bounds'-Handler das Zeigen nach.
+// Weiches Ein-/Ausblenden ueber die DirectComposition-Visual-Opacity: GPU-getrieben und von der
+// Shell gesteuert -> OHNE Web-Message-/Compositor-Aufwach-Latenz, startet sofort auf die Eingabe.
+static void osdFadeVisual(bool in) {
+    if (!g_dcompVisual || !g_dcompDev) return;
+    ComPtr<IDCompositionVisual3> v3;
+    if (FAILED(g_dcompVisual.As(&v3)) || !v3) return;
+    ComPtr<IDCompositionAnimation> anim;
+    // Einblenden weich (0.26s, gefaellt), AUSblenden deutlich schneller (0.11s): sonst bleibt das
+    // OSD nach dem Schliessen die erste ~0.1s noch klar sichtbar und wirkt "verzoegert" gegenueber
+    // dem sofortigen Erscheinen. Kurzer Fade = knackiges Schliessen, aber nicht hart abgeschnitten.
+    const double dur = in ? 0.26 : 0.11, from = in ? 0.0 : 1.0, to = in ? 1.0 : 0.0;
+    if (SUCCEEDED(g_dcompDev->CreateAnimation(&anim)) && anim) {
+        anim->AddCubic(0.0f, (float)from, (float)((to - from) / dur), 0.0f, 0.0f);   // linearer Verlauf from->to
+        anim->End((float)dur, (float)to);
+        v3->SetOpacity(anim.Get());
+    } else v3->SetOpacity((float)to);
+    g_dcompDev->Commit();
+}
+// Zeigt das OSD (SW_SHOW ist "blitzschnell") und blendet per DComp sanft ein - nur wenn das OSD
+// aktiviert ist (oder im Edit-Modus). Ohne bekannte Panel-Groesse holt der 'osd-bounds'-Handler das nach.
 static void osdEnsureVisible() {
-    if (!g_osdHwnd || !loadSettings().value("osdEnabled", false)) return;
-    applyOsdWindowGeometry();
+    bool en = loadSettings().value("osdEnabled", false);
+    if (!g_osdHwnd || (!g_osdEdit && !en)) return;
     if (!g_osdEdit && !g_osdHavePanel) return;
+    KillTimer(g_hwnd, TIMER_OSDHIDE);   // ein evtl. laufendes Ausblenden abbrechen (schnelles aus->an)
+    applyOsdWindowGeometry();
     ShowWindow(g_osdHwnd, SW_SHOWNOACTIVATE);
     SetWindowPos(g_osdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    osdFadeVisual(true);   // sanft einblenden (DComp, sofort)
 }
 static void showOsd() {
     createOsdWindow();                 // idempotent; per TIMER_OSDPRELOAD schon beim Start vorgewaermt -> hier sofort da
@@ -2839,7 +2966,14 @@ static void showOsd() {
     SetTimer(g_hwnd, TIMER_OSDDATA, 200, nullptr); SetTimer(g_hwnd, TIMER_OSDFPS, 33, nullptr);
     sensorsInit(); ensureOsdSetup(); brokersEnsure();   // Datenquellen danach - blockieren das Erscheinen nicht mehr
 }
-static void hideOsd() { KillTimer(g_hwnd, TIMER_OSDDATA); KillTimer(g_hwnd, TIMER_OSDFPS); shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); }
+static void hideOsd() {
+    KillTimer(g_hwnd, TIMER_OSDDATA); KillTimer(g_hwnd, TIMER_OSDFPS);
+    shmWriteApp(g_fpsShm, 0); shmWriteApp(g_senseShm, 0);
+    if (g_osdHwnd && IsWindowVisible(g_osdHwnd)) {
+        osdFadeVisual(false);                            // schnell ausblenden (DComp, 0.11s)
+        SetTimer(g_hwnd, TIMER_OSDHIDE, 130, nullptr);   // Fenster kurz NACH dem schnellen Fade verstecken
+    }
+}
 static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
 // Live-Edit-Modus (Alt+Shift+O, wie Electrons setOsdEditMode): Overlay wird kurz
 // interaktiv (Ecke ziehen, Mausrad = Groesse, Editbar-Buttons); "Fertig" schaltet zurueck.
@@ -2874,10 +3008,14 @@ static void setOsdEditMode(bool on) {
     }
 }
 static void toggleOsdSetting() {   // wie Electrons toggleOverlay (Hotkey/Gamepad/Kanal)
-    json s = loadSettings(); s["osdEnabled"] = !s.value("osdEnabled", false);
+    // Jeder Druck schaltet SOFORT um - genau wie das Hauptfenster. Das ist moeglich, weil der
+    // Sicht-Pfad (showOsd/hideOsd) jetzt nur noch die BILLIGE Arbeit macht (Fenster zeigen/verstecken
+    // + DComp-Fade); die teure Einrichtung (ensureOsdSetup mit PowerShell-Checks) laeuft im
+    // Hintergrund und nur einmal. Keine Buendelung mehr noetig -> reagiert unmittelbar auf die Eingabe.
+    json s = loadSettings(); bool newOn = !s.value("osdEnabled", false); s["osdEnabled"] = newOn;
     writeFile(settingsPath(), s.dump(2));
+    sendToUi("osd-config", nullptr);   // UI-Checkbox darf sofort nachziehen (liest Settings neu)
     syncOsdVisibility();
-    sendToUi("osd-config", nullptr);   // UI-Checkbox darf nachziehen (liest Settings neu)
 }
 // Poll-Hotkey-Liste aus den Settings bauen (1:1 aus main.js rebuildHotkeys). Wird
 // von registerHotkeys aufgerufen (Start + nach jeder Hotkey-Aenderung).
@@ -2890,32 +3028,34 @@ static void rebuildKbHotkeys() {
         if (!parseAccelerator(accel, mods, vk)) return;
         list.push_back({ vk, (mods & MOD_ALT) != 0, (mods & MOD_CONTROL) != 0, (mods & MOD_SHIFT) != 0, action, false });
     };
-    add(s.value("toggleHotkey", "Alt+L"), toggleMainWindow);
-    add(s.value("osdHotkey", "Alt+O"), toggleOsdSetting);
-    add(s.value("osdEditHotkey", "Alt+Shift+O"), []() { setOsdEditMode(!g_osdEdit); });
-    add(s.value("osdAbHotkey", "Alt+B"), []() { lurtss::toggleAbOsd(); });
-    add(s.value("streamHotkey", ""), []() {
-        // Vordergrundfenster JETZT lesen (im Hotkey-Kontext, nicht im Worker - sonst waere
-        // evtl. schon ein anderes Fenster fokussiert): das gerade gespielte SPIEL wird die
-        // Stream-Quelle (1:1 Electron-Hotkey-Verhalten; eigene Fenster -> letztes Spiel).
-        HWND fg = GetForegroundWindow();
-        if (!fg || fg == g_hwnd || fg == g_osdHwnd) fg = g_prevGameHwnd;
-        std::thread([fg]() {
-            bool wasActive = g_bcState.value("active", false);
-            if (wasActive) { g_bcCopyPending.clear(); stopBroadcast(); }
-            else {
-                if (fg && IsWindow(fg)) {
-                    json s2 = loadSettings(); s2["streamSource"] = "window:" + std::to_string((long long)(intptr_t)fg);
-                    writeFile(settingsPath(), s2.dump(2));
-                    sendToUi("stream-source-changed", json::object());   // UI zieht die Quellen-Anzeige nach
-                }
-                g_bcCopyPending = "hotkey"; startBroadcast();   // Link nach Router-Phase in die Zwischenablage + Tray-Balloon (Nutzer ist im Spiel)
-            }
-            sendToUi("stream-toggle-sound", { {"on", !wasActive} });   // akustische Rueckmeldung - man sieht die UI nicht
-        }).detach();
-    });
+    // Aktionen POSTEN nur an den UI-Thread (der Poll laeuft im eigenen Thread) - die eigentliche
+    // (teure) Arbeit passiert dann in WndProc/WM_HOTKEY_CMD auf dem UI-Thread. Fuer den Stream-Hotkey
+    // wird das Vordergrundfenster JETZT (zum Druckzeitpunkt) gelesen und mitgegeben.
+    add(s.value("toggleHotkey", "Alt+L"), []() { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_MAIN, 0); });
+    add(s.value("osdHotkey", "Alt+O"), []() { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_OSD, 0); });
+    add(s.value("osdEditHotkey", "Alt+Shift+O"), []() { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_OSDEDIT, 0); });
+    add(s.value("osdAbHotkey", "Alt+B"), []() { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_AB, 0); });
+    add(s.value("streamHotkey", ""), []() { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_STREAM, (LPARAM)GetForegroundWindow()); });
     std::lock_guard<std::mutex> lk(g_kbMx);
     g_kbHotkeys = std::move(list);
+}
+// Stream-Hotkey-Rumpf (laeuft auf dem UI-Thread via WM_HOTKEY_CMD; fg = Vordergrundfenster zum
+// Druckzeitpunkt). Das gerade gespielte SPIEL wird die Stream-Quelle (1:1 Electron-Verhalten).
+static void doStreamHotkey(HWND fg) {
+    if (!fg || fg == g_hwnd || fg == g_osdHwnd) fg = g_prevGameHwnd;
+    std::thread([fg]() {
+        bool wasActive = g_bcState.value("active", false);
+        if (wasActive) { g_bcCopyPending.clear(); stopBroadcast(); }
+        else {
+            if (fg && IsWindow(fg)) {
+                json s2 = loadSettings(); s2["streamSource"] = "window:" + std::to_string((long long)(intptr_t)fg);
+                writeFile(settingsPath(), s2.dump(2));
+                sendToUi("stream-source-changed", json::object());   // UI zieht die Quellen-Anzeige nach
+            }
+            g_bcCopyPending = "hotkey"; startBroadcast();   // Link nach Router-Phase in die Zwischenablage + Tray-Balloon (Nutzer ist im Spiel)
+        }
+        sendToUi("stream-toggle-sound", { {"on", !wasActive} });   // akustische Rueckmeldung - man sieht die UI nicht
+    }).detach();
 }
 
 // --- Auto-Update, zwei Kanaele ---
@@ -2957,7 +3097,13 @@ static void checkForUpdates(bool manual) {
         if (ver.empty()) { if (manual) sendToUi("update-none", nullptr); return; }
         if (cmpVer(effectiveVersion(), ver) < 0) {
             g_updUrl = j.value("url", "");
-            sendToUi("update-available", { {"version", ver}, {"notes", j.value("notes", "")}, {"notesEn", j.value("notesEn", "")} });
+            json payload = { {"version", ver}, {"notes", j.value("notes", "")}, {"notesEn", j.value("notesEn", "")} };
+            sendToUi("update-available", payload);
+            bool hidden = g_hwnd && (!IsWindowVisible(g_hwnd) || IsIconic(g_hwnd));
+            bcLogStream("update: " + ver + " verfuegbar (installiert " + effectiveVersion() + "), Fenster " + (hidden ? "versteckt -> Tray-Balloon" : "sichtbar -> Dialog direkt"));
+            // Fenster versteckt (Autostart-minimiert)? -> der Dialog ist unsichtbar. Update merken +
+            // Tray-Balloon anstossen; der Klick liefert die Meldung frisch aus (WebView dann sicher bereit).
+            if (hidden) { g_pendingUpdate = payload; g_updBalloonVer = widen(ver); PostMessageW(g_hwnd, WM_SHELL_UPDATEBALLOON, 0, 0); }
         } else if (manual) sendToUi("update-none", nullptr);
     }).detach();
 }
@@ -3590,10 +3736,19 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
         if (w == TIMER_IPWATCH) { bcIpWatchTick(); return 0; }
         if (w == TIMER_COLDLINK) { KillTimer(h, TIMER_COLDLINK); if (!g_coldDeepLink.empty()) { handleDeepLink(g_coldDeepLink); g_coldDeepLink.clear(); } return 0; }
-        if (w == TIMER_OSDPRELOAD) { KillTimer(h, TIMER_OSDPRELOAD); createOsdWindow(); return 0; }   // WebView2 vorwaermen (bleibt versteckt, bis das OSD aktiviert wird)
+        if (w == TIMER_OSDPRELOAD) { KillTimer(h, TIMER_OSDPRELOAD); createOsdWindow(); sensorsInit(); return 0; }   // WebView2 + PDH-Sensoren vorwaermen (Fenster bleibt versteckt) -> erster OSD-Show ist sofort
+        if (w == TIMER_OSDHIDE) { KillTimer(h, TIMER_OSDHIDE); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); return 0; }   // nach dem DComp-Ausblenden verstecken
         if (w == TIMER_SRCWATCH) { srcWatchTick(); return 0; }
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
-        if (w == TIMER_XINPUT) { xinputTick(); return 0; }
+        // (TIMER_XINPUT entfaellt: der Hotkey-Poll laeuft jetzt im eigenen Thread, siehe startHotkeyPollThread)
+        if (w == TIMER_REFOCUS) {   // Fokus nach dem asynchronen Vordergrund-Wechsel nochmal ins WebView (Gamepad ohne Mausklick)
+            KillTimer(h, TIMER_REFOCUS);
+            if (g_controller && IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd)) {
+                if (GetForegroundWindow() != g_hwnd) forceForeground(g_hwnd);
+                g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+            }
+            return 0;
+        }
         if (w == TIMER_LANPUSH) {   // im LAN entdeckte Gruppen an die UI (veraltete raus)
             json arr = json::array();
             for (auto& [code, name] : lulan::groups()) arr.push_back({ {"code", code}, {"name", name} });
@@ -3611,8 +3766,28 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             return 0;
         }
         break;
+    case WM_SHELL_UPDATEBALLOON: notifyUpdateAvailable(); return 0;   // vom Update-Thread angestossen (UI-Thread)
+    case WM_HOTKEY_CMD:   // vom Hotkey-Poll-Thread gepostet -> die (teure) Aktion laeuft hier auf dem UI-Thread
+        switch (w) {
+            case HKC_MAIN:    toggleMainWindow(); break;
+            case HKC_OSD:     toggleOsdSetting(); break;
+            case HKC_OSDEDIT: setOsdEditMode(!g_osdEdit); break;
+            case HKC_AB:      lurtss::toggleAbOsd(); break;
+            case HKC_STREAM:  doStreamHotkey((HWND)l); break;
+        }
+        return 0;
     case WM_SHELL_TRAY:
-        if (LOWORD(l) == NIN_BALLOONUSERCLICK) { showMainWindow(); sendToUi("show-forward-help", nullptr); return 0; }   // Portfreigabe-Balloon geklickt
+        if (LOWORD(l) == NIN_BALLOONUSERCLICK) {
+            showMainWindow();
+            // Update-Balloon geklickt -> Fenster ist jetzt sichtbar und die WebView bereit: die
+            // Update-Meldung FRISCH ausliefern (der Erst-Versand beim Check kann verpufft sein, wenn
+            // der Renderer da noch lud). Sonst: Portfreigabe-Balloon -> Anleitung oeffnen.
+            if (g_updateBalloonPending) {
+                g_updateBalloonPending = false;
+                if (g_pendingUpdate.is_object()) { sendToUi("update-available", g_pendingUpdate); bcLogStream("update: Balloon geklickt -> Meldung frisch ausgeliefert"); }
+            } else sendToUi("show-forward-help", nullptr);
+            return 0;
+        }
         if (LOWORD(l) == WM_LBUTTONUP) { toggleMainWindow(); return 0; }
         if (LOWORD(l) == WM_RBUTTONUP) {
             HMENU menu = CreatePopupMenu();
@@ -3935,7 +4110,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
     SetTimer(hwnd, TIMER_OSDPRELOAD, 3000, nullptr); // OSD-WebView2 ~3s nach Start vorwaermen (Browser-Prozess laeuft dann schon) -> Oeffnen sofort
     timeBeginPeriod(1);                              // praeziser Hintergrund-Poll (wie Electron/RTSS)
-    SetTimer(hwnd, TIMER_XINPUT, 40, nullptr);       // nativer Gamepad-Hotkey-Poll (25 Hz)
+    startHotkeyPollThread();   // Gamepad-/Tastatur-Hotkey-Poll im EIGENEN Thread (125 Hz), entkoppelt vom
+                               // UI-Thread: schnelles Toggeln + 2-Tasten-Kombis gehen nicht mehr verloren,
+                               // wenn ein Toggle den UI-Thread kurz blockiert (Flanken werden gepostet)
     lubridge::init(sendToUi);                        // Eingabe-Bruecke: Push-Kanal verdrahten (Thread startet erst bei Nutzung)
     lubridge::g_diag = [](const std::string& s) { bcLogStream(s); };   // HID-Report-Diagnose ins Stream-Log (1x je Report-ID bei offenem Eingabe-Tab)
     lulan::listenStart();                            // LAN-Beacon-Empfang ab Start (fremde Gruppen sehen)
@@ -3996,6 +4173,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+    stopHotkeyPollThread();   // Hotkey-Poll-Thread sauber beenden (bevor statische Zustaende abgeraeumt werden)
     lubridge::shutdown();   // virtuelles Pad entfernen + Bridge-Thread beenden (sonst haengt der Prozess)
     return 0;
 }

@@ -9,6 +9,8 @@
     font-family: 'Consolas', 'DejaVu Sans Mono', 'Courier New', monospace; font-weight: 700;
     font-variant-numeric: tabular-nums; font-feature-settings: "tnum";  /* Ziffern gleich breit -> keine Sprünge */
   }
+  /* Das sanfte Ein-/Ausblenden macht die Shell ueber die DirectComposition-Visual-Opacity
+     (GPU-getrieben, ohne Web-Message-Latenz) - hier NICHTS faden, sonst doppelt/verzoegert. */
   :root {
     --nv: #74e857; --amd: #ff8a1e; --val: #ffe100; --fps: #ffffff; --ft: #6fe86f;
     --accent: #74e857;              /* Akzentfarbe (überschreibbar per Config) */

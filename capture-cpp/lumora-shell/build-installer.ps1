@@ -7,7 +7,13 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.0.1"   # 3.0.1: OSD-Overlay auf Panel-Groesse verkleinert (blockierte als Vollbild-Overlay
+$version = "3.0.2"   # 3.0.2: Hotkey-Poll in eigenen Thread entkoppelt (schnelles Fenster-/OSD-Toggeln
+                     #        per Tastatur+Gamepad geht nicht mehr verloren/verklemmt); Fenster kommt per
+                     #        Hotkey sofort bedienbar in den Vordergrund (AttachThreadInput gegen die
+                     #        Foreground-Sperre + Refocus); OSD schaltet sofort pro Druck (ensureOsdSetup
+                     #        async statt synchron-PowerShell) + schnelleres Ausblenden; Gamepad LB/RB
+                     #        blaettert die Reiter (index.html); Update-Balloon bei minimiertem Autostart.
+$prev_3_0_1 = ""  # 3.0.1: OSD-Overlay auf Panel-Groesse verkleinert (blockierte als Vollbild-Overlay
                      #        auf manchen Systemen die Desktop-Symbole, auch nach dem Deaktivieren);
                      #        Edit-Modus-Ende SWP_FRAMECHANGED-Fix; Relay/Capture tragen jetzt das App-Icon.
 $prev_3_0_0 = ""  # 3.0.0: erstes offizielles Release der nativen Version (loest die Electron-
