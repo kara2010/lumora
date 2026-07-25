@@ -1,0 +1,19 @@
+Lumora 3.0.2 – Steuerung & Komfort
+
+• Hotkeys reagieren jetzt zuverlässig: Fenster und OSD lassen sich per Tastatur- oder Gamepad-Hotkey auch schnell hintereinander ein- und ausschalten, ohne zu „verklemmen".
+• Lumora kommt per Hotkey sofort bedienbar in den Vordergrund – kein Mausklick mehr nötig, damit Tastatur und Gamepad reagieren.
+• Gamepad-Menü-Navigation: Mit den Schultertasten LB/RB durch die Reiter (Bibliothek, Allgemein, Darstellung …) blättern.
+• Das OSD reagiert unmittelbar auf die Eingabe und blendet flüssiger aus.
+• Update-Hinweis bei minimiertem Autostart: Steht ein Update bereit, meldet sich Lumora über das Infobereich-Symbol – ein Klick zeigt den Update-Dialog.
+
+Bestehende Installationen aktualisieren sich automatisch.
+===EN===
+Lumora 3.0.2 – Controls & polish
+
+• Hotkeys are reliable now: the window and the OSD can be toggled quickly in a row via keyboard or gamepad hotkey without getting stuck.
+• Lumora comes to the foreground fully operable via hotkey – no more mouse click needed for keyboard and gamepad to respond.
+• Gamepad menu navigation: use the LB/RB shoulder buttons to move through the tabs (Library, General, Appearance …).
+• The OSD reacts instantly to input and fades out more smoothly.
+• Update notice when autostarted minimized: if an update is ready, Lumora notifies you via the tray icon – one click shows the update dialog.
+
+Existing installations update automatically.

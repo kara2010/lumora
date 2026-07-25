@@ -5308,6 +5308,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     let gpPadIndex = null, gpTimer = null
     const gpPressed = {}, gpRepeatAt = {}
     const GP_DEAD = 0.5, GP_REPEAT_FIRST = 400, GP_REPEAT_NEXT = 120
+    // LB/RB blaettern durch die Reiter (Bibliothek/Allgemein/…). Die Bumper sind Teil der
+    // Fenster-/OSD-Gamepad-Kombis, darum wird erst beim LOSLASSEN geschaltet und nur, wenn waehrend
+    // des Haltens keine Kombi mitlief (sonst springt das Formen von LB+RB einen Tab weiter).
+    let gpLbHeld = false, gpLbCombo = false, gpRbHeld = false, gpRbCombo = false
 
     function gpEdge(name, active, fn) {
       const now = performance.now()
@@ -5318,6 +5322,19 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function gpTap(name, active, fn) {
       if (active) { if (!gpPressed[name]) { gpPressed[name] = true; fn() } } else gpPressed[name] = false
+    }
+    // Einen Reiter weiter (dir=+1) bzw. zurueck (dir=-1). Reihenfolge/Existenz kommen aus der
+    // Reiterleiste selbst (bleibt synchron, wenn Reiter ein-/ausgeblendet werden). Kein Umlauf.
+    function gpSwitchTab(dir) {
+      if (typeof navOpenOverlay === 'function' && navOpenOverlay()) return   // nicht aus einem offenen Dialog springen
+      const tabs = [...document.querySelectorAll('#detailNav .detail-nav-tab')].filter(b => b.offsetParent !== null)
+      if (!tabs.length) return
+      const active = settingsTab || 'library'
+      let i = tabs.findIndex(b => b.dataset.view === active); if (i < 0) i = 0
+      const ni = Math.min(tabs.length - 1, Math.max(0, i + dir)); if (ni === i) return
+      const view = tabs[ni].dataset.view
+      if (view === 'library') showLibraryView(); else showSettings(view)
+      showGamepadToast(tabs[ni].textContent.trim())
     }
     function gpPoll() {
       const gp = gpPadIndex !== null ? navigator.getGamepads()[gpPadIndex] : null
@@ -5352,6 +5369,17 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const cMain = appSettingsCache.gamepadHotkey, cOsd = appSettingsCache.gamepadOsdHotkey
       const comboDown = (cMain && cMain.length && cMain.every(i => b[i] && b[i].pressed)) ||
                         (cOsd && cOsd.length && cOsd.every(i => b[i] && b[i].pressed))
+
+      // 2b) LB/RB = Reiter blättern. Läuft VOR dem Kombi-Guard, damit auch die Loslass-Flanke
+      //     erkannt wird. Geschaltet wird beim Loslassen und nur, wenn währenddessen keine Kombi
+      //     mitlief – so blättert ein kurzer Bumper-Tap, aber LB+RB (Fenster) / B+LB (OSD) nicht.
+      if (document.hasFocus()) {
+        const lbDown = !!(b[4] && b[4].pressed), rbDown = !!(b[5] && b[5].pressed), bDown = !!(b[1] && b[1].pressed)
+        if (lbDown) { gpLbHeld = true; if (rbDown || bDown || comboDown) gpLbCombo = true }
+        else if (gpLbHeld) { if (!gpLbCombo) gpSwitchTab(-1); gpLbHeld = false; gpLbCombo = false }
+        if (rbDown) { gpRbHeld = true; if (lbDown || comboDown) gpRbCombo = true }
+        else if (gpRbHeld) { if (!gpRbCombo) gpSwitchTab(1); gpRbHeld = false; gpRbCombo = false }
+      } else { gpLbHeld = gpLbCombo = gpRbHeld = gpRbCombo = false }
 
       // 3) Navigation nur im Vordergrund und nicht, während die Kombi aktiv ist
       //    (damit der Toggle-Moment nicht zusätzlich navigiert).
