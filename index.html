@@ -2947,6 +2947,14 @@ ipcRenderer.on('input-bridge-setup-status', (e, msg, done) => {
 // vom Fremdstart-Watcher gemeldeten laufenden Spielen (external-running, pro Pfad).
 let launchStatus = 'idle'
 let externalRunning = new Set()
+// Live-Timer auf dem Start-Knopf: ab Start-Erkennung zaehlt "Spiel läuft" die Minuten/
+// Stunden mit (Aktualisierung alle 30s reicht fuer Minuten-Granularitaet).
+let launchRunningSince = null, launchBtnTimer = null
+function fmtLaunchTime(ms) {
+  const m = Math.floor(ms / 60000), en = window.LANG === 'en'
+  if (m < 60) return m + (en ? ' min' : ' Min')
+  return Math.floor(m / 60) + (en ? ' h ' : ' Std ') + (m % 60) + (en ? ' min' : ' Min')
+}
 function refreshLaunchBtn() {
   const btn = document.getElementById('launchBtn')
   if (!btn) return
@@ -2962,10 +2970,17 @@ function refreshLaunchBtn() {
     btn.disabled = true
     return
   }
-  btn.innerHTML = `<span>${window.tr(messages[launchStatus] || '▶ Spiel starten')}</span>`
+  let label = window.tr(messages[launchStatus] || '▶ Spiel starten')
+  if (launchStatus === 'running' && launchRunningSince) label += ' · ' + fmtLaunchTime(Date.now() - launchRunningSince)
+  btn.innerHTML = `<span>${label}</span>`
   btn.disabled = launchStatus !== 'idle'
 }
-ipcRenderer.on('launch-status', (event, status) => { launchStatus = status; refreshLaunchBtn() })
+ipcRenderer.on('launch-status', (event, status) => {
+  if (status === 'running' && !launchRunningSince) launchRunningSince = Date.now()
+  if (status === 'idle') { launchRunningSince = null; if (launchBtnTimer) { clearInterval(launchBtnTimer); launchBtnTimer = null } }
+  if (status === 'running' && !launchBtnTimer) launchBtnTimer = setInterval(refreshLaunchBtn, 30000)
+  launchStatus = status; refreshLaunchBtn()
+})
 ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set(paths || []); refreshLaunchBtn() })
 
 
