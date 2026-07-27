@@ -2899,6 +2899,43 @@ static RECT osdMonitorRect() { HMONITOR hm = MonitorFromPoint({ 0,0 }, MONITOR_D
 // selbst - wie Hauptfenster/Tuersteher, die nachweislich funktionieren. Die handgebaute
 // SendMouseInput-Weiterleitung des Composition-Modus ist ENDGUELTIG raus: Klicks gingen je
 // nach Hintergrund/Z-Order/DPI verloren oder daneben (mehrfach real gemessen, nie stabil).
+// WebView2 erzeugt auch im Composition-Modus interne Eingabe-Kindfenster in UNSEREM
+// Fensterbaum (Chrome_WidgetWin_1 -> Chrome_RenderWidgetHostHWND, msedgewebview2-Prozess).
+// Die haben KEIN WS_EX_TRANSPARENT, nehmen am Hit-Test teil und schlucken Desktop-Klicks
+// exakt auf der Panel-Flaeche - auch wenn unser eigenes Fenster korrekt durchlaessig ist
+// (gemessen per WindowFromPoint: Chrome-Kind bekam die Klicks; nach Style-Nachziehen im
+// Live-Test wanderte der Klick korrekt zum Explorer durch). Nur auf Programmfenster
+// DARUNTER fiel es nicht auf - die liegen in der Z-Ordnung ueber dem Kind; betroffen war
+// genau der nackte Desktop. Styles muessen NACHGEZOGEN werden, sobald/so oft Chromium
+// seine Kinder (neu) erzeugt - idempotent und billig.
+static void osdMakeChildrenClickThrough() {
+    if (!g_osdHwnd) return;
+    // 1) Kinder in unserem eigenen Fensterbaum (falls Chromium welche dort einhaengt).
+    EnumChildWindows(g_osdHwnd, [](HWND c, LPARAM) -> BOOL {
+        LONG_PTR ex = GetWindowLongPtrW(c, GWL_EXSTYLE);
+        if (!(ex & WS_EX_TRANSPARENT)) SetWindowLongPtrW(c, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE);
+        return TRUE;
+    }, 0);
+    // 2) Chromiums TOP-LEVEL-Zwischenfenster: im Composition-Modus haengt das
+    //    Chrome_WidgetWin_1 NICHT in unserem Baum (GetParent=NULL, gemessen), sondern
+    //    steht als eigenes msedgewebview2-Fenster exakt auf unserer Fensterflaeche.
+    //    Es hat LAYERED, aber KEIN WS_EX_TRANSPARENT - sein RenderWidgetHost-Kind
+    //    faengt dadurch Desktop-Klicks auf der Panel-Flaeche (nur der nackte Desktop
+    //    ist betroffen; Programmfenster liegen in der Z-Ordnung darueber). Erkennung
+    //    ueber Klasse + exakte Rect-Gleichheit mit unserem OSD-Fenster (die windowed
+    //    WebView2s von Haupt-UI/Doorman sind KINDER ihrer Fenster -> keine Kollision).
+    RECT mine{}; GetWindowRect(g_osdHwnd, &mine);
+    EnumWindows([](HWND w, LPARAM lp) -> BOOL {
+        const RECT* m = (const RECT*)lp;
+        wchar_t cls[32] = {}; GetClassNameW(w, cls, 31);
+        if (wcscmp(cls, L"Chrome_WidgetWin_1") != 0) return TRUE;
+        RECT r{}; GetWindowRect(w, &r);
+        if (r.left != m->left || r.top != m->top || r.right != m->right || r.bottom != m->bottom) return TRUE;
+        LONG_PTR ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
+        if (!(ex & WS_EX_TRANSPARENT)) SetWindowLongPtrW(w, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+        return TRUE;
+    }, (LPARAM)&mine);
+}
 static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
     case WM_NCHITTEST: return HTTRANSPARENT;
@@ -2906,7 +2943,7 @@ static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_osdWv) g_osdWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
     // Controller-Bounds = Fenster-Client (der WebView2-Viewport ist das kleine Fenster;
     // osd.html rendert das Panel oben-links passend hinein). DPI-natuerlich.
-    case WM_SIZE: if (g_osdCtrl) { RECT rc; GetClientRect(h, &rc); g_osdCtrl->put_Bounds(rc); } return 0;
+    case WM_SIZE: if (g_osdCtrl) { RECT rc; GetClientRect(h, &rc); g_osdCtrl->put_Bounds(rc); osdMakeChildrenClickThrough(); } return 0;
     case WM_DESTROY: return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -2974,8 +3011,9 @@ static void createOsdWindow() {
                                     return S_OK;
                                 }).Get(), nullptr);
                             g_osdWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { g_osdLoaded = true; bcLogStream("osd: osd.html geladen"); applyOsdConfig(); return S_OK; }).Get(), nullptr);
+                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT { g_osdLoaded = true; bcLogStream("osd: osd.html geladen"); applyOsdConfig(); osdMakeChildrenClickThrough(); return S_OK; }).Get(), nullptr);
                             g_osdWv->Navigate(L"https://app.lumora/osd.html");
+                            osdMakeChildrenClickThrough();   // Chromium-Eingabe-Kinder existieren ab jetzt - sofort durchlaessig machen
                             return S_OK;
                         }).Get());
                 return S_OK;
