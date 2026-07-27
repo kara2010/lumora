@@ -374,6 +374,20 @@ static void launchTick() {
 // launch-game-Handler (laeuft im Worker-Thread: HDR-Wartezeit + AUMID-Suche blockieren das UI nicht).
 static json launchGame(const json& args) {
     std::wstring gamePath = widen(args[0].get<std::string>());
+    {   // Doppelstart-Sperre: solange ein Spiel laeuft oder gerade startet (Eigen- ODER
+        // Fremdstart), wird kein zweites gestartet - auch nicht dasselbe (Doppel-Instanz).
+        // Ausnahme: eine Eigenstart-Session, die nach 30s nie erkannt wurde (reenabled -
+        // die UI zeigt dort wieder "idle" und ein Neuversuch muss erlaubt bleiben).
+        std::lock_guard<std::mutex> lk(g_launchMx);
+        std::string runningPath;
+        for (auto& s : g_launches) if (!s.done && (s.started || !s.reenabled)) { runningPath = narrow(s.gamePath); break; }
+        if (runningPath.empty()) for (auto& [k, es] : g_extSessions) { runningPath = es.gamePath; break; }
+        if (!runningPath.empty()) {
+            std::string nm; for (auto& g : readLibraryGames()) if (g.value("path", "") == runningPath) { nm = g.value("name", ""); break; }
+            lulaunch::playLog(dataDir(), "LAUNCH abgelehnt - es laeuft bereits: " + runningPath);
+            return { {"success", false}, {"error", "\"" + (nm.empty() ? runningPath : nm) + "\" laeuft bereits - bitte zuerst beenden."} };
+        }
+    }
     json opts = args.size() >= 2 && args[1].is_object() ? args[1] : json::object();
     bool useHdr = opts.value("useHdr", false);
     bool admin = opts.value("admin", false);
