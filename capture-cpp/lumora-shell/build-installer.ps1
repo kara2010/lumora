@@ -7,7 +7,15 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.0.4"   # 3.0.4: Update-Hinweise zuverlaessig bei minimiertem Autostart: auch das stille
+$version = "3.0.5"   # 3.0.5: Xbox-Controller (Wireless-Dongle) verbindet sich bei laufendem Lumora
+                     #        zuverlaessig neu (UI-Gamepad auf nativen gp-state-Push, Chromiums
+                     #        Gamepad-Monitor gestubbt; XInput-Leerplatz-Probe nur nach
+                     #        WM_DEVICECHANGE); OSD blockiert keine Desktop-Klicks mehr (Chromium-
+                     #        Zwischenfenster click-through); Spielende-Erkennung event-getrieben
+                     #        (HDR in ~1-3s zurueck); Doppelstart-Sperre; Live-Spielzeit auf dem
+                     #        Start-Knopf; Update-Suche-URL repariert (/updates/-Pfad fehlte);
+                     #        QSV-Bitrate-Fallback fuer aeltere Intel-Generationen (Reset -14).
+$prev_3_0_4 = ""  # 3.0.4: Update-Hinweise zuverlaessig bei minimiertem Autostart: auch das stille
                      #        Komponenten-Update meldet sich per Tray-Balloon + Nachlieferung beim
                      #        naechsten Fenster-Oeffnen; Downgrade-Reinstall-Erkennung (veraltetes
                      #        componentsVersion machte den Updater blind).
