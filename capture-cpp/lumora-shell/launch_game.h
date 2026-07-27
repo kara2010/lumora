@@ -235,6 +235,13 @@ struct LaunchSession {
     bool started = false, reenabled = false, done = false;
     int absent = 0;
     ULONGLONG launchTs = 0, startTs = 0;
+    // Event-getriebene Ende-Erkennung: SYNCHRONIZE-Handle auf den erkannten Spielprozess
+    // + Threadpool-Wait (RegisterWaitForSingleObject). Beim Prozess-Exit weckt der Wait
+    // den UI-Thread SOFORT statt aufs 4s-Polling zu warten -> HDR geht Sekunden frueher
+    // wieder aus. Polling bleibt als Sicherheitsnetz (Steam-Registry-Pfad hat keine PID;
+    // DRM-Handoff wechselt Prozesse).
+    DWORD pid = 0;
+    HANDLE hProc = nullptr, hWait = nullptr;
 };
 
 inline bool probeRunning(const LaunchSession& s) {
@@ -242,6 +249,46 @@ inline bool probeRunning(const LaunchSession& s) {
     if (processByName(s.exeName)) return true;                            // 2) Exe-Name
     if (!s.isLnk && anyProcessInFolder(s.gameDir)) return true;           // 3) Ordner-Prozess
     return false;
+}
+
+// PID des Spielprozesses (0 = keine gefunden) - fuer den Prozess-Exit-Wait. Die
+// Steam-Registry liefert keine PID; dort bleibt es beim reinen Polling-Fallback.
+inline DWORD pidByName(const std::wstring& exeName) {
+    std::wstring low = exeName; for (auto& c : low) c = towlower(c);
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    PROCESSENTRY32W pe{ sizeof(pe) }; DWORD pid = 0;
+    if (Process32FirstW(snap, &pe)) do {
+        std::wstring n = pe.szExeFile; for (auto& c : n) c = towlower(c);
+        if (n == low) { pid = pe.th32ProcessID; break; }
+    } while (Process32NextW(snap, &pe));
+    CloseHandle(snap);
+    return pid;
+}
+inline DWORD pidInFolder(const std::wstring& dir) {
+    std::wstring prefix = dir; if (!prefix.empty() && prefix.back() != L'\\') prefix += L'\\';
+    for (auto& c : prefix) c = towlower(c);
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    PROCESSENTRY32W pe{ sizeof(pe) }; DWORD pid = 0;
+    if (Process32FirstW(snap, &pe)) do {
+        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+        if (!h) continue;
+        wchar_t buf[MAX_PATH * 2] = {}; DWORD len = MAX_PATH * 2;
+        if (QueryFullProcessImageNameW(h, 0, buf, &len)) {
+            std::wstring p = buf; for (auto& c : p) c = towlower(c);
+            if (p.rfind(prefix, 0) == 0) pid = pe.th32ProcessID;
+        }
+        CloseHandle(h);
+        if (pid) break;
+    } while (Process32NextW(snap, &pe));
+    CloseHandle(snap);
+    return pid;
+}
+inline DWORD probePid(const LaunchSession& s) {
+    DWORD pid = pidByName(s.exeName);
+    if (!pid && !s.isLnk) pid = pidInFolder(s.gameDir);
+    return pid;
 }
 
 } // namespace lulaunch
