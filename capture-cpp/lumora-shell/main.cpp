@@ -1961,17 +1961,19 @@ static PadSlot g_pads[4];
 // einen leeren Platz stoesst die komplette Geraete-Neuermittlung an und warf den Xbox-
 // Controller am Wireless-Dongle direkt nach dem Reconnect wieder raus (User-Befund:
 // "verbindet sich fuer eine Sekunde, dann sofort weg", bis Lumora beendet wurde).
-// GEMESSEN: auch ein mehrsekuendiges Probe-FENSTER nach WM_DEVICECHANGE reproduzierte
-// den Rauswurf 1-2 s NACH dem Verbinden - die wiederholten Probes der uebrigen leeren
-// Plaetze (1-3) killten die frische Verbindung auf Platz 0. Deshalb jetzt: pro
-// Geraeteaenderung genau EIN Probe-Durchlauf, und erst wenn die WM_DEVICECHANGE-
-// Ereignisse 2 s lang Ruhe geben (jedes neue Ereignis schiebt den Zeitpunkt nach
-// hinten) - dann ist der Verbindungs-Handshake sicher abgeschlossen.
+// Probe-Zeitpunkt: FRUEHER galt "2 s Ruhe nach dem LETZTEN WM_DEVICECHANGE" - waehrend
+// des Verbindungsaufbaus feuern aber MEHRERE dieser Meldungen kurz hintereinander, jede
+// schob die Frist neu an -> Lumora reagierte erst mehrere Sekunden nach dem Einschalten
+// (User-Befund 2026-07-27). Jetzt: Frist laeuft ab der ERSTEN Meldung eines Schubs
+// (nicht verlaengerbar), erster Probe-Durchlauf nach 750 ms, und falls der Controller da
+// noch mitten im Handshake ist (kein Pad gefunden), genau EIN Nachversuch 2 s spaeter.
+// Damit bleiben es maximal zwei einmalige Abfragen pro Einschaltvorgang - weiterhin
+// KEIN zyklisches Antasten leerer Plaetze (das war der Reconnect-Killer-Kontext).
 static std::atomic<ULONGLONG> g_padProbeAt{ 0 };
-static std::atomic<bool> g_padProbePending{ false };
+static std::atomic<int> g_padProbesLeft{ 0 };
 static void padPoll() {
     ULONGLONG now = GetTickCount64();
-    bool probeNow = g_padProbePending.load() && now >= g_padProbeAt.load();
+    bool probeNow = g_padProbesLeft.load() > 0 && now >= g_padProbeAt.load();
     for (DWORD i = 0; i < 4; ++i) {
         PadSlot& p = g_pads[i];
         if (!p.on && !probeNow) continue;   // leere Plaetze ausserhalb des einen Probe-Durchlaufs ganz in Ruhe lassen
@@ -1990,7 +1992,12 @@ static void padPoll() {
             p.on = on; p.since = now;
         }
     }
-    if (probeNow) g_padProbePending = false;   // genau EIN Durchlauf pro Geraeteaenderung
+    if (probeNow) {
+        bool anyOn = g_pads[0].on || g_pads[1].on || g_pads[2].on || g_pads[3].on;
+        if (anyOn) g_padProbesLeft = 0;                                  // gefunden - fertig
+        else { int left = g_padProbesLeft.load() - 1; g_padProbesLeft = left;
+               if (left > 0) g_padProbeAt = now + 1200; }                // Handshake lief evtl. noch: EIN Nachversuch
+    }
 }
 // Kombi auf irgendeinem der 4 XInput-Slots vollstaendig gedrueckt? (nutzt den Tick-Zustand)
 static bool gamepadComboDown(const json& combo) {
@@ -2095,7 +2102,7 @@ static void startHotkeyPollThread() {
     // Start-Probe: beim App-Start bereits eingeschaltete Controller einmal einsammeln
     // (danach loest nur noch WM_DEVICECHANGE einen weiteren Einzel-Durchlauf aus).
     g_padProbeAt = GetTickCount64();
-    g_padProbePending = true;
+    g_padProbesLeft = 1;
     g_hotkeyThread = std::thread([]() {
         while (g_hotkeyRun.load()) { xinputTick(); Sleep(8); }
     });
@@ -4069,15 +4076,14 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         launchTick(); extWatchTick();
         return 0;
     case WM_DEVICECHANGE:
-        // Geraeteaenderung (Controller ein-/ausgeschaltet, Dongle-Ereignis): EINEN Probe-
-        // Durchlauf fuer leere XInput-Plaetze vormerken, ausgefuehrt erst nach 2 s Ruhe
-        // (jedes weitere Ereignis schiebt den Zeitpunkt nach hinten - waehrend des
-        // Verbindungs-Handshakes feuern mehrere WM_DEVICECHANGE kurz hintereinander).
-        // Sonst bleiben leere Plaetze KOMPLETT unangetastet: jede XInputGetState-Abfrage
-        // auf einen leeren Platz stoesst die Geraete-Neuermittlung an und warf den
-        // Controller am Wireless-Dongle direkt nach dem Reconnect wieder raus.
-        g_padProbeAt = GetTickCount64() + 2000;
-        g_padProbePending = true;
+        // Geraeteaenderung (Controller ein-/ausgeschaltet, Dongle-Ereignis): Probe-Durchlaeufe
+        // fuer leere XInput-Plaetze vormerken - erster nach 750 ms ab der ERSTEN Meldung des
+        // Schubs (Folge-Meldungen verlaengern die Frist NICHT mehr; frueher schob jede neue
+        // Meldung +2 s -> Lumora reagierte erst mehrere Sekunden nach dem Einschalten). Findet
+        // der erste Durchlauf nichts (Handshake lief noch), folgt in padPoll genau EIN
+        // Nachversuch 2 s spaeter. Ausserhalb dessen bleiben leere Plaetze KOMPLETT
+        // unangetastet (zyklisches Antasten war der Reconnect-Killer-Kontext).
+        if (g_padProbesLeft.load() <= 0) { g_padProbeAt = GetTickCount64() + 400; g_padProbesLeft = 2; }
         break;   // weiter zu DefWindowProc (Broadcast normal behandeln lassen)
     case WM_NCCALCSIZE: {   // BEIDE wParam-Faelle behandeln: beim initialen Fensteraufbau kommt
         auto* pr = (RECT*)l;   // FALSE - unbehandelt blieb da die System-Titelleiste stehen (Start im Fenster-Modus)
