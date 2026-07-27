@@ -1886,14 +1886,27 @@ static bool xiButtonDown(const XINPUT_GAMEPAD& g, int idx) {
 // weiter jeden Tick gelesen (Hotkeys bleiben unmittelbar), leere nur alle 2 s geprueft.
 struct PadSlot { bool on = false; XINPUT_STATE st{}; ULONGLONG nextProbe = 0, since = 0; };
 static PadSlot g_pads[4];
+// Leere Plaetze werden NICHT mehr zyklisch angetastet - jede XInputGetState-Abfrage auf
+// einen leeren Platz stoesst die komplette Geraete-Neuermittlung an und warf den Xbox-
+// Controller am Wireless-Dongle direkt nach dem Reconnect wieder raus (User-Befund:
+// "verbindet sich fuer eine Sekunde, dann sofort weg", bis Lumora beendet wurde).
+// GEMESSEN: auch ein mehrsekuendiges Probe-FENSTER nach WM_DEVICECHANGE reproduzierte
+// den Rauswurf 1-2 s NACH dem Verbinden - die wiederholten Probes der uebrigen leeren
+// Plaetze (1-3) killten die frische Verbindung auf Platz 0. Deshalb jetzt: pro
+// Geraeteaenderung genau EIN Probe-Durchlauf, und erst wenn die WM_DEVICECHANGE-
+// Ereignisse 2 s lang Ruhe geben (jedes neue Ereignis schiebt den Zeitpunkt nach
+// hinten) - dann ist der Verbindungs-Handshake sicher abgeschlossen.
+static std::atomic<ULONGLONG> g_padProbeAt{ 0 };
+static std::atomic<bool> g_padProbePending{ false };
 static void padPoll() {
     ULONGLONG now = GetTickCount64();
+    bool probeNow = g_padProbePending.load() && now >= g_padProbeAt.load();
     for (DWORD i = 0; i < 4; ++i) {
         PadSlot& p = g_pads[i];
-        if (!p.on && now < p.nextProbe) continue;   // leerer Platz: nur alle 2 s antasten
+        if (!p.on && !probeNow) continue;   // leere Plaetze ausserhalb des einen Probe-Durchlaufs ganz in Ruhe lassen
         XINPUT_STATE st{};
         bool on = XInputGetState(i, &st) == ERROR_SUCCESS;
-        if (on) p.st = st; else p.nextProbe = now + 2000;
+        if (on) p.st = st;
         if (on != p.on) {
             std::string ago = p.since ? (" nach " + std::to_string((now - p.since) / 1000) + "s") : "";
             bcLogStream("pad: Platz " + std::to_string(i) + (on ? " verbunden" : " WEG") + ago
@@ -1906,6 +1919,7 @@ static void padPoll() {
             p.on = on; p.since = now;
         }
     }
+    if (probeNow) g_padProbePending = false;   // genau EIN Durchlauf pro Geraeteaenderung
 }
 // Kombi auf irgendeinem der 4 XInput-Slots vollstaendig gedrueckt? (nutzt den Tick-Zustand)
 static bool gamepadComboDown(const json& combo) {
@@ -1959,6 +1973,34 @@ static void xinputTick() {   // 125 Hz; Flanke = einmal ausloesen pro Druck
     if (m && !g_gpMainWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_MAIN, 0);
     if (o && !g_gpOsdWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_OSD, 0);
     g_gpMainWas = m; g_gpOsdWas = o;
+    // 1b) Controller-Zustand an die UI pushen (~30 Hz, nur bei sichtbarem Fenster).
+    // Die UI darf navigator.getGamepads NICHT mehr benutzen: allein die Registrierung
+    // von gamepadconnected-Listenern startet Chromiums Gamepad-Monitor im Browser-
+    // prozess, dessen Dauerpoll der leeren XInput-Plaetze den Xbox-Controller am
+    // Wireless-Dongle nach jedem Reconnect sofort wieder rauswarf (per Diagnose-
+    // Bisektion bewiesen: about:blank/gestubbte Listener ok, echte UI kaputt).
+    {
+        static ULONGLONG lastPush = 0; static bool wasConn = false;
+        if (now - lastPush >= 33) {
+            lastPush = now;
+            int slot = -1;
+            for (DWORD i = 0; i < 4; ++i) if (g_pads[i].on && (LONG)i != lubridge::g_vigemSlot.load()) { slot = (int)i; break; }
+            bool conn = slot >= 0;
+            // Verbindungs-UEBERGAENGE immer melden (echter Geraetezustand, unabhaengig von der
+            // Fenster-Sichtbarkeit - sonst meldet die UI bei jedem Einblenden faelschlich
+            // "Controller verbunden"); nur der 30-Hz-Datenstrom pausiert bei verstecktem Fenster.
+            if (conn != wasConn) { wasConn = conn; sendToUi("gp-state", conn
+                ? json{ {"connected", true}, {"buttons", json::array()}, {"axes", { 0.0, 0.0, 0.0, 0.0 }} }
+                : json{ {"connected", false} }); }
+            if (conn && g_hwnd && IsWindowVisible(g_hwnd)) {
+                const XINPUT_GAMEPAD& g = g_pads[slot].st.Gamepad;
+                json btns = json::array();
+                for (int bi = 0; bi <= 15; ++bi) btns.push_back(xiButtonDown(g, bi));
+                json ax = { g.sThumbLX / 32767.0, -(g.sThumbLY / 32767.0), g.sThumbRX / 32767.0, -(g.sThumbRY / 32767.0) };
+                sendToUi("gp-state", { {"connected", true}, {"buttons", btns}, {"axes", ax} });
+            }
+        }
+    }
     // 2) Tastatur-Hotkeys (steigende Flanke, EXAKTE Modifier wie main.js).
     std::lock_guard<std::mutex> lk(g_kbMx);
     if (!g_kbHotkeys.empty()) {
@@ -1979,6 +2021,10 @@ static std::atomic<bool> g_hotkeyRun{ false };
 static std::thread g_hotkeyThread;
 static void startHotkeyPollThread() {
     if (g_hotkeyRun.exchange(true)) return;   // laeuft bereits
+    // Start-Probe: beim App-Start bereits eingeschaltete Controller einmal einsammeln
+    // (danach loest nur noch WM_DEVICECHANGE einen weiteren Einzel-Durchlauf aus).
+    g_padProbeAt = GetTickCount64();
+    g_padProbePending = true;
     g_hotkeyThread = std::thread([]() {
         while (g_hotkeyRun.load()) { xinputTick(); Sleep(8); }
     });
@@ -3270,7 +3316,7 @@ static void doStreamHotkey(HWND fg) {
 // Setting updateChannel: "auto" (Standard: Komponenten + Installer-Fallback),
 // "installer" (nur voller Installer), "store"/"off" (kein Selbst-Update, fuer
 // eine MS-Store-Distribution - dort aktualisiert der Store).
-static const char* UPDATE_FEED_DEFAULT = "https://lumora-streaming.de/native-update.json";
+static const char* UPDATE_FEED_DEFAULT = "https://lumora-streaming.de/updates/native-update.json";
 static std::atomic<bool> g_updBusy{ false };
 static std::string g_updUrl, g_updFile;
 static int cmpVer(const std::string& a, const std::string& b) {
@@ -3908,6 +3954,17 @@ static void placeWebView(HWND h) {
 
 static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
+    case WM_DEVICECHANGE:
+        // Geraeteaenderung (Controller ein-/ausgeschaltet, Dongle-Ereignis): EINEN Probe-
+        // Durchlauf fuer leere XInput-Plaetze vormerken, ausgefuehrt erst nach 2 s Ruhe
+        // (jedes weitere Ereignis schiebt den Zeitpunkt nach hinten - waehrend des
+        // Verbindungs-Handshakes feuern mehrere WM_DEVICECHANGE kurz hintereinander).
+        // Sonst bleiben leere Plaetze KOMPLETT unangetastet: jede XInputGetState-Abfrage
+        // auf einen leeren Platz stoesst die Geraete-Neuermittlung an und warf den
+        // Controller am Wireless-Dongle direkt nach dem Reconnect wieder raus.
+        g_padProbeAt = GetTickCount64() + 2000;
+        g_padProbePending = true;
+        break;   // weiter zu DefWindowProc (Broadcast normal behandeln lassen)
     case WM_NCCALCSIZE: {   // BEIDE wParam-Faelle behandeln: beim initialen Fensteraufbau kommt
         auto* pr = (RECT*)l;   // FALSE - unbehandelt blieb da die System-Titelleiste stehen (Start im Fenster-Modus)
         if (IsZoomed(h)) {     // maximiert die unsichtbaren Frame-Insets abziehen, sonst ragt das Fenster ueber den Monitor
@@ -4384,6 +4441,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                             std::wstring shim = SHIM_JS;   // Versions-Platzhalter fuellen
                             size_t vp = shim.find(L"%SHELL_VERSION%");
                             if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
+                            // Sicherheitsnetz: Gamepad-Listener/-API im Renderer hart stubben. Die UI nutzt
+                            // den nativen 'gp-state'-Push; wuerde (auch versehentlich, z.B. durch kuenftigen
+                            // Code) wieder ein gamepadconnected-Listener registriert, startet Chromiums
+                            // Gamepad-Monitor im Browserprozess und dessen Dauerpoll der leeren XInput-
+                            // Plaetze killt den Xbox-Dongle-Reconnect (per Bisektion bewiesen, Juli 2026).
+                            shim += L"\n(()=>{const a=window.addEventListener.bind(window);"
+                                L"window.addEventListener=(t,...r)=>{if(t==='gamepadconnected'||t==='gamepaddisconnected')return;return a(t,...r);};"
+                                L"try{Object.defineProperty(Navigator.prototype,'getGamepads',{value:()=>[]});}catch(e){}})();";
                             g_webview->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
                             g_webview->add_WebMessageReceived(
                                 Callback<ICoreWebView2WebMessageReceivedEventHandler>(

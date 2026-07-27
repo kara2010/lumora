@@ -5305,7 +5305,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // Polling per setInterval (nicht requestAnimationFrame): läuft mit
     // backgroundThrottling:false auch weiter, wenn Lumora minimiert ist – nötig,
     // damit der Gamepad-Hotkey das Fenster zurückholen kann.
-    let gpPadIndex = null, gpTimer = null
+    let gpPadIndex = null, gpNativeState = null
     const gpPressed = {}, gpRepeatAt = {}
     const GP_DEAD = 0.5, GP_REPEAT_FIRST = 400, GP_REPEAT_NEXT = 120
     // LB/RB blaettern durch die Reiter (Bibliothek/Allgemein/…). Die Bumper sind Teil der
@@ -5337,9 +5337,11 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       showGamepadToast(tabs[ni].textContent.trim())
     }
     function gpPoll() {
-      const gp = gpPadIndex !== null ? navigator.getGamepads()[gpPadIndex] : null
+      const gp = gpNativeState
       if (!gp) return
-      const b = gp.buttons, ax = gp.axes
+      // Nativer Push: buttons = Array aus 16 Booleans (Standard-XInput-Reihenfolge),
+      // axes = [lx, ly, rx, ry] (W3C-Vorzeichen). Auf die alte getGamepads-Form abbilden.
+      const b = gp.buttons.map(p => ({ pressed: p })), ax = gp.axes
 
       // 1) Aufnahme-Modus: größte gleichzeitig gedrückte Knopf-Menge merken,
       //    beim Loslassen speichern.
@@ -5425,20 +5427,28 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       t.textContent = msg; t.style.display = 'block'
       clearTimeout(t._timer); t._timer = setTimeout(() => { t.style.display = 'none' }, 2500)
     }
-    window.addEventListener('gamepadconnected', (e) => {
-      gpPadIndex = e.gamepad.index
-      setNavMode(true)
-      showGamepadToast(window.tr('🎮 Controller verbunden'))
-      const items = navFocusables(); if (items.length && !navFocusEl) setNavFocus(navPickStart(items))
-      if (!gpTimer) gpTimer = setInterval(gpPoll, 30)
-    })
-    window.addEventListener('gamepaddisconnected', (e) => {
-      if (e.gamepad.index !== gpPadIndex) return
-      gpPadIndex = null
-      setNavMode(false)
-      if (navFocusEl) { navFocusEl.classList.remove('nav-focus'); navFocusEl = null }
-      if (gpTimer) { clearInterval(gpTimer); gpTimer = null }
-      showGamepadToast(window.tr('Controller getrennt'))
+    // Controller-Zustand kommt NATIV von der Shell (Kanal 'gp-state', ~30 Hz), NICHT mehr
+    // ueber navigator.getGamepads: allein das Registrieren von gamepadconnected-Listenern
+    // startet Chromiums Gamepad-Monitor im Browserprozess, und dessen Dauerpoll der leeren
+    // XInput-Plaetze warf den Xbox-Controller am Wireless-Dongle direkt nach jedem
+    // Reconnect wieder raus (gemessen: Reconnect erst nach App-Ende moeglich).
+    ipcRenderer.on('gp-state', (e, st) => {
+      if (st && st.connected) {
+        if (gpPadIndex === null) {
+          gpPadIndex = 0
+          setNavMode(true)
+          showGamepadToast(window.tr('🎮 Controller verbunden'))
+          const items = navFocusables(); if (items.length && !navFocusEl) setNavFocus(navPickStart(items))
+        }
+        gpNativeState = st
+        gpPoll()
+      } else if (gpPadIndex !== null) {
+        gpPadIndex = null
+        gpNativeState = null
+        setNavMode(false)
+        if (navFocusEl) { navFocusEl.classList.remove('nav-focus'); navFocusEl = null }
+        showGamepadToast(window.tr('Controller getrennt'))
+      }
     })
 
     // Einstellungs-Inhalt aus seiner HTML-Position in die Inline-Ansicht holen.
