@@ -218,7 +218,8 @@ static std::mutex g_launchMx;
 static std::vector<lulaunch::LaunchSession> g_launches;
 static bool g_hdrByLauncher = false;                       // wer HDR gerade verwaltet (Eigen- ODER Fremdstart)
 static std::vector<std::string> g_activeLaunchExes;        // exe(lower) der Eigenstart-Monitore
-struct ExtSession { std::string gamePath, name; ULONGLONG startTs; int absent; bool hdrOn; };
+struct ExtSession { std::string gamePath, name; ULONGLONG startTs; int absent; bool hdrOn;
+                    HANDLE hProc = nullptr, hWait = nullptr; };   // Exit-Wait wie bei Eigenstarts (sofortige Ende-Erkennung)
 static std::map<std::string, ExtSession> g_extSessions;    // exe(lower) -> Fremdstart-Session
 static std::map<std::wstring, std::string> g_lnkExeCache;  // .lnk-Pfad -> Ziel-exe(lower)
 
@@ -281,6 +282,18 @@ static void inputBridgeOnEnd(const std::string& gamePath) {
 
 // Fremdstart-Watcher (2s-Takt wie Electron-Nachruestung: HDR geht an, BEVOR das Spiel
 // seine Display-Faehigkeiten prueft; Ende nach 3 leeren Scans ~6s gegen DRM-Handoff).
+static void CALLBACK launchWaitCb(PVOID, BOOLEAN);   // (unten definiert) Exit-Wait -> Wake-Message
+static void extAttachHandle(ExtSession& s, const std::string& exeLow) {
+    DWORD pid = lulaunch::pidByName(widen(exeLow)); if (!pid) return;
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, pid); if (!h) return;
+    HANDLE w = nullptr;
+    if (!RegisterWaitForSingleObject(&w, h, launchWaitCb, nullptr, INFINITE, WT_EXECUTEONLYONCE)) { CloseHandle(h); return; }
+    s.hProc = h; s.hWait = w;
+}
+static void extDetachHandle(ExtSession& s) {
+    if (s.hWait) { UnregisterWaitEx(s.hWait, nullptr); s.hWait = nullptr; }
+    if (s.hProc) { CloseHandle(s.hProc); s.hProc = nullptr; }
+}
 static void extWatchTick() {
     std::lock_guard<std::mutex> lk(g_launchMx);
     auto running = listRunningExes();
@@ -309,25 +322,56 @@ static void extWatchTick() {
             lulaunch::setHDR(true); g_hdrByLauncher = true; s.hdrOn = true;
             sendToUi("hdr-status", true);
         }
+        extAttachHandle(s, exe);   // Exit-Wait: Prozess-Ende weckt sofort statt 2s-Raster
         g_extSessions[exe] = s;
         sendExternalRunning();
         inputBridgeOnRunning(p);   // Spiel laeuft nachweislich -> ggf. Eingabe-Bruecke (Profil-Link) an
     }
     // 2) Laufende Fremd-Sessions pruefen / beenden
+    bool suspectEnd = false;   // tote/fehlende Handles -> Takt kurz auf 1s (schnelle Bestaetigung)
     for (auto it = g_extSessions.begin(); it != g_extSessions.end();) {
-        if (running.count(it->first)) { it->second.absent = 0; ++it; continue; }
-        if (++it->second.absent < 3) { ++it; continue; }
-        ExtSession s = it->second; it = g_extSessions.erase(it);
+        if (running.count(it->first)) {
+            ExtSession& es = it->second; es.absent = 0;
+            // Handle tot, exe laeuft aber noch (DRM-Handoff/zweite Instanz) -> neu anhaengen
+            if (es.hProc && WaitForSingleObject(es.hProc, 0) == WAIT_OBJECT_0) extDetachHandle(es);
+            if (!es.hProc) { extAttachHandle(es, it->first); if (!es.hProc) suspectEnd = true; }
+            ++it; continue;
+        }
+        if (++it->second.absent < 3) { suspectEnd = true; ++it; continue; }
+        ExtSession s = it->second; extDetachHandle(it->second); it = g_extSessions.erase(it);
         sendExternalRunning();
         lulaunch::playLog(dataDir(), "EXTERN beendet: " + s.gamePath + " Dauer " + std::to_string((GetTickCount64() - s.startTs) / 1000) + "s");
         if (s.hdrOn) { lulaunch::setHDR(false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
         inputBridgeOnEnd(s.gamePath);
         sendToUi("play-session", { {"gamePath", s.gamePath}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
     }
+    // Takt dynamisch (wie launchTick): Ende-Verdacht schnell mit 1s bestaetigen (3 leere
+    // Scans -> Ende in ~3s statt ~6s, Start der Zaehlung kommt per Exit-Wake sofort).
+    SetTimer(g_hwnd, TIMER_EXTWATCH, suspectEnd ? 1000 : 2000, nullptr);
 }
 
+// --- Event-getriebene Ende-Erkennung: Prozess-Exit weckt den UI-Thread sofort ---------
+// Threadpool-Wait auf das SYNCHRONIZE-Handle des Spielprozesses. Beim Exit wird nur eine
+// Message gepostet (threadsicher); die eigentliche Pruefung laeuft im UI-Thread ueber die
+// bestehenden Ticks. Polling bleibt als Sicherheitsnetz (Steam-Registry ohne PID, Scan-
+// Aussetzer, DRM-Prozesswechsel) - aber die LATENZ bestimmt jetzt der Exit, nicht der Takt.
+#define WM_SHELL_LAUNCHWAKE (WM_APP + 8)
+static void CALLBACK launchWaitCb(PVOID, BOOLEAN) { PostMessageW(g_hwnd, WM_SHELL_LAUNCHWAKE, 0, 0); }
+static void launchDetachHandle(lulaunch::LaunchSession& s) {
+    if (s.hWait) { UnregisterWaitEx(s.hWait, nullptr); s.hWait = nullptr; }   // non-blocking; nachlaufender Callback postet nur eine harmlose Wake-Message
+    if (s.hProc) { CloseHandle(s.hProc); s.hProc = nullptr; }
+    s.pid = 0;
+}
+static void launchAttachHandle(lulaunch::LaunchSession& s) {
+    DWORD pid = lulaunch::probePid(s); if (!pid) return;
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, pid); if (!h) return;
+    HANDLE w = nullptr;
+    if (!RegisterWaitForSingleObject(&w, h, launchWaitCb, nullptr, INFINITE, WT_EXECUTEONLYONCE)) { CloseHandle(h); return; }
+    s.pid = pid; s.hProc = h; s.hWait = w;
+}
 // Ende einer Session: HDR ggf. aus, Spielzeit verbuchen, Button freigeben (wie endSession in main.js).
 static void launchEndSession(lulaunch::LaunchSession& s, bool credit) {
+    launchDetachHandle(s);
     std::string exeLow = narrow(s.exeName); for (auto& c : exeLow) c = (char)tolower((unsigned char)c);
     g_activeLaunchExes.erase(std::remove(g_activeLaunchExes.begin(), g_activeLaunchExes.end(), exeLow), g_activeLaunchExes.end());   // Watcher darf wieder uebernehmen
     if (s.useHdr) { lulaunch::setHDR(false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
@@ -345,6 +389,7 @@ static void launchTick() {
         if (!s.started) {
             if (running) {
                 s.started = true; s.startTs = GetTickCount64(); s.absent = 0;
+                launchAttachHandle(s);   // Exit-Wait auf den erkannten Prozess (sofortige Ende-Erkennung)
                 sendToUi("launch-status", "running");
                 inputBridgeOnRunning(narrow(s.gamePath));   // erst JETZT (laeuft nachweislich), nie beim Startaufruf
                 // HDR wurde bei der 30s-Freigabe geparkt? Spaetstarter doch noch da -> wieder an.
@@ -361,14 +406,26 @@ static void launchTick() {
                 }
                 if (waited > 120000) { lulaunch::playLog(dataDir(), "TIMEOUT - nie erkannt nach " + std::to_string(waited / 1000) + "s."); launchEndSession(s, false); }
             }
-        } else if (running) s.absent = 0;
-        else if (++s.absent >= 2) {
+        } else if (running) {
+            s.absent = 0;
+            // Handle tot (Prozess-Exit) aber probeRunning noch true -> DRM-Handoff/anderer
+            // Prozess hat uebernommen: Wait auf den NEUEN Prozess umhaengen. Ohne PID
+            // (Steam-Registry-Pfad) bleibt s.hProc null -> Polling-Sicherheitsnetz.
+            if (s.hProc && WaitForSingleObject(s.hProc, 0) == WAIT_OBJECT_0) launchDetachHandle(s);
+            if (!s.hProc) launchAttachHandle(s);
+        } else if (++s.absent >= 2) {
             lulaunch::playLog(dataDir(), "ENDED - Dauer " + std::to_string((GetTickCount64() - s.startTs) / 1000) + "s");
             launchEndSession(s, true);
         }
     }
     g_launches.erase(std::remove_if(g_launches.begin(), g_launches.end(), [](const lulaunch::LaunchSession& s) { return s.done; }), g_launches.end());
-    if (g_launches.empty()) KillTimer(g_hwnd, TIMER_LAUNCH);
+    if (g_launches.empty()) { KillTimer(g_hwnd, TIMER_LAUNCH); return; }
+    // Takt dynamisch: Ende-/Handoff-Verdacht (gestartete Session ohne lebendes Handle,
+    // z.B. direkt nach dem Exit-Wake) schnell mit 1s bestaetigen (absent>=2 -> Ende in
+    // ~2s statt ~8s); sonst gemuetliche 4s. SetTimer ersetzt den bestehenden Timer.
+    UINT next = 4000;
+    for (auto& s : g_launches) if (!s.done && s.started && (!s.hProc || WaitForSingleObject(s.hProc, 0) == WAIT_OBJECT_0)) { next = 1000; break; }
+    SetTimer(g_hwnd, TIMER_LAUNCH, next, nullptr);
 }
 
 // launch-game-Handler (laeuft im Worker-Thread: HDR-Wartezeit + AUMID-Suche blockieren das UI nicht).
@@ -4006,6 +4063,11 @@ static void placeWebView(HWND h) {
 
 static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
+    case WM_SHELL_LAUNCHWAKE:
+        // Spielprozess ist beendet (Exit-Wait): sofort pruefen statt aufs Polling-Raster
+        // zu warten - HDR/Session-Ende folgen dadurch in ~1-3s statt ~6-12s.
+        launchTick(); extWatchTick();
+        return 0;
     case WM_DEVICECHANGE:
         // Geraeteaenderung (Controller ein-/ausgeschaltet, Dongle-Ereignis): EINEN Probe-
         // Durchlauf fuer leere XInput-Plaetze vormerken, ausgefuehrt erst nach 2 s Ruhe
