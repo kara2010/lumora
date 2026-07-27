@@ -1,0 +1,27 @@
+Xbox-Controller: Verbindet sich der Controller (Xbox Wireless Dongle) bei laufendem Lumora neu, bleibt die Verbindung jetzt stabil. Ursache war die Gamepad-Abfrage der Oberfläche (Chromium-Gamepad-Monitor pollte leere Controller-Plätze und störte den Verbindungsaufbau) – die Steuerung läuft jetzt komplett nativ.
+
+OSD: Das Overlay blockiert keine Klicks mehr auf Desktop-Symbole – auch nicht bei ausgeblendetem OSD. Ein internes WebView2-Fenster saß unsichtbar über der Panel-Fläche und fing Klicks ab; es wird jetzt durchlässig gemacht.
+
+Spielende-Erkennung: Lumora erkennt das Beenden eines Spiels jetzt in 1–3 Sekunden (vorher bis zu 12) – HDR schaltet entsprechend schneller zurück. Die Erkennung reagiert direkt auf das Prozess-Ende statt auf ein Abfrage-Raster.
+
+Doppelstart-Schutz: Solange ein Spiel läuft oder gerade startet, wird kein zweites gestartet (auch keine zweite Instanz desselben Spiels).
+
+Start-Knopf: Zeigt bei laufendem Spiel die bisherige Spielzeit live an ("Spiel läuft · 12 Min").
+
+Update-Suche: "Nach Updates suchen" funktioniert wieder (die Standard-Feed-Adresse zeigte auf einen falschen Pfad).
+
+Intel-Grafik: Live-Bitraten-Wechsel greifen jetzt auch auf älteren Intel-Generationen (z. B. HD 630), auf denen der Treiber die nahtlose Umstellung ablehnt – der Encoder wird dort automatisch kurz neu initialisiert.
+===EN===
+Xbox controller: Reconnecting the controller (Xbox Wireless Dongle) while Lumora is running is now stable. The UI's gamepad polling (Chromium's gamepad monitor probing empty controller slots) disrupted the pairing handshake – controller input is now handled fully natively.
+
+OSD: The overlay no longer blocks clicks on desktop icons – even while hidden. An internal WebView2 window sat invisibly over the panel area and swallowed clicks; it is now made click-through.
+
+Game-end detection: Lumora now detects a game closing within 1–3 seconds (previously up to 12) – HDR switches back accordingly faster. Detection reacts directly to process exit instead of a polling grid.
+
+Double-launch guard: While a game is running or starting, no second game can be launched (including a second instance of the same game).
+
+Launch button: Shows the current session time live while a game is running ("Game running · 12 min").
+
+Update check: "Check for updates" works again (the default feed address pointed to a wrong path).
+
+Intel graphics: Live bitrate changes now also apply on older Intel generations (e.g. HD 630) where the driver rejects seamless reconfiguration – the encoder is briefly re-initialized automatically there.
