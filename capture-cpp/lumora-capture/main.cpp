@@ -453,9 +453,32 @@ struct QsvEncoder : Encoder {
         // Bearbeitung ist. Ergebnis wird hier verworfen (verliert hoechstens 1 Frame,
         // vernachlaessigbar bei einer seltenen manuellen Bitrate-Aenderung).
         if (pendingSyncp) { MFXVideoCORE_SyncOperation(session, pendingSyncp, 100000); pendingSyncp = nullptr; }
+        mfxVideoParam prev = par;   // nachweislich funktionierender Zustand (Rueckfall-Kopie)
         applyRate(kbit, par.mfx.FrameInfo.FrameRateExtN > 0 ? par.mfx.FrameInfo.FrameRateExtN : 60);
         mfxStatus st = MFXVideoENCODE_Reset(session, &par);
-        if (st < MFX_ERR_NONE) printf("QSV-DEBUG: MFXVideoENCODE_Reset (Bitrate) fehlgeschlagen, status=%d\n", (int)st);
+        if (st < MFX_ERR_NONE) {
+            // Aeltere QSV-Generationen (Gen9.5/HD630, Intel-Laptop-Log 2026-07-27): Reset kann
+            // BRC-/Pufferaenderungen nicht uebernehmen (-14 MFX_ERR_INCOMPATIBLE_VIDEO_PARAM) -
+            // die Bitrate blieb dadurch STILL auf dem alten Wert (bei Paketverlust genau falsch).
+            // Fallback: nur die Encode-Komponente schliessen und mit den neuen Parametern frisch
+            // initialisieren (gleiche Session, gleiche Pipeline; naechster Frame wird ein IDR -
+            // fuer Zuschauer ein kurzer Keyframe, KEIN Stream-Abriss). Schlaegt auch das fehl,
+            // zurueck auf die alten Parameter (die liefen bis eben) - schlimmstenfalls bleibt
+            // die alte Bitrate aktiv, der Stream laeuft in JEDEM Fall weiter.
+            printf("QSV-DEBUG: MFXVideoENCODE_Reset (Bitrate) fehlgeschlagen, status=%d -> Encoder-Re-Init\n", (int)st);
+            MFXVideoENCODE_Close(session);
+            size_t need = (size_t)kbit * 1000 / 8 * 3 + (2 << 20);   // Ausgabepuffer ggf. mitwachsen lassen (kein in-Flight-Frame mehr, s. Sync oben)
+            if (bsBuf.size() < need) bsBuf.resize(need);
+            MFXVideoENCODE_Query(session, &par, &par);
+            mfxStatus i2 = MFXVideoENCODE_Init(session, &par);
+            if (i2 < MFX_ERR_NONE) {
+                printf("QSV-DEBUG: Re-Init mit neuer Bitrate fehlgeschlagen, status=%d -> zurueck auf alte Parameter\n", (int)i2);
+                par = prev;
+                MFXVideoENCODE_Query(session, &par, &par);
+                mfxStatus i3 = MFXVideoENCODE_Init(session, &par);
+                if (i3 < MFX_ERR_NONE) printf("QSV-DEBUG: Re-Init mit alten Parametern fehlgeschlagen, status=%d - Encoder gestoert!\n", (int)i3);
+            } else printf("QSV-DEBUG: Encoder-Re-Init mit %d kbit erfolgreich\n", kbit);
+        }
     }
     void encode(ID3D11Texture2D* nv12, std::vector<std::vector<uint8_t>>& out) override {
         // Pipelining (Befund 2026-07-21, per QSV-PERF-Messung auf echter Intel-Hardware): mit
