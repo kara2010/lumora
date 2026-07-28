@@ -2884,13 +2884,18 @@ static void analyzeTick() {   // TIMER_ANALYZE (200 ms): Heartbeat, Tail, Status
     if (anShmRead(m)) {
         bool brokerAlive = m[1] && (uint32_t)(GetTickCount() - m[1]) < 3000;
         if (g_anStopping && (!brokerAlive || m[2] == 0)) { analyzeFinish(); return; }
-        if (!g_anStopping && !brokerAlive && m[2] == 0) {
-            // Broker kam nie hoch oder ist gestorben (>8s Toleranz ueber Timer-Startzeit abgedeckt
-            // durch brokerTick-Frische) - nach 10s ohne Leben aufgeben und ehrlich melden.
-            static uint32_t deadSince = 0;
+        // Broker regulaer fertig (state 0) ODER tot (Heartbeat weg - egal welcher state:
+        // frueher verlangte der Totmann state==0 und ein abgestuerzter Broker mit state 1
+        // liess die Messung ewig "laufen"): nach 10s Karenz ehrlich beenden.
+        static uint32_t deadSince = 0;
+        if (!g_anStopping && !brokerAlive) {
             if (!deadSince) deadSince = now;
-            if (now - deadSince > 10000) { deadSince = 0; g_anStopping = true; analyzeFinish(); }
-        }
+            if (now - deadSince > 10000) {
+                deadSince = 0; g_anStopping = true;
+                bcLogStream("analyze: Broker-Heartbeat weg - beende Messung (Absturz?)");
+                analyzeFinish();
+            }
+        } else deadSince = 0;
     }
 }
 
