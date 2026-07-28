@@ -4271,6 +4271,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         for (int i = 1; i < ac; ++i) {
             if (wcscmp(av[i], L"--fps-broker") == 0) { WSADATA w; WSAStartup(MAKEWORD(2, 2), &w); return lubroker::runFpsBroker(bd); }
             if (wcscmp(av[i], L"--sensor-broker") == 0) return lubroker::runSensorBroker(bd);   // PawnIO CPU-Temp/-Power
+            // Prototyp-/Diagnosemodus der Ruckler-Blackbox: 5 s Kernel-ETW mitschneiden und
+            // Aggregate ausgeben (Konsole + %TEMP%\lumora-analyze-dump.txt). Elevated noetig.
+            if (wcscmp(av[i], L"--analyze-dump") == 0) return lubroker::runAnalyzeDump();
         }
     }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);

@@ -14,8 +14,102 @@
 #include <algorithm>
 #include <cmath>
 #include "etw_present.h"
+#include "etw_kernel.h"
 
 namespace lubroker {
+
+// --- Ruckler-Blackbox: Diagnose-/Prototypmodus ------------------------------------
+// "lumora-shell.exe --analyze-dump" (elevated Konsole): 5 s Kernel-ETW mitschneiden,
+// Aggregate (DPC je Treiber, CSwitch-/Disk-Raten, Top-CPU-Prozesse) auf Konsole UND
+// nach %TEMP%\lumora-analyze-dump.txt schreiben. Beweist die komplette Kette
+// (System-Logger-Session, MOF-Parsing, Treibernamen, TID->PID) VOR dem Feature-Bau.
+inline int runAnalyzeDump() {
+    // GUI-Subsystem: an die aufrufende Konsole anhaengen, sonst verpufft printf
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) { FILE* f; freopen_s(&f, "CONOUT$", "w", stdout); }
+    auto out = [](const std::string& s) {
+        printf("%s\n", s.c_str());
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        FILE* f = nullptr; _wfopen_s(&f, (std::wstring(tmp) + L"\\lumora-analyze-dump.txt").c_str(), L"ab");
+        if (f) { fwrite(s.data(), 1, s.size(), f); fwrite("\n", 1, 1, f); fclose(f); }
+    };
+    {   // alte Dump-Datei leeren
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        DeleteFileW((std::wstring(tmp) + L"\\lumora-analyze-dump.txt").c_str());
+    }
+    // Aggregate (nur dieser Thread schreibt via Callbacks, Hauptthread liest NACH stop())
+    struct DrvAgg { uint64_t count = 0; double sumUs = 0, maxUs = 0; };
+    std::map<int, DrvAgg> dpcByDrv, isrByDrv;
+    double durMin = 1e18, durMax = -1e18; uint64_t durNeg = 0;   // Zeitbasis-Diagnose InitialTime
+    uint64_t csw = 0, disk = 0; double diskBytes = 0;
+    std::map<uint32_t, double> cpuByPid;               // pid -> geschaetzte Laufzeit (s)
+    struct CoreRun { uint32_t tid = 0; double since = 0; } cores[128];
+
+    std::map<std::string, uint64_t> guidStats;
+    luetw::KernelTrace kt;
+    kt.setGuidStats(&guidStats);
+    luetw::KernelTrace::Sinks sinks;
+    sinks.dpcIsr = [&](double, double durUs, int drv, bool isr) {
+        if (durUs < durMin) durMin = durUs; if (durUs > durMax) durMax = durUs; if (durUs < 0) ++durNeg;
+        auto& a = (isr ? isrByDrv : dpcByDrv)[drv];
+        a.count++; a.sumUs += durUs; if (durUs > a.maxUs) a.maxUs = durUs;
+    };
+    sinks.cswitch = [&](double t, uint32_t cpu, uint32_t, uint32_t newTid) {
+        ++csw;
+        if (cpu < 128) {
+            auto& c = cores[cpu];
+            if (c.tid) { uint32_t pid = kt.pidOfTid(c.tid); if (pid) cpuByPid[pid] += t - c.since; }
+            c.tid = newTid; c.since = t;
+        }
+    };
+    sinks.diskIo = [&](double, uint32_t bytes, double) { ++disk; diskBytes += bytes; };
+    sinks.proc = [&](double, uint32_t, bool) {};
+    if (!kt.start(std::move(sinks))) {
+        out("FEHLER: KernelTrace.start fehlgeschlagen, Code " + std::to_string(kt.lastError()) +
+            (kt.lastError() == 5 ? " (Zugriff verweigert - elevated Konsole noetig!)" : ""));
+        return 1;
+    }
+    out("Kernel-ETW-Session laeuft (System-Logger). Sammle 5 Sekunden...");
+    if (kt.enableIntrError()) out("HINWEIS: EnableTraceEx2(System-Interrupt) Code " + std::to_string(kt.enableIntrError()));
+    Sleep(5000);
+    kt.stop();
+
+    char b[256];
+    out("--- Event-Mix (GUID/Opcode, Top 20) ---");
+    { std::vector<std::pair<uint64_t, std::string>> gs;
+      for (auto& [k, n] : guidStats) gs.push_back({ n, k });
+      std::sort(gs.rbegin(), gs.rend());
+      for (size_t i = 0; i < gs.size() && i < 20; ++i) { sprintf_s(b, "  %-52s n=%llu", gs[i].second.c_str(), (unsigned long long)gs[i].first); out(b); } }
+    sprintf_s(b, "Events gesamt: %llu | Treiber in Tabelle: %zu", (unsigned long long)kt.eventCount(), kt.drivers().size()); out(b);
+    sprintf_s(b, "CSwitch: %llu (%.0f/s) | Disk-IOs: %llu (%.1f MB)", (unsigned long long)csw, csw / 5.0, (unsigned long long)disk, diskBytes / 1048576.0); out(b);
+    sprintf_s(b, "InitialTime-Diagnose: durUs min=%.1f max=%.1f negativ=%llu (QPF=%lld)", durMin, durMax, (unsigned long long)durNeg, (long long)kt.qpf()); out(b);
+    out("--- DPC je Treiber (Top 10 nach Summe) ---");
+    std::vector<std::pair<double, int>> top;
+    for (auto& [drv, a] : dpcByDrv) top.push_back({ a.sumUs, drv });
+    std::sort(top.rbegin(), top.rend());
+    for (size_t i = 0; i < top.size() && i < 10; ++i) {
+        auto& a = dpcByDrv[top[i].second];
+        sprintf_s(b, "  %-24s n=%-7llu sum=%9.0fus max=%7.1fus", kt.drivers().name(top[i].second).c_str(),
+                  (unsigned long long)a.count, a.sumUs, a.maxUs); out(b);
+    }
+    out("--- ISR je Treiber (Top 5) ---");
+    top.clear(); for (auto& [drv, a] : isrByDrv) top.push_back({ a.sumUs, drv });
+    std::sort(top.rbegin(), top.rend());
+    for (size_t i = 0; i < top.size() && i < 5; ++i) {
+        auto& a = isrByDrv[top[i].second];
+        sprintf_s(b, "  %-24s n=%-7llu sum=%9.0fus max=%7.1fus", kt.drivers().name(top[i].second).c_str(),
+                  (unsigned long long)a.count, a.sumUs, a.maxUs); out(b);
+    }
+    out("--- CPU-Zeit je Prozess aus CSwitch (Top 10) ---");
+    std::vector<std::pair<double, uint32_t>> topCpu;
+    for (auto& [pid, s] : cpuByPid) topCpu.push_back({ s, pid });
+    std::sort(topCpu.rbegin(), topCpu.rend());
+    for (size_t i = 0; i < topCpu.size() && i < 10; ++i) {
+        sprintf_s(b, "  pid %-7u %-28s %6.2fs", topCpu[i].second,
+                  luetw::pidExeName(topCpu[i].second).c_str(), topCpu[i].first); out(b);
+    }
+    out("FERTIG.");
+    return 0;
+}
 
 static const uint32_t FPS_MAGIC = 0x4C4F5344;   // 'LOSD'
 // PresentMon-Prozesse, die kein Spiel sind (1:1 aus main.js PM_IGNORE)
