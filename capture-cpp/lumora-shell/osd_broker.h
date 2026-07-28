@@ -15,6 +15,7 @@
 #include <cmath>
 #include "etw_present.h"
 #include "etw_kernel.h"
+#include "stutter_analyzer.h"
 
 namespace lubroker {
 
@@ -35,6 +36,11 @@ inline int runAnalyzeDump() {
     {   // alte Dump-Datei leeren
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
         DeleteFileW((std::wstring(tmp) + L"\\lumora-analyze-dump.txt").c_str());
+    }
+    {   // Analyzer-Selbstcheck mit synthetischen Daten (braucht KEINE Elevation)
+        std::string msg;
+        bool ok = luana::StutterAnalyzer::selfCheck(msg);
+        out((ok ? "OK  " : "FEHLER  ") + msg);
     }
     // Aggregate (nur dieser Thread schreibt via Callbacks, Hauptthread liest NACH stop())
     struct DrvAgg { uint64_t count = 0; double sumUs = 0, maxUs = 0; };
