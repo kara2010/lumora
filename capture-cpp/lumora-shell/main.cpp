@@ -1934,6 +1934,8 @@ static void toggleMainWindow() {
 enum { HKC_MAIN = 1, HKC_OSD = 2, HKC_OSDEDIT = 3, HKC_AB = 4, HKC_STREAM = 5, HKC_ANALYZE = 6 };
 static void toggleOsdSetting();   // (unten definiert)
 static void analyzeToggle();      // Ruckler-Blackbox: Messung an/aus (unten definiert)
+static void showAnalyzeOsd(bool on);                                   // Analyse-Overlay (unten)
+static void sendToAnalyzeOsd(const std::string& channel, const json& payload);   // dito
 static void setOsdEditMode(bool on);
 // Standard-Gamepad-API-Index -> XINPUT_GAMEPAD-Pruefung (Masken 1:1 aus main.js XI_MASK)
 static bool xiButtonDown(const XINPUT_GAMEPAD& g, int idx) {
@@ -2734,6 +2736,7 @@ static void analyzePushStatus() {   // UI-Statuszeile (Reiter) + Analyse-OSD spe
                 {"selfPermille", have ? (int)m[8] : 0}, {"err", have ? (int)m[9] : 0},
                 {"target", have && m[11] ? luetw::pidExeName(m[11]) : ""} };
     sendToUi("analyze-status", st);
+    if (g_anMeasuring) sendToAnalyzeOsd("an-data", st);   // eigenes Analyse-Overlay speisen
 }
 static void analyzeTailFindings() {   // neue Befund-Zeilen aus findings.jsonl an UI/OSD pushen
     FILE* f = nullptr;
@@ -2752,7 +2755,7 @@ static void analyzeTailFindings() {   // neue Befund-Zeilen aus findings.jsonl a
             std::string line = chunk.substr(pos, nl - pos);
             pos = nl + 1;
             json j = json::parse(line, nullptr, false);
-            if (j.is_object()) sendToUi("analyze-finding", j);
+            if (j.is_object()) { sendToUi("analyze-finding", j); sendToAnalyzeOsd("an-finding", j); }
         }
     }
     fclose(f);
@@ -2760,6 +2763,7 @@ static void analyzeTailFindings() {   // neue Befund-Zeilen aus findings.jsonl a
 static void analyzeFinish() {   // Broker fertig -> neuesten Bericht melden, aufraeumen
     KillTimer(g_hwnd, TIMER_ANALYZE);
     g_anMeasuring = false; g_anStopping = false; g_anTailOff = 0;
+    showAnalyzeOsd(false);
     // juengsten report-*.json finden
     std::wstring newest; FILETIME newestFt{};
     WIN32_FIND_DATAW fd{};
@@ -2781,6 +2785,7 @@ static void analyzeStartMeasurement() {
     { std::lock_guard<std::mutex> lk(g_launchMx); (void)target; }   // Ziel-PID waehlt der Broker (aktivster Praesentierer)
     anShmWriteApp(1, 0, 0);
     g_anMeasuring = true; g_anStopping = false;
+    showAnalyzeOsd(true);   // eigenes Analyse-Overlay einblenden (nur waehrend der Messung)
     SetTimer(g_hwnd, TIMER_ANALYZE, 200, nullptr);
     std::thread([]() { runTask(L"LumoraOSD-Analyze"); }).detach();
     bcLogStream("analyze: Messung gestartet");
@@ -3287,6 +3292,144 @@ static void createOsdWindow() {
                 return S_OK;
             }).Get());
 }
+// === Analyse-OSD: EIGENSTAENDIGES zweites Overlay (analyze-osd.html) ==================
+// Bewusst ein SEPARATES Fenster + eigene HTML-Datei statt eines Feldes im Gaming-OSD
+// (User-Vorgabe): eigene Designsprache ("Messinstrument"), laeuft nur waehrend einer
+// Mess-Session und darf parallel zum normalen OSD stehen (andere Ecke). Technisch die
+// exakt gleiche, hart erkaempfte Kette wie createOsdWindow: Composition-Controller +
+// DirectComposition-Visual (per-pixel-transparent), click-through ueber
+// WS_EX_LAYERED|WS_EX_TRANSPARENT|NOREDIRECTIONBITMAP + HTTRANSPARENT + das
+// Nachziehen der Chromium-Zwischenfenster-Styles (anMakeChildrenClickThrough).
+static HWND g_anOsdHwnd = nullptr;
+static ComPtr<ICoreWebView2Controller> g_anOsdCtrl;
+static ComPtr<ICoreWebView2> g_anOsdWv;
+static ComPtr<ICoreWebView2CompositionController> g_anOsdComp;
+static ComPtr<IDCompositionDevice> g_anDcompDev;
+static ComPtr<IDCompositionTarget> g_anDcompTarget;
+static ComPtr<IDCompositionVisual> g_anDcompVisual;
+static bool g_anOsdLoaded = false;
+static int g_anW = 0, g_anH = 0;
+static bool g_anHavePanel = false;
+static void sendToAnalyzeOsd(const std::string& channel, const json& payload) {
+    if (!g_anOsdHwnd) return;
+    json m = { {"channel", channel}, {"payload", payload} };
+    PostMessageW(g_anOsdHwnd, WM_SHELL_OSDMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
+}
+static void anMakeChildrenClickThrough() {
+    if (!g_anOsdHwnd) return;
+    EnumChildWindows(g_anOsdHwnd, [](HWND c, LPARAM) -> BOOL {
+        LONG_PTR ex = GetWindowLongPtrW(c, GWL_EXSTYLE);
+        if (!(ex & WS_EX_TRANSPARENT)) SetWindowLongPtrW(c, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE);
+        return TRUE;
+    }, 0);
+    RECT mine{}; GetWindowRect(g_anOsdHwnd, &mine);
+    EnumWindows([](HWND w, LPARAM lp) -> BOOL {
+        const RECT* m = (const RECT*)lp;
+        wchar_t cls[32] = {}; GetClassNameW(w, cls, 31);
+        if (wcscmp(cls, L"Chrome_WidgetWin_1") != 0) return TRUE;
+        RECT r{}; GetWindowRect(w, &r);
+        if (r.left != m->left || r.top != m->top || r.right != m->right || r.bottom != m->bottom) return TRUE;
+        LONG_PTR ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
+        if (!(ex & WS_EX_TRANSPARENT)) SetWindowLongPtrW(w, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE);
+        return TRUE;
+    }, (LPARAM)&mine);
+}
+static void applyAnalyzeOsdGeometry() {   // Fenster auf die gemeldete Panel-Flaeche + Ecke setzen
+    if (!g_anOsdHwnd || !g_anHavePanel || g_anW < 1 || g_anH < 1) return;
+    RECT mon = osdMonitorRect();
+    int monW = mon.right - mon.left, monH = mon.bottom - mon.top;
+    int w = g_anW > monW ? monW : g_anW, hh = g_anH > monH ? monH : g_anH;
+    std::string corner = loadSettings().value("analyzeOsdCorner", std::string("tr"));   // Default oben RECHTS (Gaming-OSD sitzt links)
+    bool right = corner.size() > 1 && corner[1] == 'r';
+    bool bottom = !corner.empty() && corner[0] == 'b';
+    int x = right ? monW - w : 0, y = bottom ? monH - hh : 0;
+    SetWindowPos(g_anOsdHwnd, HWND_TOPMOST, mon.left + x, mon.top + y, w, hh, SWP_NOACTIVATE);
+}
+static LRESULT CALLBACK anOsdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_NCHITTEST: return HTTRANSPARENT;
+    case WM_SETCURSOR: return TRUE;
+    case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_anOsdWv) g_anOsdWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
+    case WM_SIZE: if (g_anOsdCtrl) { RECT rc; GetClientRect(h, &rc); g_anOsdCtrl->put_Bounds(rc); anMakeChildrenClickThrough(); } return 0;
+    case WM_DESTROY: return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+static void createAnalyzeOsdWindow() {
+    if (g_anOsdHwnd) return;
+    static bool reg = false;
+    if (!reg) { WNDCLASSW wc{}; wc.lpfnWndProc = anOsdWndProc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = L"LumoraAnalyzeOsd"; RegisterClassW(&wc); reg = true; }
+    RECT mon = osdMonitorRect();
+    g_anOsdHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+        L"LumoraAnalyzeOsd", L"", WS_POPUP, mon.left, mon.top, 520, 300, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!g_anOsdHwnd) { bcLogStream("analyze-osd: CreateWindowExW err=" + std::to_string(GetLastError())); return; }
+    bcLogStream("analyze-osd: Overlay-Fenster erstellt");
+    wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
+    std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
+                ComPtr<ICoreWebView2Environment3> env3;
+                if (FAILED(res) || !env || !g_anOsdHwnd || FAILED(env->QueryInterface(IID_PPV_ARGS(&env3))) || !env3) { bcLogStream("analyze-osd: Environment3 fehlt"); return res; }
+                env3->CreateCoreWebView2CompositionController(g_anOsdHwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2CompositionControllerCompletedHandler>(
+                        [](HRESULT r2, ICoreWebView2CompositionController* comp) -> HRESULT {
+                            if (FAILED(r2) || !comp || !g_anOsdHwnd) { bcLogStream("analyze-osd: Controller-Init " + std::to_string(r2)); return r2; }
+                            g_anOsdComp = comp;
+                            comp->QueryInterface(IID_PPV_ARGS(&g_anOsdCtrl));
+                            if (!g_anOsdCtrl) return E_NOINTERFACE;
+                            g_anOsdCtrl->get_CoreWebView2(&g_anOsdWv);
+                            ComPtr<ICoreWebView2Controller2> c2; g_anOsdCtrl.As(&c2);
+                            if (c2) { COREWEBVIEW2_COLOR clr{ 0, 0, 0, 0 }; c2->put_DefaultBackgroundColor(clr); }
+                            if (SUCCEEDED(DCompositionCreateDevice(nullptr, IID_PPV_ARGS(&g_anDcompDev))) && g_anDcompDev) {
+                                g_anDcompDev->CreateTargetForHwnd(g_anOsdHwnd, TRUE, &g_anDcompTarget);
+                                g_anDcompDev->CreateVisual(&g_anDcompVisual);
+                                if (g_anDcompVisual) { g_anOsdComp->put_RootVisualTarget(g_anDcompVisual.Get());
+                                    if (g_anDcompTarget) g_anDcompTarget->SetRoot(g_anDcompVisual.Get());
+                                    g_anDcompDev->Commit(); }
+                            }
+                            RECT rc; GetClientRect(g_anOsdHwnd, &rc); g_anOsdCtrl->put_Bounds(rc);
+                            g_anOsdCtrl->put_IsVisible(TRUE);
+                            { json s = loadSettings();
+                              double z = (std::max)(0.5, (std::min)(2.5, s.value("analyzeOsdScale", 1.0)));
+                              g_anOsdCtrl->put_ZoomFactor(z); }
+                            ComPtr<ICoreWebView2_3> wv3; g_anOsdWv.As(&wv3);
+                            if (wv3) wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            std::wstring shim = SHIM_JS; size_t vp = shim.find(L"%SHELL_VERSION%");
+                            if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
+                            g_anOsdWv->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
+                            g_anOsdWv->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* a) -> HRESULT {
+                                    LPWSTR j = nullptr;
+                                    if (SUCCEEDED(a->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_anOsdHwnd); CoTaskMemFree(j); }
+                                    return S_OK;
+                                }).Get(), nullptr);
+                            g_anOsdWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+                                    g_anOsdLoaded = true; bcLogStream("analyze-osd: geladen"); anMakeChildrenClickThrough(); return S_OK;
+                                }).Get(), nullptr);
+                            g_anOsdWv->Navigate(L"https://app.lumora/analyze-osd.html");
+                            anMakeChildrenClickThrough();
+                            return S_OK;
+                        }).Get());
+                return S_OK;
+            }).Get());
+}
+static void showAnalyzeOsd(bool on) {
+    if (on) {
+        createAnalyzeOsdWindow();
+        if (!g_anOsdHwnd) return;
+        if (g_anHavePanel) applyAnalyzeOsdGeometry();
+        ShowWindow(g_anOsdHwnd, SW_SHOWNOACTIVATE);
+        SetWindowPos(g_anOsdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        if (g_anOsdCtrl) g_anOsdCtrl->put_IsVisible(TRUE);
+        anMakeChildrenClickThrough();
+    } else if (g_anOsdHwnd) {
+        if (g_anOsdCtrl) g_anOsdCtrl->put_IsVisible(FALSE);   // interne Chromium-Flaeche mit runter (Klick-Blocker-Lehre)
+        ShowWindow(g_anOsdHwnd, SW_HIDE);
+    }
+}
+
 // --- Live-Edit-Fenster: NORMAL gehostetes (windowed) WebView2 mit derselben osd.html ---
 // Input (Maus/Pointer/Capture/DPI) macht WebView2 nativ - der einzige hier nachweislich
 // zuverlaessige Pfad (Hauptfenster/Tuersteher). Die "Transparenz" liefert ein beim Oeffnen
@@ -4062,7 +4205,18 @@ static json handleChannel(const std::string& channel, const json& args) {
         // 2) Exe-/Datei-Icon
         return fileIconDataUrl(p);
     }
-    // ---- Ruckler-Blackbox (Analyse-Reiter) ----
+    // ---- Ruckler-Blackbox (Analyse-Reiter + Analyse-OSD) ----
+    // Das Analyse-OSD meldet seine Panelgroesse wie osd.html -> Fenster darauf verkleinern
+    // (nur so kann es NIE Klicks ausserhalb des Panels blockieren).
+    if (channel == "an-bounds" && args.size() >= 1 && args[0].is_object()) {
+        int w = (int)args[0].value("w", 0.0), h = (int)args[0].value("h", 0.0);
+        if (w > 0 && h > 0 && (w != g_anW || h != g_anH || !g_anHavePanel)) {
+            g_anW = w; g_anH = h; g_anHavePanel = true;
+            applyAnalyzeOsdGeometry();
+            anMakeChildrenClickThrough();
+        }
+        return true;
+    }
     if (channel == "analyze-toggle") { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 0); return true; }
     if (channel == "analyze-stop") { analyzeStop(); return true; }
     if (channel == "analyze-status") { analyzePushStatus(); return true; }
