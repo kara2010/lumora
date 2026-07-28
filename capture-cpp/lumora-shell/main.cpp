@@ -4274,6 +4274,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
             // Prototyp-/Diagnosemodus der Ruckler-Blackbox: 5 s Kernel-ETW mitschneiden und
             // Aggregate ausgeben (Konsole + %TEMP%\lumora-analyze-dump.txt). Elevated noetig.
             if (wcscmp(av[i], L"--analyze-dump") == 0) return lubroker::runAnalyzeDump();
+            // Mess-Broker der Ruckler-Blackbox (geplante Aufgabe LumoraOSD-Analyze, elevated)
+            if (wcscmp(av[i], L"--analyze-broker") == 0) return lubroker::runAnalyzeBroker();
         }
     }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
