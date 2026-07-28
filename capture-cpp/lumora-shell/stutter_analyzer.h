@@ -134,6 +134,10 @@ public:
         if (ft <= 0 || ft > 5000) return;
         frames_.push({ t, ft, pid });
         allFtT_.push_back(t); allFt_.push_back(ft);        // Gesamtserie fuer den Report
+        // Fester Live-Ring fuer recentFt (OSD-Schrieb): der grosse Vektor darf von fremden
+        // Threads NICHT gelesen werden (push_back-Reallokation -> Use-after-free; real
+        // passiert: Broker-Absturz nach ~5 Minuten Messung). Ring ist fix + lockfrei.
+        recent_[frameCount_ % 64] = ft;
         ++frameCount_;
         // Spike-Pruefung inline (billig): Median der letzten 64 Frametimes
         double med = median64();
@@ -189,12 +193,14 @@ public:
     }
     const std::vector<Finding>& findings() const { return findings_; }
     uint32_t spikeCount() const { return (uint32_t)findings_.size(); }
-    // Letzte n Frametimes (aeltester zuerst) fuer den Live-Schrieb im Analyse-OSD.
-    // Leser-Race auf dem Vektor-Ende ist tolerierbar (nur Anzeige, POD-floats).
+    // Letzte n Frametimes (aeltester zuerst) fuer den Live-Schrieb im Analyse-OSD -
+    // AUSSCHLIESSLICH aus dem festen recent_-Ring (nie aus dem wachsenden Vektor,
+    // s. Kommentar in pushFrame: Reallokation + Fremd-Thread = Absturz).
     uint32_t recentFt(float* out, uint32_t n) const {
-        size_t sz = allFt_.size();
-        uint32_t cnt = (uint32_t)(sz < n ? sz : n);
-        for (uint32_t i = 0; i < cnt; ++i) out[i] = allFt_[sz - cnt + i];
+        if (n > 64) n = 64;
+        uint64_t fc = frameCount_;
+        uint32_t cnt = (uint32_t)(fc < n ? fc : n);
+        for (uint32_t i = 0; i < cnt; ++i) out[i] = recent_[(fc - cnt + i) % 64];
         return cnt;
     }
     uint64_t frameCount() const { return frameCount_; }
@@ -266,7 +272,8 @@ private:
     double bucketT0_ = 0;
     // Frame-Zustand (nur Present-Thread)
     double lastPresent_ = 0, lastSpikeT_ = -1, graceUntil_ = 0;
-    uint64_t frameCount_ = 0;
+    volatile uint64_t frameCount_ = 0;
+    float recent_[64] = {};   // fester Live-Ring fuer recentFt (lockfrei, nie realloziert)
     std::vector<double> allFtT_; std::vector<float> allFt_;   // Gesamtserie (Report)
     // Spike-Uebergabe an den Worker
     std::atomic<uint32_t> pendingSpike_{ 0 };
