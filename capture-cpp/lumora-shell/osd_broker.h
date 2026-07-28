@@ -200,6 +200,12 @@ inline int runAnalyzeBroker() {
         mem[3] = spikeCount.load(); mem[4] = lastFindingId.load();
         mem[5] = (uint32_t)(st.medianFtMs * 100); mem[6] = (uint32_t)(st.avgFps * 10);
         mem[10] = presentOnly ? 1 : 0; mem[11] = ana.targetPid(); mem[12] = (now - startTick) / 1000;
+        {   // Live-Frametimes fuers Analyse-OSD (echter Schrieb statt 1-Hz-Median):
+            // mem[20] = Frame-Zaehler, mem[21..60] = letzte 40 Frametimes x100 (aeltester zuerst)
+            float fts[40]; uint32_t n = ana.recentFt(fts, 40);
+            for (uint32_t i = 0; i < 40; ++i) mem[21 + i] = i < n ? (uint32_t)(fts[i] * 100.0f + 0.5f) : 0;
+            mem[20] = (uint32_t)ana.frameCount();
+        }
         // Ende: App will stoppen (wanted=0) oder App-Heartbeat weg (>5s, nach 8s Anlauf)
         bool appAlive = (mem[16] && (uint32_t)(now - mem[16]) < 5000) || (uint32_t)(now - startTick) < 8000;
         if (!mem[17] || !appAlive) break;
@@ -377,7 +383,11 @@ static const uint32_t FPS_MAGIC = 0x4C4F5344;   // 'LOSD'
 // PresentMon-Prozesse, die kein Spiel sind (1:1 aus main.js PM_IGNORE)
 static bool pmIgnore(const std::string& app) {
     static const std::set<std::string> ig = { "dwm.exe","explorer.exe","lumora.exe","lumora_shell.exe","presentmon.exe",
-        "searchhost.exe","textinputhost.exe","shellexperiencehost.exe","startmenuexperiencehost.exe","applicationframehost.exe" };
+        "searchhost.exe","textinputhost.exe","shellexperiencehost.exe","startmenuexperiencehost.exe","applicationframehost.exe",
+        // WebView2-Renderer: praesentiert fuer UNSERE Overlays (Analyse-/Gaming-OSD) - ohne
+        // diesen Eintrag koennte die Ziel-PID-Wahl der Ruckler-Blackbox das eigene OSD
+        // als "Spiel" waehlen (Selbstmessungs-Falle).
+        "msedgewebview2.exe" };
     std::string a = app; for (auto& c : a) c = (char)tolower((unsigned char)c);
     return ig.count(a) > 0;
 }
