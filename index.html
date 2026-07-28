@@ -3149,7 +3149,10 @@ async function anShowReport(file) {
     + aggHtml + spikesHtml
     + '<div class="an-actions"><button class="btn-browse" onclick="anExport(\'' + anEsc(file) + '\')">' + window.tr('Als Text kopieren') + '</button></div>'
   requestAnimationFrame(() => { const cv = document.getElementById('anChart'); if (cv) anDrawChart(cv, r.ftSeries, r.findings) })
-  box.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // NUR den Einstellungs-Scrollbereich bewegen - scrollIntoView scrollte auch die
+  // Eltern-Container und schob damit die Reiterleiste (#detailNav) aus dem Bild.
+  const sv = document.getElementById('settingsView')
+  if (sv) sv.scrollTo({ top: sv.scrollTop + box.getBoundingClientRect().top - sv.getBoundingClientRect().top - 10, behavior: 'smooth' })
 }
 async function anRefreshHistory() {
   anHist = (await ipcRenderer.invoke('analyze-list')) || []
