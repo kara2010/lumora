@@ -3,11 +3,10 @@
 <head>
 <meta charset="utf-8">
 <style>
-  /* Analyse-OSD ("Ruckler-Blackbox") - BEWUSST eine eigene Designsprache, klar
-     abgesetzt vom Gaming-OSD: Messinstrument-Optik (dunkle Glaskarte, Messrahmen,
-     Monospace-Kennzahlen, pulsierender REC-Punkt, grosser Frametime-Schrieb).
-     Wird per DirectComposition per-pixel-transparent ueber das Spiel gelegt und ist
-     komplett click-through - hier NICHTS interaktiv machen. */
+  /* Analyse-OSD ("Ruckler-Blackbox") - eigene Designsprache, klar abgesetzt vom
+     Gaming-OSD: Praezisions-Messgeraet trifft Sci-Fi-HUD. Phosphor-Oszilloskop mit
+     Nachleuchten, Severity-Farbverlauf, Sucher-Ecken, Spike-Blitz. Per-pixel-
+     transparent + komplett click-through - hier ist NICHTS interaktiv. */
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none;
@@ -15,64 +14,97 @@
     font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
   }
   #panel {
-    position: absolute; top: 0; left: 0; margin: 16px; width: 420px;
-    background: linear-gradient(160deg, rgba(10,13,20,.90), rgba(8,10,16,.84));
-    border: 1px solid rgba(120,190,255,.22);
-    border-radius: 14px; padding: 12px 14px 10px;
-    box-shadow: 0 10px 34px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05);
-    backdrop-filter: blur(3px);
-    color: #dce6f2;
+    position: absolute; top: 0; left: 0; margin: 18px; width: 460px;
+    background: linear-gradient(165deg, rgba(8,12,22,.93), rgba(5,8,15,.88));
+    border: 1px solid rgba(0,229,255,.28);
+    border-radius: 12px; padding: 13px 15px 11px;
+    box-shadow: 0 14px 44px rgba(0,0,0,.6), 0 0 24px rgba(0,229,255,.08),
+                inset 0 1px 0 rgba(255,255,255,.06);
+    backdrop-filter: blur(4px);
+    color: #d9eaf5;
   }
-  /* Kopfzeile: REC-Punkt + Titel + Laufzeit */
-  .head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-  .rec { width: 9px; height: 9px; border-radius: 50%; background: #ff4d4d;
-         box-shadow: 0 0 0 0 rgba(255,77,77,.7); animation: pulse 1.6s infinite; flex: 0 0 auto; }
+  /* Sucher-Ecken (Viewfinder) um das ganze Panel */
+  .corner { position: absolute; width: 16px; height: 16px; pointer-events: none; }
+  .corner::before, .corner::after { content: ''; position: absolute; background: rgba(0,229,255,.85);
+    box-shadow: 0 0 6px rgba(0,229,255,.7); }
+  .corner::before { width: 16px; height: 2px; } .corner::after { width: 2px; height: 16px; }
+  .c-tl { top: -5px; left: -5px; } .c-tl::before { top: 0; left: 0; } .c-tl::after { top: 0; left: 0; }
+  .c-tr { top: -5px; right: -5px; } .c-tr::before { top: 0; right: 0; } .c-tr::after { top: 0; right: 0; }
+  .c-bl { bottom: -5px; left: -5px; } .c-bl::before { bottom: 0; left: 0; } .c-bl::after { bottom: 0; left: 0; }
+  .c-br { bottom: -5px; right: -5px; } .c-br::before { bottom: 0; right: 0; } .c-br::after { bottom: 0; right: 0; }
+  /* Spike-Blitz: kurzer roter Puls auf dem Panel-Rahmen */
+  #panel.flash { animation: flash .5s ease-out; }
+  @keyframes flash {
+    0% { border-color: rgba(255,64,80,.95); box-shadow: 0 14px 44px rgba(0,0,0,.6), 0 0 42px rgba(255,64,80,.55), inset 0 0 22px rgba(255,64,80,.18); }
+    100% { border-color: rgba(0,229,255,.28); box-shadow: 0 14px 44px rgba(0,0,0,.6), 0 0 24px rgba(0,229,255,.08), inset 0 1px 0 rgba(255,255,255,.06); }
+  }
+  /* Kopf: REC + Titel + Timecode */
+  .head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+  .rec { width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff8a8a, #ff2a3c);
+         box-shadow: 0 0 8px rgba(255,42,60,.9); animation: pulse 1.4s infinite; flex: 0 0 auto; }
   @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(255,77,77,.65); }
-    70%  { box-shadow: 0 0 0 7px rgba(255,77,77,0); }
-    100% { box-shadow: 0 0 0 0 rgba(255,77,77,0); }
+    0%   { box-shadow: 0 0 0 0 rgba(255,42,60,.6), 0 0 8px rgba(255,42,60,.9); }
+    70%  { box-shadow: 0 0 0 9px rgba(255,42,60,0), 0 0 8px rgba(255,42,60,.9); }
+    100% { box-shadow: 0 0 0 0 rgba(255,42,60,0), 0 0 8px rgba(255,42,60,.9); }
   }
-  .title { font-size: 11px; letter-spacing: .18em; color: #8fb4dd; text-transform: uppercase; }
-  .time { margin-left: auto; font-size: 13px; color: #eaf2ff; font-weight: 700; }
-  /* Kennzahlen-Reihe */
-  .stats { display: flex; gap: 8px; margin-bottom: 9px; }
-  .stat { flex: 1; background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.06);
-          border-radius: 9px; padding: 6px 8px 5px; }
-  .stat .k { font-size: 9px; letter-spacing: .14em; color: #7e93ab; text-transform: uppercase; }
-  .stat .v { font-size: 17px; font-weight: 700; color: #eaf2ff; line-height: 1.15; }
-  .stat .v small { font-size: 10px; color: #7e93ab; font-weight: 400; margin-left: 2px; }
-  .stat.alarm .v { color: #ff7a7a; }
-  /* Frametime-Schrieb */
-  #graphWrap { position: relative; height: 74px; border-radius: 9px; overflow: hidden;
-               background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); }
-  #ft { display: block; width: 100%; height: 100%; }
-  .axis { position: absolute; right: 6px; top: 4px; font-size: 9px; color: #6f8399; }
+  .title { font-size: 11px; letter-spacing: .24em; text-transform: uppercase;
+           background: linear-gradient(90deg, #4ce0ff, #9a7bff);
+           -webkit-background-clip: text; background-clip: text; color: transparent; font-weight: 700; }
+  .time { margin-left: auto; font-size: 15px; font-weight: 700; color: #eaf6ff;
+          text-shadow: 0 0 10px rgba(0,229,255,.45); }
+  /* Kennzahlen */
+  .stats { display: flex; gap: 8px; margin-bottom: 10px; }
+  .stat { flex: 1; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+          border-radius: 9px; padding: 7px 9px 6px; position: relative; overflow: hidden; }
+  .stat::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+                  background: linear-gradient(180deg, #35e08a, transparent); opacity: .9; }
+  .stat.mid::before { background: linear-gradient(180deg, #4ce0ff, transparent); }
+  .stat.alarm::before { background: linear-gradient(180deg, #ff2a3c, transparent); }
+  .stat .k { font-size: 8.5px; letter-spacing: .18em; color: #6d86a0; text-transform: uppercase; }
+  .stat .v { font-size: 21px; font-weight: 800; line-height: 1.12; color: #eef7ff;
+             text-shadow: 0 0 12px rgba(76,224,255,.35); }
+  .stat .v small { font-size: 10px; color: #6d86a0; font-weight: 400; margin-left: 2px; }
+  .stat.alarm .v { color: #ff8d99; text-shadow: 0 0 12px rgba(255,42,60,.5); }
+  /* Oszilloskop */
+  #graphWrap { position: relative; height: 108px; border-radius: 9px; overflow: hidden;
+               background: linear-gradient(180deg, rgba(4,10,18,.92), rgba(3,7,13,.96));
+               border: 1px solid rgba(0,229,255,.14); }
+  #ftc { display: block; width: 100%; height: 100%; }
+  .axis { position: absolute; right: 7px; top: 5px; font-size: 9px; color: #4ce0ff; opacity: .75; }
+  .axis2 { position: absolute; left: 7px; top: 5px; font-size: 9px; color: #5f7d99; }
   /* Befund-Banner */
-  #find { margin-top: 9px; border-radius: 9px; padding: 8px 10px; font-size: 12px;
-          background: linear-gradient(90deg, rgba(255,86,86,.16), rgba(255,86,86,.05));
-          border: 1px solid rgba(255,120,120,.30); color: #ffd9d9;
-          display: none; animation: slidein .28s cubic-bezier(.2,.9,.3,1.2); }
-  @keyframes slidein { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  #find { margin-top: 10px; border-radius: 9px; padding: 9px 11px 8px; font-size: 12.5px;
+          background: linear-gradient(90deg, rgba(255,42,60,.20), rgba(255,42,60,.04));
+          border: 1px solid rgba(255,90,104,.4); border-left: 3px solid #ff2a3c; color: #ffdfe2;
+          display: none; animation: slidein .3s cubic-bezier(.2,.9,.3,1.25);
+          box-shadow: 0 0 18px rgba(255,42,60,.15); }
+  @keyframes slidein { from { opacity: 0; transform: translateY(-8px) scale(.985); } to { opacity: 1; transform: none; } }
   #find b { color: #fff; }
-  #find .sub { display: block; color: #ffb9b9; font-size: 10.5px; margin-top: 2px; }
-  .foot { margin-top: 8px; display: flex; align-items: center; gap: 6px; font-size: 9.5px; color: #64788d; }
-  .dot { width: 4px; height: 4px; border-radius: 50%; background: #3f9d5a; }
-  .dot.warn { background: #d8a13a; }
+  #find .sub { display: block; color: #ffaeb6; font-size: 10.5px; margin-top: 3px; }
+  .foot { margin-top: 9px; display: flex; align-items: center; gap: 6px; font-size: 9.5px; color: #5c7288; }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: #35e08a; box-shadow: 0 0 6px rgba(53,224,138,.8); }
+  .dot.warn { background: #ffb03a; box-shadow: 0 0 6px rgba(255,176,58,.8); }
 </style>
 </head>
 <body>
 <div id="panel">
+  <div class="corner c-tl"></div><div class="corner c-tr"></div>
+  <div class="corner c-bl"></div><div class="corner c-br"></div>
   <div class="head">
     <div class="rec"></div>
-    <div class="title">Ruckler-Analyse</div>
+    <div class="title">Ruckler-Blackbox</div>
     <div class="time" id="time">00:00</div>
   </div>
   <div class="stats">
     <div class="stat"><div class="k">FPS Ø</div><div class="v" id="fps">–</div></div>
-    <div class="stat"><div class="k">Frametime</div><div class="v" id="ft">–<small>ms</small></div></div>
+    <div class="stat mid"><div class="k">Frametime</div><div class="v" id="ft">–<small>ms</small></div></div>
     <div class="stat" id="spikeBox"><div class="k">Ruckler</div><div class="v" id="spikes">0</div></div>
   </div>
-  <div id="graphWrap"><canvas id="ftc"></canvas><div class="axis" id="axis">50 ms</div></div>
+  <div id="graphWrap">
+    <canvas id="ftc"></canvas>
+    <div class="axis" id="axis">50 ms</div>
+    <div class="axis2" id="axis2"></div>
+  </div>
   <div id="find"></div>
   <div class="foot"><span class="dot" id="hdot"></span><span id="hint">Messung laeuft – Alt+A beendet sie</span></div>
 </div>
@@ -82,78 +114,125 @@
   let ipcRenderer = null;
   try { ipcRenderer = require('electron').ipcRenderer; } catch (e) {}
 
-  // ---- Panelgroesse an die Shell melden (Fenster wird darauf verkleinert -> das
-  //      Overlay kann NIEMALS Klicks ausserhalb des Panels blockieren) -------------
+  // ---- Panelgroesse an die Shell melden (Fenster = nur Panelflaeche, click-through) --
   const panel = $('panel');
   let _rb = 0;
   function reportBounds() {
     if (!ipcRenderer) return;
     const r = panel.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return;
-    const dpr = window.devicePixelRatio || 1, M = 16;
+    const dpr = window.devicePixelRatio || 1, M = 18;
     ipcRenderer.invoke('an-bounds', { w: Math.ceil((r.width + 2 * M) * dpr), h: Math.ceil((r.height + 2 * M) * dpr) });
   }
   function scheduleBounds() { if (_rb) return; _rb = requestAnimationFrame(() => { _rb = 0; reportBounds(); }); }
   try { new ResizeObserver(scheduleBounds).observe(panel); } catch (e) {}
 
-  // ---- Frametime-Schrieb (eigener, groesser als im Gaming-OSD) ------------------
+  // ---- Phosphor-Oszilloskop -------------------------------------------------------
+  // Echte Frametimes (5-Hz-Batches aus dem Broker-SHM) laufen in einen Ring; gezeichnet
+  // wird mit ~30 fps: Nachleuchten (Fade statt Clear), Severity-Farbe je Punkt
+  // (gruen < 1.5x Median, amber < Spike-Schwelle, rot = Spike), Glow via shadowBlur.
   const cv = $('ftc'), ctx = cv.getContext('2d');
-  const N = 240, hist = new Array(N).fill(0);
-  let spikeMarks = new Array(N).fill(0);
+  const N = 360;
+  const hist = new Array(N).fill(-1);         // -1 = noch keine Daten (Luecke)
+  const marks = new Array(N).fill(0);
+  let median = 0, frameNo = 0, dirty = true;
+
+  function sevColor(v) {
+    if (median <= 0) return '#4ce0ff';
+    if (v > Math.max(3 * median, median + 8)) return '#ff2a3c';
+    if (v > 1.6 * median) return '#ffb03a';
+    return '#35e08a';
+  }
   function draw() {
     const dpr = window.devicePixelRatio || 1;
     const w = cv.clientWidth, h = cv.clientHeight;
+    if (!w || !h) return;
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
       cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = 'rgba(3,7,13,1)'; ctx.fillRect(0, 0, w, h);
     }
+    // Nachleuchten: alten Inhalt leicht abdunkeln statt loeschen (Phosphor-Effekt)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    // Skala dynamisch: mind. 50 ms, sonst 1,25x Maximum (gerundet)
+    ctx.fillStyle = 'rgba(3,7,13,.28)'; ctx.fillRect(0, 0, w, h);
+    // Skala: mind. 40 ms oder 1.3x Maximum
     let mx = 0; for (const v of hist) if (v > mx) mx = v;
-    const scale = Math.max(50, Math.ceil(mx * 1.25 / 10) * 10);
+    const scale = Math.max(40, Math.ceil(mx * 1.3 / 10) * 10);
     $('axis').textContent = scale + ' ms';
-    // Gitter (16,7 / 33,3 ms = 60/30 fps)
-    ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.lineWidth = 1;
-    for (const ms of [16.7, 33.3]) {
-      const y = h - (ms / scale) * h;
-      if (y > 2 && y < h - 2) { ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke(); }
+    $('axis2').textContent = median > 0 ? ('Median ' + median.toFixed(1) + ' ms') : '';
+    const Y = v => h - Math.min(1, v / scale) * (h - 10) - 4;
+    // Raster: 60/30-fps-Linien gepunktet
+    ctx.save();
+    ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
+    for (const [ms, lab] of [[16.7, '60'], [33.3, '30']]) {
+      const y = Y(ms);
+      if (y > 8 && y < h - 4) {
+        ctx.strokeStyle = 'rgba(76,224,255,.14)';
+        ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(w, y + .5); ctx.stroke();
+        ctx.fillStyle = 'rgba(95,125,153,.8)'; ctx.font = '8px Consolas';
+        ctx.fillText(lab, 3, y - 2);
+      }
     }
-    // Verlaufs-Flaeche
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, 'rgba(96,190,255,.42)'); g.addColorStop(1, 'rgba(96,190,255,.03)');
-    ctx.beginPath(); ctx.moveTo(0, h);
+    ctx.restore();
+    // Kurve mit Glow + Severity-Segmentfarben
+    ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+    let prevX = -1, prevY = 0;
     for (let i = 0; i < N; i++) {
-      const x = (i / (N - 1)) * w, y = h - Math.min(1, hist[i] / scale) * h;
-      ctx.lineTo(x, y);
+      const v = hist[i];
+      if (v < 0) { prevX = -1; continue; }
+      const x = (i / (N - 1)) * w, y = Y(v);
+      if (prevX >= 0) {
+        const col = sevColor(v);
+        ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 7;
+        ctx.beginPath(); ctx.moveTo(prevX, prevY); ctx.lineTo(x, y); ctx.stroke();
+      }
+      prevX = x; prevY = y;
     }
-    ctx.lineTo(w, h); ctx.closePath(); ctx.fillStyle = g; ctx.fill();
-    // Linie
-    ctx.beginPath();
-    for (let i = 0; i < N; i++) {
-      const x = (i / (N - 1)) * w, y = h - Math.min(1, hist[i] / scale) * h;
-      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    ctx.shadowBlur = 0;
+    // Spike-Marker: leuchtende Raute + Vertikalstrahl
+    for (let i = 0; i < N; i++) if (marks[i] && hist[i] >= 0) {
+      const x = (i / (N - 1)) * w, y = Y(hist[i]);
+      const g = ctx.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, 'rgba(255,42,60,.45)'); g.addColorStop(1, 'rgba(255,42,60,0)');
+      ctx.fillStyle = g; ctx.fillRect(x - 1, 0, 2, h);
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = '#ff2a3c'; ctx.shadowColor = '#ff2a3c'; ctx.shadowBlur = 10;
+      ctx.fillRect(-3, -3, 6, 6);
+      ctx.restore(); ctx.shadowBlur = 0;
     }
-    ctx.strokeStyle = 'rgba(140,210,255,.95)'; ctx.lineWidth = 1.4; ctx.stroke();
-    // Spike-Marker
-    for (let i = 0; i < N; i++) if (spikeMarks[i]) {
-      const x = (i / (N - 1)) * w;
-      ctx.strokeStyle = 'rgba(255,90,90,.75)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, h); ctx.stroke();
+    // Schreibkopf: heller Punkt am juengsten Wert
+    for (let i = N - 1; i >= 0; i--) if (hist[i] >= 0) {
+      const x = (i / (N - 1)) * w, y = Y(hist[i]);
+      ctx.fillStyle = '#eaf6ff'; ctx.shadowColor = '#4ce0ff'; ctx.shadowBlur = 12;
+      ctx.beginPath(); ctx.arc(x, y, 2.2, 0, 7); ctx.fill();
+      ctx.shadowBlur = 0; break;
     }
   }
-  function pushFt(ms, spike) {
-    hist.push(ms); hist.shift();
-    spikeMarks.push(spike ? 1 : 0); spikeMarks.shift();
-    draw();
+  // 30-fps-Zeichenschleife, aber nur solange sich etwas geaendert hat (dirty) -
+  // das Nachleuchten laeuft dabei ein paar Frames aus, dann steht das Bild.
+  let fade = 0;
+  (function loop() {
+    if (dirty || fade > 0) { if (!dirty) fade--; else fade = 24; dirty = false; draw(); }
+    setTimeout(() => requestAnimationFrame(loop), 33);
+  })();
+
+  function pushFts(arr, spikeNew) {
+    for (let k = 0; k < arr.length; k++) {
+      hist.push(arr[k]); hist.shift();
+      marks.push(0); marks.shift();
+    }
+    if (spikeNew && arr.length) marks[N - 1] = 1;   // Spike am juengsten Punkt markieren
+    dirty = true;
   }
 
-  // ---- Daten von der Shell ------------------------------------------------------
+  // ---- Daten von der Shell --------------------------------------------------------
   function fmtTime(s) {
     s = Math.max(0, s | 0);
     const m = (s / 60) | 0, r = s % 60;
     return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
   }
-  let lastSpikes = 0;
+  let lastSpikes = 0, lastFrameNo = 0;
   if (ipcRenderer) {
     ipcRenderer.on('an-data', (e, d) => {
       if (!d) return;
@@ -162,9 +241,16 @@
       $('ft').innerHTML = d.medianFt > 0 ? d.medianFt.toFixed(1) + '<small>ms</small>' : '–<small>ms</small>';
       $('spikes').textContent = d.spikes | 0;
       $('spikeBox').classList.toggle('alarm', (d.spikes | 0) > 0);
-      pushFt(d.medianFt > 0 ? d.medianFt : 0, (d.spikes | 0) > lastSpikes);
+      median = d.medianFt > 0 ? d.medianFt : median;
+      // Nur die NEUEN Frametimes seit dem letzten Batch anhaengen (frameNo = Gesamtzaehler)
+      const fts = Array.isArray(d.fts) ? d.fts : [];
+      const newN = Math.max(0, Math.min(fts.length, (d.frameNo | 0) - lastFrameNo));
+      lastFrameNo = d.frameNo | 0;
+      const spikeNew = (d.spikes | 0) > lastSpikes;
       lastSpikes = d.spikes | 0;
-      // Fusszeile: Selbstlast + Hinweise ehrlich anzeigen
+      if (newN > 0) pushFts(fts.slice(fts.length - newN), spikeNew);
+      else if (spikeNew) { const i = hist.length - 1; if (hist[i] >= 0) { marks[i] = 1; dirty = true; } }
+      if (spikeNew) { panel.classList.remove('flash'); void panel.offsetWidth; panel.classList.add('flash'); }
       const perm = d.selfPermille | 0;
       $('hdot').className = 'dot' + (perm > 10 || d.err ? ' warn' : '');
       let hint = 'Messung laeuft – Alt+A beendet sie';
@@ -184,12 +270,44 @@
                      (s.name ? ': ' + s.name : '') + '<span class="sub">' + (s.evidence || '') + '</span>';
       el.style.display = 'block';
       el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
-      clearTimeout(el._t); el._t = setTimeout(() => { el.style.display = 'none'; scheduleBounds(); }, 5000);
+      clearTimeout(el._t); el._t = setTimeout(() => { el.style.display = 'none'; scheduleBounds(); }, 6000);
       scheduleBounds();
     });
   }
-  draw(); scheduleBounds();
-  window.addEventListener('resize', () => { draw(); scheduleBounds(); });
+  // ---- Demo-Modus (im Browser ohne Shell): synthetischer Lauf fuer Design-Pruefung
+  //      und Website-Screenshots - gleiche Optik wie live.
+  if (!ipcRenderer) {
+    let sec = 0, spikes = 0, fno = 0;
+    $('hint').textContent = 'DEMO – forzahorizon5.exe';
+    setInterval(() => {
+      const batch = [];
+      for (let i = 0; i < 14; i++) {
+        let v = 6.9 + Math.random() * 1.6 + (Math.random() < 0.03 ? Math.random() * 6 : 0);
+        batch.push(v);
+      }
+      let spikeNew = false;
+      if (Math.random() < 0.06) { batch[batch.length - 1] = 45 + Math.random() * 50; spikes++; spikeNew = true; }
+      fno += batch.length; sec += 0.2;
+      median = 7.2;
+      $('time').textContent = fmtTime(sec);
+      $('fps').textContent = '138';
+      $('ft').innerHTML = '7.2<small>ms</small>';
+      $('spikes').textContent = spikes;
+      $('spikeBox').classList.toggle('alarm', spikes > 0);
+      pushFts(batch, spikeNew);
+      if (spikeNew) {
+        panel.classList.remove('flash'); void panel.offsetWidth; panel.classList.add('flash');
+        const el = $('find');
+        el.innerHTML = '<b>Ruckler #' + spikes + ' · ' + (batch[batch.length - 1] | 0) + ' ms</b> – Treiber: nvlddmkm.sys' +
+                       '<span class="sub">DPC/ISR max 812us, Summe 1943us im Fenster (Basis max 40us)</span>';
+        el.style.display = 'block';
+        el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+        clearTimeout(el._t); el._t = setTimeout(() => { el.style.display = 'none'; }, 6000);
+      }
+    }, 200);
+  }
+  dirty = true; scheduleBounds();
+  window.addEventListener('resize', () => { dirty = true; scheduleBounds(); });
 })();
 </script>
 </body>

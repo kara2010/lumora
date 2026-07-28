@@ -2680,6 +2680,7 @@ static bool g_anStopping = false;
 static uint64_t g_anTailOff = 0;
 static uint32_t g_anLastFindingPushed = 0;
 static std::atomic<bool> g_anSetupRunning{ false };
+static std::atomic<int> g_anReady{ -1 };   // -1 unbekannt (Check laeuft), 0 nicht eingerichtet, 1 bereit
 static std::wstring analyzeDirW() { return dataDir() + L"\\analyze"; }
 static bool anShmOpen() {
     if (g_anShm) return true;
@@ -2734,9 +2735,23 @@ static void analyzePushStatus() {   // UI-Statuszeile (Reiter) + Analyse-OSD spe
                 {"sec", have ? (int)m[12] : 0}, {"avgFps", have ? m[6] / 10.0 : 0},
                 {"medianFt", have ? m[5] / 100.0 : 0}, {"cswPerSec", have ? (int)m[7] : 0},
                 {"selfPermille", have ? (int)m[8] : 0}, {"err", have ? (int)m[9] : 0},
-                {"target", have && m[11] ? luetw::pidExeName(m[11]) : ""} };
+                {"target", have && m[11] ? luetw::pidExeName(m[11]) : ""},
+                {"ready", g_anReady.load()}, {"setupRunning", g_anSetupRunning.load()} };
     sendToUi("analyze-status", st);
-    if (g_anMeasuring) sendToAnalyzeOsd("an-data", st);   // eigenes Analyse-Overlay speisen
+}
+// Analyse-OSD-Feed (JEDER 200-ms-Tick): Status + die ECHTEN letzten Frametimes aus dem
+// SHM-Ring (mem[20]=Frame-Zaehler, mem[21..60]=ftX100) - erst damit lebt der Schrieb;
+// der 1-Hz-Median allein sah aus wie ein Lineal (User-Befund "0,0 WOW").
+static void analyzeFeedOsd() {
+    uint32_t m[64] = {};
+    if (!anShmRead(m)) return;
+    json fts = json::array();
+    for (int i = 0; i < 40; ++i) if (m[21 + i]) fts.push_back(m[21 + i] / 100.0);
+    json d = { {"sec", (int)m[12]}, {"spikes", (int)m[3]}, {"avgFps", m[6] / 10.0},
+               {"medianFt", m[5] / 100.0}, {"frameNo", m[20]}, {"fts", fts},
+               {"selfPermille", (int)m[8]}, {"err", (int)m[9]},
+               {"target", m[11] ? luetw::pidExeName(m[11]) : ""} };
+    sendToAnalyzeOsd("an-data", d);
 }
 static void analyzeTailFindings() {   // neue Befund-Zeilen aus findings.jsonl an UI/OSD pushen
     FILE* f = nullptr;
@@ -2791,10 +2806,26 @@ static void analyzeStartMeasurement() {
     bcLogStream("analyze: Messung gestartet");
     analyzePushStatus();
 }
-static void ensureAnalyzeSetup() {   // LAZY: Aufgabe erst beim ersten Messstart registrieren (EIN UAC)
-    if (g_anSetupRunning.exchange(true)) return;
+// Hintergrund-Check "ist die Aufgabe eingerichtet?" (PowerShell, bis 8s) - einmalig,
+// gefuettert wird g_anReady; die UI zeigt danach "Einrichten" ODER "Messung starten".
+static void analyzeEnsureReadyCheck() {
+    static std::atomic<bool> running{ false };
+    if (g_anReady.load() != -1 || running.exchange(true)) return;
     std::thread([]() {
-        if (analyzeTaskPresent()) { g_anSetupRunning = false; PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 1); return; }
+        g_anReady = analyzeTaskPresent() ? 1 : 0;
+        analyzePushStatus();
+    }).detach();
+}
+// EXPLIZITER Einrichtungs-Schritt (User-Vorgabe): bewusst VOR dem ersten Spielstart
+// durchfuehrbar, startet danach KEINE Messung automatisch - so ist der erste echte
+// Messlauf sauber (keine UAC-/Setup-/Spielstart-Stoergeraeusche im Ergebnis).
+static void ensureAnalyzeSetup() {
+    if (g_anSetupRunning.exchange(true)) return;
+    analyzePushStatus();
+    std::thread([]() {
+        if (analyzeTaskPresent()) {
+            g_anReady = 1; g_anSetupRunning = false; analyzePushStatus(); return;
+        }
         std::wstring dlg = L"Fuer die Ruckler-Analyse richtet Lumora einmalig einen Hintergrunddienst ein\n"
             L"(Windows-Leistungsdaten lesen: Frametimes, Treiber-Latenzen, Prozess-Last).\n\n"
             L"Gleich fragt Windows EINMAL nach deiner Bestaetigung (Administratorrechte).\n"
@@ -2818,8 +2849,13 @@ static void ensureAnalyzeSetup() {   // LAZY: Aufgabe erst beim ersten Messstart
         runCaptureOutput(L"powershell -NoProfile -Command \"" + outer + L"\"", 20000);
         bool ok = false;
         for (int i = 0; i < 30 && !ok; ++i) { if (analyzeTaskPresent()) ok = true; else Sleep(1000); }
+        g_anReady = ok ? 1 : 0;
         g_anSetupRunning = false;
-        if (ok) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 1);   // jetzt wirklich starten (UI-Thread)
+        analyzePushStatus();
+        // KEIN Auto-Messstart: bewusst getrennter Schritt, damit der erste echte Lauf
+        // ohne Setup-/UAC-Stoergeraeusche ablaeuft (am besten VOR dem Spielstart einrichten).
+        if (ok) MessageBoxW(g_hwnd, L"Einrichtung abgeschlossen. ✓\n\nDie Ruckler-Analyse ist jetzt bereit - starte eine Messung am besten,\nBEVOR du das Spiel startest bzw. waehrend das Spiel bereits ruhig laeuft.",
+                            L"Ruckler-Analyse", MB_OK | MB_ICONINFORMATION);
         else MessageBoxW(g_hwnd, L"Die Einrichtung wurde nicht abgeschlossen (Windows-Sicherheitsabfrage abgelehnt?).\nEinfach erneut starten, wenn du die Analyse nutzen moechtest.", L"Ruckler-Analyse", MB_OK | MB_ICONWARNING);
     }).detach();
 }
@@ -2833,13 +2869,14 @@ static void analyzeStop() {
 static void analyzeToggle() {
     if (g_anMeasuring) { analyzeStop(); return; }
     if (g_anSetupRunning.load()) return;
-    // Task vorhanden? Der Check kostet bis zu 8s (PowerShell) -> im Hintergrund; Start folgt per Post.
-    ensureAnalyzeSetup();
+    if (g_anReady.load() == 1) { analyzeStartMeasurement(); return; }   // eingerichtet -> direkt messen
+    ensureAnalyzeSetup();   // sonst: expliziter Einrichtungs-Schritt (ohne Auto-Start)
 }
 static void analyzeTick() {   // TIMER_ANALYZE (200 ms): Heartbeat, Tail, Statuspush, Ende-Erkennung
     if (!g_anMeasuring) { KillTimer(g_hwnd, TIMER_ANALYZE); return; }
     anShmWriteApp(g_anStopping ? 0 : 1, 0, 0);
     analyzeTailFindings();
+    analyzeFeedOsd();   // Analyse-OSD bei JEDEM Tick (5 Hz) mit echten Frametimes speisen
     static uint32_t lastPush = 0;
     uint32_t now = GetTickCount();
     if (now - lastPush >= 1000) { lastPush = now; analyzePushStatus(); }
@@ -3941,7 +3978,7 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "set-hotkey") {   // (accelerator, which) wie Electron; Rueckgabe {ok}
         std::string acc = args.size() >= 1 && args[0].is_string() ? args[0].get<std::string>() : "";
         std::string which = args.size() >= 2 && args[1].is_string() ? args[1].get<std::string>() : "";
-        std::string key = which == "osd" ? "osdHotkey" : which == "osdEdit" ? "osdEditHotkey" : which == "osdAb" ? "osdAbHotkey" : which == "stream" ? "streamHotkey" : "toggleHotkey";
+        std::string key = which == "osd" ? "osdHotkey" : which == "osdEdit" ? "osdEditHotkey" : which == "osdAb" ? "osdAbHotkey" : which == "stream" ? "streamHotkey" : which == "analyze" ? "analyzeHotkey" : "toggleHotkey";
         json s = loadSettings(); s[key] = acc; writeFile(settingsPath(), s.dump(2));
         return { {"ok", registerHotkeys()} };
     }
@@ -4219,7 +4256,7 @@ static json handleChannel(const std::string& channel, const json& args) {
     }
     if (channel == "analyze-toggle") { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 0); return true; }
     if (channel == "analyze-stop") { analyzeStop(); return true; }
-    if (channel == "analyze-status") { analyzePushStatus(); return true; }
+    if (channel == "analyze-status") { analyzeEnsureReadyCheck(); analyzePushStatus(); return true; }
     if (channel == "analyze-list") {   // Verlauf: alle Berichte mit Kopf-Metadaten (neueste zuerst)
         json out = json::array();
         WIN32_FIND_DATAW fd{};
@@ -4576,7 +4613,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             case HKC_OSDEDIT: setOsdEditMode(!g_osdEdit); break;
             case HKC_AB:      lurtss::toggleAbOsd(); break;
             case HKC_STREAM:  doStreamHotkey((HWND)l); break;
-            case HKC_ANALYZE: if (l == 1) analyzeStartMeasurement(); else analyzeToggle(); break;   // l=1: Start nach Setup-Erfolg
+            case HKC_ANALYZE: analyzeToggle(); break;
         }
         return 0;
     case WM_SHELL_TRAY:

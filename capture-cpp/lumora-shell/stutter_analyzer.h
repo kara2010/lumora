@@ -114,7 +114,13 @@ public:
     // Ziel-PID nachtraeglich setzen (Broker waehlt den aktivsten Praesentierer erst zur
     // Laufzeit). Benigner u32-Race gegen den Present-Thread - schlimmstenfalls zaehlt
     // ein einzelner Frame in den Wechselmoment.
-    void setTargetPid(uint32_t pid) { cfg_.targetPid = pid; }
+    void setTargetPid(uint32_t pid) {
+        cfg_.targetPid = pid;
+        // Schonfrist nach (Neu-)Wahl des Ziels: die ersten Sekunden eines Spiels sind
+        // Lade-/Shader-Phase - deren Spitzen als "Ruckler mit Taeter Spiel" zu melden
+        // ist irrefuehrend (real passiert: Forza wurde beim Start selbst verdaechtigt).
+        graceUntil_ = lastPresent_ + 10.0;
+    }
     uint32_t targetPid() const { return cfg_.targetPid; }
     ~StutterAnalyzer() { stop(); }
 
@@ -131,7 +137,7 @@ public:
         ++frameCount_;
         // Spike-Pruefung inline (billig): Median der letzten 64 Frametimes
         double med = median64();
-        if (med > 0 && ft > (std::max)(cfg_.spikeK * med, med + cfg_.spikeAbsMs)) {
+        if (med > 0 && t >= graceUntil_ && ft > (std::max)(cfg_.spikeK * med, med + cfg_.spikeAbsMs)) {
             if (t - lastSpikeT_ >= cfg_.debounceS) {
                 lastSpikeT_ = t;
                 pendingSpike_.store(1 + (uint32_t)(t * 1000), std::memory_order_release);
@@ -183,6 +189,15 @@ public:
     }
     const std::vector<Finding>& findings() const { return findings_; }
     uint32_t spikeCount() const { return (uint32_t)findings_.size(); }
+    // Letzte n Frametimes (aeltester zuerst) fuer den Live-Schrieb im Analyse-OSD.
+    // Leser-Race auf dem Vektor-Ende ist tolerierbar (nur Anzeige, POD-floats).
+    uint32_t recentFt(float* out, uint32_t n) const {
+        size_t sz = allFt_.size();
+        uint32_t cnt = (uint32_t)(sz < n ? sz : n);
+        for (uint32_t i = 0; i < cnt; ++i) out[i] = allFt_[sz - cnt + i];
+        return cnt;
+    }
+    uint64_t frameCount() const { return frameCount_; }
 
     // Selbstcheck mit synthetischen Daten (fuer --analyze-dump): Spike + Taeter muessen erkannt werden.
     static bool selfCheck(std::string& msg);
@@ -250,7 +265,7 @@ private:
     uint32_t busyUs_ = 0;
     double bucketT0_ = 0;
     // Frame-Zustand (nur Present-Thread)
-    double lastPresent_ = 0, lastSpikeT_ = -1;
+    double lastPresent_ = 0, lastSpikeT_ = -1, graceUntil_ = 0;
     uint64_t frameCount_ = 0;
     std::vector<double> allFtT_; std::vector<float> allFt_;   // Gesamtserie (Report)
     // Spike-Uebergabe an den Worker
@@ -360,7 +375,7 @@ inline void StutterAnalyzer::analyzeSpike(double t, double ftMs, double medMs) {
     {
         std::vector<ProcSample> wp;
         procs_.range(t - 1.0, w1, wp);   // grosszuegiger: Start kurz vorher zaehlt
-        for (auto& p : wp) if (p.start) {
+        for (auto& p : wp) if (p.start && p.pid != cfg_.targetPid) {   // das Spiel selbst ist nie "Stoerer durch Start"
             std::string nm = cfg_.pidName ? cfg_.pidName(p.pid) : "";
             if (nm.empty()) nm = "pid " + std::to_string(p.pid);
             sprintf_s(ev, "Prozess startete %.1f s vor dem Ruckler", t - p.t);

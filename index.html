@@ -1455,6 +1455,8 @@ const I18N_EN = {
     'Every run is saved. Tick two runs to compare them (e.g. before/after disabling a suspicious program) – a note helps you keep track.',
   '▶ Messung starten': '▶ Start measurement',
   '⏹ Messung beenden': '⏹ Stop measurement',
+  '🛠 Analyse einmalig einrichten': '🛠 Set up analysis (one time)',
+  '🛠 Einrichtung läuft …': '🛠 Setting up …',
   'Messung läuft…': 'Measuring…',
   'Messung läuft': 'Measuring',
   'Ruckler': 'stutters',
@@ -3032,7 +3034,15 @@ ipcRenderer.on('analyze-status', (e, st) => {
   anMeasuring = !!(st && st.measuring)
   const btn = document.getElementById('anStartBtn'), live = document.getElementById('anLive')
   if (!btn) return
-  btn.innerHTML = anMeasuring ? window.tr('⏹ Messung beenden') : window.tr('▶ Messung starten')
+  // Expliziter Einrichtungs-Schritt VOR der ersten Messung (eigener Button-Zustand):
+  // ready -1 = Check läuft, 0 = nicht eingerichtet, 1 = bereit. Die Einrichtung startet
+  // bewusst KEINE Messung – der erste echte Lauf bleibt frei von Setup-Störgeräuschen.
+  const ready = st ? st.ready : -1
+  if (st && st.setupRunning) { btn.innerHTML = window.tr('🛠 Einrichtung läuft …'); btn.disabled = true }
+  else if (anMeasuring) { btn.innerHTML = window.tr('⏹ Messung beenden'); btn.disabled = false }
+  else if (ready === 0) { btn.innerHTML = window.tr('🛠 Analyse einmalig einrichten'); btn.disabled = false }
+  else if (ready === -1) { btn.innerHTML = window.tr('▶ Messung starten'); btn.disabled = true }
+  else { btn.innerHTML = window.tr('▶ Messung starten'); btn.disabled = false }
   live.style.display = anMeasuring ? 'inline-flex' : 'none'
   if (anMeasuring) {
     const m = Math.floor((st.sec || 0) / 60), s = (st.sec || 0) % 60
