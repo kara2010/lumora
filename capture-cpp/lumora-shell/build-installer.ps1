@@ -112,7 +112,7 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 Copy-Item "$shell\build\Release\lumora_shell.exe" "$stage\lumora-shell.exe"
 
 # UI-Assets (was das WebView2 laedt) - genau die Dateien, die die Shell via app.lumora mappt
-foreach ($f in "index.html","styles.css","player.html","osd.html","doorman.html","icon.ico","icon-64.png") {
+foreach ($f in "index.html","styles.css","player.html","osd.html","analyze-osd.html","doorman.html","icon.ico","icon-64.png") {
   if (Test-Path "$root\$f") { Copy-Item "$root\$f" $stage }
 }
 # UI-Bilder/Assets (Logos etc.), die index.html/styles.css referenzieren
