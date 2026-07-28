@@ -111,6 +111,11 @@ public:
         stop_ = true;
         if (worker_.joinable()) { wake(); worker_.join(); }
     }
+    // Ziel-PID nachtraeglich setzen (Broker waehlt den aktivsten Praesentierer erst zur
+    // Laufzeit). Benigner u32-Race gegen den Present-Thread - schlimmstenfalls zaehlt
+    // ein einzelner Frame in den Wechselmoment.
+    void setTargetPid(uint32_t pid) { cfg_.targetPid = pid; }
+    uint32_t targetPid() const { return cfg_.targetPid; }
     ~StutterAnalyzer() { stop(); }
 
     // ---- Feeds (jeweils genau EIN Schreiber-Thread) -------------------------------

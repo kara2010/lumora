@@ -28,6 +28,15 @@ public:
     // cb(pid, tSeconds): ein Present()-Aufruf von Prozess pid zum Zeitpunkt t (Sekunden, QPC-basiert).
     using Callback = std::function<void(uint32_t pid, double tSeconds)>;
 
+    // Eigener Sessionname erlaubt eine ZWEITE Present-Session parallel zum FPS-Broker
+    // (User-Mode-Provider duerfen von mehreren Sessions gleichzeitig gelesen werden) -
+    // die Ruckler-Blackbox misst so unabhaengig, ohne dem OSD die Session wegzunehmen.
+    explicit PresentTrace(const wchar_t* sessionName = L"LumoraOSDTrace") : name_(sessionName) {}
+
+    // Gemeinsame QPC-Basis mit anderen Quellen (0 = eigenes t0 beim ersten Event)
+    void setT0(int64_t t0) { t0_ = t0; }
+    int64_t t0() const { return t0_; }
+
     bool start(Callback cb) {
         cb_ = std::move(cb);
         QueryPerformanceFrequency((LARGE_INTEGER*)&qpf_);
@@ -36,7 +45,7 @@ public:
         stopSessionByName();
 
         // Realtime-Session anlegen. ClientContext=1 -> Event-Timestamps sind QPC.
-        size_t sz = sizeof(EVENT_TRACE_PROPERTIES) + (wcslen(SESSION_NAME) + 1) * sizeof(wchar_t);
+        size_t sz = sizeof(EVENT_TRACE_PROPERTIES) + (name_.size() + 1) * sizeof(wchar_t);
         propsBuf_.assign(sz, 0);
         auto* p = (EVENT_TRACE_PROPERTIES*)propsBuf_.data();
         p->Wnode.BufferSize = (ULONG)sz;
@@ -44,7 +53,7 @@ public:
         p->Wnode.ClientContext = 1;                      // QPC
         p->LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
         p->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
-        if (StartTraceW(&session_, SESSION_NAME, p) != ERROR_SUCCESS) return false;
+        if (StartTraceW(&session_, name_.c_str(), p) != ERROR_SUCCESS) return false;
 
         // Beide Present-Provider aktivieren (alle Keywords; gefiltert wird im Callback per Event-ID)
         EnableTraceEx2(session_, &GUID_DXGI, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
@@ -53,7 +62,7 @@ public:
                        TRACE_LEVEL_INFORMATION, 0, 0, 0, nullptr);
 
         EVENT_TRACE_LOGFILEW lf{};
-        lf.LoggerName = (LPWSTR)SESSION_NAME;
+        lf.LoggerName = (LPWSTR)name_.c_str();
         lf.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
         lf.EventRecordCallback = &PresentTrace::onEventStatic;
         lf.Context = this;
@@ -77,15 +86,13 @@ public:
     ~PresentTrace() { stop(); }
 
 private:
-    static constexpr const wchar_t* SESSION_NAME = L"LumoraOSDTrace";
-
     void stopSessionByName() {
         size_t sz = sizeof(EVENT_TRACE_PROPERTIES) + 1024;
         std::vector<char> buf(sz, 0);
         auto* p = (EVENT_TRACE_PROPERTIES*)buf.data();
         p->Wnode.BufferSize = (ULONG)sz;
         p->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
-        ControlTraceW(0, SESSION_NAME, p, EVENT_TRACE_CONTROL_STOP);
+        ControlTraceW(0, name_.c_str(), p, EVENT_TRACE_CONTROL_STOP);
     }
 
     static void WINAPI onEventStatic(EVENT_RECORD* er) {
@@ -103,6 +110,7 @@ private:
         cb_(h.ProcessId, t);
     }
 
+    std::wstring name_;
     Callback cb_;
     TRACEHANDLE session_ = 0;
     TRACEHANDLE consumer_ = INVALID_PROCESSTRACE_HANDLE;

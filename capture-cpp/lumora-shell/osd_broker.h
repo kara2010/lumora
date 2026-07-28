@@ -7,6 +7,9 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <intrin.h>
+#include <shlobj.h>      // SHGetKnownFolderPath (analyzeDir: %APPDATA% im elevated Broker)
+#include <knownfolders.h>
+#include <mutex>
 #include <string>
 #include <map>
 #include <vector>
@@ -18,6 +21,259 @@
 #include "stutter_analyzer.h"
 
 namespace lubroker {
+
+// === Ruckler-Blackbox: Mess-Broker (--analyze-broker) ==============================
+// Explizite Mess-Session: Shell setzt wanted=1 im Kontroll-SHM und startet die
+// geplante Aufgabe LumoraOSD-Analyze; dieser Broker faehrt Kernel-ETW + eigene
+// Present-Session + NVML-Probe hoch, fuettert den StutterAnalyzer, schreibt Befunde
+// live nach findings.jsonl und beim Stop den fertigen Bericht (JSON, mit Kontext-
+// Metadaten aus context.json der Shell). SHM-Layout (pack via u32-Indizes, 256 B):
+//   Broker: [0]='LOSA' [1]=brokerTick [2]=state(1 messen/2 Fehler) [3]=spikeCount
+//           [4]=lastFindingId [5]=medianFtX100 [6]=avgFpsX10 [7]=cswitchPerSec
+//           [8]=selfCpuPermille [9]=errCode [10]=modeEcho [11]=targetPid [12]=sessionSec
+//   App:    [16]=appTick [17]=wanted [18]=appTargetPid [19]=modeWunsch(bit0=presentOnly)
+static const uint32_t ANALYZE_MAGIC = 0x4C4F5341;   // 'LOSA'
+static bool pmIgnore(const std::string& app);       // (unten definiert; Ziel-PID-Wahl nutzt sie)
+
+inline std::wstring analyzeDir() {   // %APPDATA%\lumora\analyze (elevated: KnownFolder, nicht Env)
+    PWSTR p = nullptr; std::wstring d;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p)) && p) { d = p; CoTaskMemFree(p); }
+    d += L"\\lumora\\analyze";
+    CreateDirectoryW((d.substr(0, d.find_last_of(L'\\'))).c_str(), nullptr);
+    CreateDirectoryW(d.c_str(), nullptr);
+    return d;
+}
+inline std::string readSmallFile(const std::wstring& p) {
+    FILE* f = nullptr; _wfopen_s(&f, p.c_str(), L"rb"); if (!f) return "";
+    std::string s; char buf[4096]; size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) s.append(buf, n);
+    fclose(f); return s;
+}
+
+inline int runAnalyzeBroker() {
+    HANDLE shm = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 256, "Local\\LumoraOSDAnalyze");
+    if (!shm) return 1;
+    uint32_t* mem = (uint32_t*)MapViewOfFile(shm, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    if (!mem) { CloseHandle(shm); return 1; }
+    if (mem[0] == ANALYZE_MAGIC && mem[1] && (uint32_t)(GetTickCount() - mem[1]) < 2500) { UnmapViewOfFile(mem); CloseHandle(shm); return 0; }   // Singleton
+    mem[0] = ANALYZE_MAGIC; mem[1] = GetTickCount(); mem[2] = 0; mem[9] = 0;
+
+    std::wstring dir = analyzeDir();
+    std::wstring curDir = dir + L"\\current";
+    CreateDirectoryW(curDir.c_str(), nullptr);
+    DeleteFileW((curDir + L"\\findings.jsonl").c_str());
+    bool presentOnly = (mem[19] & 1) != 0;   // Selbsttest-Modus A: ohne Kernel-Provider
+
+    // --- NVML lokal laden (eigener Prozess; Klon des Shell-Musters main.cpp L2753) ---
+    struct { void* dev = nullptr; char name[96] = {}; char drvVer[64] = {};
+             int (*clock)(void*, int, unsigned int*) = nullptr;
+             int (*temp)(void*, int, unsigned int*) = nullptr;
+             int (*power)(void*, unsigned int*) = nullptr;
+             int (*memInfo)(void*, void*) = nullptr;
+             int (*throttle)(void*, unsigned long long*) = nullptr; } nv;
+    {
+        HMODULE m = LoadLibraryW(L"nvml.dll");
+        if (!m) m = LoadLibraryW(L"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll");
+        if (m) {
+            auto init = (int(*)())GetProcAddress(m, "nvmlInit_v2");
+            auto byIdx = (int(*)(unsigned int, void**))GetProcAddress(m, "nvmlDeviceGetHandleByIndex_v2");
+            auto gname = (int(*)(void*, char*, unsigned int))GetProcAddress(m, "nvmlDeviceGetName");
+            auto sysDrv = (int(*)(char*, unsigned int))GetProcAddress(m, "nvmlSystemGetDriverVersion");
+            nv.clock = (int(*)(void*, int, unsigned int*))GetProcAddress(m, "nvmlDeviceGetClockInfo");
+            nv.temp = (int(*)(void*, int, unsigned int*))GetProcAddress(m, "nvmlDeviceGetTemperature");
+            nv.power = (int(*)(void*, unsigned int*))GetProcAddress(m, "nvmlDeviceGetPowerUsage");
+            nv.memInfo = (int(*)(void*, void*))GetProcAddress(m, "nvmlDeviceGetMemoryInfo");
+            nv.throttle = (int(*)(void*, unsigned long long*))GetProcAddress(m, "nvmlDeviceGetCurrentClocksThrottleReasons");
+            if (init && byIdx && init() == 0) {
+                byIdx(0, &nv.dev);
+                if (nv.dev && gname) gname(nv.dev, nv.name, sizeof(nv.name));
+                if (sysDrv) sysDrv(nv.drvVer, sizeof(nv.drvVer));
+            }
+        }
+        // AMD/Intel: keine NVML -> Sensor-Ring bleibt duenn (nur RAM); die Analyse
+        // degradiert sauber (GPU-Verdaechtige entfallen, Rest bleibt voll nutzbar).
+    }
+
+    // --- Analyzer + Quellen ---
+    luana::StutterAnalyzer ana;
+    std::atomic<uint32_t> spikeCount{ 0 }, lastFindingId{ 0 };
+    FILE* jsonl = nullptr;
+    _wfopen_s(&jsonl, (curDir + L"\\findings.jsonl").c_str(), L"ab");
+    luetw::KernelTrace kt;
+    luana::StutterAnalyzer::Config cfg;
+    cfg.targetPid = mem[18];   // 0 = automatisch waehlen
+    cfg.pidName = [](uint32_t pid) { return luetw::pidExeName(pid); };
+    cfg.driverName = [&kt](int idx) { return kt.drivers().name(idx); };
+    cfg.onFinding = [&](const luana::Finding& f) {
+        if (jsonl) { std::string line = luana::findingJson(f) + "\n"; fwrite(line.data(), 1, line.size(), jsonl); fflush(jsonl); }
+        spikeCount = (uint32_t)f.id; lastFindingId = f.id;
+    };
+    ana.start(cfg);
+
+    // Present-Session (eigener Name, parallel zum FPS-Broker moeglich) + Ziel-Wahl:
+    // aktivster Praesentierer der letzten Sekunde (ohne Shell/DWM & Co.), sofern die
+    // App keinen festen Ziel-PID vorgibt.
+    std::mutex electMx; std::map<uint32_t, uint32_t> presentsByPid;
+    luetw::PresentTrace pres(L"LumoraAnalyzePresent");
+    bool presOk = pres.start([&](uint32_t pid, double t) {
+        ana.pushFrame(pid, t);
+        if (!pid) return;
+        std::lock_guard<std::mutex> lk(electMx);
+        presentsByPid[pid]++;
+    });
+    if (!presOk) { mem[2] = 2; mem[9] = 100; UnmapViewOfFile(mem); CloseHandle(shm); if (jsonl) fclose(jsonl); return 1; }
+
+    std::atomic<uint32_t> cswPerSecCnt{ 0 };
+    bool kernelOk = false;
+    if (!presentOnly) {
+        luetw::KernelTrace::Sinks sinks;
+        sinks.dpcIsr = [&](double t, double durUs, int drv, bool isr) { ana.pushDpcIsr(t, durUs, drv, isr); };
+        sinks.cswitch = [&](double t, uint32_t cpu, uint32_t oldTid, uint32_t newTid) {
+            cswPerSecCnt.fetch_add(1, std::memory_order_relaxed);
+            ana.onCSwitch(t, cpu, oldTid, newTid, kt.pidOfTid(newTid));
+        };
+        sinks.diskIo = [&](double t, uint32_t bytes, double latMs) { ana.pushDisk(t, bytes, latMs); };
+        sinks.proc = [&](double t, uint32_t pid, bool start) { ana.pushProc(t, pid, start); };
+        kernelOk = kt.start(std::move(sinks), pres.t0());
+        if (!kernelOk) { mem[9] = kt.lastError(); }   // nicht fatal: Etappe-1-Analyse laeuft weiter
+    }
+
+    // Sensor-Probe-Thread (10 Hz): NVML + RAM in den Sensor-Ring
+    std::atomic<bool> run{ true };
+    std::thread sensorThr([&]() {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        LARGE_INTEGER qpf, qpc; QueryPerformanceFrequency(&qpf);
+        while (run.load()) {
+            luana::SensorSample s{};
+            QueryPerformanceCounter(&qpc);
+            int64_t base = pres.t0() ? pres.t0() : qpc.QuadPart;
+            s.t = (double)(qpc.QuadPart - base) / (double)qpf.QuadPart;
+            if (nv.dev) {
+                unsigned int v = 0;
+                if (nv.clock && nv.clock(nv.dev, 0, &v) == 0) s.gpuClockMHz = (int)v;
+                if (nv.temp && nv.temp(nv.dev, 0, &v) == 0) s.gpuTempC = (int)v;
+                if (nv.power && nv.power(nv.dev, &v) == 0) s.gpuPowerW = v / 1000.0f;
+                struct { unsigned long long total, freeB, used; } mi{};
+                if (nv.memInfo && nv.memInfo(nv.dev, &mi) == 0) s.vramMB = (int64_t)(mi.used / 1048576);
+                unsigned long long tr = 0;
+                if (nv.throttle && nv.throttle(nv.dev, &tr) == 0) { s.throttleMask = tr; s.throttleKnown = 1; }
+            }
+            MEMORYSTATUSEX ms{ sizeof(ms) };
+            if (GlobalMemoryStatusEx(&ms)) s.ramMB = (int64_t)((ms.ullTotalPhys - ms.ullAvailPhys) / 1048576);
+            ana.pushSensor(s);
+            Sleep(100);
+        }
+    });
+
+    // --- Hauptschleife: SHM-Status, Ziel-Wahl, Selbst-CPU-Watchdog, Ende-Erkennung ---
+    uint32_t startTick = GetTickCount(), lastSec = GetTickCount();
+    FILETIME cA, cB, kA, uA, kB, uB; GetProcessTimes(GetCurrentProcess(), &cA, &cB, &kA, &uA);
+    uint64_t lastCpu100 = ((uint64_t)kA.dwHighDateTime << 32 | kA.dwLowDateTime) + ((uint64_t)uA.dwHighDateTime << 32 | uA.dwLowDateTime);
+    bool cswDropped = false;
+    for (;;) {
+        Sleep(100);
+        uint32_t now = GetTickCount();
+        // Ziel-PID-Wahl 1x/s (falls App keinen vorgibt)
+        if (now - lastSec >= 1000) {
+            std::map<uint32_t, uint32_t> counts;
+            { std::lock_guard<std::mutex> lk(electMx); counts.swap(presentsByPid); }
+            if (!mem[18]) {
+                uint32_t best = 0, bestN = 0;
+                for (auto& [pid, n] : counts)
+                    if (n > bestN && !pmIgnore(luetw::pidExeName(pid))) { best = pid; bestN = n; }
+                if (best && bestN >= 20 && best != ana.targetPid()) ana.setTargetPid(best);   // >=20 fps: echtes Spiel/Anwendung
+            } else if (ana.targetPid() != mem[18]) ana.setTargetPid(mem[18]);
+            // Selbst-CPU (Permille eines Kerns) + CSwitch-Rate + Watchdog
+            GetProcessTimes(GetCurrentProcess(), &cA, &cB, &kB, &uB);
+            uint64_t cpu100 = ((uint64_t)kB.dwHighDateTime << 32 | kB.dwLowDateTime) + ((uint64_t)uB.dwHighDateTime << 32 | uB.dwLowDateTime);
+            uint32_t permille = (uint32_t)((cpu100 - lastCpu100) / 10000);   // 100ns-Einheiten -> Promille bei 1s Wand-Zeit
+            lastCpu100 = cpu100;
+            mem[8] = permille;
+            mem[7] = cswPerSecCnt.exchange(0);
+            if (!cswDropped && permille > 10 && kernelOk) { kt.dropCSwitch(); cswDropped = true; mem[9] = 200; }   // Notbremse (>1% eines Kerns)
+            lastSec = now;
+        }
+        // SHM-Status
+        auto st = ana.stats();
+        mem[1] = now;
+        mem[2] = 1;
+        mem[3] = spikeCount.load(); mem[4] = lastFindingId.load();
+        mem[5] = (uint32_t)(st.medianFtMs * 100); mem[6] = (uint32_t)(st.avgFps * 10);
+        mem[10] = presentOnly ? 1 : 0; mem[11] = ana.targetPid(); mem[12] = (now - startTick) / 1000;
+        // Ende: App will stoppen (wanted=0) oder App-Heartbeat weg (>5s, nach 8s Anlauf)
+        bool appAlive = (mem[16] && (uint32_t)(now - mem[16]) < 5000) || (uint32_t)(now - startTick) < 8000;
+        if (!mem[17] || !appAlive) break;
+    }
+
+    // --- Finalisieren: Quellen stoppen, Bericht schreiben ---
+    run = false;
+    pres.stop(); if (kernelOk) kt.stop(); ana.stop();
+    if (sensorThr.joinable()) sensorThr.join();
+    if (jsonl) fclose(jsonl);
+
+    auto st = ana.stats();
+    double durS = (GetTickCount() - startTick) / 1000.0;
+    // Aggregat: Verdaechtige nach (kind,name) buendeln
+    struct Agg { std::string kind, name; uint32_t hits = 0; };
+    std::vector<Agg> agg;
+    for (auto& f : ana.findings()) {
+        // je Befund nur den TOP-Verdaechtigen zaehlen (sonst dominieren Beifaenge)
+        if (f.suspects.empty()) continue;
+        const auto& s = f.suspects[0];
+        bool found = false;
+        for (auto& a : agg) if (a.kind == s.kind && a.name == s.name) { a.hits++; found = true; break; }
+        if (!found) agg.push_back({ s.kind, s.name, 1 });
+    }
+    std::sort(agg.begin(), agg.end(), [](const Agg& a, const Agg& b) { return a.hits > b.hits; });
+    std::string verdictKey = "clean", verdictName; uint32_t verdictHits = 0;
+    if (!ana.findings().empty() && !agg.empty()) { verdictKey = agg[0].kind; verdictName = agg[0].name; verdictHits = agg[0].hits; }
+
+    // Bericht zusammensetzen (manuelles JSON, BOM-frei; Kontext der Shell einbetten)
+    std::string ctx = readSmallFile(curDir + L"\\context.json");
+    if (ctx.empty() || ctx[0] != '{') ctx = "{}";
+    SYSTEMTIME lt; GetLocalTime(&lt);
+    char ts[32]; sprintf_s(ts, "%04d%02d%02d-%02d%02d%02d", lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond);
+    char head[1024];
+    sprintf_s(head,
+        "{\"version\":1,\"wall\":\"%04d-%02d-%02dT%02d:%02d:%02d\",\"durS\":%.0f,\"pid\":%u,"
+        "\"frames\":%llu,\"avgFps\":%.1f,\"p1LowFps\":%.1f,\"medianFtMs\":%.2f,\"p99FtMs\":%.2f,"
+        "\"spikes\":%u,\"spikesPerMin\":%.2f,\"presentOnly\":%s,\"kernelOk\":%s,\"errCode\":%u,"
+        "\"verdictKey\":\"%s\",\"verdictHits\":%u,",
+        lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond, durS, ana.targetPid(),
+        (unsigned long long)st.frames, st.avgFps, st.p1LowFps, st.medianFtMs, st.p99FtMs,
+        (uint32_t)ana.findings().size(), durS > 0 ? ana.findings().size() * 60.0 / durS : 0,
+        presentOnly ? "true" : "false", kernelOk ? "true" : "false", mem[9],
+        verdictKey.c_str(), verdictHits);
+    std::string rep = head;
+    rep += "\"verdictName\":\"" + luana::jsonEsc(verdictName) + "\",";
+    rep += "\"game\":\"" + luana::jsonEsc(luetw::pidExeName(ana.targetPid())) + "\",";
+    rep += "\"gpu\":\"" + luana::jsonEsc(nv.name) + "\",\"gpuDriver\":\"" + luana::jsonEsc(nv.drvVer) + "\",";
+    rep += "\"context\":" + ctx + ",\"note\":\"\",";
+    rep += "\"ftSeries\":[";
+    { std::vector<std::pair<double, float>> ser; ana.ftSeries(2000, ser);
+      char b2[48];
+      for (size_t i = 0; i < ser.size(); ++i) { sprintf_s(b2, "%s[%.2f,%.2f]", i ? "," : "", ser[i].first, ser[i].second); rep += b2; } }
+    rep += "],\"findings\":[";
+    { const auto& fs = ana.findings();
+      for (size_t i = 0; i < fs.size(); ++i) { if (i) rep += ","; rep += luana::findingJson(fs[i]); } }
+    rep += "],\"aggregate\":[";
+    for (size_t i = 0; i < agg.size() && i < 8; ++i) {
+        if (i) rep += ",";
+        rep += "{\"kind\":\"" + luana::jsonEsc(agg[i].kind) + "\",\"name\":\"" + luana::jsonEsc(agg[i].name)
+             + "\",\"hits\":" + std::to_string(agg[i].hits) + "}";
+    }
+    rep += "]}";
+    {
+        std::wstring repPath = dir + L"\\report-" + std::wstring(ts, ts + strlen(ts)) + L".json";
+        FILE* f = nullptr; _wfopen_s(&f, repPath.c_str(), L"wb");
+        if (f) { fwrite(rep.data(), 1, rep.size(), f); fclose(f); }
+    }
+    DeleteFileW((curDir + L"\\findings.jsonl").c_str());
+    DeleteFileW((curDir + L"\\context.json").c_str());
+    mem[2] = 0; mem[1] = GetTickCount();
+    UnmapViewOfFile(mem); CloseHandle(shm);
+    return 0;
+}
 
 // --- Ruckler-Blackbox: Diagnose-/Prototypmodus ------------------------------------
 // "lumora-shell.exe --analyze-dump" (elevated Konsole): 5 s Kernel-ETW mitschneiden,
