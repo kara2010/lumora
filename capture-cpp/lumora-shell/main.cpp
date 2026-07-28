@@ -1931,8 +1931,9 @@ static void toggleMainWindow() {
 // verloren zu gehen. Genau das war die Ursache fuer "schnelles Toggeln kommt nicht an": Poll und
 // Toggle teilten sich den UI-Thread, der Toggle blockierte den Poll (nicht-deterministisch).
 #define WM_HOTKEY_CMD (WM_APP + 7)
-enum { HKC_MAIN = 1, HKC_OSD = 2, HKC_OSDEDIT = 3, HKC_AB = 4, HKC_STREAM = 5 };
+enum { HKC_MAIN = 1, HKC_OSD = 2, HKC_OSDEDIT = 3, HKC_AB = 4, HKC_STREAM = 5, HKC_ANALYZE = 6 };
 static void toggleOsdSetting();   // (unten definiert)
+static void analyzeToggle();      // Ruckler-Blackbox: Messung an/aus (unten definiert)
 static void setOsdEditMode(bool on);
 // Standard-Gamepad-API-Index -> XINPUT_GAMEPAD-Pruefung (Masken 1:1 aus main.js XI_MASK)
 static bool xiButtonDown(const XINPUT_GAMEPAD& g, int idx) {
@@ -2660,6 +2661,195 @@ static void ensureOsdSetup() {
         g_osdSetupChecked = true;   // in dieser Sitzung nicht erneut die PowerShell-Checks fahren
         g_osdSetupRunning = false;
     }).detach();
+}
+
+// === Ruckler-Blackbox: Shell-Seite (Mess-Session steuern, Befunde einsammeln) =========
+// Design: capture-cpp/BOTTLENECK-PLAN.md. Der eigentliche Messer ist der elevated
+// Analyze-Broker (--analyze-broker, geplante Aufgabe LumoraOSD-Analyze, LAZY beim
+// ersten Start registriert - ensureOsdSetup bleibt unangetastet, Bestandsnutzer sehen
+// nur dann einen UAC-Dialog, wenn sie das Feature wirklich benutzen). Die Shell:
+// schreibt context.json (Spiel/Aufloesung/HDR/Streaming/Build), setzt wanted=1 im
+// Kontroll-SHM, startet die Aufgabe, tailt findings.jsonl (Byte-Offset) und pusht
+// Status/Befunde an UI + Analyse-OSD. Beim Stop wartet sie auf den fertigen Bericht.
+#define TIMER_ANALYZE 119
+static HANDLE g_anShm = nullptr;
+static bool g_anMeasuring = false;
+static bool g_anStopping = false;
+static uint64_t g_anTailOff = 0;
+static uint32_t g_anLastFindingPushed = 0;
+static std::atomic<bool> g_anSetupRunning{ false };
+static std::wstring analyzeDirW() { return dataDir() + L"\\analyze"; }
+static bool anShmOpen() {
+    if (g_anShm) return true;
+    g_anShm = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 256, "Local\\LumoraOSDAnalyze");
+    return g_anShm != nullptr;
+}
+static void anShmWriteApp(uint32_t wanted, uint32_t targetPid, uint32_t mode) {
+    if (!anShmOpen()) return;
+    void* p = MapViewOfFile(g_anShm, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    if (!p) return;
+    uint32_t* m = (uint32_t*)p;
+    m[16] = GetTickCount(); m[17] = wanted; m[18] = targetPid; m[19] = mode;
+    UnmapViewOfFile(p);
+}
+static bool anShmRead(uint32_t out[64]) {
+    if (!anShmOpen()) return false;
+    void* p = MapViewOfFile(g_anShm, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    if (!p) return false;
+    memcpy(out, p, 256); UnmapViewOfFile(p);
+    return true;
+}
+static bool analyzeTaskPresent() { return schtaskPresent(L"LumoraOSD-Analyze"); }
+// Kontext-Metadaten fuer den Bericht (User-Kernanforderung "Laeufe vergleichen"):
+// ohne Spiel/Aufloesung/HDR/Streaming/Buildstand sind zwei Laeufe nicht vergleichbar.
+static void analyzeWriteContext() {
+    json ctx;
+    {   // laufendes Spiel aus Eigen-/Fremdstart-Erkennung (Fallback: leer -> Broker nimmt Praesentierer)
+        std::lock_guard<std::mutex> lk(g_launchMx);
+        for (auto& s : g_launches) if (s.started && !s.done) { ctx["game"] = narrow(s.gamePath); break; }
+        if (!ctx.contains("game")) for (auto& [exe, es] : g_extSessions) { ctx["game"] = es.gamePath; break; }
+    }
+    HMONITOR hm = MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFOEXW mi{}; mi.cbSize = sizeof(mi); GetMonitorInfoW(hm, &mi);
+    DEVMODEW dm{}; dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm))
+        ctx["resolution"] = std::to_string(dm.dmPelsWidth) + "x" + std::to_string(dm.dmPelsHeight) + "@" + std::to_string(dm.dmDisplayFrequency);
+    ctx["hdr"] = g_hdrByLauncher;
+    ctx["streaming"] = g_streamSrvUp;
+    RTL_OSVERSIONINFOW vi{ sizeof(vi) };
+    { auto f = (LONG(WINAPI*)(RTL_OSVERSIONINFOW*))GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion");
+      if (f && f(&vi) == 0) ctx["winBuild"] = (int)vi.dwBuildNumber; }
+    ctx["lumora"] = shellVersion();
+    CreateDirectoryW(analyzeDirW().c_str(), nullptr);
+    CreateDirectoryW((analyzeDirW() + L"\\current").c_str(), nullptr);
+    writeFile(analyzeDirW() + L"\\current\\context.json", ctx.dump());
+}
+static void analyzePushStatus() {   // UI-Statuszeile (Reiter) + Analyse-OSD speisen
+    uint32_t m[64] = {};
+    bool have = anShmRead(m);
+    json st = { {"measuring", g_anMeasuring}, {"stopping", g_anStopping},
+                {"state", have ? (int)m[2] : 0}, {"spikes", have ? (int)m[3] : 0},
+                {"sec", have ? (int)m[12] : 0}, {"avgFps", have ? m[6] / 10.0 : 0},
+                {"medianFt", have ? m[5] / 100.0 : 0}, {"cswPerSec", have ? (int)m[7] : 0},
+                {"selfPermille", have ? (int)m[8] : 0}, {"err", have ? (int)m[9] : 0},
+                {"target", have && m[11] ? luetw::pidExeName(m[11]) : ""} };
+    sendToUi("analyze-status", st);
+}
+static void analyzeTailFindings() {   // neue Befund-Zeilen aus findings.jsonl an UI/OSD pushen
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, (analyzeDirW() + L"\\current\\findings.jsonl").c_str(), L"rb") != 0 || !f) return;
+    _fseeki64(f, 0, SEEK_END);
+    int64_t sz = _ftelli64(f);
+    if (sz > (int64_t)g_anTailOff) {
+        _fseeki64(f, g_anTailOff, SEEK_SET);
+        std::string chunk((size_t)(sz - g_anTailOff), 0);
+        fread(chunk.data(), 1, chunk.size(), f);
+        g_anTailOff = (uint64_t)sz;
+        size_t pos = 0;
+        while (pos < chunk.size()) {
+            size_t nl = chunk.find('\n', pos);
+            if (nl == std::string::npos) { g_anTailOff -= (chunk.size() - pos); break; }   // halbe Zeile: naechster Tick
+            std::string line = chunk.substr(pos, nl - pos);
+            pos = nl + 1;
+            json j = json::parse(line, nullptr, false);
+            if (j.is_object()) sendToUi("analyze-finding", j);
+        }
+    }
+    fclose(f);
+}
+static void analyzeFinish() {   // Broker fertig -> neuesten Bericht melden, aufraeumen
+    KillTimer(g_hwnd, TIMER_ANALYZE);
+    g_anMeasuring = false; g_anStopping = false; g_anTailOff = 0;
+    // juengsten report-*.json finden
+    std::wstring newest; FILETIME newestFt{};
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW((analyzeDirW() + L"\\report-*.json").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do { if (CompareFileTime(&fd.ftLastWriteTime, &newestFt) > 0) { newestFt = fd.ftLastWriteTime; newest = fd.cFileName; } } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    analyzePushStatus();
+    sendToUi("analyze-done", newest.empty() ? json(nullptr) : json(narrow(newest)));
+    bcLogStream("analyze: Messung beendet" + (newest.empty() ? "" : " -> " + narrow(newest)));
+}
+static void analyzeStartMeasurement() {
+    if (g_anMeasuring) return;
+    analyzeWriteContext();
+    g_anTailOff = 0; g_anLastFindingPushed = 0;
+    DeleteFileW((analyzeDirW() + L"\\current\\findings.jsonl").c_str());
+    uint32_t target = 0;
+    { std::lock_guard<std::mutex> lk(g_launchMx); (void)target; }   // Ziel-PID waehlt der Broker (aktivster Praesentierer)
+    anShmWriteApp(1, 0, 0);
+    g_anMeasuring = true; g_anStopping = false;
+    SetTimer(g_hwnd, TIMER_ANALYZE, 200, nullptr);
+    std::thread([]() { runTask(L"LumoraOSD-Analyze"); }).detach();
+    bcLogStream("analyze: Messung gestartet");
+    analyzePushStatus();
+}
+static void ensureAnalyzeSetup() {   // LAZY: Aufgabe erst beim ersten Messstart registrieren (EIN UAC)
+    if (g_anSetupRunning.exchange(true)) return;
+    std::thread([]() {
+        if (analyzeTaskPresent()) { g_anSetupRunning = false; PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 1); return; }
+        std::wstring dlg = L"Fuer die Ruckler-Analyse richtet Lumora einmalig einen Hintergrunddienst ein\n"
+            L"(Windows-Leistungsdaten lesen: Frametimes, Treiber-Latenzen, Prozess-Last).\n\n"
+            L"Gleich fragt Windows EINMAL nach deiner Bestaetigung (Administratorrechte).\n"
+            L"Es wird KEIN Treiber installiert.";
+        if (MessageBoxW(g_hwnd, dlg.c_str(), L"Ruckler-Analyse einrichten", MB_OKCANCEL | MB_ICONINFORMATION | MB_SETFOREGROUND) != IDOK) {
+            g_anSetupRunning = false; analyzePushStatus(); return;
+        }
+        auto q = [](std::wstring s) { size_t p = 0; while ((p = s.find(L'\'', p)) != std::wstring::npos) { s.insert(p, 1, L'\''); p += 2; } return s; };
+        wchar_t exeW[MAX_PATH]; GetModuleFileNameW(nullptr, exeW, MAX_PATH);
+        std::wstring inner =
+            L"$a=New-ScheduledTaskAction -Execute '" + q(exeW) + L"' -Argument '--analyze-broker'; "
+            L"$p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive; "
+            L"$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew; "
+            L"Register-ScheduledTask -TaskName 'LumoraOSD-Analyze' -Action $a -Principal $p -Settings $s -Force";
+        std::string b64 = b64encode((const uint8_t*)inner.data(), inner.size() * 2);
+        std::wstring b64w = widen(b64);
+        std::wstring elevExe = binDir() + L"\\lumora-elevate.exe";
+        std::wstring outer = (GetFileAttributesW(elevExe.c_str()) != INVALID_FILE_ATTRIBUTES)
+            ? L"Start-Process -FilePath '" + q(elevExe) + L"' -Verb RunAs -WindowStyle Hidden -ArgumentList '--ps-encoded','" + b64w + L"'"
+            : L"Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand " + b64w + L"'";
+        runCaptureOutput(L"powershell -NoProfile -Command \"" + outer + L"\"", 20000);
+        bool ok = false;
+        for (int i = 0; i < 30 && !ok; ++i) { if (analyzeTaskPresent()) ok = true; else Sleep(1000); }
+        g_anSetupRunning = false;
+        if (ok) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 1);   // jetzt wirklich starten (UI-Thread)
+        else MessageBoxW(g_hwnd, L"Die Einrichtung wurde nicht abgeschlossen (Windows-Sicherheitsabfrage abgelehnt?).\nEinfach erneut starten, wenn du die Analyse nutzen moechtest.", L"Ruckler-Analyse", MB_OK | MB_ICONWARNING);
+    }).detach();
+}
+static void analyzeStop() {
+    if (!g_anMeasuring) return;
+    g_anStopping = true;
+    anShmWriteApp(0, 0, 0);   // Broker finalisiert und schreibt den Bericht
+    bcLogStream("analyze: Stop angefordert - warte auf Bericht");
+    analyzePushStatus();
+}
+static void analyzeToggle() {
+    if (g_anMeasuring) { analyzeStop(); return; }
+    if (g_anSetupRunning.load()) return;
+    // Task vorhanden? Der Check kostet bis zu 8s (PowerShell) -> im Hintergrund; Start folgt per Post.
+    ensureAnalyzeSetup();
+}
+static void analyzeTick() {   // TIMER_ANALYZE (200 ms): Heartbeat, Tail, Statuspush, Ende-Erkennung
+    if (!g_anMeasuring) { KillTimer(g_hwnd, TIMER_ANALYZE); return; }
+    anShmWriteApp(g_anStopping ? 0 : 1, 0, 0);
+    analyzeTailFindings();
+    static uint32_t lastPush = 0;
+    uint32_t now = GetTickCount();
+    if (now - lastPush >= 1000) { lastPush = now; analyzePushStatus(); }
+    uint32_t m[64] = {};
+    if (anShmRead(m)) {
+        bool brokerAlive = m[1] && (uint32_t)(GetTickCount() - m[1]) < 3000;
+        if (g_anStopping && (!brokerAlive || m[2] == 0)) { analyzeFinish(); return; }
+        if (!g_anStopping && !brokerAlive && m[2] == 0) {
+            // Broker kam nie hoch oder ist gestorben (>8s Toleranz ueber Timer-Startzeit abgedeckt
+            // durch brokerTick-Frische) - nach 10s ohne Leben aufgeben und ehrlich melden.
+            static uint32_t deadSince = 0;
+            if (!deadSince) deadSince = now;
+            if (now - deadSince > 10000) { deadSince = 0; g_anStopping = true; analyzeFinish(); }
+        }
+    }
 }
 
 // --- Eingabe-Bruecke: ViGEmBus-Ersteinrichtung (Muster ensureOsdSetup: Einwilligung,
@@ -3398,6 +3588,7 @@ static void rebuildKbHotkeys() {
     add(s.value("osdEditHotkey", "Alt+Shift+O"), []() { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_OSDEDIT, 0); });
     add(s.value("osdAbHotkey", "Alt+B"), []() { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_AB, 0); });
     add(s.value("streamHotkey", ""), []() { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_STREAM, (LPARAM)GetForegroundWindow()); });
+    add(s.value("analyzeHotkey", "Alt+A"), []() { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 0); });   // Ruckler-Messung an/aus
     std::lock_guard<std::mutex> lk(g_kbMx);
     g_kbHotkeys = std::move(list);
 }
@@ -3871,6 +4062,57 @@ static json handleChannel(const std::string& channel, const json& args) {
         // 2) Exe-/Datei-Icon
         return fileIconDataUrl(p);
     }
+    // ---- Ruckler-Blackbox (Analyse-Reiter) ----
+    if (channel == "analyze-toggle") { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 0); return true; }
+    if (channel == "analyze-stop") { analyzeStop(); return true; }
+    if (channel == "analyze-status") { analyzePushStatus(); return true; }
+    if (channel == "analyze-list") {   // Verlauf: alle Berichte mit Kopf-Metadaten (neueste zuerst)
+        json out = json::array();
+        WIN32_FIND_DATAW fd{};
+        HANDLE h = FindFirstFileW((analyzeDirW() + L"\\report-*.json").c_str(), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            std::vector<std::wstring> files;
+            do { files.push_back(fd.cFileName); } while (FindNextFileW(h, &fd));
+            FindClose(h);
+            std::sort(files.rbegin(), files.rend());   // Dateiname traegt den Zeitstempel
+            for (auto& fn : files) {
+                if (out.size() >= 100) break;
+                json j = json::parse(readFile(analyzeDirW() + L"\\" + fn), nullptr, false);
+                if (!j.is_object()) continue;
+                out.push_back({ {"file", narrow(fn)}, {"wall", j.value("wall", "")}, {"game", j.value("game", "")},
+                                {"durS", j.value("durS", 0.0)}, {"spikes", j.value("spikes", 0)},
+                                {"avgFps", j.value("avgFps", 0.0)}, {"p1LowFps", j.value("p1LowFps", 0.0)},
+                                {"spikesPerMin", j.value("spikesPerMin", 0.0)},
+                                {"verdictKey", j.value("verdictKey", "")}, {"verdictName", j.value("verdictName", "")},
+                                {"note", j.value("note", "")} });
+            }
+        }
+        return out;
+    }
+    // Dateiname-Absicherung fuer get/delete/note: NUR report-*.json ohne Pfadanteile
+    auto anSafeName = [](const json& a) -> std::wstring {
+        if (a.empty() || !a[0].is_string()) return L"";
+        std::string f = a[0];
+        if (f.find('\\') != std::string::npos || f.find('/') != std::string::npos) return L"";
+        if (f.rfind("report-", 0) != 0 || f.size() < 12 || f.substr(f.size() - 5) != ".json") return L"";
+        return widen(f);
+    };
+    if (channel == "analyze-get") {
+        std::wstring fn = anSafeName(args); if (fn.empty()) return nullptr;
+        json j = json::parse(readFile(analyzeDirW() + L"\\" + fn), nullptr, false);
+        return j.is_object() ? j : json(nullptr);
+    }
+    if (channel == "analyze-delete") {
+        std::wstring fn = anSafeName(args); if (fn.empty()) return false;
+        return DeleteFileW((analyzeDirW() + L"\\" + fn).c_str()) != 0;
+    }
+    if (channel == "analyze-note" && args.size() >= 2 && args[1].is_string()) {
+        std::wstring fn = anSafeName(args); if (fn.empty()) return false;
+        json j = json::parse(readFile(analyzeDirW() + L"\\" + fn), nullptr, false);
+        if (!j.is_object()) return false;
+        j["note"] = args[1];
+        return writeFile(analyzeDirW() + L"\\" + fn, j.dump());
+    }
     if (channel == "list-gpus") {   // auslesbare GPUs (NVML + ADL), Format {id,label} wie listGpus
         nvmlInitOnce(); luadl::setup();
         json out = json::array();
@@ -4144,6 +4386,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == TIMER_OSDPRELOAD) { KillTimer(h, TIMER_OSDPRELOAD); createOsdWindow(); sensorsInit(); return 0; }   // WebView2 + PDH-Sensoren vorwaermen (Fenster bleibt versteckt) -> erster OSD-Show ist sofort
         if (w == TIMER_OSDHIDE) { KillTimer(h, TIMER_OSDHIDE); if (g_osdHwnd) ShowWindow(g_osdHwnd, SW_HIDE); return 0; }   // nach dem DComp-Ausblenden verstecken
         if (w == TIMER_SRCWATCH) { srcWatchTick(); return 0; }
+        if (w == TIMER_ANALYZE) { analyzeTick(); return 0; }   // Ruckler-Blackbox: Heartbeat/Tail/Status
         if (w == TIMER_BCAPPLY) { KillTimer(h, TIMER_BCAPPLY); if (g_bcState.value("active", false)) bcApplyCfg(bcStreamCfg(g_bcState.value("encoder", ""))); return 0; }
         // (TIMER_XINPUT entfaellt: der Hotkey-Poll laeuft jetzt im eigenen Thread, siehe startHotkeyPollThread)
         if (w == TIMER_REFOCUS) {   // Fokus nach dem asynchronen Vordergrund-Wechsel nochmal ins WebView (Gamepad ohne Mausklick)
@@ -4179,6 +4422,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             case HKC_OSDEDIT: setOsdEditMode(!g_osdEdit); break;
             case HKC_AB:      lurtss::toggleAbOsd(); break;
             case HKC_STREAM:  doStreamHotkey((HWND)l); break;
+            case HKC_ANALYZE: if (l == 1) analyzeStartMeasurement(); else analyzeToggle(); break;   // l=1: Start nach Setup-Erfolg
         }
         return 0;
     case WM_SHELL_TRAY:
