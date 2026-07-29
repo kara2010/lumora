@@ -93,7 +93,7 @@
             "name": "Was wird dafür installiert?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Einmalig der ViGEmBus-Treiber – ein signierter Open-Source-Treiber für virtuelle Gamepads. Lumora lädt ihn auf deinen Klick von der offiziellen Quelle, prüft die Signatur und installiert ihn; über „Apps & Features" ist er jederzeit wieder deinstallierbar. Nichts davon passiert automatisch im Hintergrund."
+              "text": "Einmalig der ViGEmBus-Treiber – ein signierter Open-Source-Treiber für virtuelle Gamepads. Lumora lädt ihn auf deinen Klick von der offiziellen Quelle, prüft die Signatur und installiert ihn; über die Windows-Einstellungen (Apps & Features) ist er jederzeit wieder deinstallierbar. Nichts davon passiert automatisch im Hintergrund."
             }
           }
         ]
@@ -185,6 +185,21 @@
     <p>Für den virtuellen Controller braucht Windows einmalig den <strong>ViGEmBus-Treiber</strong> (signiert, Open Source, von Nefarius). Lumora lädt ihn erst nach deinem Klick von der offiziellen Quelle, prüft die Signatur und installiert ihn – deinstallierbar jederzeit über „Apps &amp; Features". Nichts passiert automatisch im Hintergrund, und wie alles in Lumora ist der komplette Quellcode <a href="https://github.com/kara2010/lumora" target="_blank" rel="noopener">öffentlich auf GitHub</a>.</p>
 
     <p><a class="cta" href="download.php">⬇ Jetzt kostenlos laden</a></p>
+
+    <h2>Häufige Fragen</h2>
+    <h3>Warum erkennt mein Microsoft-Store-Spiel mein Lenkrad oder meinen Joystick nicht?</h3>
+    <p>Viele Microsoft-Store- und Game-Pass-Spiele akzeptieren nur XInput – also das Xbox-Controller-Protokoll. Ältere Lenkräder, Joysticks und Flightsticks melden sich aber als DirectInput-Gerät und bleiben deshalb unsichtbar. Die Lumora Eingabe-Brücke legt aus deinem Gerät einen virtuellen Xbox-360-Controller an, den jedes XInput-Spiel sofort erkennt.</p>
+    <h3>Wie richte ich die Zuordnung ein?</h3>
+    <p>Visuell: In Lumora klickst du auf dem abgebildeten Xbox-Controller die Taste oder Achse an, bewegst dann den echten Hebel oder drückst den echten Knopf – fertig. Achsen werden dabei automatisch kalibriert (Ruhelage und Ausschlag), auch invertierte Achsen und kombinierte Pedale funktionieren.</p>
+    <h3>Kann ich Knöpfe auf Achsen legen – zum Beispiel Gas auf RT?</h3>
+    <p>Ja, in beide Richtungen: eine echte Achse kann auf die analogen Trigger LT/RT (oder Stick-Achsen) gelegt werden, und ein echter Knopf kann eine Achse voll ausschlagen lassen. So wird aus Pedal oder Schubregler ein sauberes analoges Gas.</p>
+    <h3>Ist das eine Alternative zu x360ce?</h3>
+    <p>Ja, mit anderem Ansatz: Statt DLL-Dateien in Spielordner zu kopieren, erzeugt die Eingabe-Brücke über den signierten Open-Source-Treiber ViGEmBus einen systemweiten virtuellen Xbox-Controller. Das funktioniert dadurch auch mit Microsoft-Store- und Game-Pass-Spielen, bei denen der DLL-Trick nicht möglich ist.</p>
+    <h3>Wird Force Feedback an mein Lenkrad weitergegeben?</h3>
+    <p>Nein, aktuell nicht: Die Brücke überträgt deine Eingaben zum Spiel, Vibration und Force-Feedback-Effekte werden nicht an das Gerät zurückgereicht. Für Lenkräder mit Force Feedback ist der native Treiber des Herstellers die bessere Wahl, wenn das Spiel ihn unterstützt.</p>
+    <h3>Was wird dafür installiert?</h3>
+    <p>Einmalig der ViGEmBus-Treiber – ein signierter Open-Source-Treiber für virtuelle Gamepads. Lumora lädt ihn auf deinen Klick von der offiziellen Quelle, prüft die Signatur und installiert ihn; über die Windows-Einstellungen (Apps &amp; Features) ist er jederzeit wieder deinstallierbar. Nichts davon passiert automatisch im Hintergrund.</p>
+
 
     <h2>Mehr von Lumora</h2>
     <p>

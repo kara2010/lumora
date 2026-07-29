@@ -187,6 +187,21 @@
 
     <p><a class="cta" href="download.php">⬇ Download for free now</a></p>
 
+    <h2>Frequently asked questions</h2>
+    <h3>Why doesn't my Microsoft Store game detect my wheel or joystick?</h3>
+    <p>Many Microsoft Store and Game Pass games only accept XInput – the Xbox controller protocol. Older wheels, joysticks and flight sticks report themselves as DirectInput devices and stay invisible. The Lumora input bridge creates a virtual Xbox 360 controller from your device that every XInput game recognises instantly.</p>
+    <h3>How do I set up the mapping?</h3>
+    <p>Visually: in Lumora you click the button or axis on the pictured Xbox controller, then move the real lever or press the real button – done. Axes are calibrated automatically (rest position and travel); inverted axes and combined pedals work too.</p>
+    <h3>Can I map buttons onto axes – for example throttle on RT?</h3>
+    <p>Yes, both ways: a real axis can be mapped onto the analog triggers LT/RT (or stick axes), and a real button can drive an axis to full deflection. That turns a pedal or throttle lever into clean analog input.</p>
+    <h3>Is this an alternative to x360ce?</h3>
+    <p>Yes, with a different approach: instead of copying DLL files into game folders, the input bridge creates a system-wide virtual Xbox controller via the signed open-source driver ViGEmBus. That also works with Microsoft Store and Game Pass games, where the DLL trick isn't possible.</p>
+    <h3>Is force feedback passed back to my wheel?</h3>
+    <p>No, not currently: the bridge sends your inputs to the game, but vibration and force feedback effects are not passed back to the device. For force-feedback wheels the manufacturer's native driver is the better choice if the game supports it.</p>
+    <h3>What gets installed for this?</h3>
+    <p>A one-time install of the ViGEmBus driver – a signed open-source driver for virtual gamepads. Lumora downloads it from the official source on your click, verifies the signature and installs it; it's removable any time via Apps &amp; Features. None of this happens automatically in the background.</p>
+
+
     <h2>More from Lumora</h2>
     <p>
       <a href="gamepad.html">Control the whole launcher with a gamepad →</a><br>
