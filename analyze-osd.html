@@ -316,7 +316,12 @@
     lastFrameNo = 0; lastSpikes = 0;   // echte Messdaten wieder sauber anknuepfen
   }
   if (!ipcRenderer) startDemo();
-  else ipcRenderer.on('an-preview', (e, on) => { if (on) startDemo(); else stopDemo(); });
+  else {
+    ipcRenderer.on('an-preview', (e, on) => { if (on) startDemo(); else stopDemo(); });
+    // Deckkraft-Regler: CSS-Opacity der ganzen Seite (Composition-Overlay ist per-pixel-
+    // transparent -> wirkt exakt wie Compositor-Opacity, ohne DComp-Interface-Huerden)
+    ipcRenderer.on('an-opacity', (e, v) => { document.body.style.opacity = Math.max(0.25, Math.min(1, +v || 1)); });
+  }
   dirty = true; scheduleBounds();
   window.addEventListener('resize', () => { dirty = true; scheduleBounds(); });
 })();
