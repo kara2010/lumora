@@ -104,10 +104,10 @@
           },
           {
             "@type": "Question",
-            "name": "Bin ich im CPU- oder GPU-Bottleneck?",
+            "name": "Erkennt Lumora auch ein CPU- oder GPU-Bottleneck?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Lumora misst pro Frame, wie lange die GPU tatsächlich beschäftigt war. Ist sie nahezu durchgehend ausgelastet, limitiert die GPU. Bleibt sie zwischen den Frames unbeschäftigt, während die FPS trotzdem nicht steigen, wartet sie auf die CPU – das klassische CPU-Bottleneck. Zusätzlich werden Throttling durch Power- oder Temperature-Limit und volllaufendes VRAM erkannt."
+              "text": "Teilweise: Erkannt werden GPU-Throttling durch Power- oder Temperature-Limit (mit ausgelesener Ursache bei NVIDIA-Karten), volllaufendes VRAM und Einzelkern-Überlast, weil die CPU-Zeit pro Kern mitgemessen wird. Eine dauerhafte Anzeige 'GPU-limitiert' oder 'CPU-limitiert' auf Basis der GPU-Auslastung pro Frame ist der nächste Ausbauschritt und noch nicht enthalten."
             }
           }
         ]
@@ -218,8 +218,8 @@
     <h3>Warum ruckelt mein Spiel, obwohl die Hardware stark genug ist?</h3>
     <p>Micro-Stutter entsteht selten aus Mangel an Rechenleistung. Typische Ursachen sind Background-Tasks, die kurz die CPU belegen, Treiber mit hohen DPC-Latenzen, kurzzeitiges GPU-Throttling oder Nachladevorgänge im Spiel selbst. Im Task-Manager sind solche Aussetzer meist unsichtbar, weil sie nur Millisekunden dauern.</p>
 
-    <h3>Bin ich im CPU- oder GPU-Bottleneck?</h3>
-    <p>Lumora misst pro Frame, wie lange die GPU tatsächlich beschäftigt war. Ist sie nahezu durchgehend ausgelastet, limitiert die GPU. Bleibt sie zwischen den Frames unbeschäftigt, während die FPS trotzdem nicht steigen, wartet sie auf die CPU – das klassische CPU-Bottleneck. Zusätzlich werden Throttling durch Power- oder Temperature-Limit und volllaufendes VRAM erkannt.</p>
+    <h3>Erkennt Lumora auch ein CPU- oder GPU-Bottleneck?</h3>
+    <p>Teilweise – und wir sagen ehrlich, was heute geht: Erkannt werden <strong>GPU-Throttling</strong> (Takteinbruch durch Power- oder Temperature-Limit, mit ausgelesener Ursache bei NVIDIA), <strong>volllaufendes VRAM</strong> und <strong>Einzelkern-Überlast</strong>, weil die CPU-Zeit pro Kern mitgemessen wird. Eine dauerhafte „GPU-limitiert / CPU-limitiert"-Anzeige über die GPU-Auslastung pro Frame ist der nächste Ausbauschritt und noch nicht enthalten.</p>
 
     <h3>Was sind DPC-Latenzen und warum verursachen sie Stutter?</h3>
     <p>DPCs sind kurze Aufgaben, die Treiber im Windows-Kernel ausführen – etwa für Netzwerk, Audio oder Grafik. Dauert so ein Aufruf zu lange, wartet alles andere, auch dein Spiel; spürbar als Freeze oder Micro-Stutter. Lumora liest diese Events mit und zeigt die verantwortliche Treiberdatei beim Namen, zum Beispiel <code>nvlddmkm.sys</code> oder einen WLAN-Treiber. Genau dafür greift man sonst zu Spezial-Tools wie LatencyMon.</p>
