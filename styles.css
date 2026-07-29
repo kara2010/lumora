@@ -2421,6 +2421,22 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 .an-live { display: inline-flex; align-items: center; gap: 8px; color: var(--text, #dbe4ef); font-size: 13px; }
 .an-rec { width: 9px; height: 9px; border-radius: 50%; background: #ff4d4d; animation: anpulse 1.6s infinite; }
 @keyframes anpulse { 0% { box-shadow: 0 0 0 0 rgba(255,77,77,.6); } 70% { box-shadow: 0 0 0 7px rgba(255,77,77,0); } 100% { box-shadow: 0 0 0 0 rgba(255,77,77,0); } }
+/* Empfindlichkeits-Regler (3 Stufen) + Overlay-Regler (Groesse/Transparenz/Ecke) */
+.an-sense { display: inline-flex; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; overflow: hidden; }
+.an-sense button { background: rgba(255,255,255,.03); border: none; color: var(--text, #dbe4ef);
+  padding: 8px 16px; font-size: 12.5px; cursor: pointer; border-right: 1px solid rgba(255,255,255,.08); }
+.an-sense button:last-child { border-right: none; }
+.an-sense button:hover { background: rgba(255,255,255,.08); }
+.an-sense button.active { background: var(--accent, #74e857); color: #0b1220; font-weight: 700; }
+.an-osdrow { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+.an-osdlbl { width: 100px; font-size: 12.5px; opacity: .8; flex: 0 0 auto; }
+.an-osdrow input[type=range] { flex: 1; max-width: 260px; }
+.an-osdval { width: 46px; font-size: 12px; opacity: .65; font-variant-numeric: tabular-nums; }
+.an-corner { display: inline-flex; gap: 6px; }
+.an-corner button { width: 38px; height: 34px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.03); color: var(--text, #dbe4ef); font-size: 16px; cursor: pointer; }
+.an-corner button:hover { background: rgba(255,255,255,.08); }
+.an-corner button.active { background: var(--accent, #74e857); color: #0b1220; border-color: transparent; }
 .an-hero { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 12px;
   background: rgba(255,255,255,.035); border: 1px solid; margin-bottom: 12px; }
 .an-hero-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; margin-top: 4px; }

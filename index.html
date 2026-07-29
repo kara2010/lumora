@@ -467,6 +467,42 @@
             </div>
             <p class="settings-hint">Tipp: Messung im Spiel per Hotkey starten, ein paar Minuten spielen (gern bis Ruckler auftreten), dann per Hotkey beenden – der Bericht erscheint hier.</p>
           </div>
+          <div class="form-group">
+            <label>Empfindlichkeit</label>
+            <p class="settings-hint">Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28&nbsp;ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45&nbsp;ms).</p>
+            <div class="an-sense" id="anSense">
+              <button data-v="0" onclick="anSetSense(0)">Empfindlich</button>
+              <button data-v="1" class="active" onclick="anSetSense(1)">Normal</button>
+              <button data-v="2" onclick="anSetSense(2)">Nur harte Ruckler</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Anzeige im Spiel</label>
+            <p class="settings-hint">Größe, Transparenz und Position des Mess-Overlays. Beim Anfassen eines Reglers erscheint sofort eine Vorschau auf dem Bildschirm.</p>
+            <div class="an-osdrow">
+              <span class="an-osdlbl">Größe</span>
+              <input type="range" id="anOsdScale" min="0.5" max="2" step="0.05" value="1"
+                     oninput="anOsdSlide('analyzeOsdScale', parseFloat(this.value))"
+                     onpointerdown="anPreview(true)" onpointerup="anPreviewSoon()" onchange="anPreviewSoon()">
+              <span class="an-osdval" id="anOsdScaleV">100%</span>
+            </div>
+            <div class="an-osdrow">
+              <span class="an-osdlbl">Transparenz</span>
+              <input type="range" id="anOsdOpacity" min="0.25" max="1" step="0.05" value="1"
+                     oninput="anOsdSlide('analyzeOsdOpacity', parseFloat(this.value))"
+                     onpointerdown="anPreview(true)" onpointerup="anPreviewSoon()" onchange="anPreviewSoon()">
+              <span class="an-osdval" id="anOsdOpacityV">100%</span>
+            </div>
+            <div class="an-osdrow">
+              <span class="an-osdlbl">Position</span>
+              <div class="an-corner" id="anCorner">
+                <button data-c="tl" onclick="anSetCorner('tl')" title="Oben links">◰</button>
+                <button data-c="tr" class="active" onclick="anSetCorner('tr')" title="Oben rechts">◳</button>
+                <button data-c="bl" onclick="anSetCorner('bl')" title="Unten links">◱</button>
+                <button data-c="br" onclick="anSetCorner('br')" title="Unten rechts">◲</button>
+              </div>
+            </div>
+          </div>
           <div class="form-group" id="anReportBox" style="display:none">
             <label>Ergebnis</label>
             <div id="anReport"></div>
@@ -1457,6 +1493,19 @@ const I18N_EN = {
   '⏹ Messung beenden': '⏹ Stop measurement',
   '🛠 Analyse einmalig einrichten': '🛠 Set up analysis (one time)',
   '🛠 Einrichtung läuft …': '🛠 Setting up …',
+  'Empfindlichkeit': 'Sensitivity',
+  'Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28 ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45 ms).': 'When does a frame count as a stutter? "Normal" only reports noticeable hitches (from ~28 ms), "Sensitive" also small bumps, "Hard stutters only" only clear freezes (from ~45 ms).',
+  'Empfindlich': 'Sensitive',
+  'Nur harte Ruckler': 'Hard stutters only',
+  'Anzeige im Spiel': 'In-game display',
+  'Größe, Transparenz und Position des Mess-Overlays. Beim Anfassen eines Reglers erscheint sofort eine Vorschau auf dem Bildschirm.': 'Size, transparency and position of the measurement overlay. Touching a slider instantly shows a live preview on screen.',
+  'Größe': 'Size',
+  'Transparenz': 'Transparency',
+  'Position': 'Position',
+  'Oben links': 'Top left',
+  'Oben rechts': 'Top right',
+  'Unten links': 'Bottom left',
+  'Unten rechts': 'Bottom right',
   'Messung läuft…': 'Measuring…',
   'Messung läuft': 'Measuring',
   'Ruckler': 'stutters',
@@ -3030,6 +3079,34 @@ ipcRenderer.on('input-bridge-setup-status', (e, msg, done) => {
 // ==== Ruckler-Analyse (Analyse-Reiter): Messung steuern, Bericht/Verlauf/Vergleich ====
 let anMeasuring = false, anHist = [], anSel = []
 function anToggle() { ipcRenderer.invoke('analyze-toggle') }
+// Empfindlichkeits-Regler (0 empfindlich / 1 normal / 2 nur harte Ruckler) – wirkt
+// sofort, auch in eine laufende Messung hinein (Shell -> SHM-Bits -> Broker).
+function anSetSense(v) {
+  ipcRenderer.invoke('set-app-settings', { analyzeSense: v })
+  document.querySelectorAll('#anSense button').forEach(b => b.classList.toggle('active', +b.dataset.v === v))
+}
+// Overlay-Regler mit Live-Vorschau: beim Anfassen erscheint das OSD (Demo-Inhalt),
+// beim Loslassen verschwindet es nach kurzer Nachlaufzeit wieder.
+let anPrevTimer = null
+function anPreview(on) {
+  clearTimeout(anPrevTimer); anPrevTimer = null
+  ipcRenderer.invoke('analyze-osd-preview', !!on)
+}
+function anPreviewSoon() {   // Loslassen: Vorschau kurz stehen lassen, dann weg
+  clearTimeout(anPrevTimer)
+  anPrevTimer = setTimeout(() => ipcRenderer.invoke('analyze-osd-preview', false), 900)
+}
+function anOsdSlide(key, val) {
+  ipcRenderer.invoke('set-app-settings', { [key]: val })
+  const pct = Math.round(val * 100) + '%'
+  if (key === 'analyzeOsdScale') document.getElementById('anOsdScaleV').textContent = pct
+  else document.getElementById('anOsdOpacityV').textContent = pct
+}
+function anSetCorner(c) {
+  ipcRenderer.invoke('set-app-settings', { analyzeOsdCorner: c })
+  document.querySelectorAll('#anCorner button').forEach(b => b.classList.toggle('active', b.dataset.c === c))
+  anPreview(true); anPreviewSoon()   // kurzer Vorschau-Puls an der neuen Ecke
+}
 ipcRenderer.on('analyze-status', (e, st) => {
   anMeasuring = !!(st && st.measuring)
   const btn = document.getElementById('anStartBtn'), live = document.getElementById('anLive')
@@ -3056,7 +3133,21 @@ ipcRenderer.on('analyze-done', async (e, file) => {
   await anRefreshHistory()
   if (file) anShowReport(file)
 })
-async function anOpen() { ipcRenderer.invoke('analyze-status'); await anRefreshHistory() }
+async function anOpen() {
+  ipcRenderer.invoke('analyze-status')
+  const s = await ipcRenderer.invoke('get-app-settings') || {}
+  const sense = typeof s.analyzeSense === 'number' ? s.analyzeSense : 1
+  document.querySelectorAll('#anSense button').forEach(b => b.classList.toggle('active', +b.dataset.v === sense))
+  const sc = typeof s.analyzeOsdScale === 'number' ? s.analyzeOsdScale : 1
+  const op = typeof s.analyzeOsdOpacity === 'number' ? s.analyzeOsdOpacity : 1
+  document.getElementById('anOsdScale').value = sc
+  document.getElementById('anOsdScaleV').textContent = Math.round(sc * 100) + '%'
+  document.getElementById('anOsdOpacity').value = op
+  document.getElementById('anOsdOpacityV').textContent = Math.round(op * 100) + '%'
+  const corner = s.analyzeOsdCorner || 'tr'
+  document.querySelectorAll('#anCorner button').forEach(b => b.classList.toggle('active', b.dataset.c === corner))
+  await anRefreshHistory()
+}
 function anEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
 // Urteils-Sätze in Klartext (verdictKey + Daten -> DE/EN via window.tr)
 function anVerdict(r) {
