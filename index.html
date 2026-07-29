@@ -602,7 +602,7 @@
                 </div>
                 <p class="settings-hint" style="margin-top:8px">Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.</p>
                 <div id="hdrTuneBox" style="margin-top:16px">
-                  <div class="dl-head" style="margin-bottom:7px">HDR-Feinabstimmung <span style="opacity:.7; font-weight:400">(nur bei HDR-Spielen)</span></div>
+                  <div class="dl-head" style="margin-bottom:7px">HDR-Feinabstimmung (nur bei HDR-Spielen)</div>
                   <div class="osd-field">
                     <span class="osd-field-label">Kurve</span>
                     <select id="setHdrMode" class="sort-select" style="flex:1" onchange="onHdrTuneChange()">
@@ -816,8 +816,8 @@
         <div class="settings-panel" data-panel="eingabe" hidden>
           <div class="form-group">
             <label>Eingabe-Brücke</label>
-            <p class="settings-hint">Verwandelt <b>jedes</b> Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z.&nbsp;B. Knopf = Vollgas) und umgekehrt.</p>
-            <p class="settings-hint">⚠ Spiele sehen dann <b>zwei</b> Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.</p>
+            <p class="settings-hint">Verwandelt jedes Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z.&nbsp;B. Knopf = Vollgas) und umgekehrt.</p>
+            <p class="settings-hint">⚠ Spiele sehen dann zwei Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.</p>
             <div class="setting-toggle-row">
               <span class="setting-toggle-label">Bei verknüpften Spielen automatisch aktivieren</span>
               <label class="switch"><input type="checkbox" id="setIbAuto" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
@@ -826,7 +826,7 @@
               <span class="setting-toggle-label" id="ibStatusLabel">Virtuelles Gamepad: aus</span>
               <button class="btn-primary" id="ibToggleBtn" onclick="ibToggle()">▶ Aktivieren</button>
             </div>
-            <p class="settings-hint" id="ibSetupHint" style="display:none">Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber <b>ViGEmBus</b> ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps &amp; Features.</p>
+            <p class="settings-hint" id="ibSetupHint" style="display:none">Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber ViGEmBus ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps &amp; Features.</p>
           </div>
           <div class="form-group">
             <label>Profil</label>
@@ -1173,9 +1173,9 @@ const I18N_EN = {
   "⚠️ <b>Kein Bild.</b> Läuft dein Spiel im <b>exklusiven Vollbild</b>? Stelle es auf <b>randloses Fenster</b> („Borderless\"/„Fenster-Vollbild\") um – dann kann Lumora aufnehmen, ohne ins Spiel einzugreifen.": "⚠️ <b>No image.</b> Is your game in <b>exclusive fullscreen</b>? Switch it to <b>borderless window</b> (\"Borderless\"/\"Windowed fullscreen\") – then Lumora can capture without interfering with the game.",
   "❌ Vermittlungs-Server nicht erreichbar – Internet prüfen (oder die Skript-URL unter „Eigener Vermittlungs-Server\").": "❌ Signaling server unreachable – check your internet (or the script URL under \"Custom signaling server\").",
   "= schon belegt (Quelle darunter). Bei aktivem Pad bewegt sich der Controller live mit.": "= already mapped (source below). With an active pad the controller moves along live.",
-  "Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.": "controller (original + virtual pad). If Steam Input is active, disable the original device there, otherwise inputs arrive twice.",
+  "⚠ Spiele sehen dann zwei Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.": "⚠ Games will then see two controllers (original + virtual pad). If Steam Input is active, disable the original device there, otherwise inputs arrive twice.",
   "Das Profil gilt für das gewählte Gerät („Alle Geräte\" = jede Quelle wird gemappt, z. B. Lenkrad + separate Pedale).": "The profile applies to the selected device (\"All devices\" = every source is mapped, e.g. wheel + separate pedals).",
-  "Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z. B. Knopf = Vollgas) und umgekehrt.": "input device (joystick, wheel, flight stick …) into a virtual Xbox gamepad. This lets you control games that only recognise gamepads – including Microsoft Store / Game Pass titles, where Steam Input doesn't work. Great for accessibility too: single buttons can replace axes (e.g. button = full throttle) and vice versa.",
+  "Verwandelt jedes Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z. B. Knopf = Vollgas) und umgekehrt.": "Turns any input device (joystick, wheel, flight stick …) into a virtual Xbox gamepad. This lets you control games that only recognise gamepads – including Microsoft Store / Game Pass titles, where Steam Input doesn't work. Great for accessibility too: single buttons can replace axes (e.g. button = full throttle) and vice versa.",
   "Klick auf ein Bauteil des Controllers unten – dann am Gerät den gewünschten Knopf drücken oder die Achse bewegen.": "Click a part of the controller below – then press the desired button or move the axis on your device.",
   "Nur nötig, wenn der Test oben „nicht erreichbar\" meldet. Zugangsdaten kommen vom Relay-Anbieter oder deinem eigenen coturn-Server („turn:\" nicht nötig).": "Only needed if the test above reports \"unreachable\". Credentials come from your relay provider or your own coturn server (\"turn:\" prefix not needed).",
   "Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.": "Buffer: short = low latency, longer = smoother on an unstable connection. Auto-adjust: temporarily lowers the bitrate when viewers (e.g. on mobile data) report poor reception – and raises it again once things are stable.",
@@ -1183,11 +1183,13 @@ const I18N_EN = {
   "Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein. Jeder neue Zuschauer wird dir einzeln zur Freigabe angezeigt (Fenster überm Spiel); ein Ablehnen gilt nur kurz.": "Off by default. When on, only people you explicitly approve can watch your stream – even someone who knows the link or IP can't get in unasked. Each new viewer is shown to you individually for approval (window over the game); a rejection only lasts briefly.",
   "Startet das Spiel (egal ob über Lumora oder direkt), aktiviert sich das verknüpfte Profil automatisch – aber erst, wenn das Spiel wirklich läuft. Beim Beenden geht das virtuelle Pad wieder aus.": "When the game starts (whether via Lumora or directly), the linked profile activates automatically – but only once the game is really running. On exit the virtual pad turns off again.",
   "Zeigt rohe Geräte-Eingaben und (bei aktivem Pad) das Ergebnis am virtuellen Controller.": "Shows raw device inputs and (with an active pad) the result on the virtual controller.",
-  "ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps & Features.": "(official source, one Windows security prompt). Removable via Apps & Features.",
+  "Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber ViGEmBus ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps & Features.": "The first time you activate this, Lumora installs the signed open-source driver ViGEmBus (official source, one Windows security prompt). Removable via Apps & Features.",
   "★ Stammgäste": "★ Regulars",
+  "🚫 Gesperrt": "🚫 Blocked",
   "🔒 Nur freigegebene Zuschauer": "🔒 Approved viewers only",
   'Wird geladen…': 'Loading…',
   'HDR-Feinabstimmung (nur bei HDR-Spielen)': 'HDR fine-tuning (HDR games only)',
+  'Feineinstellung (Puffer, adaptive Bitrate, HDR)': 'Fine-tuning (buffer, adaptive bitrate, HDR)',
   'Kurve': 'Curve',
   'Helligkeit': 'Brightness',
   'ACES (Standard)': 'ACES (default)',
@@ -1213,10 +1215,13 @@ const I18N_EN = {
   'Eingabe-Brücke': 'Input bridge',
   'Bei verknüpften Spielen automatisch aktivieren': 'Activate automatically for linked games',
   'Virtuelles Gamepad: aus': 'Virtual gamepad: off',
+  'Virtuelles Gamepad: AKTIV': 'Virtual gamepad: ACTIVE',
   '▶ Aktivieren': '▶ Activate',
+  '⏹ Deaktivieren': '⏹ Deactivate',
   'Profil': 'Profile',
   'Zuordnung': 'Mapping',
   'POV-Hat (Rundblickschalter) → Steuerkreuz': 'POV hat switch → D-pad',
+  'Feineinstellung (Deadzone / Kurve / Invertieren) & Liste': 'Fine-tuning (deadzone / curve / invert) & list',
   // Eingabe-Bruecke: Zuordnungsliste, Controller-Tooltips, Dialoge, Live-Anzeige
   'Linker Stick X': 'Left stick X', 'Linker Stick Y': 'Left stick Y',
   'Rechter Stick X': 'Right stick X', 'Rechter Stick Y': 'Right stick Y',
@@ -1275,6 +1280,8 @@ const I18N_EN = {
   'Keine': 'None',
   'Keine neuen Spiele gefunden.': 'No new games found.',
   'Schließen': 'Close',
+  'Minimieren': 'Minimize',
+  'Maximieren': 'Maximize',
   'Update fehlgeschlagen': 'Update failed',
   'Bitte später erneut versuchen.': 'Please try again later.',
   'Neu starten & installieren': 'Restart & install',
@@ -1688,7 +1695,7 @@ const I18N_EN = {
   "„Im Spiel\" zeichnet die Werte direkt in den Spiel-Frame – sichtbar in Aufnahmen und Streams und auch im exklusiven Vollbild. Benötigt laufendes RTSS bzw. MSI Afterburner (sonst automatisch Overlay-Fenster). Vereinfachte Designs (Kompakt/Minimal/Balken); Position folgt der Ecken-Wahl unten. Tipp: Wirkt eine große Fläche hinter den Anzeigen störend, in RTSS die Option „Bildschirmfüllung\" (Fill) abschalten.": "\"In-game\" draws the values straight into the game frame – visible in recordings and streams and even in exclusive fullscreen. Requires RTSS or MSI Afterburner running (otherwise an overlay window is used automatically). Simplified designs (Compact/Minimal/Bars); position follows the corner choice below. Tip: if a large area behind the readouts is distracting, turn off the \"Fill\" (Bildschirmfüllung) option in RTSS.",
   "Blendet das OSD von MSI Afterburner aus bzw. wieder ein – derselbe Schalter, den auch Afterburners eigener OSD-Hotkey nutzt. Das Lumora-Panel (eigener Hotkey oben) bleibt davon": "Shows or hides the MSI Afterburner OSD – the same switch that Afterburner's own OSD hotkey uses. The Lumora panel (its own hotkey above) stays",
   "unabhängig": "independent",
-  ": Afterburner z. B. links, Lumora rechts. Hinweis: Bei Anzeige-Art „Im Spiel\" teilen sich beide Anzeigen denselben RTSS-Kanal – getrennt schalten geht nur mit dem Overlay-Fenster.": ": Afterburner on the left, Lumora on the right, for example. Note: with display mode \"In-game\" both overlays share the same RTSS channel – switching them separately only works with the overlay window.",
+  ": Afterburner z. B. links, Lumora rechts.": ": Afterburner on the left, Lumora on the right, for example.",
   "Globaler Hotkey, um Lumora in den Vordergrund zu holen bzw. wieder zu verstecken – als Tastenkombination": "Global hotkey to bring Lumora to the front or hide it again – as a key combination",
   "oder": "or",
   "Gamepad-Kombi. Ein angeschlossener Controller steuert die Bibliothek automatisch (D-Pad/Stick bewegen, A wählt/startet, B zurück).": "gamepad combo. A connected controller drives the library automatically (move D-pad/stick, A selects/launches, B goes back).",
@@ -3036,8 +3043,8 @@ ipcRenderer.on('input-bridge-active', (e, st) => ibShowActive(st && st.active))
 function ibShowActive(on) {
   const lbl = document.getElementById('ibStatusLabel'), btn = document.getElementById('ibToggleBtn')
   if (!lbl || !btn) return
-  lbl.textContent = on ? 'Virtuelles Gamepad: AKTIV' : 'Virtuelles Gamepad: aus'
-  btn.textContent = on ? '⏹ Deaktivieren' : '▶ Aktivieren'
+  lbl.textContent = window.tr(on ? 'Virtuelles Gamepad: AKTIV' : 'Virtuelles Gamepad: aus')
+  btn.textContent = window.tr(on ? '⏹ Deaktivieren' : '▶ Aktivieren')
   btn.dataset.on = on ? '1' : ''
 }
 async function ibRefreshStatus() {
