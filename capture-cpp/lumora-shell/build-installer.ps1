@@ -7,7 +7,20 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.0.5"   # 3.0.5: Xbox-Controller (Wireless-Dongle) verbindet sich bei laufendem Lumora
+$version = "3.1.0"   # 3.1.0: Ruckler-Blackbox - neue Analyse-Funktion findet die Ursache von
+                     #        Mikro-Rucklern (Kernel-ETW: Hintergrundprozesse, Treiber-DPC/ISR-
+                     #        Latenzen, GPU-Throttling/VRAM, Datentraeger, Programmstarts) waehrend
+                     #        einer expliziten Mess-Session, mit eigenem OSD, Klartext-Bericht,
+                     #        Verlauf + Vergleich zweier Laeufe; dazu Flaschenhals-Erkennung
+                     #        (GPU-/CPU-/Einzelkern-Limit, FPS-Limiter, Throttling, VRAM) als
+                     #        Live-Badge + Verteilung im Bericht. Gamepad-Hotkey fuer Start/Stop
+                     #        der Messung. Menue konsolidiert (Darstellung/Steuerung sind jetzt
+                     #        Abschnitte in Allgemein). Gaming-OSD: sanftes Ein-/Ausblenden
+                     #        repariert (DComp-Visual-Opacity scheiterte still, jetzt CSS-basiert),
+                     #        Fensterinhalt konnte nach Vordergrund-Holen horizontal verrutschen
+                     #        (fehlendes overflow-x auf drei Scroll-Containern) - behoben. Mehrere
+                     #        Uebersetzungsluecken in der Eingabe-Bruecke geschlossen.
+$prev_3_0_5 = ""  # 3.0.5: Xbox-Controller (Wireless-Dongle) verbindet sich bei laufendem Lumora
                      #        zuverlaessig neu (UI-Gamepad auf nativen gp-state-Push, Chromiums
                      #        Gamepad-Monitor gestubbt; XInput-Leerplatz-Probe nur nach
                      #        WM_DEVICECHANGE); OSD blockiert keine Desktop-Klicks mehr (Chromium-
