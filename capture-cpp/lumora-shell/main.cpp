@@ -2815,7 +2815,7 @@ static void analyzeStartMeasurement() {
     g_anMeasuring = true; g_anStopping = false;
     showAnalyzeOsd(true);   // eigenes Analyse-Overlay einblenden (nur waehrend der Messung)
     applyAnalyzeOsdConfig();   // Groesse/Deckkraft/Ecke aus den Settings anwenden
-    SetTimer(g_hwnd, TIMER_ANALYZE, 200, nullptr);
+    SetTimer(g_hwnd, TIMER_ANALYZE, 100, nullptr);   // 100ms = Takt des Broker-SHM-Schriebs; 200ms liess jeden 2. Schrieb aus -> ruckelige Kurve
     std::thread([]() { runTask(L"LumoraOSD-Analyze"); }).detach();
     bcLogStream("analyze: Messung gestartet");
     analyzePushStatus();
@@ -2886,11 +2886,11 @@ static void analyzeToggle() {
     if (g_anReady.load() == 1) { analyzeStartMeasurement(); return; }   // eingerichtet -> direkt messen
     ensureAnalyzeSetup();   // sonst: expliziter Einrichtungs-Schritt (ohne Auto-Start)
 }
-static void analyzeTick() {   // TIMER_ANALYZE (200 ms): Heartbeat, Tail, Statuspush, Ende-Erkennung
+static void analyzeTick() {   // TIMER_ANALYZE (100 ms): Heartbeat, Tail, Statuspush, Ende-Erkennung
     if (!g_anMeasuring) { KillTimer(g_hwnd, TIMER_ANALYZE); return; }
     anShmWriteApp(g_anStopping ? 0 : 1, 0, 0);
     analyzeTailFindings();
-    analyzeFeedOsd();   // Analyse-OSD bei JEDEM Tick (5 Hz) mit echten Frametimes speisen
+    analyzeFeedOsd();   // Analyse-OSD bei JEDEM Tick (10 Hz) mit echten Frametimes speisen
     {   // Click-Through periodisch nachziehen (1 Hz): Chromium kann seine internen Fenster
         // jederzeit (neu) erzeugen/verschieben - der einmalige Durchlauf bei Erstellung
         // liess Teilflaechen klick-blockierend zurueck (User-Befund "nicht an jeder Stelle").
