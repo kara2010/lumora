@@ -212,6 +212,22 @@
     <h2>How sensitive should it be?</h2>
     <p>Not every small bump is a stutter. In the settings you pick one of three levels: <strong>Sensitive</strong> also reports small jumps, <strong>Normal</strong> sticks to noticeable hitches, <strong>Hard stutters only</strong> to clear freezes. So you can either catch every irregularity or target exactly the moments you actually felt while playing.</p>
 
+    <h2>Frequently asked questions</h2>
+    <h3>Why does my game stutter even though my hardware is fast enough?</h3>
+    <p>Micro-stutter rarely comes from a lack of raw performance. Typical causes are background tasks briefly grabbing the CPU, drivers with high DPC latency, momentary GPU throttling, or the game streaming in new data. Task Manager usually shows nothing, because these hitches last only milliseconds.</p>
+
+    <h3>Am I CPU or GPU bottlenecked?</h3>
+    <p>Lumora measures per frame how long the GPU was actually busy. If it is busy almost continuously, the GPU is the limit. If it idles between frames while the FPS still don't rise, it is waiting on the CPU – the classic CPU bottleneck. On top of that, throttling by power or temperature limit and filling VRAM are detected.</p>
+
+    <h3>What are DPC latencies and why do they cause stutter?</h3>
+    <p>DPCs are short tasks that drivers run inside the Windows kernel – for network, audio or graphics. If such a call takes too long, everything else waits, including your game; you feel it as a freeze or micro-stutter. Lumora reads these events and names the responsible driver file, for example <code>nvlddmkm.sys</code> or a Wi-Fi driver. This is exactly what specialist tools like LatencyMon are used for.</p>
+
+    <h3>Does the measurement itself cost performance?</h3>
+    <p>Not noticeably: the session is designed to stay below one percent CPU load and only runs while you start it. With no measurement running there is no load at all – your FPS stay untouched.</p>
+
+    <h3>Do I need extra drivers or third-party tools?</h3>
+    <p>No. The analysis uses only built-in Windows facilities. Reading the measurement data requires administrator rights – setup happens once with a single confirmation, after that everything runs without further prompts.</p>
+
     <h2>And by the way…</h2>
     <p>Lumora is first and foremost a game launcher: every game from Steam, Epic, GOG, Xbox, EA &amp; co. in one cover library, automatic per-game HDR, <a href="gaming-osd.html">a gaming OSD with FPS and hardware readings</a> and <a href="streaming.html">game streaming in up to 4K to your friends' browsers</a>. The stutter analysis is one building block among many – and it doesn't cost you a cent.</p>
 
