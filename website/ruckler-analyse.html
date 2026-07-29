@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0a0a0f">
-  <title>Warum ruckelt mein Spiel? Ruckler-Analyse findet den Grund | Lumora</title>
-  <meta name="description" content="Spiel ruckelt trotz starker Hardware? Lumora misst mit und benennt bei jedem Ruckler die wahrscheinlichen Verursacher: Programm, Treiber, GPU. Kostenlos.">
-  <meta name="keywords" content="Spiel ruckelt trotz guter Hardware, Mikroruckler Ursache finden, Frametime Spikes analysieren, DPC Latenz Spiel, LatencyMon Alternative, warum ruckelt mein Spiel, Stottern PC Spiele, CPU oder GPU Flaschenhals, Ruckler Analyse Tool">
+  <title>Warum ruckelt mein Spiel? Stutter- &amp; Lag-Ursache finden | Lumora</title>
+  <meta name="description" content="Micro-Stutter trotz starker Hardware? Lumora misst Frametimes mit und benennt bei jedem Ruckler den wahrscheinlichen Verursacher: Prozess, Treiber, GPU.">
+  <meta name="keywords" content="Spiel ruckelt trotz guter Hardware, Micro Stutter beheben, Mikroruckler Ursache finden, Frametime Spikes analysieren, Stuttering Windows Games, DPC Latenz Spiel, LatencyMon Alternative, warum ruckelt mein Spiel, FPS Drops Ursache, CPU oder GPU Bottleneck, Lag beim Zocken, Frametime Analyse Tool">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://lumora-streaming.de/ruckler-analyse.html">
   <link rel="alternate" hreflang="de" href="https://lumora-streaming.de/ruckler-analyse.html">
@@ -67,7 +67,7 @@
             "name": "Warum ruckelt mein Spiel, obwohl die Hardware stark genug ist?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Kurze Ruckler entstehen selten aus Mangel an Rechenleistung. Typische Ursachen sind Hintergrundprogramme, die kurz die CPU belegen, Gerätetreiber mit langen Latenzen, kurzzeitige Drosselung der Grafikkarte oder Nachladevorgänge im Spiel selbst. Im Task-Manager sind solche Aussetzer meist unsichtbar, weil sie nur Millisekunden dauern. Lumora misst genau in diesen Momenten mit und benennt die wahrscheinlichen Verursacher."
+              "text": "Micro-Stutter entsteht selten aus Mangel an Rechenleistung. Typische Ursachen sind Background-Tasks, die kurz die CPU belegen, Treiber mit hohen DPC-Latenzen, kurzzeitiges GPU-Throttling oder Nachladevorgänge im Spiel selbst. Im Task-Manager sind solche Aussetzer meist unsichtbar, weil sie nur Millisekunden dauern. Lumora misst genau in diesen Momenten mit und benennt die wahrscheinlichen Verursacher."
             }
           },
           {
@@ -75,7 +75,7 @@
             "name": "Wie finde ich heraus, welches Programm meine Spiele ruckeln lässt?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Messung in Lumora starten, ein paar Minuten normal spielen, Messung beenden. Bei jedem erkannten Ruckler friert Lumora ein Zeitfenster von etwa 200 Millisekunden ein und vergleicht es mit dem ruhigen Verlauf davor: Welcher Prozess hat genau dann CPU-Zeit gezogen, welcher Treiber hatte eine auffällige Latenzspitze, brach der GPU-Takt ein? Der Bericht listet die Verdächtigen mit Häufigkeit, damit Zufallstreffer von echten Mustern unterscheidbar sind."
+              "text": "Messung in Lumora starten, ein paar Minuten normal zocken, Messung beenden. Bei jedem erkannten Stutter friert Lumora ein Zeitfenster von etwa 200 Millisekunden ein und vergleicht es mit dem ruhigen Verlauf davor: Welcher Prozess hat genau dann CPU-Zeit gezogen, welcher Treiber hatte einen auffälligen Latenz-Spike, brach der GPU-Takt ein? Der Report listet die Verdächtigen mit Häufigkeit, damit Zufallstreffer von echten Mustern unterscheidbar sind."
             }
           },
           {
@@ -83,7 +83,7 @@
             "name": "Was sind DPC-Latenzen und warum verursachen sie Ruckler?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "DPCs sind kurze Aufgaben, die Gerätetreiber im Windows-Kern ausführen, etwa für Netzwerk, Audio oder Grafik. Dauert ein solcher Aufruf zu lange, wartet alles andere – auch das Spiel. Lumora liest diese Vorgänge über die Messschnittstelle von Windows mit und zeigt den Namen der verantwortlichen Treiberdatei an, zum Beispiel nvlddmkm.sys oder einen WLAN-Treiber."
+              "text": "DPCs sind kurze Aufgaben, die Gerätetreiber im Windows-Kernel ausführen, etwa für Netzwerk, Audio oder Grafik. Dauert ein solcher Aufruf zu lange, wartet alles andere – auch das Spiel, was sich als Freeze oder Micro-Stutter äußert. Lumora liest diese Events über die ETW-Schnittstelle von Windows mit und zeigt den Namen der verantwortlichen Treiberdatei an, zum Beispiel nvlddmkm.sys oder einen WLAN-Treiber. Genau dafür greift man sonst zu Spezial-Tools wie LatencyMon."
             }
           },
           {
@@ -91,7 +91,7 @@
             "name": "Kostet die Messung selbst Leistung?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Die Messung ist auf unter ein Prozent CPU-Last ausgelegt und läuft nur, solange du sie startest. Genutzt wird die in Windows eingebaute Ereignisverfolgung, die ohnehin mitläuft; Lumora liest sie lediglich aus. Ist die Messung beendet, entsteht keinerlei Last."
+              "text": "Die Messung ist auf unter ein Prozent CPU-Last ausgelegt und läuft nur, solange du sie startest. Genutzt wird die in Windows eingebaute Ereignisverfolgung (ETW), die ohnehin mitläuft; Lumora liest sie lediglich aus. Ist die Session beendet, entsteht keinerlei Last – deine FPS bleiben unangetastet."
             }
           },
           {
@@ -104,10 +104,10 @@
           },
           {
             "@type": "Question",
-            "name": "Bin ich CPU- oder GPU-limitiert?",
+            "name": "Bin ich im CPU- oder GPU-Bottleneck?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Lumora misst pro Bild, wie lange die Grafikkarte tatsächlich beschäftigt war. Ist sie nahezu durchgehend ausgelastet, limitiert die GPU. Bleibt sie zwischen den Bildern unbeschäftigt, während die Bildrate trotzdem nicht steigt, wartet sie auf die CPU. Zusätzlich werden Drosselung durch Strom- oder Temperaturgrenzen und ein volllaufender Grafikspeicher erkannt."
+              "text": "Lumora misst pro Frame, wie lange die GPU tatsächlich beschäftigt war. Ist sie nahezu durchgehend ausgelastet, limitiert die GPU. Bleibt sie zwischen den Frames unbeschäftigt, während die FPS trotzdem nicht steigen, wartet sie auf die CPU – das klassische CPU-Bottleneck. Zusätzlich werden Throttling durch Power- oder Temperature-Limit und volllaufendes VRAM erkannt."
             }
           }
         ]
@@ -156,7 +156,7 @@
 
 <main class="wrap" id="main">
     <h1>Warum ruckelt mein Spiel? Lumora sagt dir, wer schuld ist.</h1>
-    <p class="lead">Teure Grafikkarte, schneller Prozessor – und trotzdem diese kurzen, zufälligen Aussetzer, die beim Rennen oder im Gefecht jedes Mal nerven. Der Task-Manager zeigt nichts, die Auslastung ist niedrig. <strong>Lumora misst genau in diesen Millisekunden mit und benennt die wahrscheinlichen Verursacher – kostenlos, ohne Zusatztools.</strong></p>
+    <p class="lead">Teure GPU, schneller Prozessor – und trotzdem diese kurzen, zufälligen Aussetzer, die beim Rennen oder im Gefecht jedes Mal nerven. Ruckler, Micro-Stutter, Lags, Frametime-Spikes: Wie auch immer du es nennst, der Task-Manager zeigt nichts und die Auslastung ist niedrig. <strong>Lumora misst genau in diesen Millisekunden mit und benennt die wahrscheinlichen Verursacher – kostenlos, ohne Zusatztools.</strong></p>
     <a class="cta" href="download.php">⬇ Lumora kostenlos laden</a>
     <p class="muted">Für Windows 10 &amp; 11 · NVIDIA, AMD &amp; Intel · Open Source</p>
 
@@ -167,13 +167,13 @@
     <div class="card">
       <ul class="feat">
         <li><strong>1. Messung starten</strong> – per Tastenkürzel mitten im Spiel oder mit einem Klick in Lumora.</li>
-        <li><strong>2. Normal weiterspielen</strong> – ein Mess-Overlay zeigt live den Frametime-Verlauf, die Ruckler-Zahl und bei jedem Treffer sofort den ersten Verdacht.</li>
+        <li><strong>2. Normal weiterspielen</strong> – ein Mess-Overlay zeigt live den Frametime-Verlauf, den Stutter-Counter und bei jedem Treffer sofort den ersten Verdacht.</li>
         <li><strong>3. Messung beenden</strong> – der Bericht erscheint als Klartext-Urteil mit Kurve, Kennzahlen und Verdächtigen-Liste.</li>
       </ul>
     </div>
 
     <h2>Was am Ende dabei herauskommt</h2>
-    <p>Kein Zahlenfriedhof, sondern ein Satz, den man versteht – zum Beispiel:</p>
+    <p>Kein Zahlenfriedhof und kein Log zum Selberdeuten, sondern ein Satz, den man versteht – zum Beispiel:</p>
     <div class="verdict">
       <b>Hauptverdächtiger: Treiber nvlddmkm.sys</b> – bei 8 von 10 Rucklern auffällig.
       <span class="sub">DPC/ISR max 1.240&nbsp;µs im Ruckler-Fenster (Basis 40&nbsp;µs)</span>
@@ -191,30 +191,47 @@
     <h2>Wonach Lumora sucht</h2>
     <div class="card">
       <ul class="feat">
-        <li><strong>Hintergrundprogramme</strong>, die genau im Ruckler-Moment CPU-Zeit ziehen – Virenscanner, Update-Dienste, Overlay- und RGB-Software, Cloud-Sync.</li>
-        <li><strong>Gerätetreiber mit Latenzspitzen (DPC/ISR)</strong> – mit Dateinamen, etwa Grafik-, WLAN- oder Audiotreiber. Das ist die Disziplin, für die man sonst Spezialwerkzeuge braucht.</li>
-        <li><strong>Drosselung der Grafikkarte</strong> – Takteinbruch durch Strom- oder Temperaturgrenze, inklusive ausgelesener Ursache (bei NVIDIA-Karten).</li>
-        <li><strong>Volllaufender Grafikspeicher</strong> – wenn Texturen in den langsameren Arbeitsspeicher ausgelagert werden.</li>
-        <li><strong>Zugriffe auf den Datenträger</strong> – Ladeschübe und lange Antwortzeiten.</li>
+        <li><strong>Background-Tasks</strong>, die genau im Stutter-Moment CPU-Zeit ziehen – Virenscanner, Update-Dienste, Overlay- und RGB-Software, Cloud-Sync.</li>
+        <li><strong>Treiber mit Latenz-Spikes (DPC/ISR)</strong> – mit Dateinamen, etwa Grafik-, WLAN- oder Audiotreiber. Das ist die Disziplin, für die man sonst Spezialwerkzeuge wie LatencyMon braucht.</li>
+        <li><strong>GPU-Throttling</strong> – Takteinbruch durch Power- oder Temperature-Limit, inklusive ausgelesener Ursache (bei NVIDIA-Karten).</li>
+        <li><strong>Volllaufendes VRAM</strong> – wenn Texturen in den langsameren Arbeitsspeicher ausgelagert werden und die Frametimes einbrechen.</li>
+        <li><strong>Storage-Zugriffe</strong> – Ladeschübe und lange Antwortzeiten der SSD oder Festplatte.</li>
         <li><strong>Frisch gestartete Programme</strong> – der Klassiker, der im Nachhinein niemandem mehr einfällt.</li>
       </ul>
     </div>
 
-    <h2>Vorher und nachher vergleichen</h2>
-    <p>Der eigentliche Nutzen entsteht beim zweiten Durchgang: Verdächtigen abschalten, erneut messen, beide Läufe nebeneinanderlegen. Lumora speichert jeden Lauf mit Spiel, Auflösung, Bildwiederholrate und Treiberversion und rechnet den Unterschied aus – <em>„Lauf B: 80&nbsp;% weniger Ruckler als Lauf A"</em>. Zu jedem Lauf lässt sich eine Notiz hinterlegen, damit auch nach Tagen klar bleibt, was zwischen den Messungen geändert wurde.</p>
+    <h2>Vorher und nachher vergleichen (A/B-Test für dein System)</h2>
+    <p>Der eigentliche Nutzen entsteht beim zweiten Run: Verdächtigen abschalten, erneut messen, beide Läufe nebeneinanderlegen. Lumora speichert jede Session mit Spiel, Auflösung, Refresh-Rate und Treiberversion und rechnet den Unterschied aus – <em>„Lauf B: 80&nbsp;% weniger Stutter als Lauf A"</em>. Neben der Stutter-Rate stehen die üblichen Benchmark-Kennzahlen: durchschnittliche FPS, <strong>1&nbsp;% Lows</strong> und Median-Frametime. Zu jedem Lauf lässt sich eine Notiz hinterlegen, damit auch nach Tagen klar bleibt, was zwischen den Messungen geändert wurde.</p>
 
     <h2>Ehrlich bleiben: Was die Analyse leisten kann – und was nicht</h2>
-    <p>Lumora liefert <strong>begründete Verdachtsmomente, keine Beweise</strong>. Dass ein Programm im Ruckler-Moment auffällig war, macht es zum plausiblen Verursacher – deshalb zählen wir mit, in wie vielen Fällen es auftrat: Ein Treffer bei 8 von 10 Rucklern ist ein Muster, einer bei 1 von 10 ist Zufall. Diese Zahl steht bewusst in jedem Bericht.</p>
-    <p>Ebenso ehrlich: Ursachen <em>innerhalb</em> des Spiels – nachgeladene Shader, Streaming von Spielwelt-Daten – lassen sich von außen nicht bis zur Codezeile aufklären. Lumora erkennt sie aber als solche und sagt es klar, statt einen unschuldigen Prozess zu beschuldigen.</p>
+    <p>Lumora liefert <strong>begründete Verdachtsmomente, keine Beweise</strong>. Dass ein Prozess im Stutter-Moment auffällig war, macht ihn zum plausiblen Verursacher – deshalb zählen wir mit, in wie vielen Fällen er auftrat: Ein Treffer bei 8 von 10 Rucklern ist ein Muster, einer bei 1 von 10 ist Zufall. Diese Zahl steht bewusst in jedem Report.</p>
+    <p>Ebenso ehrlich: Ursachen <em>innerhalb</em> des Spiels – Shader-Compilation, Streaming von Spielwelt-Daten, das berüchtigte Traversal-Stutter in großen Open-World-Titeln – lassen sich von außen nicht bis zur Codezeile aufklären. Lumora erkennt sie aber als solche und sagt es klar, statt einen unschuldigen Prozess zu beschuldigen.</p>
+    <p>Und noch eine Abgrenzung, weil die Begriffe oft durcheinandergehen: Hier geht es um <strong>Frametime-Probleme auf deinem eigenen Rechner</strong> – nicht um Netzwerk-Lag oder Ping im Online-Match. Wenn dein Bild lokal stockt, obwohl die Verbindung sauber ist, bist du hier richtig.</p>
 
-    <h2>Kostet praktisch keine Leistung</h2>
-    <p>Gemessen wird über die in Windows eingebaute Ereignisverfolgung – dieselbe Grundlage, die auch professionelle Analysewerkzeuge nutzen. Das Auslesen läuft mit niedriger Priorität und ist auf <strong>unter ein Prozent CPU-Last</strong> ausgelegt; eine eingebaute Überwachung schaltet die teuerste Messstufe automatisch ab, falls sie doch einmal darüber liegt. Läuft keine Messung, entsteht überhaupt keine Last. <strong>Zusätzliche Treiber werden nicht installiert.</strong></p>
+    <h2>Kostet praktisch keine Performance</h2>
+    <p>Gemessen wird über die in Windows eingebaute Ereignisverfolgung (ETW) – dieselbe Grundlage, die auch professionelle Analyse-Tools nutzen. Das Auslesen läuft mit niedriger Priorität und ist auf <strong>unter ein Prozent CPU-Last</strong> ausgelegt; ein eingebauter Watchdog schaltet die teuerste Messstufe automatisch ab, falls sie doch einmal darüber liegt. Läuft keine Session, entsteht überhaupt keine Last. <strong>Zusätzliche Treiber werden nicht installiert.</strong></p>
 
     <h2>Wie empfindlich soll gemessen werden?</h2>
-    <p>Nicht jede kleine Unebenheit ist ein Ruckler. In den Einstellungen wählst du zwischen drei Stufen: <strong>Empfindlich</strong> meldet auch kleine Sprünge, <strong>Normal</strong> beschränkt sich auf spürbare Aussetzer, <strong>Nur harte Ruckler</strong> auf deutliche Hänger. So findest du entweder jede Unregelmäßigkeit oder gezielt die Momente, die dir im Spiel wirklich aufgefallen sind.</p>
+    <p>Nicht jeder kleine Frametime-Ausreißer ist ein spürbarer Ruckler. In den Einstellungen wählst du zwischen drei Stufen: <strong>Empfindlich</strong> meldet auch kleine Spikes, <strong>Normal</strong> beschränkt sich auf fühlbare Hitches, <strong>Nur harte Ruckler</strong> auf deutliche Freezes. So findest du entweder jede Unregelmäßigkeit oder gezielt die Momente, die dir beim Zocken wirklich aufgefallen sind.</p>
+
+    <h2>Häufige Fragen</h2>
+    <h3>Warum ruckelt mein Spiel, obwohl die Hardware stark genug ist?</h3>
+    <p>Micro-Stutter entsteht selten aus Mangel an Rechenleistung. Typische Ursachen sind Background-Tasks, die kurz die CPU belegen, Treiber mit hohen DPC-Latenzen, kurzzeitiges GPU-Throttling oder Nachladevorgänge im Spiel selbst. Im Task-Manager sind solche Aussetzer meist unsichtbar, weil sie nur Millisekunden dauern.</p>
+
+    <h3>Bin ich im CPU- oder GPU-Bottleneck?</h3>
+    <p>Lumora misst pro Frame, wie lange die GPU tatsächlich beschäftigt war. Ist sie nahezu durchgehend ausgelastet, limitiert die GPU. Bleibt sie zwischen den Frames unbeschäftigt, während die FPS trotzdem nicht steigen, wartet sie auf die CPU – das klassische CPU-Bottleneck. Zusätzlich werden Throttling durch Power- oder Temperature-Limit und volllaufendes VRAM erkannt.</p>
+
+    <h3>Was sind DPC-Latenzen und warum verursachen sie Stutter?</h3>
+    <p>DPCs sind kurze Aufgaben, die Treiber im Windows-Kernel ausführen – etwa für Netzwerk, Audio oder Grafik. Dauert so ein Aufruf zu lange, wartet alles andere, auch dein Spiel; spürbar als Freeze oder Micro-Stutter. Lumora liest diese Events mit und zeigt die verantwortliche Treiberdatei beim Namen, zum Beispiel <code>nvlddmkm.sys</code> oder einen WLAN-Treiber. Genau dafür greift man sonst zu Spezial-Tools wie LatencyMon.</p>
+
+    <h3>Kostet die Messung selbst Performance?</h3>
+    <p>Nein, spürbar nicht: Die Session ist auf unter ein Prozent CPU-Last ausgelegt und läuft nur, solange du sie startest. Läuft keine Messung, entsteht keinerlei Last – deine FPS bleiben unangetastet.</p>
+
+    <h3>Brauche ich zusätzliche Treiber oder Fremdprogramme?</h3>
+    <p>Nein. Die Analyse nutzt ausschließlich Bordmittel von Windows. Für den Zugriff auf die Messdaten sind Administratorrechte nötig – die Einrichtung erfolgt einmalig mit einer einzigen Bestätigung, danach läuft alles ohne weitere Nachfragen.</p>
 
     <h2>Und nebenbei…</h2>
-    <p>Lumora ist vor allem ein Spiele-Launcher: alle Spiele aus Steam, Epic, GOG, Xbox, EA &amp; Co. in einer Cover-Bibliothek, automatisches HDR pro Spiel, <a href="gaming-osd.html">ein Gaming-OSD mit FPS und Hardware-Werten</a> und <a href="streaming.html">Game-Streaming in bis zu 4K an den Browser deiner Freunde</a>. Die Ruckler-Analyse ist einer von vielen Bausteinen – und sie kostet dich keinen Cent.</p>
+    <p>Lumora ist vor allem ein Game-Launcher: alle Spiele aus Steam, Epic, GOG, Xbox, EA &amp; Co. in einer Cover-Library, automatisches HDR pro Spiel, <a href="gaming-osd.html">ein Gaming-OSD mit FPS und Hardware-Monitoring</a> und <a href="streaming.html">Game-Streaming in bis zu 4K an den Browser deiner Freunde</a>. Die Ruckler-Analyse ist einer von vielen Bausteinen – und sie kostet dich keinen Cent.</p>
 
     <p><a class="cta" href="download.php">⬇ Jetzt kostenlos laden</a></p>
 
