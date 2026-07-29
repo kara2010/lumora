@@ -2421,6 +2421,11 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 .an-live { display: inline-flex; align-items: center; gap: 8px; color: var(--text, #dbe4ef); font-size: 13px; }
 .an-rec { width: 9px; height: 9px; border-radius: 50%; background: #ff4d4d; animation: anpulse 1.6s infinite; }
 @keyframes anpulse { 0% { box-shadow: 0 0 0 0 rgba(255,77,77,.6); } 70% { box-shadow: 0 0 0 7px rgba(255,77,77,0); } 100% { box-shadow: 0 0 0 0 rgba(255,77,77,0); } }
+/* Abschnitts-Ueberschrift im zusammengelegten "Allgemein"-Reiter (Darstellung/Steuerung
+   sind seit der Menue-Konsolidierung Abschnitte statt eigener Reiter) */
+.settings-sec { font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--accent, #74e857); opacity: .85; font-weight: 700;
+  margin: 26px 0 2px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.08); }
 /* Empfindlichkeits-Regler (3 Stufen) + Overlay-Regler (Groesse/Transparenz/Ecke) */
 .an-sense { display: inline-flex; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; overflow: hidden; }
 .an-sense button { background: rgba(255,255,255,.03); border: none; color: var(--text, #dbe4ef);

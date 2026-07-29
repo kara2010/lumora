@@ -96,8 +96,6 @@
       <nav class="detail-nav" id="detailNav">
         <button class="detail-nav-tab active" data-view="library" onclick="showLibraryView()">Bibliothek</button>
         <button class="detail-nav-tab" data-view="allgemein" onclick="showSettings('allgemein')">Allgemein</button>
-        <button class="detail-nav-tab" data-view="darstellung" onclick="showSettings('darstellung')">Darstellung</button>
-        <button class="detail-nav-tab" data-view="steuerung" onclick="showSettings('steuerung')">Steuerung</button>
         <button class="detail-nav-tab" data-view="overlay" onclick="showSettings('overlay')">Overlay</button>
         <button class="detail-nav-tab" data-view="eingabe" onclick="showSettings('eingabe')">Eingabe</button>
         <button class="detail-nav-tab" data-view="analyse" onclick="showSettings('analyse')">Analyse</button>
@@ -287,10 +285,8 @@
             <p class="settings-hint">Lumora sucht beim Start automatisch nach Updates. Du kannst auch jederzeit selbst prüfen.</p>
             <button class="btn-browse" id="updateCheckBtn" style="align-self:flex-start" onclick="checkForUpdatesManually()">Jetzt nach Updates suchen</button>
           </div>
-        </div>
 
-        <!-- ===== DARSTELLUNG ===== -->
-        <div class="settings-panel" data-panel="darstellung" hidden>
+          <h3 class="settings-sec">Darstellung</h3>
           <div class="form-group">
             <label>Cover-Darstellung</label>
             <div class="mode-options">
@@ -329,6 +325,24 @@
                 <button class="btn-browse" onclick="openExternal('https://www.steamgriddb.com/profile/preferences/api')">↗ Key-Seite öffnen</button>
               </div>
             </details>
+          </div>
+          <h3 class="settings-sec">Steuerung</h3>
+          <div class="form-group">
+            <label>Steuerung</label>
+            <p class="settings-hint">Globaler Hotkey, um Lumora in den Vordergrund zu holen bzw. wieder zu verstecken – als Tastenkombination <strong>oder</strong> Gamepad-Kombi. Ein angeschlossener Controller steuert die Bibliothek automatisch (D-Pad/Stick bewegen, A wählt/startet, B zurück).</p>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Tastatur">⌨️</span>
+              <span class="hotkey-display" id="hotkeyDisplay">Alt+L</span>
+              <button class="btn-browse" id="hotkeyCaptureBtn" onclick="toggleHotkeyCapture('main')">Ändern</button>
+              <button class="btn-cancel" onclick="clearHotkey('main')">Aus</button>
+            </div>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Gamepad">🎮</span>
+              <span class="hotkey-display" id="gpHotkeyDisplay">—</span>
+              <button class="btn-browse" id="gpHotkeyCaptureBtn" onclick="toggleGpHotkeyCapture('main')">Aufnehmen</button>
+              <button class="btn-cancel" onclick="clearGpHotkey('main')">Aus</button>
+            </div>
+            <p class="settings-hint" id="gpHotkeyHint" style="display:none"></p>
           </div>
         </div>
 
@@ -433,26 +447,6 @@
         </div>
 
         <!-- ===== STEUERUNG ===== -->
-        <div class="settings-panel" data-panel="steuerung" hidden>
-          <div class="form-group">
-            <label>Steuerung</label>
-            <p class="settings-hint">Globaler Hotkey, um Lumora in den Vordergrund zu holen bzw. wieder zu verstecken – als Tastenkombination <strong>oder</strong> Gamepad-Kombi. Ein angeschlossener Controller steuert die Bibliothek automatisch (D-Pad/Stick bewegen, A wählt/startet, B zurück).</p>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Tastatur">⌨️</span>
-              <span class="hotkey-display" id="hotkeyDisplay">Alt+L</span>
-              <button class="btn-browse" id="hotkeyCaptureBtn" onclick="toggleHotkeyCapture('main')">Ändern</button>
-              <button class="btn-cancel" onclick="clearHotkey('main')">Aus</button>
-            </div>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Gamepad">🎮</span>
-              <span class="hotkey-display" id="gpHotkeyDisplay">—</span>
-              <button class="btn-browse" id="gpHotkeyCaptureBtn" onclick="toggleGpHotkeyCapture('main')">Aufnehmen</button>
-              <button class="btn-cancel" onclick="clearGpHotkey('main')">Aus</button>
-            </div>
-            <p class="settings-hint" id="gpHotkeyHint" style="display:none"></p>
-          </div>
-        </div>
-
         <div class="settings-panel" data-panel="analyse" hidden>
           <div class="form-group">
             <label>Ruckler-Analyse</label>
@@ -2055,7 +2049,7 @@ function applyI18n() {
     // Springt aus der leeren Cover-Suche direkt zur SteamGridDB-Einrichtung in den Einstellungen.
     function openSgdbSetup() {
       hideCoverSearch()
-      showSettings('darstellung')
+      showSettings('allgemein')   // Darstellung ist jetzt ein Abschnitt in "Allgemein"
       setTimeout(() => {
         const details = document.querySelector('.sgdb-guide')
         if (details) details.open = true
