@@ -90,8 +90,13 @@ inline std::string jsonEsc(const std::string& s) {
 class StutterAnalyzer {
 public:
     struct Config {
-        double spikeK = 3.0;            // Spike, wenn ft > max(k*Median, Median+8ms)
-        double spikeAbsMs = 8.0;
+        // Wahrnehmbarkeits-Schwelle (Nutzer-Befund: 3x Median meldete bei 138 fps schon
+        // 21-ms-Frames als "Ruckler" - das spuert niemand): ein Frame zaehlt erst, wenn
+        // er k*Median UEBERschreitet UND absolut mindestens minSpikeMs lang ist
+        // (~2+ verlorene Frames am Stueck = fuehlbarer Mikro-Ruckler).
+        double spikeK = 3.0;            // Spike, wenn ft > max(k*Median, Median+15ms) UND ft >= minSpikeMs
+        double spikeAbsMs = 15.0;
+        double minSpikeMs = 28.0;
         double debounceS = 0.25;        // max. 1 Befund je 250 ms
         uint32_t targetPid = 0;         // 0 = aktivster Praesentierer (setzt der Broker)
         std::function<std::string(uint32_t pid)> pidName;    // pidExeName
@@ -141,7 +146,8 @@ public:
         ++frameCount_;
         // Spike-Pruefung inline (billig): Median der letzten 64 Frametimes
         double med = median64();
-        if (med > 0 && t >= graceUntil_ && ft > (std::max)(cfg_.spikeK * med, med + cfg_.spikeAbsMs)) {
+        if (med > 0 && t >= graceUntil_ && ft >= cfg_.minSpikeMs
+            && ft > (std::max)(cfg_.spikeK * med, med + cfg_.spikeAbsMs)) {
             if (t - lastSpikeT_ >= cfg_.debounceS) {
                 lastSpikeT_ = t;
                 pendingSpike_.store(1 + (uint32_t)(t * 1000), std::memory_order_release);
@@ -310,7 +316,10 @@ inline void StutterAnalyzer::analyzeSpike(double t, double ftMs, double medMs) {
             if (pid == cfg_.targetPid || pid == 4 || pid == 0) continue;   // Spiel/System-Idle nicht verdaechtigen
             uint64_t bUs = 0; for (auto& e : bSum) if (e.first == pid) { bUs = e.second; break; }
             double wCore = us / (wDur * 1e6), bCore = bUs / (bDur * 1e6);  // Anteil eines Kerns
-            if (wCore > 0.15 && wCore > bCore * 2.5) {
+            // Schwelle wahrnehmungs-orientiert (Nutzer-Befund: 15% verdaechtigte staendig
+            // harmlose Systemprozesse): erst ab ~einem Drittel Kern UND deutlichem Sprung
+            // gegenueber der Baseline ist ein Prozess ein plausibler Mit-Verursacher.
+            if (wCore > 0.35 && wCore > bCore * 3.0) {
                 std::string nm = cfg_.pidName ? cfg_.pidName(pid) : "";
                 if (nm.empty()) nm = "pid " + std::to_string(pid);
                 sprintf_s(ev, "%.0f%% Kernlast im Ruckler-Fenster (Basis %.0f%%)", wCore * 100, bCore * 100);
@@ -332,7 +341,9 @@ inline void StutterAnalyzer::analyzeSpike(double t, double ftMs, double medMs) {
             double bSum = 0, bMax = 0;
             for (auto& d : bd) if (d.driverIdx == drv) { bSum += d.durUs; if (d.durUs > bMax) bMax = d.durUs; }
             double bScaled = bSum * (0.25 / 2.0);        // Baseline auf Fensterlaenge skaliert
-            if (su.second > 250.0 || (su.first > 1000.0 && su.first > bScaled * 3)) {
+            // Einzel-DPCs unter 1 ms sind Alltag (auch nvlddmkm) - erst ab ~1 ms Einzeldauer
+            // oder massiver Fenster-Summe (>3 ms UND 4x Baseline) plausibel rucklerrelevant.
+            if (su.second > 1000.0 || (su.first > 3000.0 && su.first > bScaled * 4)) {
                 std::string nm = cfg_.driverName ? cfg_.driverName(drv) : "(Treiber)";
                 sprintf_s(ev, "DPC/ISR max %.0fus, Summe %.0fus im Fenster (Basis max %.0fus)", su.second, su.first, bMax);
                 f.suspects.push_back({ "driver", nm, ev, (std::min)(1.0, 0.4 + su.second / 1000.0) });
@@ -429,7 +440,7 @@ inline bool StutterAnalyzer::selfCheck(std::string& msg) {
         for (int k = 0; k < 50; ++k) a.onCSwitch(bt + k * 0.001, 0, 0, 1, 200);
         a.onCSwitch(bt + 0.0499, 0, 0, 0, 0);
     }
-    a.pushDpcIsr(2.95, 800.0, 0, false);             // + ein dicker DPC
+    a.pushDpcIsr(2.95, 1500.0, 0, false);            // + ein dicker DPC (>1ms-Schwelle)
     a.pushFrame(100, t + 0.090);                     // der Ruckler
     for (int i = 0; i < 20 && !called; ++i) Sleep(50);
     a.stop();
