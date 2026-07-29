@@ -220,21 +220,46 @@
       ctx.shadowBlur = 0; break;
     }
   }
-  // 30-fps-Zeichenschleife, aber nur solange sich etwas geaendert hat (dirty) -
-  // das Nachleuchten laeuft dabei ein paar Frames aus, dann steht das Bild.
+  // Zeichenschleife laeuft jetzt durchgehend per rAF (kein 30-fps-Deckel mehr) UND
+  // zieht neu angekommene Punkte ueber die geschaetzte Zeit bis zum naechsten Batch
+  // gleichmaessig nach ("Reveal"), statt sie in einem Ruck an die Kurve zu haengen.
+  // Die WERTE bleiben dabei echte Messwerte - es wird nichts interpoliert/erfunden,
+  // nur der Zeitpunkt, an dem ein bereits gemessener Punkt sichtbar wird, verteilt
+  // sich auf mehrere Zeichen-Frames statt in einem einzigen Sprung zu landen.
   let fade = 0;
-  (function loop() {
+  const pending = [], pendingMarks = [];   // schon gemessene, aber noch nicht "abgespielte" Punkte
+  let revealRate = 0;    // Punkte pro ms, aus dem Abstand zwischen zwei Batches abgeleitet
+  let revealCarry = 0;   // Bruchteils-Rest zwischen zwei Zeichen-Frames
+  let lastBatchAt = 0, lastFrameT = 0;
+  (function tick(t) {
+    if (!lastFrameT) lastFrameT = t;
+    const dt = t - lastFrameT; lastFrameT = t;
+    if (pending.length) {
+      revealCarry += revealRate * dt;
+      let n = Math.min(Math.floor(revealCarry), pending.length);
+      if (n > 0) {
+        revealCarry -= n;
+        for (let i = 0; i < n; i++) {
+          hist.push(pending.shift()); hist.shift();
+          marks.push(pendingMarks.shift()); marks.shift();
+        }
+        dirty = true;
+      }
+    }
     if (dirty || fade > 0) { if (!dirty) fade--; else fade = 24; dirty = false; draw(); }
-    setTimeout(() => requestAnimationFrame(loop), 33);
-  })();
+    requestAnimationFrame(tick);
+  })(performance.now());
 
   function pushFts(arr, spikeNew) {
-    for (let k = 0; k < arr.length; k++) {
-      hist.push(arr[k]); hist.shift();
-      marks.push(0); marks.shift();
-    }
-    if (spikeNew && arr.length) marks[N - 1] = 1;   // Spike am juengsten Punkt markieren
-    dirty = true;
+    if (!arr.length) return;
+    const now = performance.now();
+    const dt = lastBatchAt ? (now - lastBatchAt) : 100;
+    lastBatchAt = now;
+    for (let k = 0; k < arr.length; k++) { pending.push(arr[k]); pendingMarks.push(0); }
+    if (spikeNew) pendingMarks[pendingMarks.length - 1] = 1;   // Spike am juengsten Punkt markieren
+    // So viele Punkte/ms enthuellen, dass die Warteschlange bis zum naechsten
+    // erwarteten Batch leer ist (min. 50ms angenommen, falls ein Batch mal zu schnell kommt).
+    revealRate = pending.length / Math.max(50, dt);
   }
 
   // ---- Daten von der Shell --------------------------------------------------------
