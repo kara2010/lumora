@@ -585,6 +585,9 @@ body::before {
 .game-list {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;   /* siehe .settings-view: overflow-y:auto ohne overflow-x macht die x-Achse
+                            per Spec ebenfalls scrollbar - hier zusaetzlich riskant, weil setNavFocus()
+                            per D-Pad/Tastatur genau in diesem Container scrollIntoView() ausloest */
   padding: 8px;
 }
 
@@ -714,6 +717,8 @@ body::before {
 .grid-view {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;   /* siehe .settings-view/.game-list: overflow-x sonst implizit auch scrollbar,
+                            und setNavFocus() (D-Pad/Tastatur) scrollt hier per scrollIntoView() */
   padding: 8px;
   flex-direction: column;
 }
@@ -1460,6 +1465,9 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
 .settings-view {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;   /* ohne das macht overflow-y:auto laut CSS-Spec die x-Achse auch scrollbar -
+                            und ohne jeden scrollLeft-Reset im JS blieb ein einmal verirrter horizontaler
+                            Scroll fuer immer stehen (User-Befund: Inhalt nach Vordergrund-Holen verschoben) */
   padding: 20px 22px;
   position: relative;
   flex-direction: column;
