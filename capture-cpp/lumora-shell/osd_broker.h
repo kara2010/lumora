@@ -6,6 +6,7 @@
 #pragma once
 #include <winsock2.h>
 #include <windows.h>
+#include <pdh.h>
 #include <intrin.h>
 #include <shlobj.h>      // SHGetKnownFolderPath (analyzeDir: %APPDATA% im elevated Broker)
 #include <knownfolders.h>
@@ -70,7 +71,8 @@ inline int runAnalyzeBroker() {
              int (*temp)(void*, int, unsigned int*) = nullptr;
              int (*power)(void*, unsigned int*) = nullptr;
              int (*memInfo)(void*, void*) = nullptr;
-             int (*throttle)(void*, unsigned long long*) = nullptr; } nv;
+             int (*throttle)(void*, unsigned long long*) = nullptr;
+             int (*util)(void*, void*) = nullptr; } nv;
     {
         HMODULE m = LoadLibraryW(L"nvml.dll");
         if (!m) m = LoadLibraryW(L"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll");
@@ -84,6 +86,7 @@ inline int runAnalyzeBroker() {
             nv.power = (int(*)(void*, unsigned int*))GetProcAddress(m, "nvmlDeviceGetPowerUsage");
             nv.memInfo = (int(*)(void*, void*))GetProcAddress(m, "nvmlDeviceGetMemoryInfo");
             nv.throttle = (int(*)(void*, unsigned long long*))GetProcAddress(m, "nvmlDeviceGetCurrentClocksThrottleReasons");
+            nv.util = (int(*)(void*, void*))GetProcAddress(m, "nvmlDeviceGetUtilizationRates");   // GPU-Auslastung (Flaschenhals-Erkennung)
             if (init && byIdx && init() == 0) {
                 byIdx(0, &nv.dev);
                 if (nv.dev && gname) gname(nv.dev, nv.name, sizeof(nv.name));
@@ -143,6 +146,14 @@ inline int runAnalyzeBroker() {
     std::thread sensorThr([&]() {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
         LARGE_INTEGER qpf, qpc; QueryPerformanceFrequency(&qpf);
+        // PDH-3D-Engine als herstellerunabhaengige GPU-Auslastung (AMD/Intel, und
+        // NVIDIA-Fallback falls NVML fehlt) - gleiche Zaehler wie das Gaming-OSD.
+        PDH_HQUERY pq = nullptr; PDH_HCOUNTER pc = nullptr;
+        if (!nv.util) {
+            if (PdhOpenQueryW(nullptr, 0, &pq) == ERROR_SUCCESS)
+                if (PdhAddEnglishCounterW(pq, L"\\GPU Engine(*engtype_3D)\\Utilization Percentage", 0, &pc) != ERROR_SUCCESS) pc = nullptr;
+            if (pq) PdhCollectQueryData(pq);   // Basis-Sample
+        }
         while (run.load()) {
             luana::SensorSample s{};
             QueryPerformanceCounter(&qpc);
@@ -154,9 +165,27 @@ inline int runAnalyzeBroker() {
                 if (nv.temp && nv.temp(nv.dev, 0, &v) == 0) s.gpuTempC = (int)v;
                 if (nv.power && nv.power(nv.dev, &v) == 0) s.gpuPowerW = v / 1000.0f;
                 struct { unsigned long long total, freeB, used; } mi{};
-                if (nv.memInfo && nv.memInfo(nv.dev, &mi) == 0) s.vramMB = (int64_t)(mi.used / 1048576);
+                if (nv.memInfo && nv.memInfo(nv.dev, &mi) == 0) {
+                    s.vramMB = (int64_t)(mi.used / 1048576);
+                    s.vramTotalMB = (int64_t)(mi.total / 1048576);   // fuer die VRAM-Limit-Erkennung
+                }
                 unsigned long long tr = 0;
                 if (nv.throttle && nv.throttle(nv.dev, &tr) == 0) { s.throttleMask = tr; s.throttleKnown = 1; }
+                struct { unsigned int gpu, mem; } ut{};
+                if (nv.util && nv.util(nv.dev, &ut) == 0) s.gpuLoadPct = (int)(ut.gpu > 100 ? 100 : ut.gpu);
+            }
+            if (s.gpuLoadPct < 0 && pc) {   // Fallback: Summe aller 3D-Engine-Instanzen (AMD/Intel)
+                PdhCollectQueryData(pq);
+                DWORD bs = 0, cnt = 0;
+                PdhGetFormattedCounterArrayW(pc, PDH_FMT_DOUBLE, &bs, &cnt, nullptr);
+                if (bs) {
+                    std::vector<uint8_t> buf(bs);
+                    auto* items = (PDH_FMT_COUNTERVALUE_ITEM_W*)buf.data();
+                    if (PdhGetFormattedCounterArrayW(pc, PDH_FMT_DOUBLE, &bs, &cnt, items) == ERROR_SUCCESS) {
+                        double sum = 0; for (DWORD i = 0; i < cnt; ++i) sum += items[i].FmtValue.doubleValue;
+                        s.gpuLoadPct = (int)(sum > 100 ? 100 : sum + 0.5);
+                    }
+                }
             }
             MEMORYSTATUSEX ms{ sizeof(ms) };
             if (GlobalMemoryStatusEx(&ms)) s.ramMB = (int64_t)((ms.ullTotalPhys - ms.ullAvailPhys) / 1048576);
@@ -190,6 +219,8 @@ inline int runAnalyzeBroker() {
             lastCpu100 = cpu100;
             mem[8] = permille;
             mem[7] = cswPerSecCnt.exchange(0);
+            ana.sampleLimit();   // Flaschenhals-Klassifikation des letzten Sekundenfensters
+            mem[13] = (uint32_t)ana.lastLimit();
             if (!cswDropped && permille > 10 && kernelOk) { kt.dropCSwitch(); cswDropped = true; mem[9] = 200; }   // Notbremse (>1% eines Kerns)
             lastSec = now;
         }
@@ -271,7 +302,24 @@ inline int runAnalyzeBroker() {
         rep += "{\"kind\":\"" + luana::jsonEsc(agg[i].kind) + "\",\"name\":\"" + luana::jsonEsc(agg[i].name)
              + "\",\"hits\":" + std::to_string(agg[i].hits) + "}";
     }
-    rep += "]}";
+    rep += "],\"limit\":{";
+    {   // Flaschenhals-Verteilung ueber die Session (Sekundenproben) + dominante Ursache
+        const luana::Limit all[] = { luana::Limit::Gpu, luana::Limit::Cpu, luana::Limit::CpuCore,
+                                     luana::Limit::Framecap, luana::Limit::Throttle, luana::Limit::Vram,
+                                     luana::Limit::Unknown };
+        uint32_t total = ana.limitTotal(); bool first = true;
+        std::string top = "unknown"; uint32_t topN = 0;
+        for (auto l : all) {
+            uint32_t n = ana.limitCount(l);
+            if (!first) rep += ","; first = false;
+            rep += "\"" + std::string(luana::limitKey(l)) + "\":" + std::to_string(total ? n * 100 / total : 0);
+            // "unknown" nie als Hauptaussage kueren - sonst stuende im Bericht eine Nicht-Aussage
+            if (l != luana::Limit::Unknown && n > topN) { topN = n; top = luana::limitKey(l); }
+        }
+        rep += ",\"samples\":" + std::to_string(total) + ",\"top\":\"" + top + "\"";
+        rep += ",\"topPct\":" + std::to_string(total ? topN * 100 / total : 0);
+    }
+    rep += "}}";
     {
         std::wstring repPath = dir + L"\\report-" + std::wstring(ts, ts + strlen(ts)) + L".json";
         FILE* f = nullptr; _wfopen_s(&f, repPath.c_str(), L"wb");

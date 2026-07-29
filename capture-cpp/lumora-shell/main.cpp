@@ -2753,9 +2753,11 @@ static void analyzeFeedOsd() {
     if (!anShmRead(m)) return;
     json fts = json::array();
     for (int i = 0; i < 40; ++i) if (m[21 + i]) fts.push_back(m[21 + i] / 100.0);
+    static const char* LIMKEY[] = { "unknown", "gpu", "cpu", "cpu-core", "framecap", "throttle", "vram" };
     json d = { {"sec", (int)m[12]}, {"spikes", (int)m[3]}, {"avgFps", m[6] / 10.0},
                {"medianFt", m[5] / 100.0}, {"frameNo", m[20]}, {"fts", fts},
                {"selfPermille", (int)m[8]}, {"err", (int)m[9]},
+               {"limit", LIMKEY[m[13] < 7 ? m[13] : 0]},
                {"target", m[11] ? luetw::pidExeName(m[11]) : ""} };
     sendToAnalyzeOsd("an-data", d);
 }

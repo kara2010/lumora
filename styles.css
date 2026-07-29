@@ -2454,6 +2454,7 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 .an-tile .s { font-size: 10.5px; opacity: .5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .an-chart { display: block; width: 100%; height: 160px; border-radius: 10px; margin-bottom: 12px;
   background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.07); }
+.an-sub { font-size: 12.5px; font-weight: 700; margin: 16px 0 2px; color: var(--text, #dbe4ef); }
 .an-agg { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .an-aggrow { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
 .an-aggrow .n { flex: 0 0 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

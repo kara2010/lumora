@@ -50,7 +50,7 @@
   .title { font-size: 11px; letter-spacing: .24em; text-transform: uppercase;
            background: linear-gradient(90deg, #4ce0ff, #9a7bff);
            -webkit-background-clip: text; background-clip: text; color: transparent; font-weight: 700; }
-  .time { margin-left: auto; font-size: 15px; font-weight: 700; color: #eaf6ff;
+  .time { margin-left: 10px; font-size: 15px; font-weight: 700; color: #eaf6ff;
           text-shadow: 0 0 10px rgba(0,229,255,.45); }
   /* Kennzahlen */
   .stats { display: flex; gap: 8px; margin-bottom: 10px; }
@@ -65,6 +65,16 @@
              text-shadow: 0 0 12px rgba(76,224,255,.35); }
   .stat .v small { font-size: 10px; color: #6d86a0; font-weight: 400; margin-left: 2px; }
   .stat.alarm .v { color: #ff8d99; text-shadow: 0 0 12px rgba(255,42,60,.5); }
+  /* Flaschenhals-Badge: aktuelles Limit (GPU/CPU/Framecap/…) */
+  .limit { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+           font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700;
+           padding: 4px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,.14);
+           background: rgba(255,255,255,.04); color: #9fb4c9; }
+  .limit .ld { width: 6px; height: 6px; border-radius: 50%; background: #6d86a0; }
+  .limit.gpu { color: #7fe0a0; border-color: rgba(53,224,138,.45); } .limit.gpu .ld { background: #35e08a; }
+  .limit.cpu, .limit.cpucore { color: #ffcf7a; border-color: rgba(255,176,58,.45); } .limit.cpu .ld, .limit.cpucore .ld { background: #ffb03a; }
+  .limit.framecap { color: #8fd0ff; border-color: rgba(76,224,255,.4); } .limit.framecap .ld { background: #4ce0ff; }
+  .limit.throttle, .limit.vram { color: #ff9aa4; border-color: rgba(255,42,60,.45); } .limit.throttle .ld, .limit.vram .ld { background: #ff2a3c; }
   /* Oszilloskop */
   #graphWrap { position: relative; height: 108px; border-radius: 9px; overflow: hidden;
                background: linear-gradient(180deg, rgba(4,10,18,.92), rgba(3,7,13,.96));
@@ -93,6 +103,7 @@
   <div class="head">
     <div class="rec"></div>
     <div class="title">Ruckler-Blackbox</div>
+    <div class="limit" id="limit" style="display:none"><span class="ld"></span><span id="limitTxt">–</span></div>
     <div class="time" id="time">00:00</div>
   </div>
   <div class="stats">
@@ -232,6 +243,18 @@
     const m = (s / 60) | 0, r = s % 60;
     return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
   }
+  // Flaschenhals-Badge: Klartext + Farbe je erkanntem Limit
+  const LIMIT_TXT = { gpu: 'GPU-Limit', cpu: 'CPU-Limit', 'cpu-core': 'Kern-Limit',
+                      framecap: 'FPS-Limit', throttle: 'GPU drosselt', vram: 'VRAM voll' };
+  function setLimit(k) {
+    const el = document.getElementById('limit');
+    if (!el) return;
+    const txt = LIMIT_TXT[k];
+    if (!txt) { el.style.display = 'none'; return; }   // "unknown" nichts behaupten
+    el.style.display = 'inline-flex';
+    el.className = 'limit ' + String(k).replace('-', '');
+    document.getElementById('limitTxt').textContent = txt;
+  }
   let lastSpikes = 0, lastFrameNo = 0;
   if (ipcRenderer) {
     ipcRenderer.on('an-data', (e, d) => {
@@ -251,6 +274,7 @@
       if (newN > 0) pushFts(fts.slice(fts.length - newN), spikeNew);
       else if (spikeNew) { const i = hist.length - 1; if (hist[i] >= 0) { marks[i] = 1; dirty = true; } }
       if (spikeNew) { panel.classList.remove('flash'); void panel.offsetWidth; panel.classList.add('flash'); }
+      setLimit(d.limit);
       const perm = d.selfPermille | 0;
       $('hdot').className = 'dot' + (perm > 10 || d.err ? ' warn' : '');
       let hint = 'Messung laeuft – Alt+A beendet sie';
@@ -296,6 +320,7 @@
       $('ft').innerHTML = '7.2<small>ms</small>';
       $('spikes').textContent = spikes;
       $('spikeBox').classList.toggle('alarm', spikes > 0);
+      setLimit('gpu');   // Demo/Vorschau: typischer Fall
       pushFts(batch, spikeNew);
       if (spikeNew) {
         panel.classList.remove('flash'); void panel.offsetWidth; panel.classList.add('flash');
