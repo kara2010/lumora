@@ -2684,7 +2684,8 @@ static uint32_t g_anLastFindingPushed = 0;
 static std::atomic<bool> g_anSetupRunning{ false };
 static std::atomic<int> g_anReady{ -1 };   // -1 unbekannt (Check laeuft), 0 nicht eingerichtet, 1 bereit
 static std::atomic<int> g_anSense{ 1 };    // Empfindlichkeit 0/1/2 (Cache des Settings analyzeSense)
-static std::atomic<bool> g_anPreview{ false };   // OSD-Vorschau aktiv (Regler wird gezogen)
+static std::atomic<bool> g_anPreview{ false };   // Analyse-OSD-Vorschau aktiv (Regler wird gezogen)
+static bool g_osdPreview = false;                // Gaming-OSD-Vorschau aktiv (Regler im Overlay-Reiter)
 static std::wstring analyzeDirW() { return dataDir() + L"\\analyze"; }
 static bool anShmOpen() {
     if (g_anShm) return true;
@@ -3778,7 +3779,15 @@ static void hideOsd() {
         SetTimer(g_hwnd, TIMER_OSDHIDE, 130, nullptr);   // Fenster kurz NACH dem schnellen Fade verstecken
     }
 }
-static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false)) showOsd(); else hideOsd(); }
+static void syncOsdVisibility() { if (loadSettings().value("osdEnabled", false) || g_osdPreview) showOsd(); else hideOsd(); }
+// Vorschau beim Ziehen der Overlay-Regler (Groesse/Deckkraft/Ecke): das OSD wird
+// kurz gezeigt, auch wenn es aus ist - beim Loslassen wieder versteckt, ausser es
+// war ohnehin eingeschaltet (dann bleibt es stehen).
+static void osdPreviewMode(bool on) {
+    g_osdPreview = on;
+    syncOsdVisibility();
+    if (on) applyOsdConfig();
+}
 // Live-Edit-Modus (Alt+Shift+O): laeuft in einem EIGENEN windowed WebView2-Fenster mit
 // Desktop-Schnappschuss als Hintergrund (createOsdEditWindow) - Klick/Drag/Rad nativ.
 // Das Anzeige-Overlay wird waehrenddessen versteckt und bleibt selbst IMMER click-through.
@@ -4326,6 +4335,7 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "analyze-stop") { analyzeStop(); return true; }
     if (channel == "analyze-status") { analyzeEnsureReadyCheck(); analyzePushStatus(); return true; }
     if (channel == "analyze-osd-preview" && args.size() >= 1 && args[0].is_boolean()) { analyzeOsdPreview(args[0].get<bool>()); return true; }
+    if (channel == "osd-preview" && args.size() >= 1 && args[0].is_boolean()) { osdPreviewMode(args[0].get<bool>()); return true; }
     if (channel == "analyze-list") {   // Verlauf: alle Berichte mit Kopf-Metadaten (neueste zuerst)
         json out = json::array();
         WIN32_FIND_DATAW fd{};
