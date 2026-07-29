@@ -3755,20 +3755,15 @@ static void applyOsdWindowGeometry() {
 // Weiches Ein-/Ausblenden ueber die DirectComposition-Visual-Opacity: GPU-getrieben und von der
 // Shell gesteuert -> OHNE Web-Message-/Compositor-Aufwach-Latenz, startet sofort auf die Eingabe.
 static void osdFadeVisual(bool in) {
-    if (!g_dcompVisual || !g_dcompDev) return;
-    ComPtr<IDCompositionVisual3> v3;
-    if (FAILED(g_dcompVisual.As(&v3)) || !v3) return;
-    ComPtr<IDCompositionAnimation> anim;
+    // War als DComp-Visual3-Opacity gedacht (GPU-getrieben, ohne Web-Message-Latenz) - schlug
+    // aber wie die Deckkraft beim Analyse-OSD mit E_NOINTERFACE fehl (unser DComp-Device ist v1,
+    // IDCompositionVisual3 braeuchte DCompositionCreateDevice3). Lief seither still ins Leere:
+    // kein Fade, hartes Erscheinen/Verschwinden. Gleicher Fix wie beim Analyse-OSD: CSS-Opacity
+    // im WebView selbst (per-pixel-transparentes Composition-Overlay macht das optisch identisch).
     // Einblenden weich (0.26s, gefaellt), AUSblenden deutlich schneller (0.11s): sonst bleibt das
     // OSD nach dem Schliessen die erste ~0.1s noch klar sichtbar und wirkt "verzoegert" gegenueber
     // dem sofortigen Erscheinen. Kurzer Fade = knackiges Schliessen, aber nicht hart abgeschnitten.
-    const double dur = in ? 0.26 : 0.11, from = in ? 0.0 : 1.0, to = in ? 1.0 : 0.0;
-    if (SUCCEEDED(g_dcompDev->CreateAnimation(&anim)) && anim) {
-        anim->AddCubic(0.0f, (float)from, (float)((to - from) / dur), 0.0f, 0.0f);   // linearer Verlauf from->to
-        anim->End((float)dur, (float)to);
-        v3->SetOpacity(anim.Get());
-    } else v3->SetOpacity((float)to);
-    g_dcompDev->Commit();
+    sendToOsd("osd-fade", in);
 }
 // Zeigt das OSD (SW_SHOW ist "blitzschnell") und blendet per DComp sanft ein - nur wenn das OSD
 // aktiviert ist (oder im Edit-Modus). Ohne bekannte Panel-Groesse holt der 'osd-bounds'-Handler das nach.

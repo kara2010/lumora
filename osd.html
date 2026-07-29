@@ -9,8 +9,16 @@
     font-family: 'Consolas', 'DejaVu Sans Mono', 'Courier New', monospace; font-weight: 700;
     font-variant-numeric: tabular-nums; font-feature-settings: "tnum";  /* Ziffern gleich breit -> keine Sprünge */
   }
-  /* Das sanfte Ein-/Ausblenden macht die Shell ueber die DirectComposition-Visual-Opacity
-     (GPU-getrieben, ohne Web-Message-Latenz) - hier NICHTS faden, sonst doppelt/verzoegert. */
+  /* Sanftes Ein-/Ausblenden per CSS-Opacity: der urspruengliche Plan (DirectComposition-Visual-
+     Opacity, GPU-getrieben ohne Web-Message-Latenz) scheiterte an E_NOINTERFACE (v1-DComp-Device,
+     IDCompositionVisual3 braeuchte DCompositionCreateDevice3 - gleicher Fund wie bei der Deckkraft
+     des Analyse-OSD). Startzustand (unsichtbar, NUR fuer das Anzeige-Overlay) setzt das Skript
+     SYNCHRON beim Registrieren des 'osd-fade'-Listeners, nicht hier per CSS-Default - sonst
+     koennte das einmalige erste 'osd-fade'(true) verloren gehen, falls das Skript beim allerersten
+     Zeigen noch nicht fertig geladen war, und das Overlay bliebe dauerhaft unsichtbar (schlimmer
+     als der Ausgangsfehler). 'osd-fade' (osdFadeVisual in main.cpp) schaltet Dauer + Zielwert um.
+     Edit-Modus bleibt aussen vor (siehe osd-fade-Handler + body.edit unten). */
+  body { transition: opacity .11s linear; }
   :root {
     --nv: #74e857; --amd: #ff8a1e; --val: #ffe100; --fps: #ffffff; --ft: #6fe86f;
     --accent: #74e857;              /* Akzentfarbe (überschreibbar per Config) */
@@ -130,6 +138,9 @@
   body:not(.edit) #panel { position: static !important; margin: 14px !important;
     left: auto !important; right: auto !important; top: auto !important; bottom: auto !important; transform: none !important; }
   body.edit #panel { outline: 2px dashed #4f8ef7; outline-offset: 5px; cursor: move; }
+  /* Edit-Fenster ist ein normales, immer sichtbares Fenster - vom neuen Fade-Standard
+     (body{opacity:0}) und von jeder verirrten 'osd-fade'-Nachricht ausnehmen. */
+  body.edit { opacity: 1 !important; transition: none !important; }
   /* ===== Live-Edit-Leiste: Lumora-Look (Glas-Panel, Sektionen, Akzent #4f8ef7) ===== */
   #editbar { display: none; position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
     z-index: 10; flex-direction: column; gap: 10px; white-space: nowrap; padding: 13px 16px 11px;
@@ -587,6 +598,11 @@
   // im Composition-ANZEIGE-Overlay; dort ist der Body wie bisher transparent).
   try {
     if (new URLSearchParams(location.search).get('editbg')) {
+      // Sofort sichtbar machen, synchron per URL statt ueber das asynchrone 'osd-edit'/
+      // body.edit - sonst waere das Edit-Fenster fuer die Dauer dieses Web-Message-Umlaufs
+      // kurz unsichtbar (der neue Fade-Start unten setzt opacity:0 nur fuer das Anzeige-
+      // Overlay, aber sicherheitshalber schon hier explizit auf sichtbar).
+      document.body.style.opacity = '1';
       // WICHTIG: html/body auf volle Hoehe - sonst ist die Hintergrund-Bezugsbox nur so hoch
       // wie der INHALT (Panel) und der Schnappschuss wird in den oberen Streifen gequetscht
       // (User-Befund "Bildschirm nach oben gequetscht"; darunter blieb es schwarz).
@@ -603,9 +619,22 @@
     ipcRenderer.on('osd-data', (e, d) => updateOsd(d));
     ipcRenderer.on('osd-config', (e, c) => applyConfig(c));
     ipcRenderer.on('osd-edit', (e, on) => setEdit(on));
+    // Sanftes Ein-/Ausblenden (osdFadeVisual in main.cpp) per CSS-Opacity statt der an
+    // E_NOINTERFACE gescheiterten DComp-Visual3-Opacity. Edit-Fenster (?editbg=1, oben bereits
+    // auf opacity:1 gesetzt) bleibt aussen vor - nur das Anzeige-Overlay startet unsichtbar,
+    // und zwar genau HIER (im selben Tick, in dem der Listener registriert wird): so kann das
+    // erste 'osd-fade'(true) nie auf einen noch fehlenden Listener treffen.
+    const isEditBg = !!new URLSearchParams(location.search).get('editbg')
+    if (!isEditBg) document.body.style.opacity = '0'
+    ipcRenderer.on('osd-fade', (e, on) => {
+      if (document.body.classList.contains('edit')) return
+      document.body.style.transition = 'opacity ' + (on ? '.26s' : '.11s') + ' linear'
+      document.body.style.opacity = on ? '1' : '0'
+    })
     renderPanel();
   } else {
     // -------- Demo-Modus (im Browser ohne Electron): Beispielwerte + Theme-Umschalter
+    document.body.style.opacity = '1'   // kein Shell-Fade hier -> Default (unsichtbar) sofort aufheben
     data = { gpu:{brand:'NVIDIA',name:'RTX 5080',load:45,temp:62,power:210,clock:2730,vram:8420},
              cpu:{brand:'AMD',name:'7950X3D',load:38,temp:68,power:95,clock:5000,ram:24560},
              fps:144, frametime:6.9, api:'D3D12' };
