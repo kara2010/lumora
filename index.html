@@ -1490,6 +1490,13 @@ const I18N_EN = {
   '🛠 Analyse einmalig einrichten': '🛠 Set up analysis (one time)',
   '🛠 Einrichtung läuft …': '🛠 Setting up …',
   'Empfindlichkeit': 'Sensitivity',
+  'Flaschenhals': 'Bottleneck',
+  'GPU-Limit': 'GPU limit', 'CPU-Limit': 'CPU limit', 'Einzelkern-Limit': 'Single-core limit',
+  'FPS-Limit (VSync/Limiter)': 'FPS cap (VSync/limiter)', 'GPU drosselt': 'GPU throttling',
+  'Grafikspeicher voll': 'VRAM full', 'Nicht eindeutig': 'Inconclusive',
+  'Überwiegend': 'Mostly', 'der Messzeit': 'of the measured time',
+  'Kein klares Limit erkennbar.': 'No clear limit detected.',
+  'Ermittelt aus GPU-Auslastung, Kernlast und Frametime-Gleichmäßigkeit – eine Einschätzung, keine frame-genaue Messung.': 'Derived from GPU utilisation, per-core load and frame time consistency – an assessment, not a frame-exact measurement.',
   'Findet heraus, warum dein Spiel ruckelt: Während einer Messung überwacht Lumora Frametimes, Hintergrundprogramme, Treiber-Latenzen und deine Grafikkarte – und benennt bei jedem Ruckler die wahrscheinlichen Verursacher. Die Messung kostet praktisch keine Leistung und läuft nur, solange du sie startest.': 'Finds out why your game stutters: during a measurement Lumora watches frame times, background programs, driver latencies and your graphics card – and names the likely culprits for every stutter. The measurement costs practically no performance and only runs while you start it.',
   'Normal': 'Normal',
   'Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28 ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45 ms).': 'When does a frame count as a stutter? "Normal" only reports noticeable hitches (from ~28 ms), "Sensitive" also small bumps, "Hard stutters only" only clear freezes (from ~45 ms).',
@@ -3207,6 +3214,29 @@ function anStatTiles(r) {
     + tile(window.tr('1%-Low'), (r.p1LowFps || 0).toFixed(0) + ' fps', 'p99 ' + (r.p99FtMs || 0).toFixed(1) + ' ms')
     + tile(window.tr('Ruckler'), r.spikes | 0, (r.spikesPerMin || 0).toFixed(1) + '/min') + '</div>'
 }
+// Flaschenhals-Abschnitt: dominante Ursache + Verteilung als Balken. Bewusst nur
+// anzeigen, wenn genug Sekundenproben da sind - sonst behaupten wir nichts.
+const AN_LIMIT = { gpu: 'GPU-Limit', cpu: 'CPU-Limit', 'cpu-core': 'Einzelkern-Limit',
+                   framecap: 'FPS-Limit (VSync/Limiter)', throttle: 'GPU drosselt', vram: 'Grafikspeicher voll',
+                   unknown: 'Nicht eindeutig' }
+const AN_LIMIT_COL = { gpu: '#35e08a', cpu: '#ffb03a', 'cpu-core': '#ffb03a', framecap: '#4ce0ff',
+                       throttle: '#ff2a3c', vram: '#ff2a3c', unknown: '#6d86a0' }
+function anLimitSection(r) {
+  const L = r.limit
+  if (!L || !L.samples || L.samples < 10) return ''
+  const order = ['gpu', 'cpu', 'cpu-core', 'framecap', 'throttle', 'vram', 'unknown']
+  const rows = order.filter(k => (L[k] | 0) > 0).map(k =>
+    '<div class="an-aggrow"><span class="n">' + window.tr(AN_LIMIT[k]) + '</span>'
+    + '<span class="bar"><i style="width:' + (L[k] | 0) + '%;background:' + AN_LIMIT_COL[k] + '"></i></span>'
+    + '<span class="h">' + (L[k] | 0) + '%</span></div>').join('')
+  const topTxt = L.top && L.top !== 'unknown'
+    ? window.tr('Überwiegend') + ': <b>' + window.tr(AN_LIMIT[L.top] || L.top) + '</b> (' + (L.topPct | 0) + '% ' + window.tr('der Messzeit') + ')'
+    : window.tr('Kein klares Limit erkennbar.')
+  return '<h4 class="an-sub">' + window.tr('Flaschenhals') + '</h4>'
+    + '<p class="settings-hint" style="margin:2px 0 8px">' + topTxt + '</p>'
+    + '<div class="an-agg">' + rows + '</div>'
+    + '<p class="settings-hint" style="margin-top:-4px">' + window.tr('Ermittelt aus GPU-Auslastung, Kernlast und Frametime-Gleichmäßigkeit – eine Einschätzung, keine frame-genaue Messung.') + '</p>'
+}
 async function anShowReport(file) {
   const r = await ipcRenderer.invoke('analyze-get', file)
   if (!r) return
@@ -3235,6 +3265,7 @@ async function anShowReport(file) {
     + '<div class="an-hero-txt">' + anVerdict(r) + '<div class="an-hero-meta">' + anEsc(r.wall || '') + (metaTxt ? ' · ' + metaTxt : '') + '</div></div></div>'
     + anStatTiles(r)
     + '<canvas id="anChart" class="an-chart"></canvas>'
+    + anLimitSection(r)
     + aggHtml + spikesHtml
     + '<div class="an-actions"><button class="btn-browse" onclick="anExport(\'' + anEsc(file) + '\')">' + window.tr('Als Text kopieren') + '</button></div>'
   requestAnimationFrame(() => { const cv = document.getElementById('anChart'); if (cv) anDrawChart(cv, r.ftSeries, r.findings) })

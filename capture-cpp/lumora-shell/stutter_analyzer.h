@@ -32,10 +32,25 @@ struct SensorSample {
     double t;
     int32_t gpuClockMHz = -1, gpuTempC = -1;
     float gpuPowerW = -1;
-    int64_t vramMB = -1, ramMB = -1;
+    int64_t vramMB = -1, ramMB = -1, vramTotalMB = -1;
     uint64_t throttleMask = 0;      // NVML-ClocksThrottleReasons (0 = keiner/unbekannt)
     uint8_t throttleKnown = 0;      // 0 = Maske nicht auslesbar (AMD/alt) -> Takt-Heuristik
+    int32_t gpuLoadPct = -1;        // GPU-Auslastung (NVML bzw. PDH-3D-Engine), -1 = unbekannt
 };
+
+// --- Flaschenhals-Klassifikation (Live-Anzeige + Verteilung im Bericht) -------------
+// EHRLICHKEIT: Das ist eine Heuristik aus GPU-Auslastung, Kernlast und Frametime-
+// Stabilitaet - KEINE frame-genaue GPU-Busy-Messung (die braeuchte DxgKrnl-Events).
+// Deshalb gibt es die Stufe "unklar" statt einer erfundenen Aussage, und ein
+// erkannter Framecap (VSync/Limiter) wird als solcher benannt, nicht als CPU-Limit.
+enum class Limit : uint8_t { Unknown = 0, Gpu, Cpu, CpuCore, Framecap, Throttle, Vram };
+inline const char* limitKey(Limit l) {
+    switch (l) {
+    case Limit::Gpu: return "gpu"; case Limit::Cpu: return "cpu"; case Limit::CpuCore: return "cpu-core";
+    case Limit::Framecap: return "framecap"; case Limit::Throttle: return "throttle"; case Limit::Vram: return "vram";
+    default: return "unknown";
+    }
+}
 // CSwitch-Aggregat: ein Bucket je 50 ms. topPid/topUs = die 8 groessten CPU-Verbraucher.
 struct CpuBucket {
     double t = 0;   // Bucket-Beginn (Feldname "t" wie in allen Ringen - Ring::range verlangt das)
@@ -204,6 +219,59 @@ public:
             out.push_back({ allFtT_[mi], mx });
         }
     }
+    // --- Flaschenhals: Klassifikation des LETZTEN Sekundenfensters + Verteilung -----
+    // Aufruf 1x/s aus der Broker-Schleife. Entscheidungsreihenfolge bewusst so:
+    // harte Fakten (Throttle/VRAM) vor Auslastungs-Heuristik, und ein Framecap wird
+    // VOR dem CPU-Verdacht geprueft - sonst wuerde jedes VSync-Limit als "CPU-Limit"
+    // gemeldet (der klassische Fehlschluss solcher Tools).
+    Limit classifyLimit() {
+        double now = lastPresent_;
+        if (now <= 0) return Limit::Unknown;
+        std::vector<FrameSample> fr; frames_.range(now - 1.0, now + 0.01, fr);
+        if (fr.size() < 20) return Limit::Unknown;                 // zu wenig Daten
+        std::vector<SensorSample> ss; sensors_.range(now - 1.0, now + 0.01, ss);
+        std::vector<CpuBucket> cb; cpu_.range(now - 1.0, now + 0.01, cb);
+
+        // Frametime-Statistik des Fensters
+        std::vector<float> ft; ft.reserve(fr.size());
+        for (auto& f : fr) ft.push_back(f.ftMs);
+        std::sort(ft.begin(), ft.end());
+        double med = ft[ft.size() / 2];
+        double p10 = ft[(size_t)(ft.size() * 0.10)], p90 = ft[(size_t)(ft.size() * 0.90)];
+        double jitter = med > 0 ? (p90 - p10) / med : 1.0;         // relative Streuung
+
+        // Sensorik mitteln
+        int gpuLoad = -1, gpuClk = -1; uint64_t thr = 0; uint8_t thrKnown = 0;
+        int64_t vram = -1, vramTot = -1;
+        { int n = 0, sum = 0;
+          for (auto& s : ss) { if (s.gpuLoadPct >= 0) { sum += s.gpuLoadPct; ++n; }
+              if (s.gpuClockMHz > 0) gpuClk = s.gpuClockMHz;
+              thr |= s.throttleMask; thrKnown |= s.throttleKnown;
+              if (s.vramMB > vram) vram = s.vramMB; if (s.vramTotalMB > 0) vramTot = s.vramTotalMB; }
+          if (n) gpuLoad = sum / n; }
+        int coreMax = 0;
+        for (auto& b : cb) for (int c = 0; c < 64; ++c) if (b.coreBusyPct[c] > coreMax) coreMax = b.coreBusyPct[c];
+
+        // 1) Harte Ursachen zuerst (auslesbare Fakten statt Heuristik)
+        if (thrKnown && (thr & ~0x1ull) && gpuLoad > 50) return Limit::Throttle;   // Bit 0x1 = GpuIdle
+        if (vramTot > 0 && vram > 0 && vram > vramTot * 94 / 100) return Limit::Vram;
+        // 2) Framecap/VSync: sehr gleichmaessige Frametimes UND GPU nicht am Anschlag
+        if (jitter < 0.12 && gpuLoad >= 0 && gpuLoad < 92) return Limit::Framecap;
+        // 3) GPU am Anschlag -> GPU-Limit
+        if (gpuLoad >= 95) return Limit::Gpu;
+        // 4) GPU hat Luft: CPU-seitig gebremst? Einzelkern-Anschlag ist der haeufigste Fall
+        if (gpuLoad >= 0 && gpuLoad < 85) return coreMax >= 90 ? Limit::CpuCore : Limit::Cpu;
+        return Limit::Unknown;   // Graubereich 85-95 % ohne klares Indiz: lieber nichts behaupten
+    }
+    void sampleLimit() {                       // 1x/s aufrufen: Verteilung mitschreiben
+        Limit l = classifyLimit();
+        lastLimit_ = l;
+        limitCount_[(int)l]++; limitTotal_++;
+    }
+    Limit lastLimit() const { return lastLimit_; }
+    uint32_t limitCount(Limit l) const { return limitCount_[(int)l]; }
+    uint32_t limitTotal() const { return limitTotal_; }
+
     const std::vector<Finding>& findings() const { return findings_; }
     uint32_t spikeCount() const { return (uint32_t)findings_.size(); }
     // Letzte n Frametimes (aeltester zuerst) fuer den Live-Schrieb im Analyse-OSD -
@@ -287,6 +355,8 @@ private:
     double lastPresent_ = 0, lastSpikeT_ = -1, graceUntil_ = 0;
     volatile uint64_t frameCount_ = 0;
     float recent_[64] = {};   // fester Live-Ring fuer recentFt (lockfrei, nie realloziert)
+    Limit lastLimit_ = Limit::Unknown;
+    uint32_t limitCount_[8] = {}, limitTotal_ = 0;   // Verteilung ueber die Session
     std::vector<double> allFtT_; std::vector<float> allFt_;   // Gesamtserie (Report)
     // Spike-Uebergabe an den Worker
     std::atomic<uint32_t> pendingSpike_{ 0 };
