@@ -1,0 +1,19 @@
+Ruckler-Analyse (neu): Lumora findet jetzt die Ursache von Mikro-Rucklern. Messung per Hotkey (Alt+A oder Gamepad-Kombi, frei belegbar) starten, ein paar Minuten spielen, wieder beenden – bei jedem erkannten Ruckler vergleicht Lumora ein kurzes Zeitfenster mit dem ruhigen Verlauf davor und benennt den wahrscheinlichen Verursacher: Hintergrundprogramm, Treiber-Latenz (DPC/ISR), GPU-Throttling, volllaufendes VRAM, Datenträger-Last oder ein frisch gestartetes Programm. Eigenes, unaufdringliches Mess-Overlay mit Live-Kurve; der fertige Bericht mit Verlauf und Vergleich zweier Läufe erscheint im neuen Analyse-Reiter. Drei Empfindlichkeitsstufen einstellbar. Die Messung kostet unter 1 % CPU-Last und läuft nur, solange sie aktiv gestartet ist.
+
+Flaschenhals-Erkennung (neu): Während einer Messung zeigt Lumora zusätzlich an, was gerade das Tempo vorgibt – GPU-Limit, CPU-Limit, Einzelkern-Limit, ein FPS-Limiter/VSync, GPU-Throttling oder volllaufendes VRAM. Live als Badge im Mess-Overlay, als Verteilung über die ganze Messzeit im Bericht. Bleibt das Bild uneindeutig, sagt Lumora ehrlich "nicht eindeutig", statt zu raten.
+
+Einstellungen aufgeräumt: Die bisherigen Reiter "Darstellung" und "Steuerung" sind jetzt Abschnitte im Reiter "Allgemein" – weniger Klicks, gleicher Funktionsumfang.
+
+Gaming-OSD: Das sanfte Ein-/Ausblenden beim Ein-/Ausschalten (Alt+O) funktioniert jetzt tatsächlich – bisher scheiterte der zuständige Grafik-Aufruf still im Hintergrund, das Overlay erschien/verschwand hart statt weich. Außerdem konnte der Inhalt der Einstellungen nach dem Vordergrund-Holen per Hotkey horizontal verrutschen und die Reiterleiste verschwinden lassen – behoben.
+
+Eingabe-Brücke: Mehrere Textstellen blieben in der englischen Oberfläche versehentlich deutsch (u. a. die Kurzbeschreibung und der Aktivieren-Knopf) – jetzt vollständig übersetzt.
+===EN===
+Stutter analysis (new): Lumora now finds the cause of micro-stutter. Start a measurement via hotkey (Alt+A or a gamepad combo, freely assignable), play for a few minutes, stop it again – for every detected stutter, Lumora compares a short time window against the calm run before it and names the likely culprit: a background program, driver latency (DPC/ISR), GPU throttling, VRAM filling up, storage load, or a freshly started program. Its own unobtrusive measurement overlay shows a live curve; the finished report with history and a side-by-side comparison of two runs appears in the new Analysis tab. Three sensitivity levels are adjustable. The measurement costs under 1% CPU load and only runs while actively started.
+
+Bottleneck detection (new): During a measurement, Lumora also shows what's currently setting the pace – a GPU limit, CPU limit, single-core limit, an FPS cap/VSync, GPU throttling, or VRAM filling up. Shown live as a badge in the measurement overlay, and as a breakdown over the whole session in the report. If the picture stays unclear, Lumora honestly says "inconclusive" instead of guessing.
+
+Settings tidied up: The former "Appearance" and "Controls" tabs are now sections inside the "General" tab – fewer clicks, same functionality.
+
+Gaming OSD: The soft fade in/out when toggling it (Alt+O) now actually works – the underlying graphics call used to fail silently in the background, so the overlay appeared/disappeared abruptly instead of smoothly. Also fixed: settings content could shift horizontally after bringing the window to the foreground via hotkey, hiding the tab bar.
+
+Input bridge: Several text spots stayed in German by mistake in the English UI (including the short description and the Activate button) – now fully translated.

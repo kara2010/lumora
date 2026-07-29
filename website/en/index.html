@@ -23,13 +23,13 @@
   <meta property="og:site_name"   content="Lumora">
   <meta property="og:url"         content="https://lumora-streaming.de/en/">
   <meta property="og:title"       content="Lumora – native game launcher with streaming, auto HDR and an input bridge">
-  <meta property="og:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.5 MB, for Windows 10 / 11.">
+  <meta property="og:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.73 MB, for Windows 10 / 11.">
   <meta property="og:locale"      content="en_US">
 
   <!-- Twitter Card -->
   <meta name="twitter:card"        content="summary_large_image">
   <meta name="twitter:title"       content="Lumora – native game launcher with streaming, auto HDR and an input bridge">
-  <meta name="twitter:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.5 MB, for Windows 10 / 11.">
+  <meta name="twitter:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.73 MB, for Windows 10 / 11.">
   <meta name="twitter:image"       content="https://lumora-streaming.de/screenshot.png">
 
   <!-- og:image -->
@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "3.0.5",
+        "softwareVersion": "3.1.0",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -744,7 +744,7 @@
 <section class="hero">
   <div class="hero-badge">⬡ Free · Windows 10 / 11</div>
   <h1>A native launcher for all your games.<br><em>With game streaming, automatic HDR and an input bridge.</em></h1>
-  <p>Lumora unifies Steam, Epic, GOG, Xbox &amp; more in one cover library — at your desk with a mouse, on the couch with a gamepad. Plus streaming a game via a link, automatic HDR per game, a joystick, wheel or flight stick as a virtual Xbox controller, and an FPS/hardware OSD <strong>without Afterburner &amp; co.</strong> Native C++ code, 3.5 MB, open source.</p>
+  <p>Lumora unifies Steam, Epic, GOG, Xbox &amp; more in one cover library — at your desk with a mouse, on the couch with a gamepad. Plus streaming a game via a link, automatic HDR per game, a joystick, wheel or flight stick as a virtual Xbox controller, and an FPS/hardware OSD <strong>without Afterburner &amp; co.</strong> Native C++ code, 3.73 MB, open source.</p>
   <div class="hero-pills">
     <span class="hero-pill">🗂 All stores in one library</span>
     <span class="hero-pill">📡 Streaming via link (up to 4K)</span>
@@ -754,7 +754,7 @@
   </div>
   <div class="hero-actions">
     <button class="btn-dl" onclick="startDownload()">
-      ⬇ Download &nbsp;·&nbsp; 3.5 MB
+      ⬇ Download &nbsp;·&nbsp; 3.73 MB
     </button>
     <a class="btn-ghost" href="#features">
       See all features
@@ -1037,8 +1037,20 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.0.5</span>
+          <span class="release-ver">3.1.0</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>New: Stutter analysis</strong> – finds the cause of micro-stutter. Start a measurement via hotkey, play for a few minutes, stop it: for every stutter, Lumora names the likely culprit (a background program, driver latency, GPU throttling, VRAM, storage, or a freshly started program), with its own measurement overlay, a plain-language report, history and a side-by-side comparison of two runs. <a href="ruckler-analyse.html" style="color:var(--accent2)">Learn more →</a></li>
+          <li><strong>New: Bottleneck detection</strong> – shows live during the measurement what's currently setting the pace: a GPU limit, CPU limit, single-core limit, an FPS cap, GPU throttling, or VRAM filling up.</li>
+          <li><strong>Settings tidied up</strong>: "Appearance" and "Controls" are now sections inside the "General" tab.</li>
+          <li><strong>Gaming OSD now fades in and out smoothly</strong> when toggled via hotkey – it used to appear/disappear abruptly.</li>
+          <li><strong>Settings stay put</strong>: content could shift sideways after bringing the window to the foreground via hotkey, hiding the tab bar – fixed.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.0.5</span>
         </div>
         <ul>
           <li><strong>Xbox controller: reconnecting is now stable</strong>: turn the controller (Xbox Wireless Dongle) off and back on while Lumora is running and the connection now stays reliable – the interface's controller navigation runs fully natively for that.</li>
@@ -1081,6 +1093,7 @@
           <li><strong>Update notice in the background</strong>: if Lumora autostarts minimized, a pending update announces itself via the tray icon – one click shows the dialog.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.0.1</span>
@@ -1090,7 +1103,6 @@
           <li>Minor fix when leaving the OSD edit mode; the bundled helper programs now carry the Lumora icon.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.0.0</span>
@@ -1351,7 +1363,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (23)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (24)</button>
   </div>
 </section>
 
@@ -1750,7 +1762,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Show less' : 'Show older versions (23)';
+    btn.textContent = open ? 'Show less' : 'Show older versions (24)';
   }
 
   function toggleFeatures() {
