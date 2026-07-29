@@ -20,6 +20,14 @@ Options -Indexes
   RewriteCond %{REQUEST_URI} !^/lib- [NC]
   RewriteCond %{REQUEST_URI} !^/data/ [NC]
   RewriteRule ^(.*)$ https://lumora-streaming.de/$1 [R=301,L]
+
+  # www-Subdomain lieferte bisher denselben Inhalt OHNE Redirect aus (200 statt 301) -
+  # zwei identisch crawlbare URLs fuer dieselbe Seite, nur per canonical-Tag verbunden.
+  # Bing (strenger als Google) stufte das als Grund fuer "Issues preventing indexation"
+  # ein (Webmaster-Tools-Befund 2026-07-29). www ist in keinem Client fest verdrahtet
+  # (Repo-weit geprueft) - daher ohne Pfad-Ausnahmen dauerhaft auf non-www umleiten.
+  RewriteCond %{HTTP_HOST} ^www\.lumora-streaming\.de$ [NC]
+  RewriteRule ^(.*)$ https://lumora-streaming.de/$1 [R=301,L]
 </IfModule>
 
 # Beim Aufruf des Ordners immer index.html ausliefern
