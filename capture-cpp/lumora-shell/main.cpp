@@ -3498,10 +3498,13 @@ static void applyAnalyzeOsdConfig() {
         double z = (std::max)(0.5, (std::min)(2.5, s.value("analyzeOsdScale", 1.0)));
         g_anOsdCtrl->put_ZoomFactor(z);
     }
-    if (g_anDcompVisual && g_anDcompDev) {
+    {
+        // Deckkraft setzt die SEITE selbst (body.opacity): IDCompositionVisual3::SetOpacity
+        // scheitert auf unserem v1-DComp-Device mit E_NOINTERFACE (Log-Beweis 0x80004002 -
+        // Visual3 braeuchte DCompositionCreateDevice3). Bei per-pixel-transparentem
+        // Composition-WebView ist CSS-Opacity optisch identisch und garantiert wirksam.
         double op = (std::max)(0.25, (std::min)(1.0, s.value("analyzeOsdOpacity", 1.0)));
-        ComPtr<IDCompositionVisual3> v3;
-        if (SUCCEEDED(g_anDcompVisual.As(&v3)) && v3) { v3->SetOpacity((float)op); g_anDcompDev->Commit(); }
+        sendToAnalyzeOsd("an-opacity", op);
     }
     applyAnalyzeOsdGeometry();
     anMakeChildrenClickThrough();
