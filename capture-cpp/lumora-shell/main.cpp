@@ -3390,10 +3390,15 @@ static void anMakeChildrenClickThrough() {
     }, (LPARAM)&mine);
 }
 static void applyAnalyzeOsdGeometry() {   // Fenster auf die gemeldete Panel-Flaeche + Ecke setzen
-    if (!g_anOsdHwnd || !g_anHavePanel || g_anW < 1 || g_anH < 1) return;
+    if (!g_anOsdHwnd) return;
     RECT mon = osdMonitorRect();
     int monW = mon.right - mon.left, monH = mon.bottom - mon.top;
-    int w = g_anW > monW ? monW : g_anW, hh = g_anH > monH ? monH : g_anH;
+    // Auch OHNE gemeldete Panelgroesse positionieren (Schaetzmasse): sonst blieb das Fenster
+    // auf den Erzeugungswerten oben LINKS stehen - genau dort sitzt das Gaming-OSD, dessen
+    // Anzeige die dunkle Analyse-Karte dann verdeckte ("normales OSD ausgeblendet").
+    int wantW = g_anHavePanel && g_anW > 0 ? g_anW : 520;
+    int wantH = g_anHavePanel && g_anH > 0 ? g_anH : 300;
+    int w = wantW > monW ? monW : wantW, hh = wantH > monH ? monH : wantH;
     std::string corner = loadSettings().value("analyzeOsdCorner", std::string("tr"));   // Default oben RECHTS (Gaming-OSD sitzt links)
     bool right = corner.size() > 1 && corner[1] == 'r';
     bool bottom = !corner.empty() && corner[0] == 'b';
@@ -3418,6 +3423,7 @@ static void createAnalyzeOsdWindow() {
     g_anOsdHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOREDIRECTIONBITMAP | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
         L"LumoraAnalyzeOsd", L"", WS_POPUP, mon.left, mon.top, 520, 300, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!g_anOsdHwnd) { bcLogStream("analyze-osd: CreateWindowExW err=" + std::to_string(GetLastError())); return; }
+    applyAnalyzeOsdGeometry();   // SOFORT an die gewaehlte Ecke (Default oben rechts) - nie ueber dem Gaming-OSD stehen bleiben
     bcLogStream("analyze-osd: Overlay-Fenster erstellt");
     wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
     std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
