@@ -3493,7 +3493,19 @@ static void showAnalyzeOsd(bool on) {
     if (on) {
         createAnalyzeOsdWindow();
         if (!g_anOsdHwnd) return;
-        if (g_anHavePanel) applyAnalyzeOsdGeometry();
+        // Fenster ist warm (WebView2 laeuft), aber ERST anzeigen, wenn die echte Panel-
+        // Groesse bekannt ist (g_anHavePanel) - exakt wie osdEnsureVisible() beim
+        // Gaming-OSD. Grund (2,5h Fehlersuche beim Gaming-OSD, siehe
+        // osdMakeChildrenClickThrough): Chromiums rogue Chrome_WidgetWin_1-Top-Level-
+        // Fenster faengt Desktop-Klicks, bis anMakeChildrenClickThrough() es per exakter
+        // Rect-Gleichheit findet und transparent schaltet. Zeigen wir VOR der echten
+        // Groesse (bisher: Schaetzmass 520x300), sitzt das Fenster kurz auf einer
+        // GERATENEN Flaeche, auf der das Rect NICHT passt - der Fix greift dann nie,
+        // und DWM haelt den einmal falsch aufgebauten Hit-Test-Zustand fuer diesen
+        // Bildschirmbereich fest (dieselbe "blieb blockiert" Lehre wie beim Vollbild-
+        // OSD). Das an-bounds-Handler holt das Zeigen nach, sobald die echte Groesse da ist.
+        if (!g_anHavePanel) return;
+        applyAnalyzeOsdGeometry();
         ShowWindow(g_anOsdHwnd, SW_SHOWNOACTIVATE);
         SetWindowPos(g_anOsdHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         if (g_anOsdCtrl) g_anOsdCtrl->put_IsVisible(TRUE);
@@ -4331,9 +4343,14 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "an-bounds" && args.size() >= 1 && args[0].is_object()) {
         int w = (int)args[0].value("w", 0.0), h = (int)args[0].value("h", 0.0);
         if (w > 0 && h > 0 && (w != g_anW || h != g_anH || !g_anHavePanel)) {
+            bool firstReal = !g_anHavePanel;
             g_anW = w; g_anH = h; g_anHavePanel = true;
             applyAnalyzeOsdGeometry();
             anMakeChildrenClickThrough();
+            // Erstes Zeigen nachholen, falls showAnalyzeOsd(true) mangels bekannter
+            // Groesse noch nichts angezeigt hat (gleiches Muster wie osdEnsureVisible()
+            // im osd-bounds-Handler).
+            if (firstReal && (g_anMeasuring || g_anPreview.load())) showAnalyzeOsd(true);
         }
         return true;
     }
