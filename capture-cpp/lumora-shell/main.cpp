@@ -3461,7 +3461,13 @@ static void createAnalyzeOsdWindow() {
                                 }).Get(), nullptr);
                             g_anOsdWv->add_NavigationCompleted(Callback<ICoreWebView2NavigationCompletedEventHandler>(
                                 [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
-                                    g_anOsdLoaded = true; bcLogStream("analyze-osd: geladen"); anMakeChildrenClickThrough(); return S_OK;
+                                    g_anOsdLoaded = true; bcLogStream("analyze-osd: geladen");
+                                    // Config JETZT anwenden: beim ersten Vorschau-Oeffnen lief
+                                    // applyAnalyzeOsdConfig ins Leere (Visual/Controller existierten
+                                    // noch nicht) - Transparenz/Groesse griffen sonst erst spaeter.
+                                    applyAnalyzeOsdConfig();
+                                    if (g_anPreview.load()) sendToAnalyzeOsd("an-preview", true);   // Demo-Inhalt nachreichen
+                                    anMakeChildrenClickThrough(); return S_OK;
                                 }).Get(), nullptr);
                             g_anOsdWv->Navigate(L"https://app.lumora/analyze-osd.html");
                             anMakeChildrenClickThrough();
