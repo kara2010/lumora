@@ -2032,8 +2032,8 @@ static std::mutex g_kbMx;
 // als ein Mensch bewusst toggelt). Frueher 150/80 ms - das verschluckte zusammen mit dem groben 40-ms-Takt
 // schnelles Gamepad-Toggeln (Kombi nie im selben Abtastfenster beisammen -> gar keine Flanke).
 static const ULONGLONG GP_RELEASE_MS = 40;
-static bool g_gpMainWas = false, g_gpOsdWas = false;
-static ULONGLONG g_gpMainSeen = 0, g_gpOsdSeen = 0;
+static bool g_gpMainWas = false, g_gpOsdWas = false, g_gpAnalyzeWas = false;
+static ULONGLONG g_gpMainSeen = 0, g_gpOsdSeen = 0, g_gpAnalyzeSeen = 0;
 static void xinputTick() {   // 125 Hz; Flanke = einmal ausloesen pro Druck
     padPoll();   // EINE Abfrage pro Platz und Tick (leere Plaetze nur alle 2 s)
     ULONGLONG now = GetTickCount64();
@@ -2053,9 +2053,13 @@ static void xinputTick() {   // 125 Hz; Flanke = einmal ausloesen pro Druck
     bool rawO = gamepadComboDown(s.value("gamepadOsdHotkey", json::array()));
     if (rawO) g_gpOsdSeen = now;
     bool o = rawO || (g_gpOsdSeen && now - g_gpOsdSeen < GP_RELEASE_MS);
+    bool rawA = gamepadComboDown(s.value("gamepadAnalyzeHotkey", json::array()));
+    if (rawA) g_gpAnalyzeSeen = now;
+    bool a = rawA || (g_gpAnalyzeSeen && now - g_gpAnalyzeSeen < GP_RELEASE_MS);
     if (m && !g_gpMainWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_MAIN, 0);
     if (o && !g_gpOsdWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_OSD, 0);
-    g_gpMainWas = m; g_gpOsdWas = o;
+    if (a && !g_gpAnalyzeWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 0);
+    g_gpMainWas = m; g_gpOsdWas = o; g_gpAnalyzeWas = a;
     // 1b) Controller-Zustand an die UI pushen (~30 Hz, nur bei sichtbarem Fenster).
     // Die UI darf navigator.getGamepads NICHT mehr benutzen: allein die Registrierung
     // von gamepadconnected-Listenern startet Chromiums Gamepad-Monitor im Browser-

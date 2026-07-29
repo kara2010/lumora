@@ -461,6 +461,13 @@
               <button class="btn-browse" id="anHotkeyBtn" onclick="toggleHotkeyCapture('analyze')">Ändern</button>
               <button class="btn-cancel" onclick="clearHotkey('analyze')">Aus</button>
             </div>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Gamepad">🎮</span>
+              <span class="hotkey-display" id="gpAnHotkeyDisplay">—</span>
+              <button class="btn-browse" id="gpAnHotkeyCaptureBtn" onclick="toggleGpHotkeyCapture('analyze')">Aufnehmen</button>
+              <button class="btn-cancel" onclick="clearGpHotkey('analyze')">Aus</button>
+            </div>
+            <p class="settings-hint" id="gpAnHotkeyHint" style="display:none"></p>
             <p class="settings-hint">Tipp: Messung im Spiel per Hotkey starten, ein paar Minuten spielen (gern bis Ruckler auftreten), dann per Hotkey beenden – der Bericht erscheint hier.</p>
           </div>
           <div class="form-group">
@@ -3568,8 +3575,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       refreshHotkeyDisplay('stream')
       appSettingsCache.analyzeHotkey = s.analyzeHotkey !== undefined ? s.analyzeHotkey : 'Alt+A'
       refreshHotkeyDisplay('analyze')
+      appSettingsCache.gamepadAnalyzeHotkey = Array.isArray(s.gamepadAnalyzeHotkey) ? s.gamepadAnalyzeHotkey : []
       refreshGpHotkeyDisplay('main')
       refreshGpHotkeyDisplay('osd')
+      refreshGpHotkeyDisplay('analyze')
       document.getElementById('setStreamQuality').value = s.streamQuality || '1080'
       document.getElementById('setStreamFps').value = String(s.streamFps || 60)
       document.getElementById('setStreamEncoder').value = s.streamEncoder || 'auto'
@@ -5074,7 +5083,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // ======================================================================
     // Hotkey-Konfiguration (globaler Toggle-Shortcut)
     // ======================================================================
-    const appSettingsCache = { toggleHotkey: 'Alt+L', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O', osdAbHotkey: 'Alt+B', streamHotkey: '', analyzeHotkey: 'Alt+A', gamepadHotkey: [], gamepadOsdHotkey: [] }
+    const appSettingsCache = { toggleHotkey: 'Alt+L', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O', osdAbHotkey: 'Alt+B', streamHotkey: '', analyzeHotkey: 'Alt+A', gamepadHotkey: [], gamepadOsdHotkey: [], gamepadAnalyzeHotkey: [] }
     // Tastatur-Hotkeys nach gleichem Muster: 'main' (Oberfläche in den
     // Vordergrund), 'osd' (Overlay ein/aus), 'osdEdit' (OSD-Konfigurationsmodus),
     // 'osdAb' (natives Afterburner-OSD ein-/ausblenden).
@@ -5153,8 +5162,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // 'osd' blendet das Overlay ein/aus. Ein Slot-Deskriptor je Ziel; nur ein
     // Slot kann gleichzeitig aufnehmen.
     const GP_SLOTS = {
-      main: { key: 'gamepadHotkey',    disp: 'gpHotkeyDisplay',    btn: 'gpHotkeyCaptureBtn',    hint: 'gpHotkeyHint' },
-      osd:  { key: 'gamepadOsdHotkey', disp: 'gpOsdHotkeyDisplay', btn: 'gpOsdHotkeyCaptureBtn', hint: 'gpOsdHotkeyHint' },
+      main:    { key: 'gamepadHotkey',        disp: 'gpHotkeyDisplay',    btn: 'gpHotkeyCaptureBtn',    hint: 'gpHotkeyHint' },
+      osd:     { key: 'gamepadOsdHotkey',     disp: 'gpOsdHotkeyDisplay', btn: 'gpOsdHotkeyCaptureBtn', hint: 'gpOsdHotkeyHint' },
+      analyze: { key: 'gamepadAnalyzeHotkey', disp: 'gpAnHotkeyDisplay',  btn: 'gpAnHotkeyCaptureBtn',  hint: 'gpAnHotkeyHint' },
     }
     function refreshGpHotkeyDisplay(slot) {
       const s = GP_SLOTS[slot]; const d = document.getElementById(s.disp)
@@ -5823,9 +5833,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       //    native XInput-Poll im Hauptprozess (funktioniert auch minimiert). Hier
       //    ermitteln wir die Kombi nur noch, um die Navigation nicht auszulösen,
       //    während der Hotkey gedrückt wird.
-      const cMain = appSettingsCache.gamepadHotkey, cOsd = appSettingsCache.gamepadOsdHotkey
+      const cMain = appSettingsCache.gamepadHotkey, cOsd = appSettingsCache.gamepadOsdHotkey, cAn = appSettingsCache.gamepadAnalyzeHotkey
       const comboDown = (cMain && cMain.length && cMain.every(i => b[i] && b[i].pressed)) ||
-                        (cOsd && cOsd.length && cOsd.every(i => b[i] && b[i].pressed))
+                        (cOsd && cOsd.length && cOsd.every(i => b[i] && b[i].pressed)) ||
+                        (cAn && cAn.length && cAn.every(i => b[i] && b[i].pressed))
 
       // 2b) LB/RB = Reiter blättern. Läuft VOR dem Kombi-Guard, damit auch die Loslass-Flanke
       //     erkannt wird. Geschaltet wird beim Loslassen und nur, wenn währenddessen keine Kombi
@@ -5932,6 +5943,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       appSettingsCache.osdEditHotkey = s.osdEditHotkey != null ? s.osdEditHotkey : 'Alt+Shift+O'
       appSettingsCache.gamepadHotkey = Array.isArray(s.gamepadHotkey) ? s.gamepadHotkey : []
       appSettingsCache.gamepadOsdHotkey = Array.isArray(s.gamepadOsdHotkey) ? s.gamepadOsdHotkey : []
+      appSettingsCache.gamepadAnalyzeHotkey = Array.isArray(s.gamepadAnalyzeHotkey) ? s.gamepadAnalyzeHotkey : []
     }).catch(() => {})
 
     // Header-Live-Indikator initialisieren, falls beim Start schon ein Stream läuft
