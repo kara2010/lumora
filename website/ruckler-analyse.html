@@ -107,7 +107,7 @@
             "name": "Erkennt Lumora auch ein CPU- oder GPU-Bottleneck?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Teilweise: Erkannt werden GPU-Throttling durch Power- oder Temperature-Limit (mit ausgelesener Ursache bei NVIDIA-Karten), volllaufendes VRAM und Einzelkern-Überlast, weil die CPU-Zeit pro Kern mitgemessen wird. Eine dauerhafte Anzeige 'GPU-limitiert' oder 'CPU-limitiert' auf Basis der GPU-Auslastung pro Frame ist der nächste Ausbauschritt und noch nicht enthalten."
+              "text": "Ja: Lumora zeigt live im Mess-Overlay und im Bericht an, was gerade das Tempo vorgibt – GPU-Limit, CPU-Limit, Einzelkern-Limit, ein FPS-Limiter/VSync, GPU-Throttling (mit ausgelesener Ursache bei NVIDIA-Karten) oder volllaufendes VRAM. Ermittelt wird das jede Sekunde aus GPU-Auslastung, Kernlast und der Gleichmäßigkeit der Frametimes – eine Einschätzung, keine frame-genaue Messung. Bleibt das Bild uneindeutig, sagt Lumora ehrlich 'nicht eindeutig', statt zu raten."
             }
           }
         ]
@@ -195,6 +195,7 @@
         <li><strong>Treiber mit Latenz-Spikes (DPC/ISR)</strong> – mit Dateinamen, etwa Grafik-, WLAN- oder Audiotreiber. Das ist die Disziplin, für die man sonst Spezialwerkzeuge wie LatencyMon braucht.</li>
         <li><strong>GPU-Throttling</strong> – Takteinbruch durch Power- oder Temperature-Limit, inklusive ausgelesener Ursache (bei NVIDIA-Karten).</li>
         <li><strong>Volllaufendes VRAM</strong> – wenn Texturen in den langsameren Arbeitsspeicher ausgelagert werden und die Frametimes einbrechen.</li>
+        <li><strong>Flaschenhals-Badge</strong> – ob gerade eher die Grafikkarte, ein einzelner CPU-Kern oder ein FPS-Limiter/VSync das Tempo vorgibt, live im Overlay und als Verteilung im Bericht.</li>
         <li><strong>Storage-Zugriffe</strong> – Ladeschübe und lange Antwortzeiten der SSD oder Festplatte.</li>
         <li><strong>Frisch gestartete Programme</strong> – der Klassiker, der im Nachhinein niemandem mehr einfällt.</li>
       </ul>
@@ -219,7 +220,7 @@
     <p>Micro-Stutter entsteht selten aus Mangel an Rechenleistung. Typische Ursachen sind Background-Tasks, die kurz die CPU belegen, Treiber mit hohen DPC-Latenzen, kurzzeitiges GPU-Throttling oder Nachladevorgänge im Spiel selbst. Im Task-Manager sind solche Aussetzer meist unsichtbar, weil sie nur Millisekunden dauern.</p>
 
     <h3>Erkennt Lumora auch ein CPU- oder GPU-Bottleneck?</h3>
-    <p>Teilweise – und wir sagen ehrlich, was heute geht: Erkannt werden <strong>GPU-Throttling</strong> (Takteinbruch durch Power- oder Temperature-Limit, mit ausgelesener Ursache bei NVIDIA), <strong>volllaufendes VRAM</strong> und <strong>Einzelkern-Überlast</strong>, weil die CPU-Zeit pro Kern mitgemessen wird. Eine dauerhafte „GPU-limitiert / CPU-limitiert"-Anzeige über die GPU-Auslastung pro Frame ist der nächste Ausbauschritt und noch nicht enthalten.</p>
+    <p>Ja: Ein Badge im Mess-Overlay und eine Verteilung im Bericht zeigen, was gerade das Tempo vorgibt – <strong>GPU-Limit</strong>, <strong>CPU-Limit</strong>, <strong>Einzelkern-Limit</strong>, ein <strong>FPS-Limiter/VSync</strong>, <strong>GPU-Throttling</strong> (Takteinbruch durch Power- oder Temperature-Limit, mit ausgelesener Ursache bei NVIDIA) oder <strong>volllaufendes VRAM</strong>. Ermittelt wird das jede Sekunde aus GPU-Auslastung, Kernlast und der Gleichmäßigkeit der Frametimes – eine Einschätzung, keine frame-genaue Messung. Bleibt das Bild uneindeutig, steht dort ehrlich „nicht eindeutig" statt einer geratenen Antwort.</p>
 
     <h3>Was sind DPC-Latenzen und warum verursachen sie Stutter?</h3>
     <p>DPCs sind kurze Aufgaben, die Treiber im Windows-Kernel ausführen – etwa für Netzwerk, Audio oder Grafik. Dauert so ein Aufruf zu lange, wartet alles andere, auch dein Spiel; spürbar als Freeze oder Micro-Stutter. Lumora liest diese Events mit und zeigt die verantwortliche Treiberdatei beim Namen, zum Beispiel <code>nvlddmkm.sys</code> oder einen WLAN-Treiber. Genau dafür greift man sonst zu Spezial-Tools wie LatencyMon.</p>

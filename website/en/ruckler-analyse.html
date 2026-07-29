@@ -107,7 +107,7 @@
             "name": "Does Lumora detect a CPU or GPU bottleneck?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Partly: it detects GPU throttling from power or temperature limits (with the reported reason on NVIDIA cards), VRAM filling up, and single-core overload, because CPU time is measured per core. A permanent 'GPU limited' or 'CPU limited' readout based on per-frame GPU utilisation is the next development step and not included yet."
+              "text": "Yes: Lumora shows live in the measurement overlay and in the report what's currently setting the pace – a GPU limit, a CPU limit, a single-core limit, an FPS cap/VSync, GPU throttling (with the reported reason on NVIDIA cards) or VRAM filling up. This is worked out once a second from GPU utilisation, per-core load and how consistent the frame times are – an assessment, not a frame-exact measurement. If the picture stays unclear, Lumora honestly says 'inconclusive' instead of guessing."
             }
           }
         ]
@@ -194,6 +194,7 @@
         <li><strong>Device drivers with latency spikes (DPC/ISR)</strong> – by file name, for example graphics, Wi-Fi or audio drivers. This is the discipline that normally requires specialist tools.</li>
         <li><strong>Graphics card throttling</strong> – clock drops caused by power or temperature limits, including the reported reason (on NVIDIA cards).</li>
         <li><strong>Video memory filling up</strong> – when textures spill into the slower system RAM.</li>
+        <li><strong>Bottleneck badge</strong> – whether the GPU, a single CPU core, or an FPS cap/VSync is currently setting the pace, shown live in the overlay and as a breakdown in the report.</li>
         <li><strong>Storage access</strong> – load bursts and long response times.</li>
         <li><strong>Freshly started programs</strong> – the classic nobody remembers afterwards.</li>
       </ul>
@@ -217,7 +218,7 @@
     <p>Micro-stutter rarely comes from a lack of raw performance. Typical causes are background tasks briefly grabbing the CPU, drivers with high DPC latency, momentary GPU throttling, or the game streaming in new data. Task Manager usually shows nothing, because these hitches last only milliseconds.</p>
 
     <h3>Does Lumora detect a CPU or GPU bottleneck?</h3>
-    <p>Partly – and we'll say plainly what works today: it detects <strong>GPU throttling</strong> (clock drops from power or temperature limits, with the reported reason on NVIDIA cards), <strong>VRAM filling up</strong> and <strong>single-core overload</strong>, because CPU time is measured per core. A permanent "GPU limited / CPU limited" readout based on per-frame GPU utilisation is the next development step and not included yet.</p>
+    <p>Yes: a badge in the measurement overlay and a breakdown in the report show what's currently setting the pace – a <strong>GPU limit</strong>, a <strong>CPU limit</strong>, a <strong>single-core limit</strong>, an <strong>FPS cap/VSync</strong>, <strong>GPU throttling</strong> (clock drops from power or temperature limits, with the reported reason on NVIDIA) or <strong>VRAM filling up</strong>. This is worked out once a second from GPU utilisation, per-core load and how consistent the frame times are – an assessment, not a frame-exact measurement. If the picture stays unclear, it honestly says "inconclusive" instead of guessing.</p>
 
     <h3>What are DPC latencies and why do they cause stutter?</h3>
     <p>DPCs are short tasks that drivers run inside the Windows kernel – for network, audio or graphics. If such a call takes too long, everything else waits, including your game; you feel it as a freeze or micro-stutter. Lumora reads these events and names the responsible driver file, for example <code>nvlddmkm.sys</code> or a Wi-Fi driver. This is exactly what specialist tools like LatencyMon are used for.</p>
