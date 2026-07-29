@@ -119,6 +119,13 @@ public:
     // Ziel-PID nachtraeglich setzen (Broker waehlt den aktivsten Praesentierer erst zur
     // Laufzeit). Benigner u32-Race gegen den Present-Thread - schlimmstenfalls zaehlt
     // ein einzelner Frame in den Wechselmoment.
+    // Empfindlichkeit live umstellbar (UI-Regler): 0 = empfindlich, 1 = normal,
+    // 2 = nur harte Ruckler. Doubles einzeln geschrieben - Leser-Race harmlos.
+    void setSensitivity(int level) {
+        if (level <= 0)      { cfg_.minSpikeMs = 18.0; cfg_.spikeK = 2.5; }
+        else if (level == 1) { cfg_.minSpikeMs = 28.0; cfg_.spikeK = 3.0; }
+        else                 { cfg_.minSpikeMs = 45.0; cfg_.spikeK = 3.5; }
+    }
     void setTargetPid(uint32_t pid) {
         cfg_.targetPid = pid;
         // Schonfrist nach (Neu-)Wahl des Ziels: die ersten Sekunden eines Spiels sind

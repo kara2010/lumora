@@ -31,7 +31,7 @@ namespace lubroker {
 //   Broker: [0]='LOSA' [1]=brokerTick [2]=state(1 messen/2 Fehler) [3]=spikeCount
 //           [4]=lastFindingId [5]=medianFtX100 [6]=avgFpsX10 [7]=cswitchPerSec
 //           [8]=selfCpuPermille [9]=errCode [10]=modeEcho [11]=targetPid [12]=sessionSec
-//   App:    [16]=appTick [17]=wanted [18]=appTargetPid [19]=modeWunsch(bit0=presentOnly)
+//   App:    [16]=appTick [17]=wanted [18]=appTargetPid [19]=modeWunsch(bit0=presentOnly, bits4-5=Empfindlichkeit 0/1/2)
 static const uint32_t ANALYZE_MAGIC = 0x4C4F5341;   // 'LOSA'
 static bool pmIgnore(const std::string& app);       // (unten definiert; Ziel-PID-Wahl nutzt sie)
 
@@ -193,6 +193,9 @@ inline int runAnalyzeBroker() {
             if (!cswDropped && permille > 10 && kernelOk) { kt.dropCSwitch(); cswDropped = true; mem[9] = 200; }   // Notbremse (>1% eines Kerns)
             lastSec = now;
         }
+        // Empfindlichkeit live aus dem App-Wunsch uebernehmen (UI-Regler wirkt sofort)
+        { static int lastSense = -1; int sense = (mem[19] >> 4) & 3;
+          if (sense != lastSense) { lastSense = sense; ana.setSensitivity(sense); } }
         // SHM-Status
         auto st = ana.stats();
         mem[1] = now;

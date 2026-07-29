@@ -274,12 +274,14 @@
       scheduleBounds();
     });
   }
-  // ---- Demo-Modus (im Browser ohne Shell): synthetischer Lauf fuer Design-Pruefung
-  //      und Website-Screenshots - gleiche Optik wie live.
-  if (!ipcRenderer) {
-    let sec = 0, spikes = 0, fno = 0;
-    $('hint').textContent = 'DEMO – forzahorizon5.exe';
-    setInterval(() => {
+  // ---- Demo-Modus: im Browser (ohne Shell) dauerhaft; in der App als VORSCHAU,
+  //      solange der Nutzer die Groessen-/Transparenz-/Positions-Regler anfasst.
+  let demoTimer = null;
+  function startDemo() {
+    if (demoTimer) return;
+    let sec = 0, spikes = 0;
+    $('hint').textContent = ipcRenderer ? 'VORSCHAU – so sieht die Messung aus' : 'DEMO – forzahorizon5.exe';
+    demoTimer = setInterval(() => {
       const batch = [];
       for (let i = 0; i < 14; i++) {
         let v = 6.9 + Math.random() * 1.6 + (Math.random() < 0.03 ? Math.random() * 6 : 0);
@@ -287,7 +289,7 @@
       }
       let spikeNew = false;
       if (Math.random() < 0.06) { batch[batch.length - 1] = 45 + Math.random() * 50; spikes++; spikeNew = true; }
-      fno += batch.length; sec += 0.2;
+      sec += 0.2;
       median = 7.2;
       $('time').textContent = fmtTime(sec);
       $('fps').textContent = '138';
@@ -306,6 +308,15 @@
       }
     }, 200);
   }
+  function stopDemo() {
+    if (!demoTimer) return;
+    clearInterval(demoTimer); demoTimer = null;
+    $('hint').textContent = 'Messung laeuft – Alt+A beendet sie';
+    $('find').style.display = 'none';
+    lastFrameNo = 0; lastSpikes = 0;   // echte Messdaten wieder sauber anknuepfen
+  }
+  if (!ipcRenderer) startDemo();
+  else ipcRenderer.on('an-preview', (e, on) => { if (on) startDemo(); else stopDemo(); });
   dirty = true; scheduleBounds();
   window.addEventListener('resize', () => { dirty = true; scheduleBounds(); });
 })();

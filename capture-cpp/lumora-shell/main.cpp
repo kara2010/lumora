@@ -1935,6 +1935,8 @@ enum { HKC_MAIN = 1, HKC_OSD = 2, HKC_OSDEDIT = 3, HKC_AB = 4, HKC_STREAM = 5, H
 static void toggleOsdSetting();   // (unten definiert)
 static void analyzeToggle();      // Ruckler-Blackbox: Messung an/aus (unten definiert)
 static void showAnalyzeOsd(bool on);                                   // Analyse-Overlay (unten)
+static void applyAnalyzeOsdConfig();                                   // Groesse/Deckkraft/Ecke (unten)
+static void anMakeChildrenClickThrough();                              // Click-Through nachziehen (unten)
 static void sendToAnalyzeOsd(const std::string& channel, const json& payload);   // dito
 static void setOsdEditMode(bool on);
 // Standard-Gamepad-API-Index -> XINPUT_GAMEPAD-Pruefung (Masken 1:1 aus main.js XI_MASK)
@@ -2681,6 +2683,8 @@ static uint64_t g_anTailOff = 0;
 static uint32_t g_anLastFindingPushed = 0;
 static std::atomic<bool> g_anSetupRunning{ false };
 static std::atomic<int> g_anReady{ -1 };   // -1 unbekannt (Check laeuft), 0 nicht eingerichtet, 1 bereit
+static std::atomic<int> g_anSense{ 1 };    // Empfindlichkeit 0/1/2 (Cache des Settings analyzeSense)
+static std::atomic<bool> g_anPreview{ false };   // OSD-Vorschau aktiv (Regler wird gezogen)
 static std::wstring analyzeDirW() { return dataDir() + L"\\analyze"; }
 static bool anShmOpen() {
     if (g_anShm) return true;
@@ -2692,7 +2696,8 @@ static void anShmWriteApp(uint32_t wanted, uint32_t targetPid, uint32_t mode) {
     void* p = MapViewOfFile(g_anShm, FILE_MAP_ALL_ACCESS, 0, 0, 0);
     if (!p) return;
     uint32_t* m = (uint32_t*)p;
-    m[16] = GetTickCount(); m[17] = wanted; m[18] = targetPid; m[19] = mode;
+    m[16] = GetTickCount(); m[17] = wanted; m[18] = targetPid;
+    m[19] = mode | ((uint32_t)(g_anSense.load() & 3) << 4);   // Bits 4-5: Empfindlichkeits-Regler
     UnmapViewOfFile(p);
 }
 static bool anShmRead(uint32_t out[64]) {
@@ -2798,9 +2803,11 @@ static void analyzeStartMeasurement() {
     DeleteFileW((analyzeDirW() + L"\\current\\findings.jsonl").c_str());
     uint32_t target = 0;
     { std::lock_guard<std::mutex> lk(g_launchMx); (void)target; }   // Ziel-PID waehlt der Broker (aktivster Praesentierer)
+    g_anSense = loadSettings().value("analyzeSense", 1);   // Empfindlichkeits-Regler -> SHM-Bits
     anShmWriteApp(1, 0, 0);
     g_anMeasuring = true; g_anStopping = false;
     showAnalyzeOsd(true);   // eigenes Analyse-Overlay einblenden (nur waehrend der Messung)
+    applyAnalyzeOsdConfig();   // Groesse/Deckkraft/Ecke aus den Settings anwenden
     SetTimer(g_hwnd, TIMER_ANALYZE, 200, nullptr);
     std::thread([]() { runTask(L"LumoraOSD-Analyze"); }).detach();
     bcLogStream("analyze: Messung gestartet");
@@ -2877,6 +2884,12 @@ static void analyzeTick() {   // TIMER_ANALYZE (200 ms): Heartbeat, Tail, Status
     anShmWriteApp(g_anStopping ? 0 : 1, 0, 0);
     analyzeTailFindings();
     analyzeFeedOsd();   // Analyse-OSD bei JEDEM Tick (5 Hz) mit echten Frametimes speisen
+    {   // Click-Through periodisch nachziehen (1 Hz): Chromium kann seine internen Fenster
+        // jederzeit (neu) erzeugen/verschieben - der einmalige Durchlauf bei Erstellung
+        // liess Teilflaechen klick-blockierend zurueck (User-Befund "nicht an jeder Stelle").
+        static uint32_t lastCt = 0;
+        if (GetTickCount() - lastCt >= 1000) { lastCt = GetTickCount(); anMakeChildrenClickThrough(); }
+    }
     static uint32_t lastPush = 0;
     uint32_t now = GetTickCount();
     if (now - lastPush >= 1000) { lastPush = now; analyzePushStatus(); }
@@ -3471,6 +3484,35 @@ static void showAnalyzeOsd(bool on) {
         ShowWindow(g_anOsdHwnd, SW_HIDE);
     }
 }
+// Groesse (ZoomFactor), Deckkraft (DComp-Visual-Opacity) und Ecke live anwenden -
+// gespeist aus den Settings analyzeOsdScale/Opacity/Corner (UI-Regler + Vorschau).
+static void applyAnalyzeOsdConfig() {
+    json s = loadSettings();
+    if (g_anOsdCtrl) {
+        double z = (std::max)(0.5, (std::min)(2.5, s.value("analyzeOsdScale", 1.0)));
+        g_anOsdCtrl->put_ZoomFactor(z);
+    }
+    if (g_anDcompVisual && g_anDcompDev) {
+        double op = (std::max)(0.25, (std::min)(1.0, s.value("analyzeOsdOpacity", 1.0)));
+        ComPtr<IDCompositionVisual3> v3;
+        if (SUCCEEDED(g_anDcompVisual.As(&v3)) && v3) { v3->SetOpacity((float)op); g_anDcompDev->Commit(); }
+    }
+    applyAnalyzeOsdGeometry();
+    anMakeChildrenClickThrough();
+}
+// Vorschau fuer die Regler: beim Anfassen erscheint das OSD (mit Demo-Inhalt),
+// beim Loslassen verschwindet es wieder - ausser eine echte Messung laeuft gerade.
+static void analyzeOsdPreview(bool on) {
+    g_anPreview = on;
+    if (on) {
+        showAnalyzeOsd(true);
+        sendToAnalyzeOsd("an-preview", true);
+        applyAnalyzeOsdConfig();
+    } else {
+        sendToAnalyzeOsd("an-preview", false);
+        if (!g_anMeasuring) showAnalyzeOsd(false);
+    }
+}
 
 // --- Live-Edit-Fenster: NORMAL gehostetes (windowed) WebView2 mit derselben osd.html ---
 // Input (Maus/Pointer/Capture/DPI) macht WebView2 nativ - der einzige hier nachweislich
@@ -3977,6 +4019,12 @@ static json handleChannel(const std::string& channel, const json& args) {
             if (args[0].contains("minimizeToTray")) { if (args[0].value("minimizeToTray", false)) createTray(); else destroyTray(); }
             // OSD-Einstellung dabei? Overlay-Sichtbarkeit + Konfiguration live nachziehen (wie Electron)
             for (auto& [k, v] : args[0].items()) if (k.rfind("osd", 0) == 0) { syncOsdVisibility(); applyOsdConfig(); break; }
+            // Analyse-Einstellungen live nachziehen: Regler wirken sofort (auch in der Vorschau)
+            for (auto& [k, v] : args[0].items()) if (k.rfind("analyze", 0) == 0) {
+                g_anSense = loadSettings().value("analyzeSense", 1);
+                applyAnalyzeOsdConfig();
+                break;
+            }
         }
         return true;
     }
@@ -4262,6 +4310,7 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "analyze-toggle") { PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 0); return true; }
     if (channel == "analyze-stop") { analyzeStop(); return true; }
     if (channel == "analyze-status") { analyzeEnsureReadyCheck(); analyzePushStatus(); return true; }
+    if (channel == "analyze-osd-preview" && args.size() >= 1 && args[0].is_boolean()) { analyzeOsdPreview(args[0].get<bool>()); return true; }
     if (channel == "analyze-list") {   // Verlauf: alle Berichte mit Kopf-Metadaten (neueste zuerst)
         json out = json::array();
         WIN32_FIND_DATAW fd{};
