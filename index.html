@@ -3684,21 +3684,39 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       }
       if (fromEnabledToggle) cfg.osdEnabled = document.getElementById('setOsdEnabled').checked
       ipcRenderer.invoke('set-app-settings', cfg)
+      // JEDE Layout-Aenderung (Design, Werte, FPS-Quelle, Regler, Ecke) zeigt das Overlay
+      // kurz - sonst sieht man bei ausgeschaltetem OSD gar nicht, was die Aenderung bewirkt.
+      // NICHT beim Ein-/Ausschalten selbst: da ist der Zustand ja gerade die Aussage.
+      if (!fromEnabledToggle) osdPreviewPulse()
     }
-    // Vorschau des Gaming-OSD beim Ziehen der Regler (Muster Analyse-OSD): das Overlay
-    // wird kurz eingeblendet, auch wenn es gerade aus ist - beim Loslassen wieder weg
-    // (ausser es war ohnehin an, dann bleibt es stehen).
-    let osdPrevTimer = null
+    // Vorschau des Gaming-OSD (Muster Analyse-OSD): das Overlay wird kurz eingeblendet,
+    // auch wenn es gerade aus ist - danach wieder weg. War es ohnehin an, bleibt es
+    // stehen (die Shell blendet per syncOsdVisibility nur ZUSAETZLICH ein, nie aus).
+    let osdPrevTimer = null, osdPrevOn = false
     function osdPreview(on) {
       clearTimeout(osdPrevTimer); osdPrevTimer = null
+      osdPrevOn = !!on
       ipcRenderer.invoke('osd-preview', !!on)
     }
-    function osdPreviewSoon() {
+    function osdPreviewSoon(ms) {
+      // Verteidigung: die Regler rufen das aus onchange/onpointerup OHNE Argument auf -
+      // ein versehentlich durchgereichtes Event wuerde setTimeout(NaN) und damit ein
+      // sofortiges Ausblenden ausloesen.
+      const d = (typeof ms === 'number' && ms > 0) ? ms : 900
       clearTimeout(osdPrevTimer)
-      osdPrevTimer = setTimeout(() => ipcRenderer.invoke('osd-preview', false), 900)
+      osdPrevTimer = setTimeout(() => { osdPrevOn = false; ipcRenderer.invoke('osd-preview', false) }, d)
+    }
+    // Puls fuer Aenderungen OHNE Zieh-Geste (Design, Werte, Quelle, Ecke): einmal
+    // einblenden - waehrend eines Reglerzugs feuert oninput sehr oft, deshalb nur beim
+    // ersten Mal senden - und laenger stehen lassen als beim blossen Regler-Loslassen,
+    // damit man das neue Aussehen auch in Ruhe sieht.
+    function osdPreviewPulse() {
+      if (!osdPrevOn) osdPreview(true)
+      osdPreviewSoon(2000)
     }
     function onOsdGpuChange() {
       ipcRenderer.invoke('set-app-settings', { osdGpu: document.getElementById('setOsdGpu').value })
+      osdPreviewPulse()   // andere Karte -> andere Werte, das soll man sofort sehen
     }
 
     // --- Live-Stream (WebRTC-Broadcast) ---------------------------------------
@@ -4696,7 +4714,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     function setOsdCorner(c, apply = true) {
       osdCorner = c
       document.querySelectorAll('#osdCorners .osd-corner').forEach(b => b.classList.toggle('active', b.dataset.corner === c))
-      if (apply) { onOsdSettingChange(); osdPreview(true); osdPreviewSoon() }   // kurzer Vorschau-Puls an der neuen Ecke
+      if (apply) onOsdSettingChange()   // Vorschau-Puls macht jetzt onOsdSettingChange zentral
     }
 
     const ACCENTS = [
