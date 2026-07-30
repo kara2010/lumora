@@ -249,3 +249,31 @@ $manifest = @{ version = $version
                files = $files } | ConvertTo-Json -Depth 4
 [IO.File]::WriteAllText("$updDir\components.json", $manifest, (New-Object Text.UTF8Encoding($false)))
 Write-Output "Komponenten-Manifest: $updDir\components.json ($($files.Count) Dateien)"
+
+# 7) latest.yml (electron-updater-Format) - Auto-Update-Pfad der ALTEN Electron-Linie
+#    (2.2.x, main.js). Bestandsnutzer, die noch nicht auf nativ umgestiegen sind, holen
+#    sich hierueber den aktuellen Installer. Wurde bis 3.1.1 NICHT vom Build erzeugt und
+#    musste jedes Mal von Hand nachgezogen werden - zweimal in Folge stand sie deshalb
+#    beim Deploy noch auf der VORversion (der Feed haette Altnutzer auf ein veraltetes
+#    Setup gezeigt). Jetzt faellt sie automatisch mit an.
+#    sha512 ist base64-kodiert (nicht hex!) - genau so erwartet es electron-updater.
+$setupName = Split-Path $out -Leaf
+$sha512 = [Convert]::ToBase64String(
+  [Security.Cryptography.SHA512]::Create().ComputeHash([IO.File]::ReadAllBytes($out)))
+$size = (Get-Item $out).Length
+# Invariante Kultur + UTC: sonst schreibt eine deutsche Locale z.B. Komma-Trennung
+# oder lokale Zeit in den Zeitstempel.
+$relDate = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", [Globalization.CultureInfo]::InvariantCulture)
+$yml = @"
+version: $version
+files:
+  - url: $setupName
+    sha512: $sha512
+    size: $size
+path: $setupName
+sha512: $sha512
+releaseDate: '$relDate'
+"@
+# BOM-frei wie die anderen Feed-Dateien - ein BOM laesst YAML-Parser scheitern (siehe BUILD.md).
+[IO.File]::WriteAllText("$updDir\latest.yml", $yml, (New-Object Text.UTF8Encoding($false)))
+Write-Output "Alt-Feed (Electron): $updDir\latest.yml (v$version, $size Bytes)"
