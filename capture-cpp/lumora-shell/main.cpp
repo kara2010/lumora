@@ -3765,11 +3765,17 @@ static void osdFadeVisual(bool in) {
     // dem sofortigen Erscheinen. Kurzer Fade = knackiges Schliessen, aber nicht hart abgeschnitten.
     sendToOsd("osd-fade", in);
 }
-// Zeigt das OSD (SW_SHOW ist "blitzschnell") und blendet per DComp sanft ein - nur wenn das OSD
-// aktiviert ist (oder im Edit-Modus). Ohne bekannte Panel-Groesse holt der 'osd-bounds'-Handler das nach.
+// Zeigt das OSD (SW_SHOW ist "blitzschnell") und blendet per DComp sanft ein - wenn das OSD
+// aktiviert ist ODER gerade die Regler-Vorschau laeuft. Ohne bekannte Panel-Groesse holt der
+// 'osd-bounds'-Handler das nach.
 static void osdEnsureVisible() {
     if (g_osdEdit) return;   // im Edit-Modus zeigt das eigene Edit-Fenster - Overlay bleibt versteckt
-    bool en = loadSettings().value("osdEnabled", false);
+    // g_osdPreview MUSS hier mit rein: syncOsdVisibility() entscheidet zwar korrekt anhand
+    // (osdEnabled || g_osdPreview) und ruft showOsd(), aber showOsd() endet in genau dieser
+    // Funktion - die vorher NUR osdEnabled pruefte und bei ausgeschaltetem OSD sofort
+    // zurueckkehrte. Die Vorschau lief damit vollstaendig durch und wurde erst hier
+    // verworfen: sichtbar passierte nichts (User-Befund "da passiert leider nichts").
+    bool en = loadSettings().value("osdEnabled", false) || g_osdPreview;
     if (!g_osdHwnd || !en || !g_osdHavePanel) return;
     KillTimer(g_hwnd, TIMER_OSDHIDE);   // ein evtl. laufendes Ausblenden abbrechen (schnelles aus->an)
     applyOsdWindowGeometry();
@@ -3782,7 +3788,13 @@ static void showOsd() {
     if (g_osdLoaded) applyOsdConfig();
     osdEnsureVisible();                // ZUERST zeigen (Fenster ist warm) - kein Warten auf die Daten-Quellen
     SetTimer(g_hwnd, TIMER_OSDDATA, 200, nullptr); SetTimer(g_hwnd, TIMER_OSDFPS, 33, nullptr);
-    sensorsInit(); ensureOsdSetup(); brokersEnsure();   // Datenquellen danach - blockieren das Erscheinen nicht mehr
+    sensorsInit();
+    // Die einmalige Einrichtung NUR beim echten Einschalten anstossen, nicht bei der
+    // Regler-Vorschau: ensureOsdSetup() kann einen Erklaer-Dialog samt Administrator-
+    // Abfrage oeffnen - das darf ein blosser Regler-Zug bei ausgeschaltetem OSD nicht
+    // ausloesen. brokersEnsure() ist dagegen dialogfrei und liefert echte Werte.
+    if (loadSettings().value("osdEnabled", false)) ensureOsdSetup();
+    brokersEnsure();
 }
 static void hideOsd() {
     KillTimer(g_hwnd, TIMER_OSDDATA); KillTimer(g_hwnd, TIMER_OSDFPS);
