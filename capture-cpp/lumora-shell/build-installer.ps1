@@ -7,7 +7,17 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.1.0"   # 3.1.0: Ruckler-Blackbox - neue Analyse-Funktion findet die Ursache von
+$version = "3.1.1"   # 3.1.1: OSD-Vorschau in den Einstellungen wirkt jetzt wirklich - sie lief bis
+                     #        zur letzten Zeile und wurde dort verworfen (osdEnsureVisible pruefte
+                     #        nur osdEnabled, nicht die Vorschau) - und greift jetzt bei JEDER
+                     #        Aenderung (Design, Werte, FPS-Quelle, Grafikkarte), nicht nur an den
+                     #        Reglern; die einmalige OSD-Einrichtung (Dialog + UAC) wird dabei
+                     #        bewusst NICHT angestossen. Fenster kam nach einem Windows-Neustart
+                     #        nicht maximiert hoch, wenn es maximiert-minimiert abgelegt war
+                     #        (WPF_RESTORETOMAXIMIZED wurde nicht ausgewertet). Positions-Wahl im
+                     #        Analyse-Reiter nutzt jetzt dieselbe Darstellung wie das Overlay
+                     #        (2x2-Raster statt Viererreihe, eine gemeinsame Stilquelle).
+$prev_3_1_0 = ""  # 3.1.0: Ruckler-Blackbox - neue Analyse-Funktion findet die Ursache von
                      #        Mikro-Rucklern (Kernel-ETW: Hintergrundprozesse, Treiber-DPC/ISR-
                      #        Latenzen, GPU-Throttling/VRAM, Datentraeger, Programmstarts) waehrend
                      #        einer expliziten Mess-Session, mit eigenem OSD, Klartext-Bericht,
