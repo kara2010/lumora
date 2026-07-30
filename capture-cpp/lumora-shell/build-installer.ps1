@@ -7,7 +7,14 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.1.1"   # 3.1.1: OSD-Vorschau in den Einstellungen wirkt jetzt wirklich - sie lief bis
+$version = "3.1.2"   # 3.1.2: Fenster kommt endlich maximiert hoch, wenn es maximiert beendet wurde.
+                     #        3.1.1 speicherte den Zustand korrekt, wendete ihn aber im Regelfall
+                     #        des Nutzers nie an: bei Autostart mit --minimized ruft wWinMain kein
+                     #        ShowWindow auf, und das spaetere Oeffnen per Tray/Hotkey zeigte das
+                     #        Fenster ueber SW_SHOW in Normalgroesse. Jetzt zieht showMainWindow den
+                     #        gespeicherten Zustand beim ERSTEN Zeigen nach (danach nicht mehr, damit
+                     #        ein bewusst verkleinertes Fenster nicht wieder aufgerissen wird).
+$prev_3_1_1 = ""  # 3.1.1: OSD-Vorschau in den Einstellungen wirkt jetzt wirklich - sie lief bis
                      #        zur letzten Zeile und wurde dort verworfen (osdEnsureVisible pruefte
                      #        nur osdEnabled, nicht die Vorschau) - und greift jetzt bei JEDER
                      #        Aenderung (Design, Werte, FPS-Quelle, Grafikkarte), nicht nur an den
