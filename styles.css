@@ -2445,11 +2445,9 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 .an-osdlbl { width: 100px; font-size: 12.5px; opacity: .8; flex: 0 0 auto; }
 .an-osdrow input[type=range] { flex: 1; max-width: 260px; }
 .an-osdval { width: 46px; font-size: 12px; opacity: .65; font-variant-numeric: tabular-nums; }
-.an-corner { display: inline-flex; gap: 6px; }
-.an-corner button { width: 38px; height: 34px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.03); color: var(--text, #dbe4ef); font-size: 16px; cursor: pointer; }
-.an-corner button:hover { background: rgba(255,255,255,.08); }
-.an-corner button.active { background: var(--accent, #74e857); color: #0b1220; border-color: transparent; }
+/* Der Positions-Wahler im Analyse-Reiter nutzt jetzt .osd-corners/.osd-corner aus dem
+   Overlay-Reiter (identische Optik, eine Stilquelle) - die frueheren .an-corner-Regeln
+   sind damit tot und entfernt. */
 .an-hero { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 12px;
   background: rgba(255,255,255,.035); border: 1px solid; margin-bottom: 12px; }
 .an-hero-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; margin-top: 4px; }
