@@ -1864,6 +1864,16 @@ static void forceForeground(HWND hwnd) {
     SetFocus(hwnd);
     if (attached) AttachThreadInput(myTid, fgTid, FALSE);
 }
+// Gespeicherter Maximiert-Zustand aus window-state.json (in wWinMain gesetzt) und die
+// Frage, ob das Hauptfenster in dieser Sitzung schon EINMAL gezeigt wurde.
+// Hintergrund: Beim Autostart mit --minimized ruft wWinMain gar kein ShowWindow auf (nur
+// createTray) - der gespeicherte Zustand wird dort also nie angewendet. Oeffnete der Nutzer
+// das Fenster spaeter per Tray/Hotkey, zeigte showMainWindow es mit SW_SHOW in NORMALgroesse,
+// und die maximierte Ansicht war weg (User-Befund: "kommt nach Neustart nicht im Vollbild").
+// Darum den gespeicherten Zustand beim ERSTEN Zeigen nachziehen - danach nicht mehr, sonst
+// wuerde ein bewusst verkleinertes Fenster bei jedem Tray-Oeffnen wieder aufgerissen.
+static bool g_startMaximized = false;
+static bool g_mainShownOnce = false;
 static void showMainWindow() {
     // Diagnose "schwarzes Fenster nach --minimized-Autostart": dieselbe Fehlerklasse wie
     // beim Tuersteher-Fenster (WebView2 entsteht gegen ein noch verstecktes Hostfenster
@@ -1875,7 +1885,10 @@ static void showMainWindow() {
     }
     HWND fg = GetForegroundWindow();
     if (fg && fg != g_hwnd && fg != g_osdHwnd) g_prevGameHwnd = fg;   // merken, wem wir den Fokus nehmen
-    if (IsIconic(g_hwnd)) ShowWindow(g_hwnd, SW_RESTORE); else ShowWindow(g_hwnd, SW_SHOW);
+    if (!g_mainShownOnce && g_startMaximized && !IsIconic(g_hwnd)) ShowWindow(g_hwnd, SW_MAXIMIZE);   // erstes Zeigen nach --minimized-Autostart
+    else if (IsIconic(g_hwnd)) ShowWindow(g_hwnd, SW_RESTORE);
+    else ShowWindow(g_hwnd, SW_SHOW);
+    g_mainShownOnce = true;
     // Fix: WebView2 entsteht bei --minimized-Autostart gegen ein noch verstecktes
     // Hostfenster (der Controller wird VOR dem ersten ShowWindow erzeugt) und bleibt
     // danach unsichtbar - ShowWindow auf das Hostfenster zieht das NICHT automatisch
@@ -5088,8 +5101,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // --minimized (Autostart): versteckt starten (Tray uebernimmt); sonst normal/maximiert.
     bool startMin = false;
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--minimized") == 0) startMin = true;
-    if (startMin) createTray();
-    else ShowWindow(hwnd, st.value("maximized", false) ? SW_MAXIMIZE : nShow);
+    g_startMaximized = st.value("maximized", false);   // showMainWindow zieht das beim ersten Zeigen nach
+    if (startMin) createTray();                        // versteckt: KEIN ShowWindow -> Zustand wirkt erst beim Oeffnen
+    else { ShowWindow(hwnd, g_startMaximized ? SW_MAXIMIZE : nShow); g_mainShownOnce = true; }
     if (loadSettings().value("minimizeToTray", false)) createTray();
     registerHotkeys();
     applyAutostart();
