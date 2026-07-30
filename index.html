@@ -498,11 +498,14 @@
             </div>
             <div class="an-osdrow">
               <span class="an-osdlbl">Position</span>
-              <div class="an-corner" id="anCorner">
-                <button data-c="tl" onclick="anSetCorner('tl')" title="Oben links">◰</button>
-                <button data-c="tr" class="active" onclick="anSetCorner('tr')" title="Oben rechts">◳</button>
-                <button data-c="bl" onclick="anSetCorner('bl')" title="Unten links">◱</button>
-                <button data-c="br" onclick="anSetCorner('br')" title="Unten rechts">◲</button>
+              <!-- Bewusst dieselben Klassen wie im Overlay-Reiter (.osd-corners/.osd-corner):
+                   gleiches 2x2-Raster, gleiche Optik, EINE Stilquelle - kein Duplikat, das
+                   spaeter auseinanderlaeuft. Die id/data-c bleiben, daran haengt anSetCorner(). -->
+              <div class="osd-corners" id="anCorner">
+                <button class="osd-corner" data-c="tl" onclick="anSetCorner('tl')" title="Oben links">◤</button>
+                <button class="osd-corner" data-c="tr" onclick="anSetCorner('tr')" title="Oben rechts">◥</button>
+                <button class="osd-corner" data-c="bl" onclick="anSetCorner('bl')" title="Unten links">◣</button>
+                <button class="osd-corner" data-c="br" onclick="anSetCorner('br')" title="Unten rechts">◢</button>
               </div>
             </div>
           </div>
