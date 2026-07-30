@@ -2,10 +2,14 @@ Vorschau beim Einstellen des Overlays: Änderst du in den OSD-Einstellungen Grö
 
 Fenstergröße nach Neustart: Hattest du Lumora maximiert und dann minimiert abgelegt, kam es nach einem Windows-Neustart als normales Fenster statt maximiert hoch. Beim Speichern wurde der Zustand „minimiert" gesehen und die Information „war maximiert" ging verloren – Windows hält sie in einem separaten Kennzeichen bereit, das jetzt mit ausgewertet wird.
 
+Neustart nach einem Update: Nach „Jetzt neu starten" beendete sich Lumora, kam aber nicht wieder hoch. Die neue Version wurde zwar gestartet, lief aber in die Einzelinstanz-Sperre, weil die alte noch heruntergefahren hat – und beendete sich daraufhin sofort wieder. Der Nachfolger wartet jetzt sauber auf das Ende des Vorgängers. Lässt er sich gar nicht erst starten, bleibt die App offen, statt dich ohne laufendes Programm zurückzulassen.
+
 Analyse-Reiter: Die Positions-Wahl für das Mess-Overlay sieht jetzt aus wie die im Overlay-Reiter – 2×2-Raster statt Viererreihe, die Ecken sitzen also dort, wo sie auch auf dem Bildschirm liegen.
 ===EN===
 Preview while configuring the overlay: When you change size, opacity, position, design, the displayed values or the graphics card in the OSD settings, Lumora now briefly shows the overlay – even while it is switched off. You immediately see the effect of your change instead of having to guess. This was already wired up for the sliders in 3.1.0 but had no effect: the display logic only checked at the very end whether the OSD was enabled and discarded the preview. A preview deliberately does not trigger the one-time OSD setup (dialog with administrator prompt).
 
 Window size after a restart: If you had Lumora maximized and then minimized it, it came back as a normal window instead of maximized after a Windows restart. When saving, the state was seen as "minimized" and the information "was maximized" got lost – Windows keeps it in a separate flag, which is now taken into account.
+
+Restart after an update: After clicking "Restart now", Lumora shut down but did not come back. The new version was launched but ran into the single-instance guard while the old one was still shutting down, and therefore exited again straight away. The successor now waits properly for the previous instance to finish. If it cannot be started at all, the app stays open instead of leaving you with nothing running.
 
 Analysis tab: The position picker for the measurement overlay now matches the one in the Overlay tab – a 2×2 grid instead of a single row, so the corners sit where they actually are on screen.
