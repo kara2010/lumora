@@ -1,0 +1,11 @@
+Vorschau beim Einstellen des Overlays: Änderst du in den OSD-Einstellungen Größe, Deckkraft, Position, Design, die angezeigten Werte oder die Grafikkarte, blendet Lumora das Overlay jetzt kurz ein – auch wenn es gerade ausgeschaltet ist. So siehst du sofort, wie sich die Änderung auswirkt, statt raten zu müssen. In 3.1.0 war das für die Regler zwar schon eingebaut, blieb aber wirkungslos: Die Anzeige-Logik prüfte am Ende nur, ob das OSD eingeschaltet ist, und verwarf die Vorschau. Die einmalige OSD-Einrichtung (Dialog mit Administrator-Abfrage) wird durch eine Vorschau bewusst nicht ausgelöst.
+
+Fenstergröße nach Neustart: Hattest du Lumora maximiert und dann minimiert abgelegt, kam es nach einem Windows-Neustart als normales Fenster statt maximiert hoch. Beim Speichern wurde der Zustand „minimiert" gesehen und die Information „war maximiert" ging verloren – Windows hält sie in einem separaten Kennzeichen bereit, das jetzt mit ausgewertet wird.
+
+Analyse-Reiter: Die Positions-Wahl für das Mess-Overlay sieht jetzt aus wie die im Overlay-Reiter – 2×2-Raster statt Viererreihe, die Ecken sitzen also dort, wo sie auch auf dem Bildschirm liegen.
+===EN===
+Preview while configuring the overlay: When you change size, opacity, position, design, the displayed values or the graphics card in the OSD settings, Lumora now briefly shows the overlay – even while it is switched off. You immediately see the effect of your change instead of having to guess. This was already wired up for the sliders in 3.1.0 but had no effect: the display logic only checked at the very end whether the OSD was enabled and discarded the preview. A preview deliberately does not trigger the one-time OSD setup (dialog with administrator prompt).
+
+Window size after a restart: If you had Lumora maximized and then minimized it, it came back as a normal window instead of maximized after a Windows restart. When saving, the state was seen as "minimized" and the information "was maximized" got lost – Windows keeps it in a separate flag, which is now taken into account.
+
+Analysis tab: The position picker for the measurement overlay now matches the one in the Overlay tab – a 2×2 grid instead of a single row, so the corners sit where they actually are on screen.
