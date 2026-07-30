@@ -4042,7 +4042,21 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "restart-app") {
         if (g_bcState.value("active", false)) return json{ {"ok", false}, {"streaming", true} };
         std::wstring exe = exeDir() + L"\\lumora-shell.exe";
-        ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, exeDir().c_str(), SW_SHOWNORMAL);
+        // Der Nachfolger MUSS auf unser Prozessende warten: sonst laeuft er in die
+        // Einzelinstanz-Sperre (CreateMutexW unten in wWinMain), findet uns noch am Leben,
+        // reicht brav seine Kommandozeile durch und beendet sich SOFORT wieder - waehrend
+        // wir selbst gerade herunterfahren. Ergebnis: gar nichts laeuft mehr (User-Befund
+        // "hat sich beendet, aber nicht neu gestartet"). Unser Herunterfahren dauert
+        // spuerbar (Fensterzustand, Tray, Broker, WebView2-Abbau), das Rennen verlieren
+        // wir also zuverlaessig.
+        std::wstring args = L"--restart-wait " + std::to_wstring(GetCurrentProcessId());
+        HINSTANCE rc = ShellExecuteW(nullptr, L"open", exe.c_str(), args.c_str(), exeDir().c_str(), SW_SHOWNORMAL);
+        // Nur beenden, wenn der Start wirklich angestossen wurde - sonst stuende der Nutzer
+        // ohne laufende App da (>32 = Erfolg, ShellExecute-Konvention).
+        if ((INT_PTR)rc <= 32) {
+            bcLogStream("restart-app: Start der neuen Instanz fehlgeschlagen, rc=" + std::to_string((INT_PTR)rc) + " - App bleibt offen");
+            return json{ {"ok", false}, {"spawnFailed", true} };
+        }
         g_quitting = true; PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
         return json{ {"ok", true} };
     }
@@ -4833,6 +4847,26 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // COM (FileDialogs, WebView2) - GUI-Thread = STA
     Gdiplus::GdiplusStartupInput gsi; ULONG_PTR gtok = 0; Gdiplus::GdiplusStartup(&gtok, &gsi, nullptr);   // Datei-Icons (PNG)
     { WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa); }   // Sockets frueh (bcLanIp/mtx-Probe/SSDP laufen VOR dem HTTP-Server)
+    // Neustart nach Komponenten-Update (--restart-wait <pid>): ERST auf das Ende der
+    // Vorgaengerinstanz warten, DANN die Einzelinstanz-Pruefung. Ohne das verliert der
+    // Nachfolger das Rennen gegen das (langsame) Herunterfahren des Vorgaengers, sieht die
+    // Sperre noch belegt und beendet sich sofort - danach laeuft gar nichts mehr.
+    // Muss VOR CreateMutexW stehen; eigenes CommandLineToArgvW, weil argv erst weiter
+    // unten geparst wird.
+    {
+        int rac = 0; LPWSTR* rav = CommandLineToArgvW(GetCommandLineW(), &rac);
+        if (rav) {
+            for (int i = 1; i + 1 < rac; ++i) {
+                if (wcscmp(rav[i], L"--restart-wait") != 0) continue;
+                DWORD pid = (DWORD)_wtoi(rav[i + 1]);
+                if (!pid) break;
+                HANDLE prev = OpenProcess(SYNCHRONIZE, FALSE, pid);
+                if (prev) { WaitForSingleObject(prev, 15000); CloseHandle(prev); }   // Deckel gegen einen haengenden Vorgaenger
+                break;
+            }
+            LocalFree(rav);
+        }
+    }
     // Single-Instance (wie Electron requestSingleInstanceLock): Zweitstart reicht seine
     // Kommandozeile per WM_COPYDATA an die erste Instanz durch (Deep-Link/Fokus) und endet.
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\LumoraShellSingleton");
