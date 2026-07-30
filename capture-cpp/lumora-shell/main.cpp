@@ -4586,9 +4586,16 @@ static void saveWindowState(HWND h) {
     if (!GetWindowPlacement(h, &wp)) return;
     RECT& r = wp.rcNormalPosition;
     UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
+    // Maximiert-Zustand auch dann erkennen, wenn das Fenster gerade MINIMIERT ist:
+    // GetWindowPlacement liefert dann showCmd == SW_SHOWMINIMIZED, NICHT SW_SHOWMAXIMIZED -
+    // ein maximiert-und-dann-minimiert abgelegtes Fenster wurde deshalb als "nicht maximiert"
+    // gespeichert und kam nach dem Neustart als normales Fenster hoch (User-Befund).
+    // Windows haelt die Wiederherstellungs-Absicht dafuer in WPF_RESTORETOMAXIMIZED bereit.
+    bool maximized = wp.showCmd == SW_SHOWMAXIMIZED
+                  || (wp.showCmd == SW_SHOWMINIMIZED && (wp.flags & WPF_RESTORETOMAXIMIZED) != 0);
     json s = { {"x", MulDiv(r.left, 96, dpi)}, {"y", MulDiv(r.top, 96, dpi)},
                {"width", MulDiv(r.right - r.left, 96, dpi)}, {"height", MulDiv(r.bottom - r.top, 96, dpi)},
-               {"maximized", wp.showCmd == SW_SHOWMAXIMIZED} };
+               {"maximized", maximized} };
     writeFile(windowStatePath(), s.dump(2));
 }
 static void placeWebView(HWND h) {
