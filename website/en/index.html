@@ -1666,18 +1666,18 @@
 
 <script>
   const VIEWS = {
-    list:  { img: '../1.webp', alt: 'Lumora – Listenansicht', cap: 'List view – details, description &amp; per-game HDR toggle' },
+    list:  { img: '../1.webp', alt: 'Lumora – Listenansicht', cap: 'List view – details, description & per-game HDR toggle' },
     cover: { img: '../2.webp', alt: 'Lumora – Cover view', cap: 'Cover view – your library as a grid of game covers' },
-    osd:   { img: '../3.webp', alt: 'Lumora – Gaming OSD with GPU, CPU and FPS values over a running game', cap: 'Gaming OSD – GPU, CPU &amp; FPS live over the running game (real values)' },
-    streaming: { img: '../stream.webp', alt: 'Lumora – Stream tab with live preview, share link and “Invite friends”', cap: 'Stream tab – live preview, share link &amp; “Invite friends”' },
-    review: { img: '../rueckblick.webp', alt: 'Lumora – playtime recap with total playtime, most-played title, favourite genre and top games', cap: 'Playtime recap – total time, most played, favourite genre &amp; top games' }
+    osd:   { img: '../3.webp', alt: 'Lumora – Gaming OSD with GPU, CPU and FPS values over a running game', cap: 'Gaming OSD – GPU, CPU & FPS live over the running game (real values)' },
+    streaming: { img: '../stream.webp', alt: 'Lumora – Stream tab with live preview, share link and “Invite friends”', cap: 'Stream tab – live preview, share link & “Invite friends”' },
+    review: { img: '../rueckblick.webp', alt: 'Lumora – playtime recap with total playtime, most-played title, favourite genre and top games', cap: 'Playtime recap – total time, most played, favourite genre & top games' }
   };
   function setView(v) {
     const d = VIEWS[v];
     const shot = document.getElementById('shot');
     shot.src = d.img;
     shot.alt = d.alt;
-    document.getElementById('viewCaption').innerHTML = d.cap;
+    document.getElementById('viewCaption').textContent = d.cap;
     for (const [key, id] of [['list', 'tabList'], ['cover', 'tabCover'], ['osd', 'tabOsd'], ['streaming', 'tabStreaming'], ['review', 'tabReview']]) {
       const b = document.getElementById(id);
       if (!b) continue;
@@ -1690,7 +1690,7 @@
     { img: '../1.webp', alt: 'Lumora – List view', cap: 'List view' },
     { img: '../2.webp', alt: 'Lumora – Cover view',  cap: 'Cover view' },
     { img: '../3.webp', alt: 'Lumora – Gaming OSD',     cap: 'Gaming OSD (live values)' },
-    { img: '../stream.webp', alt: 'Lumora – Stream tab', cap: 'Stream tab (live preview &amp; share link)' },
+    { img: '../stream.webp', alt: 'Lumora – Stream tab', cap: 'Stream tab (live preview & share link)' },
     { img: '../rueckblick.webp', alt: 'Lumora – Playtime recap', cap: 'Playtime recap' }
   ];
   let lightboxIndex = 0;
