@@ -123,6 +123,8 @@
       font-family: 'Consolas', monospace; font-size: .95rem; line-height: 1.55; }
     .verdict b { color: #fff; }
     .verdict .sub { display: block; opacity: .65; font-size: .85rem; margin-top: 4px; }
+    .shot { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--border); margin: 22px 0 8px; }
+    .shot-cap { font-size: .88rem; opacity: .6; margin: 0 0 26px; text-align: center; }
   </style>
 </head>
 <body>
@@ -160,8 +162,9 @@
     <a class="cta" href="download.php">⬇ Lumora kostenlos laden</a>
     <p class="muted">Für Windows 10 &amp; 11 · NVIDIA, AMD &amp; Intel · Open Source</p>
 
-    <!-- SCREENSHOTS: hier kommen später (a) das Analyse-Overlay im Spiel und
-         (b) der fertige Bericht mit Urteil + Kurve rein. -->
+    <img class="shot" src="analyse.webp" width="1920" height="1080" loading="lazy" decoding="async"
+         alt="Lumora Ruckler-Analyse: Bericht mit Klartext-Urteil „Sauberer Lauf", Kennzahlen (Ø FPS, 1%-Low, Ruckler pro Minute), Frametime-Kurve und Flaschenhals-Einschätzung">
+    <p class="shot-cap">Der Bericht nach einer Messung: Klartext-Urteil, Kennzahlen, Frametime-Kurve und Flaschenhals-Einschätzung.</p>
 
     <h2>So läuft eine Analyse ab</h2>
     <div class="card">

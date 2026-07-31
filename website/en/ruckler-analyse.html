@@ -123,6 +123,8 @@
       font-family: 'Consolas', monospace; font-size: .95rem; line-height: 1.55; }
     .verdict b { color: #fff; }
     .verdict .sub { display: block; opacity: .65; font-size: .85rem; margin-top: 4px; }
+    .shot { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--border); margin: 22px 0 8px; }
+    .shot-cap { font-size: .88rem; opacity: .6; margin: 0 0 26px; text-align: center; }
   </style>
 </head>
 <body>
@@ -160,7 +162,9 @@
     <a class="cta" href="../download.php">⬇ Download Lumora for free</a>
     <p class="muted">For Windows 10 &amp; 11 · NVIDIA, AMD &amp; Intel · Open source</p>
 
-    <!-- SCREENSHOTS: (a) analysis overlay in-game and (b) finished report go here later. -->
+    <img class="shot" src="../analyse.webp" width="1920" height="1080" loading="lazy" decoding="async"
+         alt="Lumora stutter analysis: report with a plain-language verdict “Clean run”, key figures (avg FPS, 1% low, stutters per minute), frame time graph and bottleneck assessment">
+    <p class="shot-cap">The report after a measurement: plain-language verdict, key figures, frame time graph and bottleneck assessment.</p>
 
     <h2>How an analysis works</h2>
     <div class="card">
