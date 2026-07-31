@@ -1695,18 +1695,18 @@
 
 <script>
   const VIEWS = {
-    list:  { img: '1.webp', alt: 'Lumora – Listenansicht', cap: 'Listenansicht – Details, Beschreibung &amp; HDR-Schalter pro Spiel' },
+    list:  { img: '1.webp', alt: 'Lumora – Listenansicht', cap: 'Listenansicht – Details, Beschreibung & HDR-Schalter pro Spiel' },
     cover: { img: '2.webp', alt: 'Lumora – Cover-Ansicht', cap: 'Cover-Ansicht – deine Bibliothek als Raster aus Spiel-Covern' },
-    osd:   { img: '3.webp', alt: 'Lumora – Gaming-OSD mit GPU-, CPU- und FPS-Werten über einem laufenden Spiel', cap: 'Gaming-OSD – GPU, CPU &amp; FPS live über dem laufenden Spiel (echte Werte)' },
-    streaming: { img: 'stream.webp', alt: 'Lumora – Stream-Tab mit Live-Vorschau, Teilen-Link und „Freunde dazuholen"', cap: 'Stream-Tab – Live-Vorschau, Link teilen &amp; „Freunde dazuholen"' },
-    review: { img: 'rueckblick.webp', alt: 'Lumora – Spielzeit-Rückblick mit Gesamtspielzeit, meistgespieltem Titel, Lieblings-Genre und Top-Spielen', cap: 'Spielzeit-Rückblick – Gesamtzeit, meistgespielt, Lieblings-Genre &amp; Top-Spiele' }
+    osd:   { img: '3.webp', alt: 'Lumora – Gaming-OSD mit GPU-, CPU- und FPS-Werten über einem laufenden Spiel', cap: 'Gaming-OSD – GPU, CPU & FPS live über dem laufenden Spiel (echte Werte)' },
+    streaming: { img: 'stream.webp', alt: 'Lumora – Stream-Tab mit Live-Vorschau, Teilen-Link und „Freunde dazuholen"', cap: 'Stream-Tab – Live-Vorschau, Link teilen & „Freunde dazuholen"' },
+    review: { img: 'rueckblick.webp', alt: 'Lumora – Spielzeit-Rückblick mit Gesamtspielzeit, meistgespieltem Titel, Lieblings-Genre und Top-Spielen', cap: 'Spielzeit-Rückblick – Gesamtzeit, meistgespielt, Lieblings-Genre & Top-Spiele' }
   };
   function setView(v) {
     const d = VIEWS[v];
     const shot = document.getElementById('shot');
     shot.src = d.img;
     shot.alt = d.alt;
-    document.getElementById('viewCaption').innerHTML = d.cap;
+    document.getElementById('viewCaption').textContent = d.cap;
     for (const [key, id] of [['list', 'tabList'], ['cover', 'tabCover'], ['osd', 'tabOsd'], ['streaming', 'tabStreaming'], ['review', 'tabReview']]) {
       const b = document.getElementById(id);
       if (!b) continue;
@@ -1719,7 +1719,7 @@
     { img: '1.webp', alt: 'Lumora – Listenansicht', cap: 'Listenansicht' },
     { img: '2.webp', alt: 'Lumora – Cover-Ansicht',  cap: 'Cover-Ansicht' },
     { img: '3.webp', alt: 'Lumora – Gaming-OSD',     cap: 'Gaming-OSD (Live-Werte)' },
-    { img: 'stream.webp', alt: 'Lumora – Stream-Tab', cap: 'Stream-Tab (Live-Vorschau &amp; Teilen-Link)' },
+    { img: 'stream.webp', alt: 'Lumora – Stream-Tab', cap: 'Stream-Tab (Live-Vorschau & Teilen-Link)' },
     { img: 'rueckblick.webp', alt: 'Lumora – Spielzeit-Rückblick', cap: 'Spielzeit-Rückblick' }
   ];
   let lightboxIndex = 0;
