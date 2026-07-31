@@ -44,10 +44,12 @@
         <span class="hdr-dot" style="background:#f05a5a; animation:pulse 1.4s infinite"></span>
         <span id="streamIndLabel">LIVE</span>
       </div>
-      <div class="hdr-indicator" id="hdrIndicator">
+      <!-- Zugleich Schalter: Klick schaltet HDR global um. role/tabindex, damit er auch
+           per Tastatur und Gamepad-Navigation erreichbar ist (navFocusables nimmt button). -->
+      <button class="hdr-indicator" id="hdrIndicator" onclick="toggleHdr()" title="HDR ein-/ausschalten">
         <span class="hdr-dot" id="hdrDot"></span>
         <span id="hdrLabel">HDR aus</span>
-      </div>
+      </button>
       <!-- Fenster-Knoepfe docken BUENDIG an die obere rechte Ecke (Fitts's Law):
            volle Titelleisten-Hoehe, kein Rand-Abstand - im maximierten Fenster ist
            Schliessen damit wie bei nativen Apps mit "Maus in die Ecke" klickbar. -->
@@ -1201,6 +1203,8 @@ const I18N_EN = {
   'Linear (am hellsten)': 'Linear (brightest)',
   'Wirkt live im laufenden Stream – nur wenn dein Bildschirm in HDR läuft. Zu dunkel? Helligkeit erhöhen oder eine sanftere Kurve wählen.': 'Applies live in the running stream – only when your display is in HDR. Too dark? Raise the brightness or pick a softer curve.',
   'HDR aus': 'HDR off',
+  'HDR ein-/ausschalten': 'Turn HDR on/off',
+  'Kein HDR-fähiger Bildschirm erkannt': 'No HDR-capable display detected',
   'Meine Spiele': 'My games',
   'Manuelle Reihenfolge': 'Manual order',
   'Name (A–Z)': 'Name (A–Z)',
@@ -3421,14 +3425,44 @@ ipcRenderer.on('launch-status', (event, status) => {
 ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set(paths || []); refreshLaunchBtn() })
 
 
-    ipcRenderer.on('hdr-status', (event, enabled) => {
+    function paintHdr(enabled, capable) {
       const indicator = document.getElementById('hdrIndicator')
       const dot = document.getElementById('hdrDot')
       const label = document.getElementById('hdrLabel')
-      indicator.classList.toggle('active', enabled)
-      dot.classList.toggle('active', enabled)
+      if (!indicator) return
+      indicator.classList.toggle('active', !!enabled)
+      dot.classList.toggle('active', !!enabled)
       label.textContent = enabled ? window.tr('HDR an') : window.tr('HDR aus')
-    })
+      // Ohne HDR-faehigen Bildschirm waere der Schalter eine Attrappe - dann sichtbar
+      // abschalten statt Klicks ins Leere laufen zu lassen.
+      if (capable === false) {
+        indicator.disabled = true
+        indicator.title = window.tr('Kein HDR-fähiger Bildschirm erkannt')
+      } else {
+        indicator.disabled = false
+        indicator.title = window.tr('HDR ein-/ausschalten')
+      }
+    }
+    ipcRenderer.on('hdr-status', (event, enabled) => paintHdr(enabled))
+    // Klick auf die Anzeige schaltet HDR um. Waehrend des Umschaltens gesperrt: der
+    // Windows-Aufruf braucht einen Moment, sonst provozieren Doppelklicks ein Hin und Her.
+    let hdrBusy = false
+    async function toggleHdr() {
+      if (hdrBusy) return
+      hdrBusy = true
+      const ind = document.getElementById('hdrIndicator')
+      if (ind) ind.classList.add('busy')
+      try {
+        const st = await ipcRenderer.invoke('hdr-toggle')
+        if (st) paintHdr(st.enabled, st.capable)
+      } finally {
+        hdrBusy = false
+        if (ind) ind.classList.remove('busy')
+      }
+    }
+    // Beim Start den echten Zustand holen: bisher zeigte die Anzeige bis zum ersten
+    // Spielstart pauschal "HDR aus", auch wenn HDR in Windows an war.
+    ipcRenderer.invoke('hdr-state').then(st => { if (st) paintHdr(st.enabled, st.capable) }).catch(() => {})
 
     ipcRenderer.on('play-session', (event, { gamePath, durationMs }) => {
       const secs = Math.round(durationMs / 1000)

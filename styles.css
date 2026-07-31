@@ -93,6 +93,8 @@ body::before {
   margin-left: 4px;
 }
 
+/* Zugleich Schalter (<button>): Browser-Vorgaben zuruecksetzen, damit die Optik exakt
+   wie bei der frueheren reinen Anzeige bleibt - font/line-height erben nicht automatisch. */
 .hdr-indicator {
   display: flex;
   align-items: center;
@@ -102,9 +104,19 @@ body::before {
   background: #1e1e1e;
   border: 1px solid #333;
   font-size: 12px;
+  font-family: inherit;
+  line-height: normal;
   color: #888;
+  cursor: pointer;
   transition: all 0.3s;
+  -webkit-app-region: no-drag;   /* sonst schluckt die ziehbare Titelleiste den Klick */
 }
+.hdr-indicator:hover:not(:disabled) { border-color: #555; color: #bbb; }
+.hdr-indicator.active:hover:not(:disabled) { border-color: #2a9b5a; }
+/* Waehrend des Umschaltens: Windows braucht dafuer einen Moment */
+.hdr-indicator.busy { opacity: .6; cursor: progress; }
+/* Kein HDR-faehiger Bildschirm -> als Anzeige belassen, aber nicht klickbar wirken */
+.hdr-indicator:disabled { cursor: default; opacity: .75; }
 
 .hdr-indicator.active {
   background: #0a2a1a;

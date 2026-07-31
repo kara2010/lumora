@@ -72,6 +72,37 @@ inline void setHDR(bool on) {
     }
 }
 
+// Aktuellen HDR-Zustand LESEN (Gegenstueck zu setHDR, gleiche API-Staffelung: 24H2-Info
+// zuerst, sonst klassisch). Mehrmonitor-Semantik wie bei setHDR, das ebenfalls ueber alle
+// faehigen Ziele laeuft: capable = mindestens ein HDR-faehiges Display, enabled = bei
+// mindestens einem davon ist HDR eingeschaltet.
+struct HdrState { bool capable = false; bool enabled = false; };
+inline HdrState hdrState() {
+    HdrState st;
+    UINT32 nPath = 0, nMode = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPath, &nMode) != ERROR_SUCCESS) return st;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(nPath);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(nMode);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &nPath, paths.data(), &nMode, modes.data(), nullptr) != ERROR_SUCCESS) return st;
+    paths.resize(nPath);
+    for (auto& p : paths) {
+        const LUID adapter = p.targetInfo.adapterId; const UINT32 target = p.targetInfo.id;
+        DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2 i2{};
+        i2.header = { DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO_2, sizeof(i2), adapter, target };
+        if (DisplayConfigGetDeviceInfo(&i2.header) == ERROR_SUCCESS) {
+            if (i2.highDynamicRangeSupported) { st.capable = true; if (i2.highDynamicRangeUserEnabled) st.enabled = true; }
+            continue;
+        }
+        // Aelteres Windows: advancedColor deckt dort dasselbe ab (wie in setHDR).
+        DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO i1{};
+        i1.header = { DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO, sizeof(i1), adapter, target };
+        if (DisplayConfigGetDeviceInfo(&i1.header) == ERROR_SUCCESS) {
+            if (i1.advancedColorSupported) { st.capable = true; if (i1.advancedColorEnabled) st.enabled = true; }
+        }
+    }
+    return st;
+}
+
 // Steam-Bibliotheken (SteamPath + libraryfolders.vdf) - wie getSteamLibraries in main.js.
 inline std::vector<sfs::path> steamLibs() {
     std::vector<sfs::path> libs;

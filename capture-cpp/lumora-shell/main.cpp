@@ -4073,6 +4073,23 @@ static json handleChannel(const std::string& channel, const json& args) {
         g_quitting = true; PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
         return json{ {"ok", true} };
     }
+    // HDR-Anzeige in der Titelleiste ist zugleich Schalter. Bewusst OHNE g_hdrByLauncher
+    // anzufassen: dieses Flag bedeutet "der Launcher hat HDR fuer ein Spiel eingeschaltet
+    // und muss es am Spielende zuruecknehmen". Eine Handschaltung des Nutzers darf diese
+    // Buchhaltung nicht verfaelschen - sonst bliebe HDR nach dem Spiel faelschlich an
+    // (oder wuerde ungefragt ausgeschaltet).
+    if (channel == "hdr-state") {
+        auto st = lulaunch::hdrState();
+        return json{ {"capable", st.capable}, {"enabled", st.enabled} };
+    }
+    if (channel == "hdr-toggle") {
+        auto st = lulaunch::hdrState();
+        if (!st.capable) return json{ {"capable", false}, {"enabled", false} };
+        lulaunch::setHDR(!st.enabled);
+        auto now = lulaunch::hdrState();   // Ist-Zustand zurueckmelden, nicht den erhofften
+        sendToUi("hdr-status", now.enabled);
+        return json{ {"capable", now.capable}, {"enabled", now.enabled} };
+    }
     if (channel == "get-app-settings") return loadSettings();
     if (channel == "set-app-settings") {                      // Merge wie Object.assign in main.js
         if (args.size() >= 1 && args[0].is_object()) {
@@ -5042,6 +5059,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         for (size_t k = 0; k < r.size() && k < 40; ++k) s += "  " + r[k].value("source", "?") + ": " + r[k].value("name", "?") + " -> " + r[k].value("path", "?") + "\n";
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", s);
+        return 0;
+    }
+    // Selbsttest der HDR-Abfrage (Gegenstueck zum neuen Titelleisten-Schalter): meldet, ob
+    // ein HDR-faehiges Display erkannt wird und ob HDR gerade an ist - ohne die Oberflaeche.
+    // Dauerhaft nuetzlich, weil sich HDR-Zustaende sonst nur visuell pruefen lassen.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-hdr") == 0) {
+        auto st = lulaunch::hdrState();
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt",
+            std::string("capable=") + (st.capable ? "1" : "0") + " enabled=" + (st.enabled ? "1" : "0") + "\n");
         return 0;
     }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-ipc") == 0) {
