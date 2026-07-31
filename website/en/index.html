@@ -812,6 +812,10 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="4" width="13" height="10" rx="1.5"/><line x1="5.5" y1="17.5" x2="11.5" y2="17.5"/><path d="M18 8a4 4 0 0 1 0 6"/><path d="M21 5.5a8 8 0 0 1 0 11"/></svg>
         Streaming
       </button>
+      <button id="tabReview" onclick="setView('review')" role="tab" aria-selected="false">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+        Recap
+      </button>
     </div>
     <div class="screenshot-wrap" onclick="openLightbox()">
       <img id="shot" src="../1.webp" width="1920" height="1080" decoding="async" alt="Lumora game launcher – list view with all games from Steam, Epic, GOG &amp; more, HDR toggle and game streaming" class="screenshot-img">
@@ -1665,7 +1669,8 @@
     list:  { img: '../1.webp', alt: 'Lumora – Listenansicht', cap: 'List view – details, description &amp; per-game HDR toggle' },
     cover: { img: '../2.webp', alt: 'Lumora – Cover view', cap: 'Cover view – your library as a grid of game covers' },
     osd:   { img: '../3.webp', alt: 'Lumora – Gaming OSD with GPU, CPU and FPS values over a running game', cap: 'Gaming OSD – GPU, CPU &amp; FPS live over the running game (real values)' },
-    streaming: { img: '../stream.webp', alt: 'Lumora – Stream tab with live preview, share link and “Invite friends”', cap: 'Stream tab – live preview, share link &amp; “Invite friends”' }
+    streaming: { img: '../stream.webp', alt: 'Lumora – Stream tab with live preview, share link and “Invite friends”', cap: 'Stream tab – live preview, share link &amp; “Invite friends”' },
+    review: { img: '../rueckblick.webp', alt: 'Lumora – playtime recap with total playtime, most-played title, favourite genre and top games', cap: 'Playtime recap – total time, most played, favourite genre &amp; top games' }
   };
   function setView(v) {
     const d = VIEWS[v];
@@ -1673,7 +1678,7 @@
     shot.src = d.img;
     shot.alt = d.alt;
     document.getElementById('viewCaption').innerHTML = d.cap;
-    for (const [key, id] of [['list', 'tabList'], ['cover', 'tabCover'], ['osd', 'tabOsd'], ['streaming', 'tabStreaming']]) {
+    for (const [key, id] of [['list', 'tabList'], ['cover', 'tabCover'], ['osd', 'tabOsd'], ['streaming', 'tabStreaming'], ['review', 'tabReview']]) {
       const b = document.getElementById(id);
       if (!b) continue;
       b.classList.toggle('active', v === key);
@@ -1685,7 +1690,8 @@
     { img: '../1.webp', alt: 'Lumora – List view', cap: 'List view' },
     { img: '../2.webp', alt: 'Lumora – Cover view',  cap: 'Cover view' },
     { img: '../3.webp', alt: 'Lumora – Gaming OSD',     cap: 'Gaming OSD (live values)' },
-    { img: '../stream.webp', alt: 'Lumora – Stream tab', cap: 'Stream tab (live preview &amp; share link)' }
+    { img: '../stream.webp', alt: 'Lumora – Stream tab', cap: 'Stream tab (live preview &amp; share link)' },
+    { img: '../rueckblick.webp', alt: 'Lumora – Playtime recap', cap: 'Playtime recap' }
   ];
   let lightboxIndex = 0;
   function lightboxSet(i) {
