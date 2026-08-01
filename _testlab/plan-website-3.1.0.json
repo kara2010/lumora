@@ -1,0 +1,7 @@
+{
+  "files": [
+    { "local": "Z:/website/index.html", "remote": "index.html" },
+    { "local": "Z:/website/en/index.html", "remote": "en/index.html" },
+    { "local": "Z:/website/sitemap.xml", "remote": "sitemap.xml" }
+  ]
+}

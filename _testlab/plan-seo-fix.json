@@ -1,0 +1,12 @@
+{ "files": [
+  { "local": "Z:/website/impressum.html", "remote": "impressum.html" },
+  { "local": "Z:/website/datenschutz.html", "remote": "datenschutz.html" },
+  { "local": "Z:/website/eingabe-bruecke.html", "remote": "eingabe-bruecke.html" },
+  { "local": "Z:/website/index.html", "remote": "index.html" },
+  { "local": "Z:/website/portfreigabe.html", "remote": "portfreigabe.html" },
+  { "local": "Z:/website/en/impressum.html", "remote": "en/impressum.html" },
+  { "local": "Z:/website/en/datenschutz.html", "remote": "en/datenschutz.html" },
+  { "local": "Z:/website/en/eingabe-bruecke.html", "remote": "en/eingabe-bruecke.html" },
+  { "local": "Z:/website/en/index.html", "remote": "en/index.html" },
+  { "local": "Z:/website/en/portfreigabe.html", "remote": "en/portfreigabe.html" }
+] }
