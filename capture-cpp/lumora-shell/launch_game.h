@@ -273,6 +273,11 @@ struct LaunchSession {
     // DRM-Handoff wechselt Prozesse).
     DWORD pid = 0;
     HANDLE hProc = nullptr, hWait = nullptr;
+    // Vordergrund-Uebergabe ans Spiel (s. raiseGameWindow in main.cpp): das Spielfenster
+    // entsteht oft erst Sekunden nach dem Prozess, darum wird ab STARTED eine Weile lang
+    // pro Tick versucht, es nach vorne zu holen - hoechstens einmal erfolgreich.
+    bool raised = false;
+    ULONGLONG raiseUntil = 0;
 };
 
 inline bool probeRunning(const LaunchSession& s) {

@@ -362,6 +362,38 @@ static void launchDetachHandle(lulaunch::LaunchSession& s) {
     if (s.hProc) { CloseHandle(s.hProc); s.hProc = nullptr; }
     s.pid = 0;
 }
+// --- Vordergrund-Uebergabe an das gestartete Spiel ---
+// Befund: Fokus auf einer Fremd-App (Firefox), Lumora per Hotkey nach vorne, Spiel per
+// Gamepad gestartet -> das Spiel blieb hinter Lumora. Ursache ist die Windows-Foreground-
+// Sperre: nur der Vordergrund-Prozess darf den Vordergrund vergeben. Beim Start UEBER einen
+// Launcher (Steam, shell:appsFolder, .lnk) startet nicht Lumora das Spiel, sondern ein
+// bereits laufender Fremdprozess - der hat das Recht nicht und sein SetForegroundWindow
+// verpufft. AllowSetForegroundWindow(ASFW_ANY) vor dem Startaufruf gibt es weiter (siehe
+// launchGame); dieses Recht gilt aber nur bis zum naechsten Vordergrundwechsel, und
+// Spielfenster entstehen oft erst zehn Sekunden spaeter. Darum zusaetzlich hier: sobald das
+// Spiel nachweislich laeuft, sein erstes echtes Fenster suchen und nach vorne holen.
+// Bewusst zurueckhaltend - nur solange Lumora selbst noch vorne ist. Hat der Nutzer
+// inzwischen etwas anderes nach vorne geholt, bleibt das unangetastet.
+static void forceForeground(HWND hwnd);   // Definition weiter unten (bei showMainWindow)
+struct GameWndSearch { DWORD pid; HWND hit; };
+static BOOL CALLBACK gameWndProc(HWND h, LPARAM lp) {
+    auto* q = (GameWndSearch*)lp;
+    DWORD wpid = 0; GetWindowThreadProcessId(h, &wpid);
+    if (wpid != q->pid || !IsWindowVisible(h) || GetWindow(h, GW_OWNER)) return TRUE;
+    RECT r{}; GetWindowRect(h, &r);
+    if (r.right - r.left < 320 || r.bottom - r.top < 240) return TRUE;   // Splash-/Hilfsfenster ueberspringen
+    q->hit = h; return FALSE;
+}
+static void raiseGameWindow(lulaunch::LaunchSession& s) {
+    if (s.raised || !s.pid || GetTickCount64() > s.raiseUntil) return;
+    if (GetForegroundWindow() != g_hwnd) { s.raised = true; return; }   // Nutzer ist woanders - nicht dazwischenfunken
+    GameWndSearch q{ s.pid, nullptr };
+    EnumWindows(gameWndProc, (LPARAM)&q);
+    if (!q.hit) return;   // Fenster noch nicht da -> naechster Tick
+    forceForeground(q.hit);
+    s.raised = true;
+    lulaunch::playLog(dataDir(), "FOREGROUND an das Spielfenster uebergeben");
+}
 static void launchAttachHandle(lulaunch::LaunchSession& s) {
     DWORD pid = lulaunch::probePid(s); if (!pid) return;
     HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, pid); if (!h) return;
@@ -390,6 +422,8 @@ static void launchTick() {
             if (running) {
                 s.started = true; s.startTs = GetTickCount64(); s.absent = 0;
                 launchAttachHandle(s);   // Exit-Wait auf den erkannten Prozess (sofortige Ende-Erkennung)
+                s.raiseUntil = GetTickCount64() + 60000;   // ab jetzt 60s lang das Spielfenster nach vorne holen
+                raiseGameWindow(s);
                 sendToUi("launch-status", "running");
                 inputBridgeOnRunning(narrow(s.gamePath));   // erst JETZT (laeuft nachweislich), nie beim Startaufruf
                 // HDR wurde bei der 30s-Freigabe geparkt? Spaetstarter doch noch da -> wieder an.
@@ -408,6 +442,7 @@ static void launchTick() {
             }
         } else if (running) {
             s.absent = 0;
+            raiseGameWindow(s);   // Fenster entsteht oft erst Sekunden nach dem Prozess
             // Handle tot (Prozess-Exit) aber probeRunning noch true -> DRM-Handoff/anderer
             // Prozess hat uebernommen: Wait auf den NEUEN Prozess umhaengen. Ohne PID
             // (Steam-Registry-Pfad) bleibt s.hProc null -> Polling-Sicherheitsnetz.
@@ -425,6 +460,9 @@ static void launchTick() {
     // ~2s statt ~8s); sonst gemuetliche 4s. SetTimer ersetzt den bestehenden Timer.
     UINT next = 4000;
     for (auto& s : g_launches) if (!s.done && s.started && (!s.hProc || WaitForSingleObject(s.hProc, 0) == WAIT_OBJECT_0)) { next = 1000; break; }
+    // Waehrend auf das Spielfenster gewartet wird ebenfalls 1s: mit 4s stuende Lumora sonst
+    // bis zu vier Sekunden vor dem fertig geoeffneten Spiel.
+    for (auto& s : g_launches) if (!s.done && !s.raised && s.raiseUntil && GetTickCount64() < s.raiseUntil) { next = 1000; break; }
     SetTimer(g_hwnd, TIMER_LAUNCH, next, nullptr);
 }
 
@@ -457,6 +495,11 @@ static json launchGame(const json& args) {
             Sleep(3000);   // HDR-Umschaltzeit wie im Original
         }
         sendToUi("launch-status", "launching");
+        // Vordergrund-Recht weitergeben, BEVOR gestartet wird: sonst darf weder das Spiel noch
+        // der Launcher (Steam/Shell) sich vor Lumora schieben - Windows laesst das nur dem
+        // aktuellen Vordergrund-Prozess zu, und das ist nach dem Hotkey Lumora. ASFW_ANY, weil
+        // die Ziel-PID hier noch unbekannt ist (Steam startet das Spiel selbst).
+        AllowSetForegroundWindow(ASFW_ANY);
         std::wstring low = gamePath; for (auto& c : low) c = towlower(c);
         bool isLnk = low.size() > 4 && low.rfind(L".lnk") == low.size() - 4;
         bool isXbox = std::regex_search(gamePath, std::wregex(LR"(\\XboxGames\\)", std::regex::icase));
