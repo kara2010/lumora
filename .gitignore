@@ -73,3 +73,6 @@ _testlab/ffmpeg-build/
 HANDOFF-*.md
 _testlab/HANDOFF-*.md
 RELEASE.md
+
+# VS2022-Build-Ausgabe der Capture-Komponente (wird erzeugt)
+capture-cpp/lumora-capture/build-vs22/
