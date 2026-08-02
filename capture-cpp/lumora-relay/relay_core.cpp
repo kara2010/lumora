@@ -252,11 +252,15 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
         }
     });
 
-    // Gathering synchron abwarten (lokale Host-Kandidaten auf festem Port: schnell; TURN: bis ~3s)
-    std::mutex gm; std::condition_variable gcv; bool done = false;
-    sess->pc->onGatheringStateChange([&](rtc::PeerConnection::GatheringState st) {
+    // Gathering synchron abwarten (lokale Host-Kandidaten auf festem Port: schnell; TURN: bis ~3s).
+    // Zustand als shared_ptr, NICHT als Referenz auf lokale Variablen: das Abmelden des
+    // Callbacks unten wartet nicht auf einen GERADE LAUFENDEN Aufruf - der haette nach dem
+    // Timeout-Return dieser Funktion in freigegebene Stack-Variablen geschrieben.
+    struct Gather { std::mutex m; std::condition_variable cv; bool done = false; };
+    auto gs = std::make_shared<Gather>();
+    sess->pc->onGatheringStateChange([gs](rtc::PeerConnection::GatheringState st) {
         if (st == rtc::PeerConnection::GatheringState::Complete) {
-            std::lock_guard<std::mutex> lk(gm); done = true; gcv.notify_all();
+            std::lock_guard<std::mutex> lk(gs->m); gs->done = true; gs->cv.notify_all();
         }
     });
 
@@ -269,11 +273,11 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
 
 
     {
-        std::unique_lock<std::mutex> lk(gm);
-        gcv.wait_for(lk, std::chrono::milliseconds(3000), [&] { return done; });
+        std::unique_lock<std::mutex> lk(gs->m);
+        gs->cv.wait_for(lk, std::chrono::milliseconds(3000), [&] { return gs->done; });
     }
-    // Callback abmelden: er captured gm/gcv/done per Referenz (lokale Variablen dieser
-    // Funktion) und darf nach dem Return nicht mehr feuern.
+    // Callback abmelden (best effort); ein nachlaufender Aufruf schreibt dank shared_ptr
+    // nur noch in den gemeinsamen Gather-Zustand, nie in freigegebenen Stack.
     sess->pc->onGatheringStateChange(nullptr);
     auto local = sess->pc->localDescription();
     if (!local) return "";
