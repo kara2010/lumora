@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.2.0"   # 3.2.0: HDR-Schalter in der Titelleiste, Spielzeit zuruecksetzbar, grosse Robustheits-Runde (Timeouts, atomare Speicherung, Waisen-Prozesse).
+$version = "3.2.1"   # 3.2.1: Gestartetes Spiel kommt zuverlaessig vor Lumora in den Vordergrund.
                      #        3.1.1 speicherte den Zustand korrekt, wendete ihn aber im Regelfall
                      #        des Nutzers nie an: bei Autostart mit --minimized ruft wWinMain kein
                      #        ShowWindow auf, und das spaetere Oeffnen per Tray/Hotkey zeigte das
