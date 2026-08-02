@@ -75,7 +75,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/#app",
         "name": "Lumora",
-        "softwareVersion": "3.2.2",
+        "softwareVersion": "3.2.3",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1054,8 +1054,16 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.2.2</span>
+          <span class="release-ver">3.2.3</span>
           <span class="release-tag">aktuell</span>
+        </div>
+        <ul>
+          <li><strong>Xbox- und Microsoft-Store-Spiele haben endlich ihr Symbol</strong> – bei diesen Titeln steckt das Icon nicht in der Programmdatei, sondern liegt als Bild im Spielordner. Lumora fand dort bisher nichts und zeigte die Kachel leer; jetzt wird das Paketlogo des Spiels verwendet. Bereits vorhandene Einträge holen ihr Symbol beim nächsten Anwählen automatisch nach, ein selbst gesetztes Bild bleibt erhalten.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.2.2</span>
         </div>
         <ul>
           <li><strong>Wichtige Korrektur: Einstellungen und Bibliothek bleiben erhalten</strong> – auf Rechnern, auf denen Lumora neu installiert wurde, konnte die App ihren Datenordner nicht anlegen. Die Folge: Einstellungen gingen beim Beenden verloren, die Spielesuche kam bei jedem Start erneut hoch, und auch Spielzeiten und Cover blieben nicht erhalten. Lumora legt den Ordner jetzt selbst an, falls er fehlt.</li>
@@ -1091,6 +1099,7 @@
           <li><strong>Maximiertes Fenster kommt zuverlässig maximiert zurück</strong> – jetzt auch dann, wenn Lumora minimiert mit Windows startet. In diesem Fall zeigt Lumora zunächst nur das Symbol im Infobereich; öffnest du das Fenster später darüber oder per Hotkey, erscheint es wieder in der zuletzt genutzten Ansicht. Verkleinerst du es bewusst, bleibt das erhalten.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.1.1</span>
@@ -1102,7 +1111,6 @@
           <li>Die Positions-Wahl im Analyse-Reiter ist jetzt genauso aufgebaut wie im Overlay-Reiter: Die vier Ecken sitzen dort, wo sie auch auf dem Bildschirm liegen.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.1.0</span>
@@ -1429,7 +1437,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (29)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (30)</button>
   </div>
 </section>
 
@@ -1846,7 +1854,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (29)';
+    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (30)';
   }
 
   function toggleFeatures() {
