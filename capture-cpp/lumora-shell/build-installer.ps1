@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.2.2"   # 3.2.2: Lumora legt seinen Datenordner selbst an - ohne ihn wurde NICHTS gespeichert.
+$version = "3.2.3"   # 3.2.3: Xbox-/Microsoft-Store-Titel bekommen ihr Symbol (Paketlogo statt Exe-Icon).
                      #        3.1.1 speicherte den Zustand korrekt, wendete ihn aber im Regelfall
                      #        des Nutzers nie an: bei Autostart mit --minimized ruft wWinMain kein
                      #        ShowWindow auf, und das spaetere Oeffnen per Tray/Hotkey zeigte das
