@@ -58,6 +58,7 @@ private:
     }
     void handleConn(SOCKET c) {
         DWORD to = 10000; setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
+        setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, (const char*)&to, sizeof(to));   // send() darf nie unbegrenzt haengen (gleiche Klasse wie der SSE-Hub-Fund in der Shell)
         std::string buf;
         // Header lesen
         for (;;) {
