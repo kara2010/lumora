@@ -1,0 +1,19 @@
+HDR direkt aus der Titelleiste schalten: Die HDR-Anzeige oben rechts ist jetzt ein Knopf – ein Klick schaltet HDR für den Bildschirm an oder aus, ohne den Umweg über die Windows-Einstellungen. Die automatische HDR-Umschaltung beim Spielstart bleibt davon unberührt.
+
+Spielzeit zurücksetzen: Im Spielzeit-Rückblick kannst du die erfasste Zeit jetzt selbst zurücksetzen – für ein einzelnes Spiel über den Knopf in seiner Zeile oder für die gesamte Bibliothek auf einmal. Vor dem Löschen wird nachgefragt und dabei genannt, wie viel Zeit verloren geht.
+
+Ruckler-Analyse per Gamepad bedienbar: Im Messungs-Verlauf ließen sich die Häkchen zum Vergleichen zweier Läufe nur mit der Maus setzen. Jetzt erreichst du sie auch mit dem Controller – der Laufvergleich funktioniert damit vollständig vom Sofa aus.
+
+Deutlich robuster im Hintergrund: Eine große Überarbeitung der Grundlagen, die vor allem auf langsameren oder streng abgesicherten Systemen spürbar ist. Einstellungen und Bibliothek werden jetzt so gespeichert, dass ein abgebrochener Schreibvorgang die alten Daten nicht mehr beschädigen kann. Prüfungen im Hintergrund können nicht mehr endlos hängen bleiben – das konnte dazu führen, dass der Einrichtungshelfer fürs Overlay gar nicht mehr erschien und die Oberfläche mit der Zeit träge wurde. Beim Streaming kann ein einzelner abgebrochener Zuschauer die Verbindung der übrigen nicht mehr blockieren, und ein abgestecktes Lenkrad oder Gamepad lässt die Eingabe-Brücke nicht mehr auf dem letzten Wert stehen. Endet Lumora unerwartet, werden Streaming-Hilfsprozesse jetzt zuverlässig mit beendet, statt im Hintergrund weiterzulaufen und den nächsten Start zu blockieren.
+
+Ruckler-Berichte sind aussagekräftiger: Berichte werden jetzt sicher gespeichert – schlägt das Schreiben fehl, bleiben die Rohdaten der Messung erhalten statt mit verloren zu gehen. Zusätzlich hält jeder Bericht fest, ob während der Messung Systemereignisse verworfen werden mussten; das macht sichtbar, wie belastbar das Ergebnis ist.
+===EN===
+Toggle HDR straight from the title bar: The HDR indicator in the top right is now a button – one click turns HDR on or off for your display, without the detour through Windows settings. Automatic HDR switching when a game starts is unaffected.
+
+Reset playtime: In the playtime recap you can now reset the recorded time yourself – for a single game via the button in its row, or for the whole library at once. You are asked to confirm first, and the confirmation states how much time will be lost.
+
+Stutter analysis works with a gamepad: In the measurement history, the checkboxes for comparing two runs could only be ticked with a mouse. You can now reach them with the controller too – so run comparison works fully from the couch.
+
+Noticeably more robust under the hood: A large overhaul of the foundations, most noticeable on slower or tightly locked-down systems. Settings and your library are now written in a way that an interrupted save can no longer damage the existing data. Background checks can no longer hang indefinitely – that could stop the overlay setup helper from appearing at all and made the interface sluggish over time. While streaming, a single dropped viewer can no longer block the connection for everyone else, and unplugging a wheel or gamepad no longer leaves the input bridge stuck on the last value. If Lumora ends unexpectedly, streaming helper processes are now reliably shut down with it instead of lingering in the background and blocking the next start.
+
+Stutter reports are more meaningful: Reports are now saved safely – if writing fails, the raw measurement data is kept instead of being lost along with it. Each report also records whether system events had to be dropped during the measurement, making it visible how solid the result is.
