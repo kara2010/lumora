@@ -75,7 +75,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/#app",
         "name": "Lumora",
-        "softwareVersion": "3.2.0",
+        "softwareVersion": "3.2.1",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1054,8 +1054,16 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.2.0</span>
+          <span class="release-ver">3.2.1</span>
           <span class="release-tag">aktuell</span>
+        </div>
+        <ul>
+          <li><strong>Gestartetes Spiel kommt zuverlässig nach vorne</strong>: Hattest du Lumora per Hotkey aus einer anderen Anwendung heraus in den Vordergrund geholt und dann ein Spiel gestartet, konnte das Spiel hinter Lumora liegen bleiben – du musstest es erst per Alt+Tab holen. Hintergrund ist eine Schutzfunktion von Windows: Den Vordergrund darf nur die Anwendung vergeben, die ihn gerade hat. Startet das Spiel über Steam oder eine Verknüpfung, ist das nicht Lumora. Lumora gibt das Recht jetzt vor dem Start weiter und holt das Spielfenster zusätzlich selbst nach vorne, sobald es erscheint. Bist du zwischenzeitlich bewusst zu etwas anderem gewechselt, bleibt das unangetastet.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.2.0</span>
         </div>
         <ul>
           <li><strong>HDR direkt aus der Titelleiste schalten</strong>: Die HDR-Anzeige oben rechts ist jetzt ein Knopf – ein Klick schaltet HDR für den Bildschirm an oder aus, ohne den Umweg über die Windows-Einstellungen. Die automatische Umschaltung beim Spielstart bleibt davon unberührt.</li>
@@ -1097,6 +1105,7 @@
           <li><strong>Einstellungen bleiben an Ort und Stelle</strong>: Der Inhalt konnte nach dem Vordergrund-Holen per Hotkey seitlich verrutschen und die Reiterleiste verdecken – behoben.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.0.5</span>
@@ -1110,7 +1119,6 @@
           <li><strong>Zuverlässiger auf älteren Intel-Grafiken</strong>: Live-Bitraten-Wechsel beim Streamen greifen jetzt auch auf Generationen wie der HD 630; außerdem funktioniert „Nach Updates suchen" wieder zuverlässig.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.0.4</span>
@@ -1412,7 +1420,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (27)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (28)</button>
   </div>
 </section>
 
@@ -1829,7 +1837,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (27)';
+    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (28)';
   }
 
   function toggleFeatures() {
