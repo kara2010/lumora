@@ -2221,6 +2221,17 @@ function applyI18n() {
         else { g.icon = '' }
         saveGames()
       }
+      // V2: Xbox-/Microsoft-Store-Titel blieben ohne Symbol - deren Icon steckt nicht in
+      // der Exe, sondern liegt als Paketlogo (PNG) im Spielordner. Das kann die Shell seit
+      // 3.2.3; bestehende Eintraege haetten es aber nie erneut geholt, weil iconUpgradedV1
+      // schon gesetzt war. Darum ein zweiter Durchlauf - NUR fuer Eintraege ohne Icon,
+      // damit ein selbst gesetztes Bild (Kontextmenue: Icon aendern...) erhalten bleibt.
+      if (!g.iconUpgradedV2 && !g.icon) {
+        g.iconUpgradedV2 = true
+        const raw2 = await ipcRenderer.invoke('get-file-icon', g.path)
+        if (raw2) { if (!g.id) g.id = newId(); g.icon = await persistMedia(g.id, 'icon', raw2) }
+        saveGames()
+      }
       if (!g.coverTriedV3) await fetchAndStoreCover(i)
       if (!g.hero && !g.heroTriedV2) await fetchAndStoreHero(i)
       if (!g.infoTriedV2) {
@@ -2662,7 +2673,7 @@ function applyI18n() {
       updateCoverHero(g)
       refreshLaunchBtn()   // Fremdstart-Status (external-running) gilt pro Spiel
       applyLibView()
-      if (!g.iconUpgradedV1 || !g.coverTriedV3 || (!g.hero && !g.heroTriedV2) || !g.infoTriedV2) enrichArtwork(i)
+      if (!g.iconUpgradedV1 || (!g.iconUpgradedV2 && !g.icon) || !g.coverTriedV3 || (!g.hero && !g.heroTriedV2) || !g.infoTriedV2) enrichArtwork(i)
     }
 
     async function deleteGame() {

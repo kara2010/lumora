@@ -4565,7 +4565,42 @@ static json handleChannel(const std::string& channel, const json& args) {
                 }
             }
         }
-        // 2) Exe-/Datei-Icon
+        // 2) Xbox-/Microsoft-Store-Titel: das Icon steckt NICHT in der Exe, sondern liegt
+        // als PNG im Spielordner (MSIX/UWP-Paketlogos). SHGetFileInfo liefert dort nur das
+        // generische Windows-Symbol - deshalb blieben diese Titel ohne Bild. Massgeblich
+        // ist appxmanifest.xml (Square150x150Logo/Square44x44Logo); die Standardnamen
+        // dienen als Rueckfall, falls ein Titel abweichend benennt.
+        // Groessere Variante bevorzugt: das 44px-SmallLogo sieht in der Liste matschig aus.
+        {
+            size_t sl = p.find_last_of(L'\\');
+            std::wstring dir = sl == std::wstring::npos ? L"" : p.substr(0, sl);
+            auto tryPng = [](const std::wstring& f) -> std::string {
+                if (f.empty() || GetFileAttributesW(f.c_str()) == INVALID_FILE_ATTRIBUTES) return "";
+                std::string png = readFile(f);
+                if (png.size() < 8) return "";
+                return "data:image/png;base64," + b64encode((const uint8_t*)png.data(), png.size());
+            };
+            if (!dir.empty() && GetFileAttributesW((dir + L"\\appxmanifest.xml").c_str()) != INVALID_FILE_ATTRIBUTES) {
+                std::vector<std::wstring> kandidaten;
+                std::string mf = readFile(dir + L"\\appxmanifest.xml");
+                for (const char* attr : { "Square150x150Logo", "Square44x44Logo", "Logo" }) {
+                    std::smatch m;
+                    if (std::regex_search(mf, m, std::regex(std::string(attr) + "=\"([^\"]+)\"")))
+                        kandidaten.push_back(widen(m[1].str()));
+                }
+                // Standardnamen als Rueckfall, groesser zuerst
+                for (const wchar_t* n : { L"SmallLogo.targetsize-96_altform-unplated.png",
+                                          L"Logo.png", L"MediumLogo.png", L"StoreLogo.png", L"SmallLogo.png" })
+                    kandidaten.push_back(n);
+                for (auto& k : kandidaten) {
+                    std::wstring f = k;
+                    for (auto& c : f) if (c == L'/') c = L'\\';   // Manifest darf Unterordner angeben
+                    std::string url = tryPng(dir + L"\\" + f);
+                    if (!url.empty()) return url;
+                }
+            }
+        }
+        // 3) Exe-/Datei-Icon
         return fileIconDataUrl(p);
     }
     // ---- Ruckler-Blackbox (Analyse-Reiter + Analyse-OSD) ----
@@ -5250,6 +5285,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Selbsttest der HDR-Abfrage (Gegenstueck zum neuen Titelleisten-Schalter): meldet, ob
     // ein HDR-faehiges Display erkannt wird und ob HDR gerade an ist - ohne die Oberflaeche.
     // Dauerhaft nuetzlich, weil sich HDR-Zustaende sonst nur visuell pruefen lassen.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-icon") == 0 && i + 1 < argc) {
+        // Icon-Aufloesung fuer einen konkreten Spielpfad pruefen (Xbox/Steam/Exe).
+        // Aufruf: lumora-shell.exe --test-icon "C:\XboxGames\...\spiel.exe"
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        json r = handleChannel("get-file-icon", json::array({ narrow(argv[i + 1]) }));
+        std::string url = r.is_string() ? r.get<std::string>() : "";
+        std::string art = url.rfind("data:image/png", 0) == 0 ? "PNG (Paketlogo)"
+                        : url.rfind("data:image/jpeg", 0) == 0 ? "JPEG (Steam-Store)"
+                        : url.empty() ? "KEINS" : "Exe-Icon";
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt",
+            "pfad=" + narrow(argv[i + 1]) + "\nquelle=" + art +
+            "\nbytes(base64)=" + std::to_string(url.size()) + "\n");
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-datadir") == 0) {
         // Belegt, dass Lumora seinen Datenordner selbst anlegt. Ohne das schlug seit dem
         // nativen Umbau JEDER Schrieb fehl, sobald %APPDATA%\lumora nicht schon von der
