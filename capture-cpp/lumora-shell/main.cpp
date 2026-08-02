@@ -110,7 +110,24 @@ static std::string readFile(const std::wstring& p) {
 }
 static void bcLogStream(const std::string& msg);       // Definition beim Streaming-Modul
 static std::string narrow(const std::wstring& w);      // Definition weiter unten
+// Zielordner sicherstellen. GRUNDFEHLER seit dem nativen Umbau: dataDir() liefert nur
+// einen Pfad - ANGELEGT hat %APPDATA%\lumora niemand. Die Electron-Version tat das
+// automatisch, die native Version verliess sich stillschweigend darauf, dass er schon
+// da ist. Auf jedem Rechner OHNE Electron-Vorgeschichte (oder nachdem der Ordner
+// entfernt wurde) schlug damit JEDER Schrieb mit ERROR_PATH_NOT_FOUND fehl:
+// Einstellungen wurden nicht gespeichert, games.json blieb leer -> Spielsuche bei
+// jedem Start. Genau die Symptome des gemeldeten Anwender-Falls.
+// Hier zentral statt an ~30 Aufrufstellen: writeFile ist der einzige Schreibweg.
+static void ensureParentDir(const std::wstring& p) {
+    size_t sl = p.find_last_of(L'\\');
+    if (sl == std::wstring::npos) return;
+    std::wstring dir = p.substr(0, sl);
+    DWORD a = GetFileAttributesW(dir.c_str());
+    if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) return;   // schon da (Normalfall, ein Syscall)
+    SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);   // legt auch Zwischenebenen an
+}
 static bool writeFile(const std::wstring& p, const std::string& data) {
+    ensureParentDir(p);
     // ATOMAR: erst nach <ziel>.neu schreiben, dann per MoveFileEx ueber das Original
     // schieben. Vorher ging trunc+write DIREKT ins Ziel - die Datei wurde also zuerst
     // GELEERT und dann gefuellt: ein Absturz oder ein vom Virenscanner blockierter
@@ -5267,6 +5284,29 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Selbsttest der HDR-Abfrage (Gegenstueck zum neuen Titelleisten-Schalter): meldet, ob
     // ein HDR-faehiges Display erkannt wird und ob HDR gerade an ist - ohne die Oberflaeche.
     // Dauerhaft nuetzlich, weil sich HDR-Zustaende sonst nur visuell pruefen lassen.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-datadir") == 0) {
+        // Belegt, dass Lumora seinen Datenordner selbst anlegt. Ohne das schlug seit dem
+        // nativen Umbau JEDER Schrieb fehl, sobald %APPDATA%\lumora nicht schon von der
+        // Electron-Version existierte (Anwender-Befund: Einstellungen weg, Spielsuche
+        // bei jedem Start). Der Test loescht NICHTS - er schreibt nur eine Probe.
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::wstring d = dataDir();
+        auto exists = [](const std::wstring& p) {
+            DWORD a = GetFileAttributesW(p.c_str());
+            return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+        };
+        std::string res = "dataDir=" + narrow(d) + "\n";
+        res += "vorher vorhanden : " + std::string(exists(d) ? "ja" : "NEIN") + "\n";
+        bool ok = writeFile(d + L"\\datadir-probe.tmp", "probe");
+        bool rb = ok && readFile(d + L"\\datadir-probe.tmp") == "probe";
+        DeleteFileW((d + L"\\datadir-probe.tmp").c_str());
+        res += "schreiben        : " + std::string(ok ? "ok" : "FEHLER") + "\n";
+        res += "ruecklesen       : " + std::string(rb ? "ok" : "FEHLER") + "\n";
+        res += "danach vorhanden : " + std::string(exists(d) ? "ja" : "NEIN") + "\n";
+        res += "media-Unterordner: " + std::string(exists(d + L"\\media") ? "ja" : "nein (erst beim ersten Cover)") + "\n";
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-analyze") == 0) {
         // Unelevated Analyzer-Check: selfCheck (Spike+Taeter mit synthetischen Daten) +
         // live() (Ring-basierte Livewerte - muss ohne die Report-Vektoren auskommen).
@@ -5339,6 +5379,42 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     }
     if (g_appDir.empty() || !hasIndex(g_appDir)) {
         MessageBoxW(nullptr, L"index.html nicht gefunden.\nMit --appdir <Ordner> starten.", L"Lumora Shell", MB_ICONERROR); return 1;
+    }
+    // Datenordner JETZT anlegen, nicht erst beim ersten Schrieb: die WebView2-
+    // Ordnerzuordnung (data.lumora -> dataDir) und das erste Lesen von games.json/
+    // prefs.json passieren frueher. Fehlt der Ordner dort, startet die UI mit leerer
+    // Bibliothek und wirft den Spielsuche-Dialog hoch - selbst wenn spaeter alles
+    // korrekt gespeichert wuerde. media\ gleich mit (Cover/Hero landen dort).
+    SHCreateDirectoryExW(nullptr, dataDir().c_str(), nullptr);
+    SHCreateDirectoryExW(nullptr, (dataDir() + L"\\media").c_str(), nullptr);
+    // Altdaten aus der Zeit VOR dem Rebrand uebernehmen (Ordner "hdr-launcher").
+    // Das tat die Electron-Version (migrateOldUserData in main.js) - beim nativen Umbau
+    // ist es mituebersehen worden. Betroffen ist, wer von einer Vor-Rebrand-Version
+    // direkt auf die native springt: dessen Bibliothek waere sonst leer.
+    // Nur EINMAL: sobald games.json existiert, passiert hier nichts mehr.
+    {
+        std::wstring cur = dataDir();
+        wchar_t appdata[MAX_PATH] = {}; GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
+        std::wstring alt = std::wstring(appdata) + L"\\hdr-launcher";
+        bool haveGames = GetFileAttributesW((cur + L"\\games.json").c_str()) != INVALID_FILE_ATTRIBUTES;
+        bool haveAlt = GetFileAttributesW(alt.c_str()) != INVALID_FILE_ATTRIBUTES;
+        if (!haveGames && haveAlt && alt != cur) {
+            for (const wchar_t* f : { L"games.json", L"prefs.json", L"app-settings.json", L"window-state.json" })
+                CopyFileW((alt + L"\\" + f).c_str(), (cur + L"\\" + f).c_str(), TRUE);   // TRUE = nichts ueberschreiben
+            std::wstring am = alt + L"\\media";
+            if (GetFileAttributesW(am.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                WIN32_FIND_DATAW fd{};
+                HANDLE h = FindFirstFileW((am + L"\\*").c_str(), &fd);
+                if (h != INVALID_HANDLE_VALUE) {
+                    do {
+                        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                        CopyFileW((am + L"\\" + fd.cFileName).c_str(), (cur + L"\\media\\" + fd.cFileName).c_str(), TRUE);
+                    } while (FindNextFileW(h, &fd));
+                    FindClose(h);
+                }
+            }
+            bcLogStream("Altdaten aus hdr-launcher uebernommen");
+        }
     }
 
     WNDCLASSW wc{}; wc.lpfnWndProc = wndProc; wc.hInstance = hInst; wc.lpszClassName = L"LumoraShell";
