@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "3.2.0",
+        "softwareVersion": "3.2.1",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1041,8 +1041,16 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.2.0</span>
+          <span class="release-ver">3.2.1</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>Launched games reliably come to the front</strong>: If you had brought Lumora to the foreground from another application via hotkey and then started a game, the game could end up sitting behind Lumora – you had to alt-tab to it. This comes down to a Windows safeguard: only the application that currently holds the foreground may hand it over. When a game is launched through Steam or a shortcut, that application is not Lumora. Lumora now passes the right along before launching and additionally brings the game window to the front itself once it appears. If you deliberately switched to something else in the meantime, that is left alone.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.2.0</span>
         </div>
         <ul>
           <li><strong>Toggle HDR straight from the title bar</strong>: The HDR indicator in the top right is now a button – one click turns HDR on or off for your display, without the detour through Windows settings. Automatic switching when a game starts is unaffected.</li>
@@ -1084,6 +1092,7 @@
           <li><strong>Settings stay put</strong>: content could shift sideways after bringing the window to the foreground via hotkey, hiding the tab bar – fixed.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.0.5</span>
@@ -1097,7 +1106,6 @@
           <li><strong>More reliable on older Intel graphics</strong>: live bitrate changes while streaming now also apply on generations like the HD 630; "Check for updates" also works reliably again.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.0.4</span>
@@ -1399,7 +1407,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (27)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (28)</button>
   </div>
 </section>
 
@@ -1800,7 +1808,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Show less' : 'Show older versions (27)';
+    btn.textContent = open ? 'Show less' : 'Show older versions (28)';
   }
 
   function toggleFeatures() {
