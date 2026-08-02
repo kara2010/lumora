@@ -36,13 +36,13 @@
   <meta property="og:site_name"   content="Lumora">
   <meta property="og:url"         content="https://lumora-streaming.de/">
   <meta property="og:title"       content="Lumora – nativer Spiele-Launcher mit Streaming, Auto-HDR und Eingabe-Brücke">
-  <meta property="og:description" content="Nativer Windows-Launcher, der Steam, Epic, GOG, Xbox & Co. in einer Cover-Bibliothek vereint, komplett per Gamepad bedienbar. Mit Game-Streaming per Link (1080p60, bis 4K), automatischem HDR pro Spiel, Eingabe-Brücke (Joystick/Lenkrad als Xbox-Controller) und FPS-/GPU-/CPU-Anzeige ohne Afterburner. Kostenlos, Open Source, 3,74 MB, für Windows 10 / 11.">
+  <meta property="og:description" content="Nativer Windows-Launcher, der Steam, Epic, GOG, Xbox & Co. in einer Cover-Bibliothek vereint, komplett per Gamepad bedienbar. Mit Game-Streaming per Link (1080p60, bis 4K), automatischem HDR pro Spiel, Eingabe-Brücke (Joystick/Lenkrad als Xbox-Controller) und FPS-/GPU-/CPU-Anzeige ohne Afterburner. Kostenlos, Open Source, 3,72 MB, für Windows 10 / 11.">
   <meta property="og:locale"      content="de_DE">
 
   <!-- Twitter Card -->
   <meta name="twitter:card"        content="summary_large_image">
   <meta name="twitter:title"       content="Lumora – nativer Spiele-Launcher mit Streaming, Auto-HDR und Eingabe-Brücke">
-  <meta name="twitter:description" content="Nativer Windows-Launcher, der Steam, Epic, GOG, Xbox & Co. in einer Cover-Bibliothek vereint, komplett per Gamepad bedienbar. Mit Game-Streaming per Link (1080p60, bis 4K), automatischem HDR pro Spiel, Eingabe-Brücke (Joystick/Lenkrad als Xbox-Controller) und FPS-/GPU-/CPU-Anzeige ohne Afterburner. Kostenlos, Open Source, 3,74 MB, für Windows 10 / 11.">
+  <meta name="twitter:description" content="Nativer Windows-Launcher, der Steam, Epic, GOG, Xbox & Co. in einer Cover-Bibliothek vereint, komplett per Gamepad bedienbar. Mit Game-Streaming per Link (1080p60, bis 4K), automatischem HDR pro Spiel, Eingabe-Brücke (Joystick/Lenkrad als Xbox-Controller) und FPS-/GPU-/CPU-Anzeige ohne Afterburner. Kostenlos, Open Source, 3,72 MB, für Windows 10 / 11.">
   <meta name="twitter:image"       content="https://lumora-streaming.de/screenshot.png">
 
   <!-- og:image -->
@@ -75,7 +75,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/#app",
         "name": "Lumora",
-        "softwareVersion": "3.1.2",
+        "softwareVersion": "3.2.0",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -757,7 +757,7 @@
 <section class="hero">
   <div class="hero-badge">⬡ Kostenlos · Windows 10 / 11</div>
   <h1>Ein nativer Launcher für all deine Spiele.<br><em>Mit Game-Streaming, automatischem HDR und Eingabe-Brücke.</em></h1>
-  <p>Lumora vereint Steam, Epic, GOG, Xbox &amp; mehr in einer Cover-Bibliothek — am Schreibtisch mit der Maus, auf dem Sofa per Gamepad. Dazu ein Spiel per Link streamen, HDR automatisch pro Spiel, Joystick, Lenkrad oder Flightstick als virtuellen Xbox-Controller und ein FPS-/Hardware-OSD <strong>ohne Afterburner &amp; Co.</strong> Nativer C++-Code, 3,74 MB, Open Source.</p>
+  <p>Lumora vereint Steam, Epic, GOG, Xbox &amp; mehr in einer Cover-Bibliothek — am Schreibtisch mit der Maus, auf dem Sofa per Gamepad. Dazu ein Spiel per Link streamen, HDR automatisch pro Spiel, Joystick, Lenkrad oder Flightstick als virtuellen Xbox-Controller und ein FPS-/Hardware-OSD <strong>ohne Afterburner &amp; Co.</strong> Nativer C++-Code, 3,72 MB, Open Source.</p>
   <div class="hero-pills">
     <span class="hero-pill">🗂 Alle Stores in einer Bibliothek</span>
     <span class="hero-pill">📡 Streaming per Link (bis 4K)</span>
@@ -767,7 +767,7 @@
   </div>
   <div class="hero-actions">
     <button class="btn-dl" onclick="startDownload()">
-      ⬇ Download &nbsp;·&nbsp; 3,74 MB
+      ⬇ Download &nbsp;·&nbsp; 3,72 MB
     </button>
     <a class="btn-ghost" href="#features">
       Alle Funktionen im Überblick
@@ -1054,8 +1054,21 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.1.2</span>
+          <span class="release-ver">3.2.0</span>
           <span class="release-tag">aktuell</span>
+        </div>
+        <ul>
+          <li><strong>HDR direkt aus der Titelleiste schalten</strong>: Die HDR-Anzeige oben rechts ist jetzt ein Knopf – ein Klick schaltet HDR für den Bildschirm an oder aus, ohne den Umweg über die Windows-Einstellungen. Die automatische Umschaltung beim Spielstart bleibt davon unberührt.</li>
+          <li><strong>Spielzeit selbst zurücksetzen</strong>: Im Spielzeit-Rückblick lässt sich die erfasste Zeit jetzt zurücksetzen – für ein einzelnes Spiel oder für die ganze Bibliothek. Vor dem Löschen wird nachgefragt und dabei genannt, wie viel Zeit verloren geht.</li>
+          <li><strong>Ruckler-Vergleich jetzt auch per Gamepad</strong>: Die Auswahl zweier Messläufe für den Vergleich ließ sich bisher nur mit der Maus setzen – jetzt erreichst du sie auch mit dem Controller. Die Ruckler-Analyse ist damit vollständig vom Sofa aus bedienbar.</li>
+          <li><strong>Deutlich robuster auf strenger abgesicherten Systemen</strong>: Eine große Überarbeitung der Grundlagen. Einstellungen und Bibliothek werden jetzt so gespeichert, dass ein abgebrochener Schreibvorgang die vorhandenen Daten nicht mehr beschädigen kann. Hintergrund-Prüfungen können nicht mehr endlos hängen bleiben – auf Rechnern mit strengem Virenscanner konnte das dazu führen, dass der Einrichtungshelfer fürs Overlay ausblieb und die Oberfläche träge wurde.</li>
+          <li><strong>Streaming und Eingabe-Brücke stabiler</strong>: Ein einzelner abgebrochener Zuschauer kann die Verbindung der übrigen nicht mehr blockieren. Ein abgestecktes Lenkrad oder Gamepad lässt die Eingabe-Brücke nicht mehr auf dem letzten Wert stehen. Und endet Lumora unerwartet, werden die Streaming-Hilfsprozesse zuverlässig mit beendet, statt im Hintergrund weiterzulaufen.</li>
+          <li>Ruckler-Berichte halten jetzt fest, ob während der Messung Systemereignisse verworfen werden mussten – so ist auf einen Blick erkennbar, wie belastbar das Ergebnis ist.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.1.2</span>
         </div>
         <ul>
           <li><strong>Maximiertes Fenster kommt zuverlässig maximiert zurück</strong> – jetzt auch dann, wenn Lumora minimiert mit Windows startet. In diesem Fall zeigt Lumora zunächst nur das Symbol im Infobereich; öffnest du das Fenster später darüber oder per Hotkey, erscheint es wieder in der zuletzt genutzten Ansicht. Verkleinerst du es bewusst, bleibt das erhalten.</li>
@@ -1097,6 +1110,7 @@
           <li><strong>Zuverlässiger auf älteren Intel-Grafiken</strong>: Live-Bitraten-Wechsel beim Streamen greifen jetzt auch auf Generationen wie der HD 630; außerdem funktioniert „Nach Updates suchen" wieder zuverlässig.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.0.4</span>
@@ -1106,7 +1120,6 @@
           <li><strong>Testfreundlicher</strong>: Wird eine ältere Version über eine neuere installiert, erkennt Lumora das und bietet wieder korrekt Updates an.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.0.3</span>
@@ -1399,7 +1412,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (26)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (27)</button>
   </div>
 </section>
 
@@ -1816,7 +1829,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (26)';
+    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (27)';
   }
 
   function toggleFeatures() {
