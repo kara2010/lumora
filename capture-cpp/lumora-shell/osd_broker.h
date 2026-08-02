@@ -98,7 +98,10 @@ inline int runAnalyzeBroker() {
     }
 
     // --- Analyzer + Quellen ---
-    luana::StutterAnalyzer ana;
+    // HEAP statt Stapel: die festen Ringe machen den Analyzer ~650KB gross - auf dem
+    // 1-MB-Standardstapel blieb weniger Luft als noetig (s. selfCheck-Befund 0xC00000FD).
+    auto anaPtr = std::make_unique<luana::StutterAnalyzer>();
+    luana::StutterAnalyzer& ana = *anaPtr;
     std::atomic<uint32_t> spikeCount{ 0 }, lastFindingId{ 0 };
     FILE* jsonl = nullptr;
     _wfopen_s(&jsonl, (curDir + L"\\findings.jsonl").c_str(), L"ab");
@@ -227,12 +230,14 @@ inline int runAnalyzeBroker() {
         // Empfindlichkeit live aus dem App-Wunsch uebernehmen (UI-Regler wirkt sofort)
         { static int lastSense = -1; int sense = (mem[19] >> 4) & 3;
           if (sense != lastSense) { lastSense = sense; ana.setSensitivity(sense); } }
-        // SHM-Status
-        auto st = ana.stats();
+        // SHM-Status. live() statt stats(): stats() kopiert die WACHSENDEN Report-Vektoren,
+        // waehrend der Present-Thread per push_back realloziert - Use-after-free, exakt die
+        // Klasse des behobenen recentFt-Absturzes (c2758b6). live() liest nur den festen Ring.
+        auto lv = ana.live();
         mem[1] = now;
         mem[2] = 1;
         mem[3] = spikeCount.load(); mem[4] = lastFindingId.load();
-        mem[5] = (uint32_t)(st.medianFtMs * 100); mem[6] = (uint32_t)(st.avgFps * 10);
+        mem[5] = (uint32_t)(lv.medianFtMs * 100); mem[6] = (uint32_t)(lv.avgFps * 10);
         mem[10] = presentOnly ? 1 : 0; mem[11] = ana.targetPid(); mem[12] = (now - startTick) / 1000;
         {   // Live-Frametimes fuers Analyse-OSD (echter Schrieb statt 1-Hz-Median):
             // mem[20] = Frame-Zaehler, mem[21..60] = letzte 40 Frametimes x100 (aeltester zuerst)
@@ -319,14 +324,32 @@ inline int runAnalyzeBroker() {
         rep += ",\"samples\":" + std::to_string(total) + ",\"top\":\"" + top + "\"";
         rep += ",\"topPct\":" + std::to_string(total ? topN * 100 / total : 0);
     }
-    rep += "}}";
+    rep += "}";
+    // ETW-Verluste als Ehrlichkeits-Kennzahl in den Bericht: verworfene Events/Puffer
+    // weichen jede Aussage auf - ein Bericht ohne diese Zahl saehe immer "sauber" aus.
+    rep += ",\"eventsLost\":" + std::to_string(kernelOk ? kt.eventsLost() : 0)
+         + ",\"buffersLost\":" + std::to_string(kernelOk ? kt.buffersLost() : 0);
+    rep += "}";
+    // Bericht ATOMAR schreiben (erst .neu, dann drueberschieben) und die Rohdaten NUR
+    // bei Erfolg loeschen. Vorher: direktes wb + bedingungsloses DeleteFile - schlug der
+    // Schreibvorgang fehl (Platte voll, Virenscanner), waren Bericht UND findings.jsonl
+    // (die Blackbox!) zugleich verloren. Gleiche Fehlerklasse wie writeFile in main.cpp.
+    bool repOk = false;
     {
         std::wstring repPath = dir + L"\\report-" + std::wstring(ts, ts + strlen(ts)) + L".json";
-        FILE* f = nullptr; _wfopen_s(&f, repPath.c_str(), L"wb");
-        if (f) { fwrite(rep.data(), 1, rep.size(), f); fclose(f); }
+        std::wstring tmpPath = repPath + L".neu";
+        FILE* f = nullptr; _wfopen_s(&f, tmpPath.c_str(), L"wb");
+        if (f) {
+            repOk = fwrite(rep.data(), 1, rep.size(), f) == rep.size();
+            fclose(f);
+            if (repOk) repOk = MoveFileExW(tmpPath.c_str(), repPath.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+            if (!repOk) DeleteFileW(tmpPath.c_str());
+        }
     }
-    DeleteFileW((curDir + L"\\findings.jsonl").c_str());
-    DeleteFileW((curDir + L"\\context.json").c_str());
+    if (repOk) {
+        DeleteFileW((curDir + L"\\findings.jsonl").c_str());
+        DeleteFileW((curDir + L"\\context.json").c_str());
+    } else mem[9] = 210;   // Bericht nicht geschrieben - findings.jsonl bleibt als Blackbox liegen
     mem[2] = 0; mem[1] = GetTickCount();
     UnmapViewOfFile(mem); CloseHandle(shm);
     return 0;

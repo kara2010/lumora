@@ -155,6 +155,14 @@ public:
 
     void stop() {
         if (session_) {
+            // Verlust-Zaehler VOR dem Stop abfragen: verworfene Events/Puffer machen jede
+            // Berichts-Aussage weicher - ohne die Zahl saehe ein uebergelaufener Trace
+            // "sauber" aus (Overhead wuerde sich durch Datenverlust selbst wegmessen).
+            std::vector<char> qb(propsBuf_);
+            auto* q = (EVENT_TRACE_PROPERTIES*)qb.data();
+            if (ControlTraceW(session_, nullptr, q, EVENT_TRACE_CONTROL_QUERY) == ERROR_SUCCESS) {
+                eventsLost_ = q->EventsLost; buffersLost_ = q->RealTimeBuffersLost;
+            }
             auto* p = (EVENT_TRACE_PROPERTIES*)propsBuf_.data();
             ControlTraceW(session_, nullptr, p, EVENT_TRACE_CONTROL_STOP);
             session_ = 0;
@@ -162,6 +170,8 @@ public:
         if (consumer_ != INVALID_PROCESSTRACE_HANDLE) { CloseTrace(consumer_); consumer_ = INVALID_PROCESSTRACE_HANDLE; }
         if (thread_.joinable()) thread_.join();
     }
+    uint32_t eventsLost() const { return eventsLost_; }     // nach stop() gueltig
+    uint32_t buffersLost() const { return buffersLost_; }
     ~KernelTrace() { stop(); }
 
     // CSwitch-Flut-Notbremse (Selbst-CPU-Watchdog im Broker): nur den teuersten Flag abschalten,
@@ -318,6 +328,7 @@ private:
     TRACEHANDLE session_ = 0;
     TRACEHANDLE consumer_ = INVALID_PROCESSTRACE_HANDLE;
     std::vector<char> propsBuf_;
+    uint32_t eventsLost_ = 0, buffersLost_ = 0;   // ETW-Verluste (stop() fuellt sie)
     std::thread thread_;
     int64_t qpf_ = 1, t0_ = 0;
     int64_t epochOff_ = INT64_MAX, winMin_ = INT64_MAX, winStart_ = 0;   // Epochen-Sockel der DPC/ISR-Dauern

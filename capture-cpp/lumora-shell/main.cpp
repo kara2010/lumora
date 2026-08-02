@@ -2769,6 +2769,8 @@ static bool g_anMeasuring = false;
 static bool g_anStopping = false;
 static uint64_t g_anTailOff = 0;
 static uint32_t g_anLastFindingPushed = 0;
+static bool g_anSeenAlive = false;      // Broker hat in DIESER Messung schon einmal gelebt
+static uint32_t g_anStartTick = 0;      // Messstart (fuer die Nie-Gestartet-Grenze)
 static std::atomic<bool> g_anSetupRunning{ false };
 static std::atomic<int> g_anReady{ -1 };   // -1 unbekannt (Check laeuft), 0 nicht eingerichtet, 1 bereit
 static std::atomic<int> g_anSense{ 1 };    // Empfindlichkeit 0/1/2 (Cache des Settings analyzeSense)
@@ -2897,6 +2899,7 @@ static void analyzeStartMeasurement() {
     g_anSense = loadSettings().value("analyzeSense", 1);   // Empfindlichkeits-Regler -> SHM-Bits
     anShmWriteApp(1, 0, 0);
     g_anMeasuring = true; g_anStopping = false;
+    g_anSeenAlive = false; g_anStartTick = GetTickCount();   // Totmann erst scharf, wenn der Broker einmal lebte
     showAnalyzeOsd(true);   // eigenes Analyse-Overlay einblenden (nur waehrend der Messung)
     applyAnalyzeOsdConfig();   // Groesse/Deckkraft/Ecke aus den Settings anwenden
     SetTimer(g_hwnd, TIMER_ANALYZE, 100, nullptr);   // 100ms = Takt des Broker-SHM-Schriebs; 200ms liess jeden 2. Schrieb aus -> ruckelige Kurve
@@ -2987,12 +2990,18 @@ static void analyzeTick() {   // TIMER_ANALYZE (100 ms): Heartbeat, Tail, Status
     uint32_t m[64] = {};
     if (anShmRead(m)) {
         bool brokerAlive = m[1] && (uint32_t)(GetTickCount() - m[1]) < 3000;
+        if (brokerAlive) g_anSeenAlive = true;
         if (g_anStopping && (!brokerAlive || m[2] == 0)) { analyzeFinish(); return; }
         // Broker regulaer fertig (state 0) ODER tot (Heartbeat weg - egal welcher state:
         // frueher verlangte der Totmann state==0 und ein abgestuerzter Broker mit state 1
         // liess die Messung ewig "laufen"): nach 10s Karenz ehrlich beenden.
+        // WICHTIG: Der Totmann ist erst SCHARF, wenn der Broker einmal gelebt hat - beim
+        // Start ist m[1] der stale Tick der VORIGEN Sitzung (das SHM lebt, solange die
+        // Shell ihr Handle haelt), und auf langsamen Maschinen (i7-Anwender-Klasse) kann
+        // der Aufgabenstart laenger als 10s brauchen. Vorher haette das die Messung sofort
+        // als "Absturz?" beendet. Fuer den Nie-Gestartet-Fall gibt es eine eigene 30s-Grenze.
         static uint32_t deadSince = 0;
-        if (!g_anStopping && !brokerAlive) {
+        if (!g_anStopping && g_anSeenAlive && !brokerAlive) {
             if (!deadSince) deadSince = now;
             if (now - deadSince > 10000) {
                 deadSince = 0; g_anStopping = true;
@@ -3000,6 +3009,11 @@ static void analyzeTick() {   // TIMER_ANALYZE (100 ms): Heartbeat, Tail, Status
                 analyzeFinish();
             }
         } else deadSince = 0;
+        if (!g_anStopping && !g_anSeenAlive && (uint32_t)(now - g_anStartTick) > 30000) {
+            bcLogStream("analyze: Broker kam nicht hoch (30s) - Messung beendet (Aufgabe eingerichtet? schtasks langsam?)");
+            g_anStopping = true;
+            analyzeFinish();
+        }
     }
 }
 
@@ -5151,6 +5165,27 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Selbsttest der HDR-Abfrage (Gegenstueck zum neuen Titelleisten-Schalter): meldet, ob
     // ein HDR-faehiges Display erkannt wird und ob HDR gerade an ist - ohne die Oberflaeche.
     // Dauerhaft nuetzlich, weil sich HDR-Zustaende sonst nur visuell pruefen lassen.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-analyze") == 0) {
+        // Unelevated Analyzer-Check: selfCheck (Spike+Taeter mit synthetischen Daten) +
+        // live() (Ring-basierte Livewerte - muss ohne die Report-Vektoren auskommen).
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string msg; bool ok = luana::StutterAnalyzer::selfCheck(msg);
+        std::string res = std::string("selfCheck: ") + (ok ? "ok" : "FEHLER") + " (" + msg + ")\n";
+        {   // live(): 300 synthetische 60-fps-Frames -> Median ~16.7ms, ~60 fps.
+            // HEAP statt Stapel: der Analyzer traegt ~650KB feste Ringe - zusammen mit der
+            // selfCheck-Instanz oben sprengen zwei Exemplare den 1-MB-Standardstapel
+            // (real passiert: 0xC00000FD beim ersten Lauf dieses Tests).
+            auto ap = std::make_unique<luana::StutterAnalyzer>();
+            auto& a = *ap;
+            for (int i2 = 0; i2 < 300; ++i2) a.pushFrame(42, 1.0 + i2 * (1.0 / 60.0));
+            auto lv = a.live();
+            bool lvOk = lv.medianFtMs > 16.0 && lv.medianFtMs < 17.5 && lv.avgFps > 58 && lv.avgFps < 62;
+            char b[96]; sprintf_s(b, "live: median=%.2fms fps=%.1f %s\n", lv.medianFtMs, lv.avgFps, lvOk ? "ok" : "FEHLER");
+            res += b;
+        }
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-runcapture") == 0) {
         // Belegt den ECHTEN Timeout von runCaptureOutput: ein Kind, das 60s schweigt,
         // muss nach ~3s beendet zurueckkommen (vorher blockierte ReadFile unbegrenzt).

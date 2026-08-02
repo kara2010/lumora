@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -172,8 +173,11 @@ public:
             && ft > (std::max)(cfg_.spikeK * med, med + cfg_.spikeAbsMs)) {
             if (t - lastSpikeT_ >= cfg_.debounceS) {
                 lastSpikeT_ = t;
-                pendingSpike_.store(1 + (uint32_t)(t * 1000), std::memory_order_release);
+                // ERST die Nutzdaten, DANN das Release-Signal: andersherum konnte der
+                // Worker (wenn noch ein Wake anstand) zwischen Signal und Nutzdaten
+                // zugreifen und den Spike mit den Werten des VORIGEN analysieren.
                 pendingFt_ = ft; pendingMed_ = med; pendingT_ = t;
+                pendingSpike_.store(1 + (uint32_t)(t * 1000), std::memory_order_release);
                 wake();
             }
         }
@@ -194,7 +198,32 @@ public:
         if (t - bucketT0_ >= 0.05) closeBucket(t);
     }
 
-    // ---- Report-Daten (nach stop() vom Broker gelesen) ----------------------------
+    // Live-Werte fuer den 100ms-SHM-Schrieb der Broker-Schleife: AUSSCHLIESSLICH aus dem
+    // festen frames_-Ring (tolerierter Race, s. Klassenkommentar). stats() unten liest die
+    // WACHSENDEN Report-Vektoren und ist waehrend der Messung tabu - push_back-Reallokation
+    // im Present-Thread + Kopie im Fremd-Thread = Use-after-free, exakt die Klasse des
+    // behobenen recentFt-Absturzes (Broker-Crash nach ~5 Minuten, c2758b6).
+    struct Live { double medianFtMs = 0, avgFps = 0; };
+    Live live() const {
+        Live l;
+        uint32_t end = frames_.idx.load(std::memory_order_acquire);
+        uint32_t n = end < 256 ? end : 256;
+        if (n < 4) return l;
+        float tmp[256]; double newest = 0, oldest = 0;
+        for (uint32_t i = 0; i < n; ++i) {
+            const FrameSample& e = frames_.buf[(end - 1 - i) % 4096];
+            tmp[i] = e.ftMs;
+            if (i == 0) newest = e.t;
+            oldest = e.t;
+        }
+        std::nth_element(tmp, tmp + n / 2, tmp + n);
+        l.medianFtMs = tmp[n / 2];
+        double span = newest - oldest;
+        l.avgFps = span > 0 ? (double)(n - 1) / span : 0;
+        return l;
+    }
+
+    // ---- Report-Daten (NUR nach stop() vom Broker lesen - waehrend der Messung live()!) ----
     struct Stats { double avgFps = 0, p1LowFps = 0, medianFtMs = 0, p99FtMs = 0; uint64_t frames = 0; };
     Stats stats() const {
         Stats s; s.frames = frameCount_;
@@ -502,7 +531,11 @@ inline std::string findingJson(const Finding& f) {
 
 // ---- Selbstcheck: synthetischer Ruckler mit klarem Taeter -------------------------
 inline bool StutterAnalyzer::selfCheck(std::string& msg) {
-    StutterAnalyzer a;
+    // HEAP statt Stapel: die festen Ringe machen den Analyzer ~650KB gross - zwei
+    // Instanzen auf demselben Stapel (Aufrufer + diese) sprengen die 1-MB-Grenze
+    // (real passiert: 0xC00000FD im --test-analyze).
+    auto ap = std::make_unique<StutterAnalyzer>();
+    StutterAnalyzer& a = *ap;
     Config c;
     c.targetPid = 100;
     c.pidName = [](uint32_t pid) { return pid == 200 ? std::string("stoerer.exe") : std::string("spiel.exe"); };
