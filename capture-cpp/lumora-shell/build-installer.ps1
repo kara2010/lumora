@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.1.2"   # 3.1.2: Fenster kommt endlich maximiert hoch, wenn es maximiert beendet wurde.
+$version = "3.1.3"   # 3.1.3: OSD-Einrichtung haengt nicht mehr (echter PowerShell-Timeout) + Datenordner-Diagnose.
                      #        3.1.1 speicherte den Zustand korrekt, wendete ihn aber im Regelfall
                      #        des Nutzers nie an: bei Autostart mit --minimized ruft wWinMain kein
                      #        ShowWindow auf, und das spaetere Oeffnen per Tray/Hotkey zeigte das
