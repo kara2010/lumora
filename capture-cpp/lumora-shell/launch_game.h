@@ -278,8 +278,6 @@ struct LaunchSession {
     // pro Tick versucht, es nach vorne zu holen - hoechstens einmal erfolgreich.
     bool raised = false;
     ULONGLONG raiseUntil = 0;
-    ULONGLONG foreignSince = 0;   // seit wann ein FREMDES Fenster vorn ist (Splash vs. Nutzerwechsel)
-    uint8_t raiseTries = 0;       // Deckel gegen wiederholtes Nach-vorn-Zwingen (Flackern)
 };
 
 inline bool probeRunning(const LaunchSession& s) {
