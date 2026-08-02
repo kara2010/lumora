@@ -108,9 +108,21 @@ static std::string readFile(const std::wstring& p) {
     std::ifstream f(p, std::ios::binary); if (!f) return "";
     std::ostringstream ss; ss << f.rdbuf(); return ss.str();
 }
+static void bcLogStream(const std::string& msg);       // Definition beim Streaming-Modul
+static std::string narrow(const std::wstring& w);      // Definition weiter unten
 static bool writeFile(const std::wstring& p, const std::string& data) {
-    std::ofstream f(p, std::ios::binary | std::ios::trunc); if (!f) return false;   // binaer = UTF-8 OHNE BOM (BOM = JSON-Datenverlust-Falle!)
-    f.write(data.data(), (std::streamsize)data.size()); return (bool)f;
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);   // binaer = UTF-8 OHNE BOM (BOM = JSON-Datenverlust-Falle!)
+    if (!f) {
+        // Bisher wurde dieser Rueckgabewert von praktisch allen Aufrufern ignoriert - ein
+        // Rechner, auf dem %APPDATA%\lumora nicht beschreibbar ist (i7-Anwender-Fall:
+        // Einstellungen "verschwinden", Spielsuche bei jedem Start), blieb dadurch im Log
+        // komplett unsichtbar. Fehlschlaege jetzt IMMER mit Windows-Fehlercode festhalten.
+        bcLogStream("writeFile FEHLGESCHLAGEN (open) err=" + std::to_string(GetLastError()) + " pfad=" + narrow(p));
+        return false;
+    }
+    f.write(data.data(), (std::streamsize)data.size());
+    if (!f) { bcLogStream("writeFile FEHLGESCHLAGEN (write) err=" + std::to_string(GetLastError()) + " pfad=" + narrow(p)); return false; }
+    return true;
 }
 static std::wstring widen(const std::string& s) {
     if (s.empty()) return L"";
@@ -965,14 +977,31 @@ static std::string runCaptureOutput(const std::wstring& cmdLine, DWORD timeoutMs
     std::wstring mcmd = cmdLine; std::string out;
     if (CreateProcessW(nullptr, &mcmd[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
         CloseHandle(wr); CloseHandle(pi.hThread);
+        // ECHTER Timeout. Vorher: blockierendes ReadFile, die Zeitpruefung stand DAHINTER -
+        // sie lief also erst, wenn schon Daten kamen. Ein Kind, das minutenlang NICHTS
+        // ausgibt (i7-Anwender-Fall: Virenscanner klemmt jeden PowerShell-Start), hielt den
+        // Thread unbegrenzt fest - haengender OSD-Einrichtungshelfer (g_osdSetupRunning
+        // blieb fuer immer gesetzt) und alle 4s neue haengende runTask-Threads. Jetzt:
+        // PeekNamedPipe (blockiert nie) + Prozess-Wait im Wechsel; nach Ablauf wird das
+        // Kind hart beendet und der Aufrufer kommt GARANTIERT zurueck.
         ULONGLONG t0 = GetTickCount64();
-        char buf[8192]; DWORD got = 0;
-        while (ReadFile(rd, buf, sizeof(buf), &got, nullptr) && got) {
-            out.append(buf, got);
-            if (GetTickCount64() - t0 > timeoutMs || out.size() > 16 * 1024 * 1024) break;
+        char buf[8192]; DWORD got = 0, avail = 0;
+        for (;;) {
+            while (PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr) && avail) {
+                if (!ReadFile(rd, buf, sizeof(buf), &got, nullptr) || !got) { avail = 0; break; }
+                out.append(buf, got);
+                if (out.size() > 16 * 1024 * 1024) break;
+            }
+            if (out.size() > 16 * 1024 * 1024) break;
+            if (WaitForSingleObject(pi.hProcess, 50) == WAIT_OBJECT_0) {
+                // Kind fertig: Restausgabe abholen (Pipe kann noch gefuellte Puffer halten)
+                while (PeekNamedPipe(rd, nullptr, 0, nullptr, &avail, nullptr) && avail
+                       && ReadFile(rd, buf, sizeof(buf), &got, nullptr) && got) out.append(buf, got);
+                break;
+            }
+            if (GetTickCount64() - t0 > timeoutMs) break;
         }
-        WaitForSingleObject(pi.hProcess, 2000);
-        TerminateProcess(pi.hProcess, 0);   // haengt er noch (altes --frames-Verhalten), hart beenden
+        TerminateProcess(pi.hProcess, 0);   // laeuft er noch (Timeout/Ausgabelimit), hart beenden
         CloseHandle(pi.hProcess);
     } else CloseHandle(wr);
     CloseHandle(rd);
@@ -2456,7 +2485,10 @@ static void shmWriteApp(ShmMap& m, uint32_t wanted) {   // Heartbeat @24 (appTic
     UnmapViewOfFile(p);
 }
 static bool runTask(const wchar_t* task) {   // geplante Broker-Aufgabe starten (elevated ohne UAC)
+    ULONGLONG t0 = GetTickCount64();
     std::string out = runCaptureOutput(std::wstring(L"schtasks /run /tn \"") + task + L"\"", 8000);
+    ULONGLONG ms = GetTickCount64() - t0;
+    if (ms > 2000 || out.empty()) bcLogStream("runTask(" + narrow(task) + "): " + std::to_string(ms) + "ms, Ausgabe " + (out.empty() ? "LEER" : "ok"));
     return out.find("ERROR") == std::string::npos && out.find("FEHLER") == std::string::npos;
 }
 // FPS lesen (Frische: magic + brokerTick-Alter <= 1500ms; 1,5s-Ueberbrueckung wie main.js)
@@ -2576,9 +2608,14 @@ static bool pawnioInstalled() { return GetFileAttributesW((pawnioDirW() + L"\\Pa
 // Der Installer raeumt das beim Update selbst mit auf, das hier ist die zusaetzliche
 // Absicherung fuer alle anderen Faelle (z.B. Installationsordner manuell verschoben).
 static bool schtaskPresent(const wchar_t* task) {
+    ULONGLONG t0 = GetTickCount64();
     std::string out = runCaptureOutput(
         std::wstring(L"powershell -NoProfile -Command \"(Get-ScheduledTask -TaskName '") + task +
         L"' -ErrorAction SilentlyContinue).Actions.Execute\"", 8000);
+    // Dauer festhalten: auf der AMD-Mini-Klasse brauchte allein der PowerShell-Start ~8s,
+    // beim i7-Anwender kam offenbar nie etwas zurueck - genau das soll im Log sichtbar sein.
+    ULONGLONG ms = GetTickCount64() - t0;
+    if (ms > 2000 || out.empty()) bcLogStream("schtaskPresent(" + narrow(task) + "): " + std::to_string(ms) + "ms, Ausgabe " + (out.empty() ? "LEER" : "ok"));
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
     if (out.empty()) return false;
     wchar_t exeW[MAX_PATH]; GetModuleFileNameW(nullptr, exeW, MAX_PATH);
@@ -4899,8 +4936,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     }
     // Single-Instance (wie Electron requestSingleInstanceLock): Zweitstart reicht seine
     // Kommandozeile per WM_COPYDATA an die erste Instanz durch (Deep-Link/Fokus) und endet.
-    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\LumoraShellSingleton");
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    // AUSNAHME --test-*: Selbsttests duerfen nie an eine laufende Instanz weiterleiten -
+    // sonst "besteht" der Test scheinbar (Exit 0), ohne je gelaufen zu sein (real passiert:
+    // --test-runcapture lief bei offenem Lumora ins Leere, keine Ergebnisdatei).
+    bool isTestRun = false;
+    { int tac = 0; LPWSTR* tav = CommandLineToArgvW(GetCommandLineW(), &tac);
+      if (tav) { for (int i = 1; i < tac; ++i) if (wcsncmp(tav[i], L"--test-", 7) == 0) { isTestRun = true; break; } LocalFree(tav); } }
+    HANDLE mutex = isTestRun ? nullptr : CreateMutexW(nullptr, TRUE, L"Local\\LumoraShellSingleton");
+    if (!isTestRun && GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND other = FindWindowW(L"LumoraShell", nullptr);
         if (other) {
             std::string cmd; int ac = 0; LPWSTR* av = CommandLineToArgvW(GetCommandLineW(), &ac);
@@ -5064,6 +5107,24 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Selbsttest der HDR-Abfrage (Gegenstueck zum neuen Titelleisten-Schalter): meldet, ob
     // ein HDR-faehiges Display erkannt wird und ob HDR gerade an ist - ohne die Oberflaeche.
     // Dauerhaft nuetzlich, weil sich HDR-Zustaende sonst nur visuell pruefen lassen.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-runcapture") == 0) {
+        // Belegt den ECHTEN Timeout von runCaptureOutput: ein Kind, das 60s schweigt,
+        // muss nach ~3s beendet zurueckkommen (vorher blockierte ReadFile unbegrenzt).
+        // Dazu der Normalfall (Ausgabe kommt an) und der Spaetzuender (Ausgabe nach 1s).
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string res;
+        ULONGLONG t0 = GetTickCount64();
+        std::string a = runCaptureOutput(L"powershell -NoProfile -Command \"Start-Sleep 60\"", 3000);
+        res += "stumm60s: " + std::to_string(GetTickCount64() - t0) + "ms (soll ~3000) bytes=" + std::to_string(a.size()) + "\n";
+        t0 = GetTickCount64();
+        std::string b = runCaptureOutput(L"cmd /c echo hallo", 3000);
+        res += "echo: " + std::to_string(GetTickCount64() - t0) + "ms ausgabe=" + (b.find("hallo") != std::string::npos ? "ok" : "FEHLT") + "\n";
+        t0 = GetTickCount64();
+        std::string c = runCaptureOutput(L"powershell -NoProfile -Command \"Start-Sleep 1; 'spaet'\"", 8000);
+        res += "spaet1s: " + std::to_string(GetTickCount64() - t0) + "ms ausgabe=" + (c.find("spaet") != std::string::npos ? "ok" : "FEHLT") + "\n";
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-hdr") == 0) {
         auto st = lulaunch::hdrState();
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
@@ -5134,6 +5195,26 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     if (loadSettings().value("minimizeToTray", false)) createTray();
     registerHotkeys();
     applyAutostart();
+    // Datenordner-Selbstpruefung (Diagnosezeile, i7-Anwender-Fall: Einstellungen weg,
+    // Spielsuche bei jedem Start - beides haengt an %APPDATA%\lumora, ueber den das Log
+    // in %TEMP% bisher nichts sagte). Haelt fest: tatsaechlicher Pfad (Umleitung auf
+    // Netz/OneDrive sofort sichtbar), Schreib-Lese-Probe MIT Dauer, Zustand der beiden
+    // Kerndateien. Laeuft im Hintergrund - haengt der Datenordner, haengt nicht der Start.
+    std::thread([]() {
+        ULONGLONG t0 = GetTickCount64();
+        std::wstring probe = dataDir() + L"\\startprobe.tmp";
+        bool wr = writeFile(probe, "probe");
+        bool rb = wr && readFile(probe) == "probe";
+        DeleteFileW(probe.c_str());
+        json s = json::parse(readFile(settingsPath()), nullptr, false);
+        std::string g = readFile(dataDir() + L"\\games.json");
+        json gj = json::parse(g, nullptr, false);
+        bcLogStream("startprobe: dir=" + narrow(dataDir())
+            + " schreiben=" + (wr ? "ok" : "FEHLER") + " ruecklesen=" + (rb ? "ok" : "FEHLER")
+            + " dauer=" + std::to_string(GetTickCount64() - t0) + "ms"
+            + " settings=" + (s.is_object() ? "ok(" + std::to_string(s.size()) + " Schluessel)" : "DEFEKT/FEHLT")
+            + " games=" + (gj.is_array() ? "ok(" + std::to_string(gj.size()) + " Spiele)" : (g.empty() ? "FEHLT" : "DEFEKT")));
+    }).detach();
     registerProtocol();   // lumora://-Handler auf die native exe (Umstieg von Electron)
     setupAutoUpdate();    // 4 s nach Start still nach einer neueren Version schauen
     // Deep-Link als Startargument (lumora://... - KALTSTART ueber den "Mit Lumora
