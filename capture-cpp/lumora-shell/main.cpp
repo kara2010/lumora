@@ -958,6 +958,30 @@ static const int BC_ADAPT_F[] = { 100, 70, 50, 35, 24, 16 };   // Stufen-Faktore
 static json g_bcState = { {"active", false} };
 struct ChildProc { HANDLE proc = nullptr; HANDLE outRd = nullptr; DWORD pid = 0; bool intentional = false; };
 static ChildProc g_mtx, g_cap;
+// Job-Objekt fuer ALLE Stream-Helfer. Bisher raeumte nur der regulaere Weg auf
+// (killChild beim Stoppen/Beenden) - stuerzte die Shell ab oder wurde sie im
+// Task-Manager abgeschossen, LIEFEN Relay und Capture WEITER: Ports 8558/8889/9997/8189
+// belegt, der Capture-Helfer encodiert unbemerkt weiter (GPU-Last!), und der naechste
+// Lumora-Start scheiterte mit "Port belegt". Mit KILL_ON_JOB_CLOSE beendet Windows die
+// Kinder automatisch, sobald der letzte Verweis auf das Job-Objekt faellt - also auch
+// beim harten Prozessende. Kostet nichts und braucht keine Aufraeum-Logik.
+static HANDLE g_childJob = nullptr;
+static void childJobEnsure() {
+    if (g_childJob) return;
+    g_childJob = CreateJobObjectW(nullptr, nullptr);
+    if (!g_childJob) return;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION li{};
+    li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(g_childJob, JobObjectExtendedLimitInformation, &li, sizeof(li))) {
+        CloseHandle(g_childJob); g_childJob = nullptr;
+    }
+}
+static void childJobAdd(HANDLE proc) {
+    childJobEnsure();
+    // Fehlschlag ist nicht fatal (z.B. Prozess schon in einem fremden Job): dann gilt
+    // weiter nur der regulaere Aufraeumweg - das ist der Stand von vorher.
+    if (g_childJob && proc) AssignProcessToJobObject(g_childJob, proc);
+}
 static bool g_bcStopping = false;
 static std::string g_bcCapKey; static int g_bcNatKbit = 0; static int g_capFastFails = 0;
 static int g_adaptLevel = 0; static ULONGLONG g_adaptLastChange = 0, g_adaptBadSince = 0, g_adaptGoodSince = 0, g_adaptUpAt = 0, g_adaptUpHold = 0;
@@ -1067,6 +1091,7 @@ static bool spawnChild(ChildProc& cp, const std::wstring& cmdLine, const char* l
         CloseHandle(rd); CloseHandle(wr); return false;
     }
     CloseHandle(wr); CloseHandle(pi.hThread);
+    childJobAdd(pi.hProcess);   // stirbt mit der Shell - auch bei Absturz/Task-Manager (s. childJobEnsure)
     cp.proc = pi.hProcess; cp.outRd = rd; cp.pid = pi.dwProcessId; cp.intentional = false;
     std::string pfx = logPrefix;
     std::thread([rd, pfx]() {   // Ausgaben zeilenweise ins Log (wie die on-data-Handler)

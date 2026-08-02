@@ -1112,6 +1112,7 @@
       </div>
       <div id="reviewBody"></div>
       <div class="dialog-actions">
+        <button class="btn-browse" id="reviewResetBtn" onclick="reviewResetAll()">Spielzeit zurücksetzen</button>
         <button class="btn-primary" onclick="hideReview()">Schließen</button>
       </div>
     </div>
@@ -1166,6 +1167,9 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  // --- Spielzeit-Rueckblick: Zuruecksetzen ---
+  "Spielzeit zurücksetzen": "Reset playtime",
+  "Spielzeit dieses Spiels zurücksetzen": "Reset playtime for this game",
   // --- 3.0.0: fehlende Uebersetzungen (Eingabe-Bruecke-Panel, Stream, Fehlermeldungen) ---
   "Jetzt neu starten": "Restart now",
   "Keine Treffer. Anderen Suchbegriff testen oder „Eigenes Bild\" verwenden.": "No matches. Try a different search term or use \"Custom image\".",
@@ -3534,6 +3538,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
               <div class="review-bar"><div class="review-bar-fill" style="width:${pct}%"></div></div>
             </div>
             <span class="review-row-time">${esc(formatPlaytime(g.playtime))}</span>
+            <button class="review-row-reset" onclick="reviewResetGame('${esc(g.id)}')"
+                    title="${window.tr('Spielzeit dieses Spiels zurücksetzen')}"
+                    aria-label="${window.tr('Spielzeit dieses Spiels zurücksetzen')}">↺</button>
           </div>`
       }).join('')
 
@@ -3553,6 +3560,41 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
          </div>`
 
       document.getElementById('reviewOverlay').style.display = 'flex'
+      const rb = document.getElementById('reviewResetBtn')
+      if (rb) rb.style.display = played.length ? '' : 'none'
+    }
+    // --- Spielzeit zuruecksetzen -------------------------------------------------
+    // Bewusst NUR hier im Rueckblick (der Ort, an dem die Zahlen stehen) und immer mit
+    // Rueckfrage: die Werte sind nicht wiederherstellbar - sie werden ueber Monate
+    // gesammelt und es gibt keine zweite Quelle dafuer. Darum nennt die Rueckfrage die
+    // konkrete Zahl, die verloren geht, statt nur "wirklich?" zu fragen.
+    async function reviewResetGame(id) {
+      const g = games.find(x => x.id === id)
+      if (!g) return
+      const ok = await lumoraConfirm(
+        window.LANG === 'en'
+          ? `Reset playtime for "${g.name}"?\n\n${formatPlaytime(g.playtime || 0)} will be deleted. This cannot be undone.`
+          : `Spielzeit von „${g.name}" zurücksetzen?\n\n${formatPlaytime(g.playtime || 0)} gehen dabei verloren. Das lässt sich nicht rückgängig machen.`)
+      if (!ok) return
+      g.playtime = 0
+      g.lastPlayed = null
+      saveGames()
+      renderList()
+      showReview()   // Rueckblick sofort neu aufbauen (Reihenfolge/Kennzahlen aendern sich)
+    }
+    async function reviewResetAll() {
+      const played = games.filter(g => (g.playtime || 0) > 0)
+      if (!played.length) return
+      const total = formatPlaytime(games.reduce((s, g) => s + (g.playtime || 0), 0))
+      const ok = await lumoraConfirm(
+        window.LANG === 'en'
+          ? `Reset the playtime of ALL ${played.length} games?\n\n${total} in total will be deleted. This cannot be undone.`
+          : `Spielzeit ALLER ${played.length} Spiele zurücksetzen?\n\nInsgesamt ${total} gehen dabei verloren. Das lässt sich nicht rückgängig machen.`)
+      if (!ok) return
+      for (const g of games) { g.playtime = 0; g.lastPlayed = null }
+      saveGames()
+      renderList()
+      showReview()
     }
 
     // Einstellungen sind jetzt INLINE im Hauptbereich (kein Popup). settingsTab hält
@@ -5340,14 +5382,17 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (ctx) return Array.from(ctx.querySelectorAll('.context-menu-item')).filter(isNavVisible)
       const o = navOpenOverlay()
       if (o) {
-        const sel = 'input:not([type=hidden]):not([type=file]):not([type=checkbox]), select, textarea, button, summary, .cover-cell, .accent-swatch, .mode-option, .switch'
+        const sel = 'input:not([type=hidden]):not([type=file]):not([type=checkbox]), input[type=checkbox]:not(.switch input), select, textarea, button, summary, .cover-cell, .accent-swatch, .mode-option, .switch'
         return Array.from(o.el.querySelectorAll(sel)).filter(isNavVisible)
       }
       // Einstellungen laufen jetzt INLINE im Hauptbereich (kein Overlay mehr). Sind
       // sie offen, navigiert man die Reiter oben PLUS die Steuerelemente der
       // Einstellungsseite – sonst wären sie per Gamepad unerreichbar.
       if (settingsTab != null) {
-        const sel = 'input:not([type=hidden]):not([type=file]):not([type=checkbox]), select, textarea, button, summary, .accent-swatch, .mode-option, .switch'
+        // Blanke Kontrollkaestchen (Analyse-Verlauf: 'Fuer Vergleich auswaehlen') MUESSEN
+        // mit: sie stecken in keiner .switch-Huelle und waren per Gamepad bisher
+        // UNERREICHBAR - der Laufvergleich liess sich ohne Maus gar nicht bedienen.
+        const sel = 'input:not([type=hidden]):not([type=file]):not([type=checkbox]), input[type=checkbox]:not(.switch input), select, textarea, button, summary, .accent-swatch, .mode-option, .switch'
         const sv = document.getElementById('settingsView')
         return Array.from(document.querySelectorAll('#detailNav .detail-nav-tab'))
           .concat(sv ? Array.from(sv.querySelectorAll(sel)) : [])
