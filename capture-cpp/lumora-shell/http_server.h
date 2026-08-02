@@ -37,7 +37,14 @@ using Handler = std::function<Response(const Request&)>;
 // ---- SSE-Hub: langlebige Zuschauer-Sockets + Broadcast + Heartbeat ----
 class SseHub {
 public:
-    void add(SOCKET s) { std::lock_guard<std::mutex> lk(mx_); clients_.insert(s); }
+    void add(SOCKET s) {
+        // Sende-Timeout PFLICHT: send() blockiert sonst unbegrenzt, sobald das TCP-Fenster
+        // eines haengengebliebenen Zuschauers voll ist (Netzabriss ohne RST). sendAll haelt
+        // dabei mx_ - EIN toter Zuschauer haette damit Heartbeat und Broadcast fuer ALLE
+        // eingefroren. Mit Timeout liefert send SOCKET_ERROR und der Client fliegt raus.
+        DWORD to = 5000; setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&to, sizeof(to));
+        std::lock_guard<std::mutex> lk(mx_); clients_.insert(s);
+    }
     void broadcast(const std::string& line) { sendAll(line); }
     void start() {
         if (hb_.joinable()) return;
@@ -69,6 +76,9 @@ inline ProxyResult proxyLocal(int port, const std::string& method, const std::st
     ProxyResult r;
     HINTERNET ses = WinHttpOpen(L"Lumora/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!ses) return r;
+    // Kurze Timeouts statt der WinHTTP-Defaults (bis 60s): haengt mediamtx, soll der
+    // Zuschauer-Thread nicht eine Minute festhaengen - localhost antwortet sonst sofort.
+    WinHttpSetTimeouts(ses, 3000, 3000, 10000, 10000);
     HINTERNET con = WinHttpConnect(ses, L"127.0.0.1", (INTERNET_PORT)port, 0);
     std::wstring wpath(pathQuery.begin(), pathQuery.end());
     std::wstring wmethod(method.begin(), method.end());
@@ -135,6 +145,7 @@ public:
 private:
     void serve(SOCKET c, std::string ip) {
         DWORD to = 15000; setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
+        setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, (const char*)&to, sizeof(to));   // sonst haengt der Thread an einem Client, der nie liest (player.html ~100KB)
         std::string buf; char tmp[8192];
         size_t hdrEnd;
         for (;;) {   // bis Header-Ende lesen

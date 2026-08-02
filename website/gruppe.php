@@ -32,6 +32,23 @@ function jout($o) { header('Content-Type: application/json; charset=utf-8'); ech
 function code_ok($c) { return is_string($c) && preg_match('/^[A-Z2-9]{6}$/', $c); }
 function room_path($c) { global $dir; return $dir . '/' . $c . '.json'; }
 
+// Mitglieds-Link zulaessig? NUR http auf eine WOERTLICHE, OEFFENTLICHE IP mit hohem
+// Port. Die relay()-Aufrufe fragen sonst JEDE vom Client registrierte Adresse an -
+// auch 127.0.0.1 oder interne Netze des Hosters (SSRF; a=cfg gaebe die Antwort sogar
+// woertlich zurueck). Hostnamen sind bewusst draussen: die Clients registrieren
+// ausschliesslich STUN-ermittelte IPs, nie Namen.
+function link_ok($u) {
+  if (!is_string($u) || $u === '' || strlen($u) > 100) return false;
+  $p = @parse_url($u);
+  if (!is_array($p) || (isset($p['scheme']) ? $p['scheme'] : '') !== 'http' || empty($p['host'])) return false;
+  if (isset($p['user']) || isset($p['pass']) || isset($p['query']) || isset($p['fragment'])) return false;
+  if (isset($p['path']) && $p['path'] !== '' && $p['path'] !== '/') return false;
+  $port = isset($p['port']) ? (int)$p['port'] : 80;
+  if ($port < 1024 || $port > 65535) return false;
+  $h = trim($p['host'], '[]');
+  return filter_var($h, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+}
+
 // Raum lesen + abgelaufene Mitglieder ausmisten. flock schuetzt vor parallelen Schreibern.
 function room_load($c) {
   $p = room_path($c);
@@ -48,6 +65,18 @@ function room_save($c, $j) {
   if (count($j['members']) === 0) { @unlink(room_path($c)); return; }   // leerer Raum -> weg
   @file_put_contents(room_path($c), json_encode($j), LOCK_EX);
 }
+// Raum-Sperre fuer den GESAMTEN Lese-Aendern-Schreiben-Zyklus. Das LOCK_EX in
+// room_save schuetzt nur das Schreiben selbst - zwei gleichzeitige Anfragen lasen
+// denselben Stand und die zweite ueberschrieb die Aenderung der ersten (verlorenes
+// Join/Leave bis zum naechsten Heartbeat). Eigene .lock-Datei statt der Raumdatei,
+// weil room_save/unlink die Raumdatei ersetzt. Ein jout()-exit innerhalb der Sperre
+// ist unkritisch: PHP gibt flock am Skriptende automatisch frei.
+function room_lock($c) {
+  $h = @fopen(room_path($c) . '.lock', 'c');
+  if ($h) @flock($h, LOCK_EX);
+  return $h;
+}
+function room_unlock($h) { if ($h) { @flock($h, LOCK_UN); @fclose($h); } }
 function members_out($j) {
   $out = array();
   foreach ($j['members'] as $m) { unset($m['vk']); $out[] = $m; }   // Tuersteher-Schluessel NIE nach aussen geben
@@ -89,8 +118,10 @@ function relay($url, $method, $body, $contentType) {
 // Normalfall nie den Connect-Timeout eines toten Kandidaten (DS-Lite-Falle).
 function member_addrs($m) {
   $a = array();
-  if (!empty($m['linkV4'])) $a[] = rtrim($m['linkV4'], '/');
-  if (!empty($m['linkV6'])) $a[] = rtrim($m['linkV6'], '/');
+  // link_ok auch HIER (zweite Verteidigungslinie): Altbestand in bestehenden
+  // Raum-Dateien wurde vor der Einfuehrung der Pruefung ungeprueft gespeichert.
+  if (!empty($m['linkV4']) && link_ok($m['linkV4'])) $a[] = rtrim($m['linkV4'], '/');
+  if (!empty($m['linkV6']) && link_ok($m['linkV6'])) $a[] = rtrim($m['linkV6'], '/');
   if (!empty($m['goodAddr']) && in_array($m['goodAddr'], $a, true)) {
     array_splice($a, array_search($m['goodAddr'], $a, true), 1);
     array_unshift($a, $m['goodAddr']);
@@ -146,18 +177,39 @@ $code = isset($_GET['code']) ? strtoupper(trim($_GET['code'])) : '';
 
 // ---- API ---------------------------------------------------------------------
 if ($a === 'create') {
+  // Aufraeum-Lauf (nur hier - create ist selten): Raum-Dateien, die laenger als einen
+  // Tag unberuehrt sind, loeschen. Ohne das blieben verlassene Raeume FUER IMMER liegen
+  // (ausgemistet wird sonst nur beim Zugriff auf genau diesen Raum) - und die Dateien
+  // enthalten IP-Adressen, die nicht laenger als noetig gespeichert sein duerfen.
+  foreach ((array)@glob($dir . '/??????.json') as $f) {
+    $mt = @filemtime($f);
+    if ($mt !== false && time() - $mt > 86400) @unlink($f);
+  }
+  foreach ((array)@glob($dir . '/??????.json.lock') as $f) {   // zugehoerige Sperrdateien mit ausmisten
+    $mt = @filemtime($f);
+    if ($mt !== false && time() - $mt > 86400) @unlink($f);
+  }
+  // Obergrenze gegen Massenanlage: mehr aktive Raeume als das sind kein normaler
+  // Betrieb, sondern ein Skript - dann ehrlich ablehnen statt die Platte zu fuellen.
+  if (count((array)@glob($dir . '/??????.json')) >= 300) jout(array('ok' => false, 'error' => 'server-voll'));
   // Wunsch-Code: der Client (5-Min-Karenz beim kurzen Stream-Neustart) will seinen
   // zuletzt genutzten Code wiederbekommen. NUR wenn er gerade frei ist -> KEIN
   // dauerhafter Anspruch, keine Reservierung. Ist er belegt/abgelaufen -> Zufallscode.
   $want = isset($_GET['want']) ? strtoupper(trim($_GET['want'])) : '';
   if (code_ok($want) && !is_file(room_path($want))) {
-    room_save($want, array('code' => $want, 'created' => time(), 'members' => array('_' => array('id' => '_', 'lastSeen' => time(), 'joinedAt' => time()))));
-    jout(array('ok' => true, 'code' => $want));
+    $lk = room_lock($want);
+    if (!is_file(room_path($want))) {   // Recheck UNTER der Sperre (zwei gleichzeitige create mit demselben want)
+      room_save($want, array('code' => $want, 'created' => time(), 'members' => array('_' => array('id' => '_', 'lastSeen' => time(), 'joinedAt' => time()))));
+      jout(array('ok' => true, 'code' => $want));
+    }
+    room_unlock($lk);
   }
   for ($i = 0; $i < 50; $i++) {
     $c = '';
     for ($k = 0; $k < 6; $k++) $c .= CODE_CHARS[random_int(0, strlen(CODE_CHARS) - 1)];
     if (!is_file(room_path($c))) {
+      $lk = room_lock($c);
+      if (is_file(room_path($c))) { room_unlock($lk); continue; }   // Recheck unter der Sperre
       room_save($c, array('code' => $c, 'created' => time(), 'members' => array('_' => array('id' => '_', 'lastSeen' => time(), 'joinedAt' => time()))));
       // Platzhalter-Mitglied haelt den Raum bis zum ersten echten update am Leben.
       jout(array('ok' => true, 'code' => $c));
@@ -169,6 +221,7 @@ if ($a === 'update') {
   if (!code_ok($code)) jout(array('ok' => false, 'error' => 'bad-code'));
   $m = json_decode(read_body(), true);
   if (!is_array($m) || empty($m['id'])) jout(array('ok' => false, 'error' => 'bad-member'));
+  $lk = room_lock($code);
   $j = room_load($code);
   if ($j === null) jout(array('ok' => false, 'error' => 'no-room'));
   unset($j['members']['_']);
@@ -178,8 +231,8 @@ if ($a === 'update') {
   $j['members'][$id] = array(
     'id' => $id,
     'name' => mb_substr((string)($m['name'] ?? 'Spieler'), 0, 24),
-    'linkV4' => isset($m['linkV4']) && $m['linkV4'] ? (string)$m['linkV4'] : null,
-    'linkV6' => isset($m['linkV6']) && $m['linkV6'] ? (string)$m['linkV6'] : null,
+    'linkV4' => isset($m['linkV4']) && link_ok($m['linkV4']) ? (string)$m['linkV4'] : null,
+    'linkV6' => isset($m['linkV6']) && link_ok($m['linkV6']) ? (string)$m['linkV6'] : null,
     'streaming' => !isset($m['streaming']) || $m['streaming'] !== false,
     'joinedAt' => $prev ? $prev['joinedAt'] : time(),
     'lastSeen' => time(),
@@ -203,6 +256,7 @@ if ($a === 'list') {
 if ($a === 'leave') {
   if (!code_ok($code)) jout(array('ok' => false, 'error' => 'bad-code'));
   $b = json_decode(read_body(), true);
+  $lk = room_lock($code);
   $j = room_load($code);
   if ($j !== null && is_array($b) && !empty($b['id'])) {
     unset($j['members'][substr(preg_replace('/[^a-zA-Z0-9]/', '', $b['id']), 0, 32)]);
@@ -294,8 +348,12 @@ if ($a === 'cfg') {
     $r = relay_multi($pairs, 200);
     if ($r) {
       if (empty($j['members'][$mid]['goodAddr']) || $j['members'][$mid]['goodAddr'] !== $r['base']) {
-        $j['members'][$mid]['goodAddr'] = $r['base'];
-        room_save($code, $j);
+        // Unter der Raum-Sperre FRISCH laden statt den alten $j zurueckzuschreiben -
+        // sonst wuerde ein parallel gelaufener Heartbeat/Leave hier ueberschrieben.
+        $lk = room_lock($code);
+        $j2 = room_load($code);
+        if ($j2 !== null && isset($j2['members'][$mid])) { $j2['members'][$mid]['goodAddr'] = $r['base']; room_save($code, $j2); }
+        room_unlock($lk);
       }
       header('Content-Type: application/json'); echo $r['body']; exit;
     }
