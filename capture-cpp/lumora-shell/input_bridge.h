@@ -186,6 +186,7 @@ struct DevCache {                         // Preparsed-Data + Caps je Geraet (ei
 };
 inline std::function<void(const std::string&)> g_diag;   // optionales Diagnose-Log (Shell haengt bcLogStream ein)
 inline std::mutex g_mx;                   // schuetzt Profil + Monitor-Flags (Bridge-Thread vs. IPC)
+inline std::mutex g_vigemMx;              // ViGEm-Lifecycle (start/stop) UND jedes Target-Update; Reihenfolge g_mx -> g_vigemMx
 inline Profile g_profile;
 inline std::atomic<bool> g_running{ false };   // Thread lebt
 inline std::atomic<bool> g_feeding{ false };   // ViGEm-Target aktiv (Pad sichtbar)
@@ -347,6 +348,11 @@ inline void rebuildReport() {
     for (auto& m : g_profile.buttonToAxis)
         if (findBtnPressed(m.vid, m.pid, m.usage)) setAxisTarget(r, m.target, m.value);
     g_report = r;
+    // Unter der Lifecycle-Sperre pruefen UND aufrufen: vigemStop() (UI-Thread,
+    // Spielende-Hook) gibt g_target frei - ohne Sperre lag zwischen der Pruefung
+    // und dem Update ein Use-after-free-Fenster. Sperr-Reihenfolge immer
+    // g_mx -> g_vigemMx (rebuildReport laeuft unter g_mx), nie umgekehrt.
+    std::lock_guard<std::mutex> vg(g_vigemMx);
     if (g_feeding.load() && g_vigem && g_target) vigem_target_x360_update(g_vigem, g_target, r);
 }
 
@@ -493,11 +499,30 @@ inline LRESULT CALLBACK bridgeWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
     case WM_INPUT: onRawInput((HRAWINPUT)l); return 0;
     case WM_INPUT_DEVICE_CHANGE:   // Geraet weg/neu: Cache raeumen (Windows recycelt HANDLEs)
-        if (w == GIDC_REMOVAL) g_devCache.erase((HANDLE)l);
+        if (w == GIDC_REMOVAL) {
+            auto it = g_devCache.find((HANDLE)l);
+            if (it != g_devCache.end()) {
+                // Auch den EINGABE-Zustand des Geraets austragen: sonst haelt ein im
+                // Moment des Absteckens gedrueckter Knopf bzw. eine ausgelenkte Achse
+                // das virtuelle Pad DAUERHAFT fest (Vollgas bliebe stehen, bis dasselbe
+                // Geraet dieselbe Usage wieder meldet) - danach den Report neu bauen,
+                // damit das Pad sofort in die Ruhelage geht.
+                std::lock_guard<std::mutex> lk(g_mx);
+                const std::string vid = it->second.vid, pid = it->second.pid;
+                for (auto i2 = g_vals.begin(); i2 != g_vals.end(); )
+                    i2 = (i2->first.vid == vid && i2->first.pid == pid) ? g_vals.erase(i2) : std::next(i2);
+                for (auto i2 = g_btns.begin(); i2 != g_btns.end(); )
+                    i2 = (i2->vid == vid && i2->pid == pid) ? g_btns.erase(i2) : std::next(i2);
+                g_devCache.erase(it);
+                rebuildReport();
+            }
+        }
         return 0;
-    case WM_TIMER:   // Keepalive: Report bei Funkstille frisch halten (ViGEm-Watchdog/Idle)
+    case WM_TIMER: {   // Keepalive: Report bei Funkstille frisch halten (ViGEm-Watchdog/Idle)
+        std::lock_guard<std::mutex> vg(g_vigemMx);   // gleiche Sperre wie rebuildReport (s. dort)
         if (g_feeding.load() && g_vigem && g_target) vigem_target_x360_update(g_vigem, g_target, g_report);
         return 0;
+    }
     case LUBRIDGE_WM_STOP: DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -531,8 +556,7 @@ inline void bridgeThreadProc() {
 }
 
 // ---- ViGEm-Target an/aus (Start kommt vom IPC-Worker, Stop auch vom UI-Thread
-// (Spielende-Hook) -> Lifecycle serialisieren) ----------------------------------------
-inline std::mutex g_vigemMx;
+// (Spielende-Hook) -> Lifecycle serialisieren; g_vigemMx oben bei den Zustaenden) ------
 inline bool vigemStart() {
     std::lock_guard<std::mutex> lk(g_vigemMx);
     if (g_feeding.load()) return true;
@@ -566,8 +590,10 @@ inline void vigemStop() {
 // ---- Oeffentliche API (vom UI-/IPC-Thread aufgerufen) --------------------------------
 // Bridge-Thread hochfahren (idempotent). Laeuft auch ohne aktives Pad (Monitor/Capture).
 inline void ensureThread() {
-    if (g_running.load()) return;
-    g_running = true;
+    // exchange statt load+store: start() laeuft auf dem IPC-Worker, setMonitor/setCapture
+    // auf dem UI-Thread - beide konnten gleichzeitig durch die Pruefung und zwei
+    // Bridge-Threads starten (zweiter CreateWindow/RegisterRawInput gegen denselben Zustand).
+    if (g_running.exchange(true)) return;
     if (g_thread.joinable()) g_thread.join();
     g_thread = std::thread(bridgeThreadProc);
 }
