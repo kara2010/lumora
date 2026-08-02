@@ -5089,6 +5089,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         }
     }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // Explizite App-Identitaet (Electron tat das per app.setAppUserModelId('com.lumora.app')).
+    // Ohne sie leitet Windows die Identitaet aus dem Prozess ab: Taskleisten-Gruppierung,
+    // Anheften und die Zuordnung der Infobereich-/Toast-Meldungen zu "Lumora" sind dann
+    // unzuverlaessig. Gleiche ID wie die Electron-Version, damit ein angehefteter Eintrag
+    // beim Umstieg erhalten bleibt.
+    SetCurrentProcessExplicitAppUserModelID(L"com.lumora.app");
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // COM (FileDialogs, WebView2) - GUI-Thread = STA
     Gdiplus::GdiplusStartupInput gsi; ULONG_PTR gtok = 0; Gdiplus::GdiplusStartup(&gtok, &gsi, nullptr);   // Datei-Icons (PNG)
     { WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa); }   // Sockets frueh (bcLanIp/mtx-Probe/SSDP laufen VOR dem HTTP-Server)
@@ -5559,6 +5565,24 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                                     [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
                                         LPWSTR j = nullptr;
                                         if (SUCCEEDED(args->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_hwnd); CoTaskMemFree(j); }
+                                        return S_OK;
+                                    }).Get(), nullptr);
+                            // Renderer-Absturz abfangen und die Oberflaeche neu laden. Bei Electron
+                            // fing Chromium das ab; nativ blieb sonst ein WEISSES, totes Fenster zurueck -
+                            // besonders relevant fuer einen Launcher neben GPU-Last: ein Grafiktreiber-
+                            // Reset (TDR) waehrend des Spielens kann den Render-Prozess mitreissen.
+                            // Nur der Render-/GPU-Prozess wird neu geladen; ein Absturz des Browser-
+                            // Kernprozesses ist nicht reparabel (dann bleibt es beim Fehlerbild).
+                            g_webview->add_ProcessFailed(
+                                Callback<ICoreWebView2ProcessFailedEventHandler>(
+                                    [](ICoreWebView2* wv, ICoreWebView2ProcessFailedEventArgs* a) -> HRESULT {
+                                        COREWEBVIEW2_PROCESS_FAILED_KIND kind{};
+                                        if (a) a->get_ProcessFailedKind(&kind);
+                                        bcLogStream("webview: Prozess ausgefallen (kind=" + std::to_string((int)kind) + ") - lade neu");
+                                        if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
+                                         || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE) {
+                                            if (wv) wv->Reload();
+                                        }
                                         return S_OK;
                                     }).Get(), nullptr);
                             g_webview->Navigate(L"https://app.lumora/index.html");
