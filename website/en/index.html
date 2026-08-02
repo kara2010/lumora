@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "3.2.1",
+        "softwareVersion": "3.2.2",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1041,8 +1041,17 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.2.1</span>
+          <span class="release-ver">3.2.2</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>Important fix: settings and your library are kept</strong> – on machines where Lumora had been freshly installed, the app could not create its data folder. As a result, settings were lost on exit, the game scan reappeared on every start, and playtimes and cover art were not kept either. Lumora now creates the folder itself if it is missing.</li>
+          <li>If you still have data from a very old version, from before the rename to Lumora, your library is migrated automatically on first start.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.2.1</span>
         </div>
         <ul>
           <li><strong>Launched games reliably come to the front</strong>: If you had brought Lumora to the foreground from another application via hotkey and then started a game, the game could end up sitting behind Lumora – you had to alt-tab to it. This comes down to a Windows safeguard: only the application that currently holds the foreground may hand it over. When a game is launched through Steam or a shortcut, that application is not Lumora. Lumora now passes the right along before launching and additionally brings the game window to the front itself once it appears. If you deliberately switched to something else in the meantime, that is left alone.</li>
@@ -1080,6 +1089,7 @@
           <li>The position picker in the Analysis tab now matches the one in the Overlay tab: the four corners sit where they actually are on screen.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.1.0</span>
@@ -1092,7 +1102,6 @@
           <li><strong>Settings stay put</strong>: content could shift sideways after bringing the window to the foreground via hotkey, hiding the tab bar – fixed.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.0.5</span>
@@ -1407,7 +1416,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (28)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (29)</button>
   </div>
 </section>
 
@@ -1808,7 +1817,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Show less' : 'Show older versions (28)';
+    btn.textContent = open ? 'Show less' : 'Show older versions (29)';
   }
 
   function toggleFeatures() {
