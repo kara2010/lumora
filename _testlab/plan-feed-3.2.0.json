@@ -1,0 +1,128 @@
+{
+  "files": [
+    {
+      "local": "Z:/capture-cpp/lumora-shell/Lumora-Native-Setup-3.2.0.exe",
+      "remote": "updates/Lumora-Native-Setup-3.2.0.exe"
+    },
+    {
+      "local": "Z:/website/updates/native-update.json",
+      "remote": "updates/native-update.json"
+    },
+    {
+      "local": "Z:/website/updates/components.json",
+      "remote": "updates/components.json"
+    },
+    {
+      "local": "Z:/website/updates/latest.yml",
+      "remote": "updates/latest.yml"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/AMDFamily17.bin",
+      "remote": "updates/components/3.2.0/AMDFamily17.bin"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/AMF-LICENSE.txt",
+      "remote": "updates/components/3.2.0/AMF-LICENSE.txt"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/analyze-osd.html",
+      "remote": "updates/components/3.2.0/analyze-osd.html"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/bin/lumora-capture-native.exe",
+      "remote": "updates/components/3.2.0/bin/lumora-capture-native.exe"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/bin/lumora-elevate.exe",
+      "remote": "updates/components/3.2.0/bin/lumora-elevate.exe"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/bin/lumora-media-relay.exe",
+      "remote": "updates/components/3.2.0/bin/lumora-media-relay.exe"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/color.png",
+      "remote": "updates/components/3.2.0/color.png"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/doorman.html",
+      "remote": "updates/components/3.2.0/doorman.html"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/icon-64.png",
+      "remote": "updates/components/3.2.0/icon-64.png"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/icon-source.png",
+      "remote": "updates/components/3.2.0/icon-source.png"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/icon.ico",
+      "remote": "updates/components/3.2.0/icon.ico"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/icon.svg",
+      "remote": "updates/components/3.2.0/icon.svg"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/index.html",
+      "remote": "updates/components/3.2.0/index.html"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/IntelMSR.bin",
+      "remote": "updates/components/3.2.0/IntelMSR.bin"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/libvpl-LICENSE.txt",
+      "remote": "updates/components/3.2.0/libvpl-LICENSE.txt"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/lumora-shell.exe",
+      "remote": "updates/components/3.2.0/lumora-shell.exe"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/media-relay-LICENSE.txt",
+      "remote": "updates/components/3.2.0/media-relay-LICENSE.txt"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/NAudio-LICENSE.txt",
+      "remote": "updates/components/3.2.0/NAudio-LICENSE.txt"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/nv-codec-headers-LICENSE.txt",
+      "remote": "updates/components/3.2.0/nv-codec-headers-LICENSE.txt"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/opus-LICENSE.txt",
+      "remote": "updates/components/3.2.0/opus-LICENSE.txt"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/osd.html",
+      "remote": "updates/components/3.2.0/osd.html"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/PawnIO-Modules-LICENSE.txt",
+      "remote": "updates/components/3.2.0/PawnIO-Modules-LICENSE.txt"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/player.html",
+      "remote": "updates/components/3.2.0/player.html"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/styles.css",
+      "remote": "updates/components/3.2.0/styles.css"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/tray-icon.png",
+      "remote": "updates/components/3.2.0/tray-icon.png"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/ViGEmClient-LICENSE.txt",
+      "remote": "updates/components/3.2.0/ViGEmClient-LICENSE.txt"
+    },
+    {
+      "local": "Z:/website/updates/components/3.2.0/Vortice-LICENSE.txt",
+      "remote": "updates/components/3.2.0/Vortice-LICENSE.txt"
+    }
+  ]
+}
