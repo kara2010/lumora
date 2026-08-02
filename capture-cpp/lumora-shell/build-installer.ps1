@@ -170,6 +170,25 @@ New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
 foreach ($b in "lumora-capture-native.exe","lumora-media-relay.exe","lumora-elevate.exe") {
   if (Test-Path "$root\bin\$b") { Copy-Item "$root\bin\$b" "$stage\bin" }
 }
+# Visual-C++-Laufzeit APP-LOKAL mitliefern (vcruntime140/msvcp140). Die EXEs sind /MD
+# gebaut und haengen an diesen DLLs - sie sind NICHT Teil von Windows, sondern kommen mit
+# dem "VC++ Redistributable". Auf einem frischen Windows OHNE das Paket startete Lumora
+# gar nicht ("VCRUNTIME140.dll fehlt"). Electron hatte das Problem nie (bundelte alles).
+# Windows laedt DLLs zuerst aus dem EXE-Ordner -> die Kopien neben shell UND bin/ machen
+# die App unabhaengig vom Systemzustand (Microsofts "local deployment", offiziell erlaubt).
+# Genau die DLLs, die die vier EXEs importieren (per dumpbin ermittelte Union) - NICHT der
+# ganze CRT-Ordner (der waere ~1,8 MB statt ~0,7 MB). msvcp140 haengt selbst nur an den
+# beiden vcruntime-DLLs, mehr wird nicht nachgeladen (transitiv geprueft).
+$crtDir = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue |
+          Sort-Object FullName | Select-Object -Last 1
+if (-not $crtDir) { throw "VC++ Redist-CRT-Ordner nicht gefunden - App-lokale Laufzeit kann nicht mitgeliefert werden" }
+foreach ($n in "vcruntime140.dll","vcruntime140_1.dll","msvcp140.dll") {
+  $src = Join-Path $crtDir.FullName $n
+  if (-not (Test-Path $src)) { throw "VC++ Laufzeit-DLL fehlt: $src" }
+  Copy-Item $src $stage; Copy-Item $src "$stage\bin"
+}
+Write-Output "VC++ Laufzeit app-lokal: 3 DLLs aus $($crtDir.Name) -> shell + bin"
+
 # Sensor-Module (OSD) neben die Shell (wie in der Electron-Struktur).
 # HDRCmd.exe entfaellt (eigener Code: launch_game.h setHDR),
 # PresentMon.exe entfaellt (eigener ETW-Consumer: etw_present.h).
