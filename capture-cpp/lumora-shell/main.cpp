@@ -111,17 +111,28 @@ static std::string readFile(const std::wstring& p) {
 static void bcLogStream(const std::string& msg);       // Definition beim Streaming-Modul
 static std::string narrow(const std::wstring& w);      // Definition weiter unten
 static bool writeFile(const std::wstring& p, const std::string& data) {
-    std::ofstream f(p, std::ios::binary | std::ios::trunc);   // binaer = UTF-8 OHNE BOM (BOM = JSON-Datenverlust-Falle!)
-    if (!f) {
-        // Bisher wurde dieser Rueckgabewert von praktisch allen Aufrufern ignoriert - ein
-        // Rechner, auf dem %APPDATA%\lumora nicht beschreibbar ist (i7-Anwender-Fall:
-        // Einstellungen "verschwinden", Spielsuche bei jedem Start), blieb dadurch im Log
-        // komplett unsichtbar. Fehlschlaege jetzt IMMER mit Windows-Fehlercode festhalten.
-        bcLogStream("writeFile FEHLGESCHLAGEN (open) err=" + std::to_string(GetLastError()) + " pfad=" + narrow(p));
+    // ATOMAR: erst nach <ziel>.neu schreiben, dann per MoveFileEx ueber das Original
+    // schieben. Vorher ging trunc+write DIREKT ins Ziel - die Datei wurde also zuerst
+    // GELEERT und dann gefuellt: ein Absturz oder ein vom Virenscanner blockierter
+    // Schreibzugriff mittendrin hinterliess eine leere/halbe app-settings.json bzw.
+    // games.json (i7-Anwender-Fall: Einstellungen "verschwinden", Spielsuche bei jedem
+    // Start). Jetzt bleibt das Original bei JEDEM Fehlschlag unangetastet.
+    // Fehlschlaege landen mit Windows-Fehlercode im Log - der Rueckgabewert wird von
+    // praktisch allen Aufrufern ignoriert, ohne Logzeile war ein kaputter Datenordner
+    // unsichtbar (binaer = UTF-8 OHNE BOM; BOM = JSON-Datenverlust-Falle!).
+    std::wstring tmp = p + L".neu";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) { bcLogStream("writeFile FEHLGESCHLAGEN (open) err=" + std::to_string(GetLastError()) + " pfad=" + narrow(p)); return false; }
+        f.write(data.data(), (std::streamsize)data.size());
+        f.flush();
+        if (!f) { bcLogStream("writeFile FEHLGESCHLAGEN (write) err=" + std::to_string(GetLastError()) + " pfad=" + narrow(p)); f.close(); DeleteFileW(tmp.c_str()); return false; }
+    }
+    if (!MoveFileExW(tmp.c_str(), p.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        bcLogStream("writeFile FEHLGESCHLAGEN (move) err=" + std::to_string(GetLastError()) + " pfad=" + narrow(p));
+        DeleteFileW(tmp.c_str());
         return false;
     }
-    f.write(data.data(), (std::streamsize)data.size());
-    if (!f) { bcLogStream("writeFile FEHLGESCHLAGEN (write) err=" + std::to_string(GetLastError()) + " pfad=" + narrow(p)); return false; }
     return true;
 }
 static std::wstring widen(const std::string& s) {
@@ -141,9 +152,27 @@ static std::wstring dataDir() {
     return std::wstring(appdata) + L"\\lumora";
 }
 static std::wstring settingsPath() { return dataDir() + L"\\app-settings.json"; }
+// Letzter fehlerfrei gelesener Stand. Ohne ihn wurde ein LESE-Aussetzer (Virenscanner
+// haelt die Datei kurz, Datei defekt) zu DAUERHAFTEM Datenverlust: loadSettings lieferte
+// still {}, der naechste set-app-settings mergte seinen einen Schluessel hinein und
+// schrieb das fast leere Objekt zurueck - alle uebrigen Einstellungen weg.
+static std::mutex g_settingsCacheMx;
+static json g_settingsCache = nullptr;
+static ULONGLONG g_settingsFailLogAt = 0;   // Log-Drossel (loadSettings laeuft sehr oft)
 static json loadSettings() {
-    json j = json::parse(readFile(settingsPath()), nullptr, false);
-    return j.is_object() ? j : json::object();
+    std::string raw = readFile(settingsPath());
+    json j = json::parse(raw, nullptr, false);
+    std::lock_guard<std::mutex> lk(g_settingsCacheMx);
+    if (j.is_object()) { g_settingsCache = j; return j; }
+    if (g_settingsCache.is_object()) {
+        ULONGLONG now = GetTickCount64();
+        if (now - g_settingsFailLogAt > 60000) {
+            g_settingsFailLogAt = now;
+            bcLogStream(std::string("loadSettings: Datei ") + (raw.empty() ? "nicht lesbar/leer" : "DEFEKT") + " -> letzter guter Stand (" + std::to_string(g_settingsCache.size()) + " Schluessel)");
+        }
+        return g_settingsCache;
+    }
+    return json::object();   // Erststart: Datei existiert wirklich noch nicht
 }
 // Produkt-Version aus der eigenen VersionInfo (fuer get-version-sync im Shim).
 static std::string shellVersion() {
@@ -249,8 +278,13 @@ static std::set<std::string> listRunningExes() {
     return out;
 }
 static json readLibraryGames() {
+    // Gleicher Letzter-guter-Stand-Schutz wie loadSettings (dort begruendet).
+    static std::mutex mx; static json cache = nullptr;
     json j = json::parse(readFile(dataDir() + L"\\games.json"), nullptr, false);
-    return j.is_array() ? j : json::array();
+    std::lock_guard<std::mutex> lk(mx);
+    if (j.is_array()) { cache = j; return j; }
+    if (cache.is_array()) { bcLogStream("readLibraryGames: games.json nicht lesbar -> letzter guter Stand (" + std::to_string(cache.size()) + " Spiele)"); return cache; }
+    return json::array();
 }
 static void sendExternalRunning() {   // Start-Knopf zeigt "laeuft" fuer Fremd-Sessions
     json arr = json::array();
@@ -4166,7 +4200,17 @@ static json handleChannel(const std::string& channel, const json& args) {
         return { {"ok", registerHotkeys()} };
     }
     if (channel == "save-games" && args.size() >= 1 && args[0].is_string()) {   // UI liefert fertigen JSON-String
-        writeFile(dataDir() + L"\\games.json", args[0].get<std::string>()); return true;
+        // Schrumpft die Bibliothek stark (z.B. UI startete wegen eines Leseaussetzers mit
+        // leerer Liste und speichert dann), vorher den alten Stand sichern - Loeschen
+        // bleibt erlaubt, aber der letzte volle Stand ist wiederherstellbar.
+        std::string neu = args[0].get<std::string>();
+        json nj = json::parse(neu, nullptr, false);
+        json alt = readLibraryGames();
+        if (nj.is_array() && alt.is_array() && alt.size() >= 3 && nj.size() * 2 < alt.size()) {
+            writeFile(dataDir() + L"\\games.json.vorher", alt.dump());
+            bcLogStream("save-games: Bibliothek schrumpft " + std::to_string(alt.size()) + " -> " + std::to_string(nj.size()) + " - alter Stand in games.json.vorher gesichert");
+        }
+        writeFile(dataDir() + L"\\games.json", neu); return true;
     }
     if (channel == "save-prefs" && args.size() >= 1 && args[0].is_string()) {
         writeFile(dataDir() + L"\\prefs.json", args[0].get<std::string>()); return true;
