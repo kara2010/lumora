@@ -75,7 +75,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/#app",
         "name": "Lumora",
-        "softwareVersion": "3.2.3",
+        "softwareVersion": "3.2.4",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1054,8 +1054,16 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.2.3</span>
+          <span class="release-ver">3.2.4</span>
           <span class="release-tag">aktuell</span>
+        </div>
+        <ul>
+          <li><strong>Rundum stabiler im Hintergrund</strong>: Lumora meldet sich jetzt mit einer festen App-Identität bei Windows an – für saubere Zuordnung in der Taskleiste und bei Hinweismeldungen. Stürzt die Anzeige-Komponente ab (etwa nach einem Grafiktreiber-Reset während des Spielens), lädt Lumora die Oberfläche automatisch neu, statt als leeres Fenster hängen zu bleiben. Und der Installer prüft, ob die nötige Microsoft-Laufzeitumgebung vorhanden ist, und installiert sie bei Bedarf nach – so startet Lumora auch auf frisch aufgesetzten Systemen zuverlässig.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.2.3</span>
         </div>
         <ul>
           <li><strong>Xbox- und Microsoft-Store-Spiele haben endlich ihr Symbol</strong> – bei diesen Titeln steckt das Icon nicht in der Programmdatei, sondern liegt als Bild im Spielordner. Lumora fand dort bisher nichts und zeigte die Kachel leer; jetzt wird das Paketlogo des Spiels verwendet. Bereits vorhandene Einträge holen ihr Symbol beim nächsten Anwählen automatisch nach, ein selbst gesetztes Bild bleibt erhalten.</li>
@@ -1091,6 +1099,7 @@
           <li>Ruckler-Berichte halten jetzt fest, ob während der Messung Systemereignisse verworfen werden mussten – so ist auf einen Blick erkennbar, wie belastbar das Ergebnis ist.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.1.2</span>
@@ -1099,7 +1108,6 @@
           <li><strong>Maximiertes Fenster kommt zuverlässig maximiert zurück</strong> – jetzt auch dann, wenn Lumora minimiert mit Windows startet. In diesem Fall zeigt Lumora zunächst nur das Symbol im Infobereich; öffnest du das Fenster später darüber oder per Hotkey, erscheint es wieder in der zuletzt genutzten Ansicht. Verkleinerst du es bewusst, bleibt das erhalten.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.1.1</span>
@@ -1437,7 +1445,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (30)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Ältere Versionen anzeigen (31)</button>
   </div>
 </section>
 
@@ -1854,7 +1862,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (30)';
+    btn.textContent = open ? 'Weniger anzeigen' : 'Ältere Versionen anzeigen (31)';
   }
 
   function toggleFeatures() {
