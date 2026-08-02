@@ -432,13 +432,47 @@ static BOOL CALLBACK gameWndProc(HWND h, LPARAM lp) {
 }
 static void raiseGameWindow(lulaunch::LaunchSession& s) {
     if (s.raised || !s.pid || GetTickCount64() > s.raiseUntil) return;
-    if (GetForegroundWindow() != g_hwnd) { s.raised = true; return; }   // Nutzer ist woanders - nicht dazwischenfunken
     GameWndSearch q{ s.pid, nullptr };
     EnumWindows(gameWndProc, (LPARAM)&q);
-    if (!q.hit) return;   // Fenster noch nicht da -> naechster Tick
+    HWND fg = GetForegroundWindow();
+
+    // 1) Das ECHTE Spielfenster ist vorn -> Ziel erreicht, nichts mehr zu tun.
+    //    Bewusst nur genau dieses Fenster (unbesessen, >=320x240) zaehlt als Erfolg:
+    //    ein Start-Splash desselben Prozesses darf NICHT als "geschafft" gelten -
+    //    er verschwindet gleich wieder und das Hauptfenster kaeme hinter Lumora hoch.
+    if (q.hit && fg == q.hit) { s.raised = true; return; }
+
+    // 2) Etwas Drittes ist vorn (weder Lumora noch das gesuchte Spielfenster).
+    //    Frueher wurde hier SOFORT und ENDGUELTIG aufgegeben - das war der Fehler:
+    //    beim Xbox-/UWP-Start schiebt die Shell kurz ein eigenes Fenster nach vorne,
+    //    und traf der Sekundentakt genau diesen Moment, war der Fix fuer diesen Start
+    //    tot (Log-belegt: gleicher Forza-Start mal mit, mal ohne Uebergabe).
+    //    Jetzt: ein paar Sekunden Geduld - ein Splash ist dann weg, ein bewusster
+    //    Fensterwechsel des Nutzers bleibt und beendet den Versuch weiterhin.
+    if (fg != g_hwnd) {
+        if (!s.foreignSince) s.foreignSince = GetTickCount64();
+        else if (GetTickCount64() - s.foreignSince > 4000) {
+            s.raised = true;
+            lulaunch::playLog(dataDir(), "FOREGROUND nicht uebergeben - Nutzer ist bei einem anderen Fenster");
+        }
+        return;
+    }
+    s.foreignSince = 0;   // Lumora wieder vorn: Splash war es also
+
+    if (!q.hit) return;   // Fenster noch nicht da -> naechster Tick (bis raiseUntil)
+    if (++s.raiseTries > 8) {   // Deckel: kein Dauer-Zwingen, falls das Fenster den Fokus partout nicht annimmt
+        s.raised = true;
+        lulaunch::playLog(dataDir(), "FOREGROUND nicht uebergeben - Spielfenster nimmt den Fokus nicht an");
+        return;
+    }
     forceForeground(q.hit);
-    s.raised = true;
-    lulaunch::playLog(dataDir(), "FOREGROUND an das Spielfenster uebergeben");
+    // Erfolg PRUEFEN statt annehmen. SetForegroundWindow wirkt asynchron - klappt es
+    // in diesem Takt noch nicht, faengt der naechste Tick es oben in Fall 1 ab.
+    if (GetForegroundWindow() == q.hit) {
+        s.raised = true;
+        lulaunch::playLog(dataDir(), "FOREGROUND an das Spielfenster uebergeben (Versuch "
+                                     + std::to_string((int)s.raiseTries) + ")");
+    }
 }
 static void launchAttachHandle(lulaunch::LaunchSession& s) {
     DWORD pid = lulaunch::probePid(s); if (!pid) return;
