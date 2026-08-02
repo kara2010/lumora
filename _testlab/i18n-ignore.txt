@@ -1,0 +1,95 @@
+# Ausnahmen fuer i18n-check.js: Texte, die in DE und EN IDENTISCH sind und
+# deshalb nicht ins Woerterbuch I18N_EN gehoeren.
+# Eine Zeichenkette pro Zeile (genau so, wie der Check sie meldet).
+# '#' leitet einen Kommentar ein. Vor dem Eintragen bitte kurz pruefen:
+# Ist der Text wirklich sprachneutral - oder fehlt nur die Uebersetzung?
+
+# --- Produkt-/Markennamen ---
+Lumora
+LIVE
+Steam
+Epic
+GOG
+Ubisoft
+Xbox
+EA
+Rockstar
+Battle.net
+Amazon
+Riot
+Discord
+Telegram
+WhatsApp
+SteamGridDB
+steamgriddb.com
+GitHub
+github.com/kara2010/lumora
+
+# --- Menue-/Rubrikbezeichnungen, die im Englischen gleich lauten ---
+Name
+Status
+Link
+API
+Profil          # engl. "profile" - Feldbeschriftung steht ohne Artikel, bewusst gleich
+Overlay
+Stream
+Analyse
+Updates
+Preferences
+Deutsch         # Sprachwahl zeigt beide Sprachen IMMER in ihrer eigenen Schreibweise
+English
+
+# --- Third-Party-Komponenten (Ueber-Dialog) ---
+libdatachannel
+libjuice
+libSRTP
+Mbed TLS
+usrsctp
+libopus
+opus-codec.org
+nlohmann/json
+ViGEmClient
+ViGEmBus
+nv-codec-headers
+AMF SDK
+libvpl
+WebView2
+developer.microsoft.com
+PawnIO
+PawnIO-Module
+pawnio.eu
+
+# --- Controller-Tastenbezeichnungen (Xbox-Beschriftung, sprachneutral) ---
+LT
+RT
+LB
+RB
+Back
+Start
+↔ X
+↕ Y
+
+# --- Fachbegriffe, im Englischen identisch ---
+Deadzone
+Median
+1%-Low
+HDR
+AV1
+H.264
+Opus
+FPS
+VRAM
+WebRTC
+WHEP
+TURN
+STUN
+IPv6
+IPv4
+NVIDIA (NVENC)
+Intel (QSV)
+AMD (AMF)
+
+# --- Technische Fragmente/Platzhalter ---
+OK
+resources\gruppe.php
+-Block innerhalb

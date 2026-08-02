@@ -103,6 +103,17 @@ $prev_0_2_11 = "" # 0.2.11: Streaming-Stabilitaet (Keyframe-VBV-Deckel, NACK/SSR
                      # 0.2.1: BF6-HDR-Fix, Gamepad-Fokus, GPU-Name, Bitrate-Presets 35/50
                      # 0.2.0: eigener Relay (mediamtx-Abloesung), native HDR, ETW-FPS, libvpl statisch
 
+# 0) Uebersetzung vollstaendig? (RELEASE.md Schritt 3 - jetzt automatisch statt von Hand)
+# Schluessel im Woerterbuch I18N_EN ist der DEUTSCHE SATZ selbst. Aendert jemand den
+# deutschen Text, findet der Schluessel nichts mehr und die englische Oberflaeche zeigt
+# an dieser Stelle STILL Deutsch - ohne Fehler, ohne Warnung. Genau so gingen 3.1.0 bis
+# 3.2.0 mit 7 Luecken raus. Darum ZUERST pruefen und bei Luecken abbrechen: lieber ein
+# fehlgeschlagener Bau als eine halb uebersetzte Version beim Nutzer.
+$node = (Get-Command node -EA SilentlyContinue).Source
+if (-not $node) { throw "node.exe nicht gefunden - fuer den Uebersetzungs-Check benoetigt" }
+& $node "$root\_testlab\i18n-check.js" "$root\index.html" "$root\_testlab\i18n-ignore.txt"
+if ($LASTEXITCODE -ne 0) { throw "Uebersetzungs-Check fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
+
 # 1) Shell frisch bauen (cmake PC-unabhaengig suchen: VS2022 BuildTools ODER VS2026 Community -
 # die Entwicklungs-PCs haben unterschiedliche Toolchains; build\ ist jeweils lokal konfiguriert)
 $cmake = @(
