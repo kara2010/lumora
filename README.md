@@ -11,6 +11,19 @@ streaming server — for a download of about 3.5 MB.
 
 Download & info: <https://lumora-streaming.de/>
 
+[![Lumora – list view with details, description and per-game HDR toggle](https://lumora-streaming.de/1.webp)](https://lumora-streaming.de/)
+
+<table>
+<tr>
+<td width="50%"><img src="https://lumora-streaming.de/3.webp" alt="Gaming OSD with GPU, CPU and FPS over a running game"><br><sub><b>Gaming OSD</b> – GPU, CPU & FPS live over the game, no Afterburner needed</sub></td>
+<td width="50%"><img src="https://lumora-streaming.de/stream.webp" alt="Stream tab with live preview and share link"><br><sub><b>Streaming</b> – send a link, friends watch in the browser (P2P WebRTC)</sub></td>
+</tr>
+<tr>
+<td><img src="https://lumora-streaming.de/analyse.webp" alt="Stutter analysis report with verdict, key figures and frame time graph"><br><sub><b>Stutter analysis</b> – finds out <i>why</i> a game stutters, in plain language</sub></td>
+<td><img src="https://lumora-streaming.de/eingabe-bruecke.webp" alt="Input bridge mapping a wheel to a virtual Xbox controller"><br><sub><b>Input bridge</b> – wheel, joystick or flight stick as a virtual Xbox pad</sub></td>
+</tr>
+</table>
+
 ## Features
 
 - **Cross-store** – finds games from Steam, Microsoft Store / Xbox, EA, Epic,

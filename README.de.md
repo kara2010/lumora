@@ -12,6 +12,19 @@ einem Download von rund 3,5 MB.
 
 Download & Infos: <https://lumora-streaming.de/>
 
+[![Lumora – Listenansicht mit Details, Beschreibung und HDR-Schalter pro Spiel](https://lumora-streaming.de/1.webp)](https://lumora-streaming.de/)
+
+<table>
+<tr>
+<td width="50%"><img src="https://lumora-streaming.de/3.webp" alt="Gaming-OSD mit GPU-, CPU- und FPS-Werten über einem laufenden Spiel"><br><sub><b>Gaming-OSD</b> – GPU, CPU & FPS live über dem Spiel, ohne Afterburner</sub></td>
+<td width="50%"><img src="https://lumora-streaming.de/stream.webp" alt="Stream-Tab mit Live-Vorschau und Teilen-Link"><br><sub><b>Streaming</b> – Link verschicken, Freunde schauen im Browser zu (P2P)</sub></td>
+</tr>
+<tr>
+<td><img src="https://lumora-streaming.de/analyse.webp" alt="Ruckler-Bericht mit Klartext-Urteil, Kennzahlen und Frametime-Kurve"><br><sub><b>Ruckler-Analyse</b> – findet in Klartext heraus, <i>warum</i> ein Spiel ruckelt</sub></td>
+<td><img src="https://lumora-streaming.de/eingabe-bruecke.webp" alt="Eingabe-Brücke: Lenkrad als virtueller Xbox-Controller"><br><sub><b>Eingabe-Brücke</b> – Lenkrad, Joystick oder Flightstick als Xbox-Pad</sub></td>
+</tr>
+</table>
+
 ## Features
 
 - **Store-übergreifend** – findet Spiele von Steam, Microsoft Store / Xbox,
