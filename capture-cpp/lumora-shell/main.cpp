@@ -800,6 +800,21 @@ static LRESULT CALLBACK doorWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     return DefWindowProcW(h, m, w, l);
 }
+// ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen! ####################
+// Fuenf Stellen erzeugen ein WebView2-Fenster nach DEMSELBEN Muster (Environment ->
+// Controller -> Host-Mappings -> SHIM_JS -> WebMessage-Handler -> Navigate -> sichtbar).
+// Zwischen Gaming-OSD und Analyse-OSD sind rund 34 der ~70 Zeilen woertlich identisch.
+//   createDoormanWindow()      (hier)
+//   createOsdWindow()          - Gaming-OSD, Composition + Click-Through
+//   createAnalyzeOsdWindow()   - Analyse-OSD, Composition + Click-Through
+//   createOsdEditWindow()      - OSD-Editor, normales Fenster
+//   wWinMain()                 - Hauptfenster, normaler Controller
+// Real passiert (bitte NICHT wiederholen): 67a44c7 Klick-durch nur im Gaming-OSD
+// gefixt, Analyse-OSD blieb kaputt; db76994 Transparenz/Groesse griffen beim ersten
+// Oeffnen nur in einem der beiden; 64dcbc3 Live-Vorschau nachtraeglich nachgezogen.
+// Zusammenfuehrung ist vorgemerkt (s. ARCHITEKTUR.md) - bis dahin gilt: wer eine
+// dieser Funktionen anfasst, prueft die anderen vier.
+// ####################################################################################
 static void createDoormanWindow() {
     if (g_doorHwnd) return;
     static bool reg = false;
@@ -3466,6 +3481,11 @@ static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     return DefWindowProcW(h, m, w, l);
 }
+// ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
+// Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
+// createOsdEditWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
+// real passierten Faelle stehen ueber createDoormanWindow. Wer hier etwas aendert,
+// prueft die anderen vier.
 static void createOsdWindow() {
     if (g_osdHwnd) return;
     static bool reg = false;
@@ -3605,6 +3625,11 @@ static LRESULT CALLBACK anOsdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     return DefWindowProcW(h, m, w, l);
 }
+// ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
+// Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
+// createOsdEditWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
+// real passierten Faelle stehen ueber createDoormanWindow. Wer hier etwas aendert,
+// prueft die anderen vier.
 static void createAnalyzeOsdWindow() {
     if (g_anOsdHwnd) return;
     static bool reg = false;
@@ -3854,6 +3879,11 @@ static LRESULT CALLBACK osdEditWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     return DefWindowProcW(h, m, w, l);
 }
+// ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
+// Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
+// createOsdEditWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
+// real passierten Faelle stehen ueber createDoormanWindow. Wer hier etwas aendert,
+// prueft die anderen vier.
 static void createOsdEditWindow() {
     if (g_osdEditHwnd) return;
     static bool reg = false;
@@ -5515,6 +5545,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     SetTimer(hwnd, TIMER_SRCWATCH, 3000, nullptr);   // Quellen-Watcher (sources-updated bei Fensteraenderungen)
     syncOsdVisibility();   // OSD-Overlay gemaess Einstellung anzeigen
 
+    // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
+    // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
+    // createOsdEditWindow. Ausfuehrliche Begruendung ueber createDoormanWindow.
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
     wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
     std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
