@@ -11,6 +11,7 @@
 Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "x64.nsh"   ; DisableX64FSRedirection: 64-bit-System32 aus dem 32-bit-Installer sehen
 
 !ifndef VERSION
   !define VERSION "0.1.0"
@@ -161,6 +162,38 @@ Section "Lumora"
   DetailPrint "WebView2-Runtime wird installiert..."
   ExecWait '"$INSTDIR\MicrosoftEdgeWebview2Setup.exe" /silent /install'
 wv2ok:
+
+  ; Visual-C++-Laufzeit (vcruntime140/msvcp140) pruefen. Die EXEs sind /MD gebaut und
+  ; brauchen diese DLLs; sie sind NICHT Teil von Windows, liegen aber auf fast allen
+  ; Win11-Maschinen schon in System32. Fuer die Ausnahmen (sauberes Win10, LTSC,
+  ; abgespeckte Images) das offizielle Redist nachladen - NICHT gebundelt (25 MB), sondern
+  ; nur im Bedarfsfall geholt (wie der WebView2-Weg, aber on-demand). $SYSDIR aus einem
+  ; 32-bit-Installer zeigt sonst per WOW64 auf SysWOW64 (32-bit-Laufzeit) - Redirection
+  ; abschalten, damit wir das ECHTE 64-bit-System32 pruefen.
+  ${If} ${RunningX64}
+    StrCpy $1 ""
+    ${DisableX64FSRedirection}
+    ${IfNot} ${FileExists} "$SYSDIR\vcruntime140.dll"
+      StrCpy $1 "fehlt"
+    ${ElseIfNot} ${FileExists} "$SYSDIR\msvcp140.dll"
+      StrCpy $1 "fehlt"
+    ${EndIf}
+    ${EnableX64FSRedirection}
+    ${If} $1 == "fehlt"
+      DetailPrint "Visual-C++-Laufzeit fehlt - wird von Microsoft geladen..."
+      nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile \"$TEMP\vc_redist.x64.exe\" -UseBasicParsing } catch { exit 1 }"'
+      Pop $2   ; Rueckgabecode des Downloads
+      ${If} ${FileExists} "$TEMP\vc_redist.x64.exe"
+        DetailPrint "Visual-C++-Laufzeit wird installiert..."
+        ExecWait '"$TEMP\vc_redist.x64.exe" /install /quiet /norestart'
+        Delete "$TEMP\vc_redist.x64.exe"
+      ${Else}
+        ; Kein Netz o.ae.: App-Dateien sind installiert, aber ohne Laufzeit startet Lumora
+        ; nicht. Ehrlich sagen, statt den Nutzer spaeter mit "DLL fehlt" alleinzulassen.
+        MessageBox MB_OK|MB_ICONEXCLAMATION "Lumora benoetigt die Microsoft Visual C++ Laufzeit, die auf diesem PC fehlt und gerade nicht geladen werden konnte (keine Internetverbindung?).$\n$\nBitte einmal 'Microsoft Visual C++ Redistributable (x64)' installieren - danach startet Lumora normal."
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
 
   ; Verknuepfungen + Uninstall-Eintrag je nach Namensraum
   ${If} $Migrate == "1"

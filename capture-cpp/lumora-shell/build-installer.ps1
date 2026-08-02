@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.2.3"   # 3.2.3: Xbox-/Microsoft-Store-Titel bekommen ihr Symbol (Paketlogo statt Exe-Icon).
+$version = "3.2.4"   # 3.2.4: App-Identitaet gesetzt, WebView2-Absturzerholung, VC++-Laufzeit-Pruefung im Installer.
                      #        3.1.1 speicherte den Zustand korrekt, wendete ihn aber im Regelfall
                      #        des Nutzers nie an: bei Autostart mit --minimized ruft wWinMain kein
                      #        ShowWindow auf, und das spaetere Oeffnen per Tray/Hotkey zeigte das
@@ -176,18 +176,10 @@ foreach ($b in "lumora-capture-native.exe","lumora-media-relay.exe","lumora-elev
 # gar nicht ("VCRUNTIME140.dll fehlt"). Electron hatte das Problem nie (bundelte alles).
 # Windows laedt DLLs zuerst aus dem EXE-Ordner -> die Kopien neben shell UND bin/ machen
 # die App unabhaengig vom Systemzustand (Microsofts "local deployment", offiziell erlaubt).
-# Genau die DLLs, die die vier EXEs importieren (per dumpbin ermittelte Union) - NICHT der
-# ganze CRT-Ordner (der waere ~1,8 MB statt ~0,7 MB). msvcp140 haengt selbst nur an den
-# beiden vcruntime-DLLs, mehr wird nicht nachgeladen (transitiv geprueft).
-$crtDir = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue |
-          Sort-Object FullName | Select-Object -Last 1
-if (-not $crtDir) { throw "VC++ Redist-CRT-Ordner nicht gefunden - App-lokale Laufzeit kann nicht mitgeliefert werden" }
-foreach ($n in "vcruntime140.dll","vcruntime140_1.dll","msvcp140.dll") {
-  $src = Join-Path $crtDir.FullName $n
-  if (-not (Test-Path $src)) { throw "VC++ Laufzeit-DLL fehlt: $src" }
-  Copy-Item $src $stage; Copy-Item $src "$stage\bin"
-}
-Write-Output "VC++ Laufzeit app-lokal: 3 DLLs aus $($crtDir.Name) -> shell + bin"
+# VC++-Laufzeit (vcruntime140/msvcp140) wird NICHT app-lokal mitgeliefert - sie liegt auf
+# nahezu allen Windows-11-Maschinen bereits in System32. Fuer die seltenen Ausnahmen
+# (sauberes Win10, LTSC/Enterprise, abgespeckte Images) prueft der Installer beim
+# Einrichten und laedt bei Bedarf das offizielle Redist nach (installer.nsi, wie WebView2).
 
 # Sensor-Module (OSD) neben die Shell (wie in der Electron-Struktur).
 # HDRCmd.exe entfaellt (eigener Code: launch_game.h setHDR),
