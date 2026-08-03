@@ -1750,7 +1750,8 @@ const I18N_EN = {
   'Bitte mit Strg/Alt/Shift kombinieren…': 'Please combine with Ctrl/Alt/Shift…',
   'Kein Controller verbunden – bitte zuerst anschließen.': 'No controller connected – please connect one first.',
   'Knöpfe drücken (auch mehrere gleichzeitig)…': 'Press buttons (several at once too)…',
-  'Tipp: z. B. D-Pad ← halten und Y dazu drücken. Loslassen speichert die Kombi.': 'Tip: e.g. hold D-pad ← and press Y as well. Releasing saves the combo.',
+  'Tipp: z. B. LB halten und Y dazu drücken. Loslassen speichert die Kombi.': 'Tip: e.g. hold LB and press Y as well. Releasing saves the combo.',
+  'Achtung: Steuerkreuz-Knöpfe in einer Kombi stehen für die Navigation nicht mehr zur Verfügung.': 'Note: D-pad buttons used in a combo are no longer available for navigation.',
   'Wird geladen… ': 'Downloading… ',
   ' wurde geladen.': ' has been downloaded.',
   ' · kostenlos': ' · free',
@@ -5396,7 +5397,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       gpCaptureArmed = false          // A, mit dem "Aufnehmen" aktiviert wurde, erst loslassen
       document.getElementById(s.disp).textContent = window.tr('Knöpfe drücken (auch mehrere gleichzeitig)…')
       document.getElementById(s.btn).textContent = window.tr('Abbrechen')
-      if (hint) { hint.style.display = 'block'; hint.textContent = window.tr('Tipp: z. B. D-Pad ← halten und Y dazu drücken. Loslassen speichert die Kombi.') }
+      // Beispiel bewusst OHNE Steuerkreuz: das alte ("D-Pad ← halten und Y dazu")
+      // empfahl ausgerechnet die Kombination, die anschliessend die Navigation nach
+      // links kostet.
+      if (hint) { hint.style.display = 'block'; hint.textContent = window.tr('Tipp: z. B. LB halten und Y dazu drücken. Loslassen speichert die Kombi.') }
     }
     function stopGpHotkeyCapture() {
       const slot = gpCaptureSlot
@@ -5415,10 +5419,22 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (!slot) return
       const s = GP_SLOTS[slot]
       const b = document.getElementById(s.btn); if (b) b.textContent = window.tr('Aufnehmen')
-      const hint = document.getElementById(s.hint); if (hint) hint.style.display = 'none'
+      const hint = document.getElementById(s.hint)
       appSettingsCache[s.key] = combo
       await ipcRenderer.invoke('set-app-settings', { [s.key]: combo })
       refreshGpHotkeyDisplay(slot)
+      // Richtungsknoepfe in einer Kombi kosten die Navigation in diese Richtung:
+      // sie lebt von der Autowiederholung beim Halten, die sich nicht erst beim
+      // Loslassen werten laesst (anders als A/B/X/Y/Start, die das koennen).
+      // Der Hotkey wird trotzdem gespeichert - es ist eine bewusste Wahl, kein
+      // Fehler. Aber sie muss SICHTBAR sein: genau so ist die A-Taste einmal
+      // stillschweigend verschwunden.
+      const richt = combo.filter(i => i >= 12 && i <= 15)
+      if (hint && richt.length) {
+        hint.style.display = 'block'
+        hint.textContent = window.tr('Achtung: Steuerkreuz-Knöpfe in einer Kombi stehen für die Navigation nicht mehr zur Verfügung.')
+          + ' (' + gpComboLabel(richt) + ')'
+      } else if (hint) hint.style.display = 'none'
     }
     async function clearGpHotkey(slot) {
       if (gpCaptureSlot === slot) stopGpHotkeyCapture()
@@ -5989,6 +6005,17 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // Fenster-/OSD-Gamepad-Kombis, darum wird erst beim LOSLASSEN geschaltet und nur, wenn waehrend
     // des Haltens keine Kombi mitlief (sonst springt das Formen von LB+RB einen Tab weiter).
     let gpLbHeld = false, gpLbCombo = false, gpRbHeld = false, gpRbCombo = false
+    // Knopf-Index -> Name + Einzelaktion. EINE Quelle fuer beide Auswertungspfade:
+    // die normale Sofort-Wertung (gpTap) und die Loslass-Wertung fuer Knoepfe, die
+    // Teil eines Gamepad-Hotkeys sind.
+    const GP_TAPS = [
+      [0, 'a',     () => navActivate()],
+      [1, 'b',     () => navBack()],
+      [2, 'x',     () => navFavorite()],
+      [3, 'y',     () => navContext()],
+      [9, 'start', () => navStart()],
+    ]
+    let gpHkHeld = {}, gpHkCombo = {}   // je Knopf-Index: gehalten? / lief eine Kombi mit?
 
     function gpEdge(name, active, fn) {
       const now = performance.now()
@@ -6061,17 +6088,44 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         else if (gpRbHeld) { if (!gpRbCombo) gpSwitchTab(1); gpRbHeld = false; gpRbCombo = false }
       } else { gpLbHeld = gpLbCombo = gpRbHeld = gpRbCombo = false }
 
+      // 2c) Knöpfe, die Teil eines Gamepad-Hotkeys sind, bekommen GENAU dieselbe
+      //     Behandlung wie LB/RB darüber: gewertet wird beim Loslassen, und nur wenn
+      //     währenddessen keine Kombi mitlief.
+      //     Vorher wurden solche Knöpfe pauschal gesperrt. Das war ein stiller
+      //     Totalausfall: wer den OSD-Hotkey auf A+LB legte, konnte mit A kein Spiel
+      //     mehr starten – A ist der Startknopf. Keine Meldung, kein Hinweis, und die
+      //     Vorgabe ist leer, weshalb es beim Testen nie auffiel.
+      //     Muss VOR dem Kombi-Guard stehen: solange die Kombi gedrückt ist, kehrt die
+      //     Funktion unten um, und die Loslass-Flanke käme nie hier an.
+      const hkAlle = new Set([...(cMain || []), ...(cOsd || []), ...(cAn || [])])
+      // Ein Hotkey aus EINEM Knopf ist der Knopf selbst - der darf nie zusätzlich
+      // seine Einzelaktion auslösen.
+      const nurHotkey = new Set(
+        [cMain, cOsd, cAn].filter(c => Array.isArray(c) && c.length === 1).map(c => c[0]))
+      if (document.hasFocus()) {
+        for (const [idx, nm, fn] of GP_TAPS) {
+          if (!hkAlle.has(idx)) continue
+          if (b[idx] && b[idx].pressed) {
+            gpHkHeld[idx] = true
+            if (comboDown) gpHkCombo[idx] = true
+          } else if (gpHkHeld[idx]) {
+            gpHkHeld[idx] = false
+            const warKombi = gpHkCombo[idx]; gpHkCombo[idx] = false
+            if (!warKombi && !nurHotkey.has(idx)) fn()
+          }
+        }
+      } else { gpHkHeld = {}; gpHkCombo = {} }
+
       // 3) Navigation nur im Vordergrund und nicht, während die Kombi aktiv ist
       //    (damit der Toggle-Moment nicht zusätzlich navigiert).
       if (comboDown || !document.hasFocus()) return
 
-      // Knöpfe, die Teil eines Gamepad-Hotkeys sind (Oberfläche/OSD), dürfen ihre
-      // Einzelaktion NICHT auslösen. Sonst startet z. B. beim Hotkey "View+Menu" der
-      // Menü-Knopf allein das Spiel, wenn beide Knöpfe minimal versetzt gedrückt/
-      // losgelassen werden (nur einer ist kurz für sich gedrückt). dn() blendet
-      // solche Knöpfe aus – gpTap/gpEdge halten deren Flanke damit sauber auf „aus".
-      const hk = new Set([...(cMain || []), ...(cOsd || [])])
-      const dn = (idx) => !hk.has(idx) && !!(b[idx] && b[idx].pressed)
+      // dn() blendet die Hotkey-Knöpfe hier aus – ihre Einzelaktion hat 2c) schon
+      // beim Loslassen erledigt, gpTap/gpEdge halten deren Flanke sauber auf „aus".
+      // Richtungsknöpfe bleiben ausgeblendet OHNE Ersatz in 2c): Navigation lebt von
+      // der Autowiederholung beim Halten, die sich mit einer Loslass-Wertung nicht
+      // vereinbaren lässt. Davor schützt der Hinweis in der Hotkey-Aufnahme.
+      const dn = (idx) => !hkAlle.has(idx) && !!(b[idx] && b[idx].pressed)
       const up = dn(12) || ax[1] < -GP_DEAD
       const down = dn(13) || ax[1] > GP_DEAD
       const left = dn(14) || ax[0] < -GP_DEAD
@@ -6080,11 +6134,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       gpEdge('down', down, () => navMove('down'))
       gpEdge('left', left, () => navMove('left'))
       gpEdge('right', right, () => navMove('right'))
-      gpTap('a', dn(0), () => navActivate())
-      gpTap('b', dn(1), () => navBack())
-      gpTap('x', dn(2), () => navFavorite())
-      gpTap('y', dn(3), () => navContext())
-      gpTap('start', dn(9), () => navStart())
+      // Dieselbe Liste, die 2c) benutzt - EINE Quelle. Zwei getrennte Aufzaehlungen
+      // waeren genau die Stelle, an der ein spaeter ergaenzter Knopf in einem der
+      // beiden Pfade fehlt und dort still ausfaellt.
+      for (const [idx, nm, fn] of GP_TAPS) gpTap(nm, dn(idx), fn)
 
       // Rechter Stick: freies Scrollen der aktuellen Liste (ergänzende Steuerung,
       // unabhängig von der Fokus-Navigation).
