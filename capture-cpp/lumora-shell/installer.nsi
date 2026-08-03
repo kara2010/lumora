@@ -218,6 +218,15 @@ wv2ok:
     Delete "$SMPROGRAMS\Lumora Native (Beta).lnk"
     Delete "$DESKTOP\Lumora Native (Beta).lnk"
   ${EndIf}
+
+  ; Tote Electron-Verknuepfung aus der Umstiegszeit entfernen. Sie trug die AUMID
+  ; com.lumora.app und zeigte auf die (laengst deinstallierte) Electron-App. Die native
+  ; App setzt seit 3.2.4 dieselbe AUMID - daraufhin nahm Windows Namen ("Electron") und
+  ; totes Icon DIESER Verknuepfung fuer die Taskleiste, statt Fenstertitel/-Icon der
+  ; nativen App. Betrifft jeden, der von der Electron-Version kommt.
+  Delete "$SMPROGRAMS\Electron.lnk"
+  Delete "$DESKTOP\Electron.lnk"
+
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   ; Silent-Install = immer Auto-Update-Kontext (electron-updater beim Electron->nativ-
