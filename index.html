@@ -1900,14 +1900,32 @@ function applyI18n() {
 
     // Spiele & Einstellungen aus Dateien laden (kein localStorage → kein langsames
     // leveldb-Recovery beim Start, zuverlässige Persistenz).
+    // Robuster synchroner Start-Lesezugriff mit kurzer Wiederholung. Direkt nach einem
+    // Absturz oder harten Neustart kann die Ressourcen-Anbindung (Virtual-Host
+    // data.lumora) noch nicht bereitstehen; der erste Lesevorgang liefert dann NULL
+    // (die Anfrage schlug fehl - NICHT zu verwechseln mit "Datei ist leer"). Ein
+    // einzelner Fehlversuch wuerde Bibliothek UND Einstellungen faelschlich als leer
+    // behandeln: der Scan-Dialog kaeme hoch, Einstellungen fielen auf Standard zurueck.
+    // Darum bis zu ~0,5 s lang erneut versuchen, solange NULL zurueckkommt. Eine leere,
+    // aber VORHANDENE Datei liefert echten Inhalt ("[]"/"{}", HTTP 200) und bricht sofort
+    // ab; ein echter Neustart/Neuinstall (Datei fehlt) laeuft alle Versuche durch und
+    // zeigt danach korrekt den Scan-Dialog. Nur beim Fehlversuch entsteht die Wartezeit.
+    function loadSyncFile(channel) {
+      for (let i = 0; i < 12; i++) {
+        let raw = null
+        try { raw = ipcRenderer.sendSync(channel) } catch {}
+        if (raw != null) return raw
+        if (i < 11) { const bis = Date.now() + 40; while (Date.now() < bis) { /* kurz warten, dann erneut */ } }
+      }
+      return null
+    }
+
     let games = (function () {
-      let raw = null
-      try { raw = ipcRenderer.sendSync('load-games-sync') } catch {}
-      try { return JSON.parse(raw || '[]') } catch { return [] }
+      try { return JSON.parse(loadSyncFile('load-games-sync') || '[]') } catch { return [] }
     })()
 
     const _prefs = (function () {
-      try { const r = ipcRenderer.sendSync('load-prefs-sync'); return r ? JSON.parse(r) : {} } catch { return {} }
+      try { const r = loadSyncFile('load-prefs-sync'); return r ? JSON.parse(r) : {} } catch { return {} }
     })()
 
     let selectedIndex = -1
