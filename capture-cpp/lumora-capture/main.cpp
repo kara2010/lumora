@@ -876,6 +876,13 @@ int main(int argc, char** argv) {
         else if (a == "--audio-pid" && i + 1 < argc) { audioPid = (DWORD)strtoul(argv[++i], nullptr, 0); g_withAudio = true; }
         else if (a == "--audio") g_withAudio = true;
         else if (a == "--audio-nobytes") { g_withAudio = true; g_audioNoBytes = true; } }
+    // Argumente absichern, BEVOR sie irgendwo als Divisor/Modulo dienen. fps==0 (aus
+    // "--fps 0", nicht-numerischem atoi oder einem Settings-Fehler in der Shell) liess
+    // "frameTick % fps" (weiter unten) hart abstuerzen - eine Stelle war gegen fps==0
+    // geschuetzt, die andere nicht. Zentral klemmen statt an jeder Nutzungsstelle einzeln.
+    if (fps < 1 || fps > 480) { printf("fps %d ungueltig -> 60\n", fps); fps = 60; }
+    if (mbit < 1) { printf("bitrate %d ungueltig -> 20\n", mbit); mbit = 20; }
+    if (scaleH < 0) scaleH = 0;   // 0 = keine Skalierung
     if (findWindow && !targetHwnd) { FindCtx fc; fc.self = GetConsoleWindow(); EnumWindows(enumProc, (LPARAM)&fc); targetHwnd = fc.best; }
 
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
