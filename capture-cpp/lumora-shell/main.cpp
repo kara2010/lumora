@@ -4687,7 +4687,10 @@ static json handleChannel(const std::string& channel, const json& args) {
                                 {"avgFps", j.value("avgFps", 0.0)}, {"p1LowFps", j.value("p1LowFps", 0.0)},
                                 {"spikesPerMin", j.value("spikesPerMin", 0.0)},
                                 {"verdictKey", j.value("verdictKey", "")}, {"verdictName", j.value("verdictName", "")},
-                                {"note", j.value("note", "")} });
+                                {"note", j.value("note", "")},
+                                // Teil-Angaben mitgeben, damit der Verlauf "geteilt" zeigen
+                                // und den Link/die Ruecknahme anbieten kann.
+                                {"share", j.contains("share") ? j["share"] : json(nullptr)} });
             }
         }
         return out;
@@ -4715,6 +4718,39 @@ static json handleChannel(const std::string& channel, const json& args) {
         if (!j.is_object()) return false;
         j["note"] = args[1];
         return writeFile(analyzeDirW() + L"\\" + fn, j.dump());
+    }
+    // --- Bericht teilen -----------------------------------------------------------
+    // Die Shell laedt NUR hoch, was die UI ihr uebergibt: gereinigt und vom Nutzer im
+    // Vorschau-Dialog gesehen. Hier wird bewusst NICHT nochmal aus der Datei gelesen -
+    // sonst koennte ungeprueftes Material das Haus verlassen.
+    if (channel == "analyze-share" && args.size() >= 1 && args[0].is_object()) {
+        std::string body = args[0].dump();
+        if (body.size() > 250000) return json{ {"ok", false}, {"error", "zu-gross"} };
+        luart::HttpResp r = luart::httpPost("https://lumora-streaming.de/bericht.php", body, 20000);
+        json a = json::parse(r.body, nullptr, false);
+        if (r.status == 0) return json{ {"ok", false}, {"error", "kein-netz"} };
+        if (!a.is_object()) return json{ {"ok", false}, {"error", "antwort-unlesbar"} };
+        return a;
+    }
+    // Teil-Angaben beim Lauf vermerken (Link + Ruecknahme-Schluessel) - rein lokal.
+    if (channel == "analyze-note-share" && args.size() >= 2 && args[1].is_object()) {
+        std::wstring fn = anSafeName(args); if (fn.empty()) return false;
+        json j = json::parse(readFile(analyzeDirW() + L"\\" + fn), nullptr, false);
+        if (!j.is_object()) return false;
+        j["share"] = args[1];
+        return writeFile(analyzeDirW() + L"\\" + fn, j.dump());
+    }
+    if (channel == "analyze-unshare" && args.size() >= 1) {
+        std::wstring fn = anSafeName(args); if (fn.empty()) return false;
+        std::wstring pfad = analyzeDirW() + L"\\" + fn;
+        json j = json::parse(readFile(pfad), nullptr, false);
+        if (!j.is_object() || !j.contains("share")) return false;
+        std::string id = j["share"].value("id", ""), tok = j["share"].value("token", "");
+        if (!id.empty() && !tok.empty())
+            luart::httpGet("https://lumora-streaming.de/bericht.php?a=del&id=" + id + "&token=" + tok, L"", 15000);
+        j.erase("share");                      // lokal in jedem Fall entfernen: der Nutzer
+        writeFile(pfad, j.dump());             // hat zurueckgezogen, das darf nicht am Netz haengen
+        return true;
     }
     if (channel == "list-gpus") {   // auslesbare GPUs (NVML + ADL), Format {id,label} wie listGpus
         nvmlInitOnce(); luadl::setup();
@@ -4856,6 +4892,7 @@ static bool isSlowChannel(const std::string& c) {
            c == "list-viewers" || c == "kick-viewer" || c == "preview-whep" || c == "preview-whep-stop" ||
            c == "group-start" || c == "group-join" || c == "group-leave" || c == "group-status" ||
            c == "test-connectivity" ||   // STUN+UPnP-Proben ~10s   // Vermittlungs-Netz
+           c == "analyze-share" || c == "analyze-unshare" ||   // HTTP zum Berichts-Endpunkt
            c == "input-bridge-start" || c == "input-bridge-list-devices";   // ViGEm-Connect / HID-Handles
 }
 static void onWebMessage(const std::wstring& raw, HWND replyWnd) {

@@ -28,6 +28,12 @@ Options -Indexes
   # (Repo-weit geprueft) - daher ohne Pfad-Ausnahmen dauerhaft auf non-www umleiten.
   RewriteCond %{HTTP_HOST} ^www\.lumora-streaming\.de$ [NC]
   RewriteRule ^(.*)$ https://lumora-streaming.de/$1 [R=301,L]
+
+  # Kurze Adresse fuer geteilte Ruckler-Berichte: /b/<id> -> bericht.php?id=<id>
+  # Die ID ist bewusst kurz und vorlesbar (6 Zeichen, ohne 0/1/i/l/o) - der Link soll
+  # sich in einem Forenbeitrag oder Chat abtippen lassen. Intern KEIN Redirect, sondern
+  # stille Weiterleitung: die schoene Adresse bleibt in der Adresszeile stehen.
+  RewriteRule ^b/([a-z0-9]{6})/?$ bericht.php?id=$1 [L,QSA]
 </IfModule>
 
 # Beim Aufruf des Ordners immer index.html ausliefern
