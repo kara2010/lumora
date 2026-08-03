@@ -12,7 +12,8 @@ declare(strict_types=1);
 
 const MAX_BYTES     = 262144;      // 256 KB je Bericht (echte Berichte: 5-30 KB)
 const MAX_PRO_IP    = 10;          // Uploads je Stunde und IP
-const MAX_GESAMT_MB = 500;         // harter Deckel; danach wird nichts mehr angenommen
+const MAX_GESAMT_MB = 500;         // harter Deckel (Bytes); danach wird nichts mehr angenommen
+const MAX_ANZAHL    = 50000;       // harter Deckel (Dateien) gegen Inode-Erschoepfung
 const WARN_GESAMT_MB= 400;         // ab hier Warnung in der Uebersicht
 const TTL_TAGE      = 365;         // ohne Abruf nach 12 Monaten weg
 const ID_ZEICHEN    = '23456789abcdefghjkmnpqrstuvwxyz';   // ohne 0/1/i/l/o - vorlesbar
@@ -34,10 +35,13 @@ function id_ok(string $id): bool { return (bool) preg_match('/^[' . ID_ZEICHEN .
 function pfad(string $dir, string $id): string { return $dir . '/' . $id . '.json'; }
 function meta_pfad(string $dir, string $id): string { return $dir . '/' . $id . '.meta'; }
 
-function belegt_mb(string $dir): float {
-  $s = 0;
-  foreach ((array) @glob($dir . '/*.json') as $f) { $s += (int) @filesize($f); }
-  return $s / 1048576;
+// Belegung in EINEM Durchlauf: Megabyte UND Anzahl. Der MB-Deckel allein reicht nicht -
+// ein winziger gueltiger Bericht ist ~200 Bytes, unter 500 MB passen Millionen davon und
+// erschoepfen die Inodes, lange bevor der MB-Deckel greift.
+function belegung(string $dir): array {
+  $s = 0; $n = 0;
+  foreach ((array) @glob($dir . '/*.json') as $f) { $s += (int) @filesize($f); $n++; }
+  return ['mb' => $s / 1048576, 'anzahl' => $n];
 }
 
 // Abgelaufene Berichte entfernen. Laeuft nur beim Hochladen (selten genug), kein Cronjob.
@@ -89,6 +93,107 @@ function bericht_ok($j): bool {
   return true;
 }
 
+// ---- Der zentrale Schutz: den Bericht aus einer WHITELIST neu aufbauen. ----------
+// Dies ist ein oeffentlicher, anmeldungsfreier Schreib-Endpunkt: jeder kann per curl
+// beliebiges JSON schicken, das anschliessend jedem Betrachter ausgeliefert wird.
+// bericht_ok() prueft nur, ob die Pflichtfelder DA sind - nicht, was sonst noch drin
+// steht. Wuerde das Rohobjekt gespeichert, landete jedes Zusatzfeld (context.resolution,
+// aggregate[].kind, limit.top, ...) ungefiltert in innerHTML -> gespeichertes XSS auf
+// der eigenen Domain. Darum wird hier NUR das uebernommen, was die Anzeige liest, mit
+// festem Typ, gedeckelter Laenge und - bei Schluesseln, die als Label dienen - nur aus
+// einer erlaubten Menge. Was hier herausfaellt, kann nachgelagert nichts mehr anrichten,
+// egal welcher Renderer (Browser, Discord-Crawler, kuenftige Vorlage) es liest.
+function s_txt($v, int $max): string {
+  $s = is_scalar($v) ? (string) $v : '';
+  // < > und " ganz entfernen: damit ist der gespeicherte String in JEDEM HTML-Kontext
+  // inert - als Textknoten (kein Tag moeglich) UND in einem Attribut (kein Ausbruch
+  // aus "..."). Kein legitimer Prozess-/GPU-/Aufloesungsname enthaelt diese Zeichen.
+  // Unabhaengig davon escaped die Anzeige zusaetzlich; dies ist die Schicht, die die
+  // DATEI selbst sauber haelt, egal welcher Renderer sie liest.
+  $s = str_replace(["\0", '<', '>', '"'], '', $s);
+  $s = preg_replace('/[\x00-\x1f\x7f]/u', '', $s) ?? '';  // uebrige Steuerzeichen
+  return mb_substr(trim($s), 0, $max);
+}
+function s_flt($v): float { return is_numeric($v) ? (float) $v : 0.0; }
+function s_int($v): int   { return is_numeric($v) ? (int) $v : 0; }
+function s_bool($v): bool { return (bool) $v; }
+function s_clamp(int $v, int $lo, int $hi): int { return max($lo, min($hi, $v)); }
+function s_datei(string $p): string {                    // nur Dateiname, nie Pfad
+  $p = str_replace('\\', '/', $p);
+  $i = strrpos($p, '/');
+  return $i === false ? $p : substr($p, $i + 1);
+}
+
+function bereinige(array $j): array {
+  $VERDICTS = ['clean','driver','process','gpu-throttle','vram','disk','proc-start','game-internal'];
+  $KINDS    = ['driver','process','gpu-throttle','vram','disk','proc-start','game-internal'];
+  $LIMITS   = ['gpu','cpu','cpu-core','framecap','throttle','vram','unknown'];
+
+  $vk = is_string($j['verdictKey'] ?? null) ? $j['verdictKey'] : '';
+  $out = [
+    'version'     => 1,
+    'wall'        => s_txt($j['wall'] ?? '', 40),
+    'durS'        => s_flt($j['durS'] ?? 0),
+    'avgFps'      => s_flt($j['avgFps'] ?? 0),
+    'medianFtMs'  => s_flt($j['medianFtMs'] ?? 0),
+    'p1LowFps'    => s_flt($j['p1LowFps'] ?? 0),
+    'p99FtMs'     => s_flt($j['p99FtMs'] ?? 0),
+    'spikes'      => s_int($j['spikes'] ?? 0),
+    'spikesPerMin'=> s_flt($j['spikesPerMin'] ?? 0),
+    'verdictKey'  => in_array($vk, $VERDICTS, true) ? $vk : 'game-internal',
+    'verdictName' => s_datei(s_txt($j['verdictName'] ?? '', 64)),   // kann ein Prozessname sein
+    'verdictHits' => s_int($j['verdictHits'] ?? 0),
+    'game'        => s_datei(s_txt($j['game'] ?? '', 128)),
+    'gpu'         => s_txt($j['gpu'] ?? '', 64),
+    'gpuDriver'   => s_txt($j['gpuDriver'] ?? '', 32),
+  ];
+
+  // Kontextzeile: Aufloesung nur im erwarteten Muster, sonst weg. game NIE (Pfad).
+  $ctx = is_array($j['context'] ?? null) ? $j['context'] : [];
+  $res = s_txt($ctx['resolution'] ?? '', 16);
+  $out['context'] = [
+    'resolution' => preg_match('/^\d{1,5}x\d{1,5}(@\d{1,3})?$/', $res) ? $res : '',
+    'hdr'        => s_bool($ctx['hdr'] ?? false),
+    'streaming'  => s_bool($ctx['streaming'] ?? false),
+  ];
+
+  // Kurve + Ruckler: rein numerisch, nur was der Canvas zeichnet. Laengen gedeckelt.
+  $out['ftSeries'] = [];
+  foreach (array_slice((array) ($j['ftSeries'] ?? []), 0, 4000) as $p) {
+    if (is_array($p) && count($p) >= 2) $out['ftSeries'][] = [s_flt($p[0]), s_flt($p[1])];
+  }
+  $out['findings'] = [];
+  foreach (array_slice((array) ($j['findings'] ?? []), 0, 2000) as $fd) {
+    if (is_array($fd)) $out['findings'][] = ['t' => s_flt($fd['t'] ?? 0), 'ftMs' => s_flt($fd['ftMs'] ?? 0)];
+  }
+
+  // Verdaechtigen-Balken: kind nur aus der erlaubten Menge (sonst Zeile raus),
+  // name gedeckelt, hits als Zahl. name kann ein Prozessname sein -> Dateiname-Schutz.
+  $out['aggregate'] = [];
+  foreach (array_slice((array) ($j['aggregate'] ?? []), 0, 24) as $a) {
+    if (!is_array($a)) continue;
+    $kind = is_string($a['kind'] ?? null) ? $a['kind'] : '';
+    if (!in_array($kind, $KINDS, true)) continue;
+    $out['aggregate'][] = [
+      'kind' => $kind,
+      'name' => s_datei(s_txt($a['name'] ?? '', 64)),
+      'hits' => s_clamp(s_int($a['hits'] ?? 0), 0, 100000),
+    ];
+  }
+
+  // Flaschenhals: alle Werte numerisch, top nur aus der erlaubten Menge.
+  if (is_array($j['limit'] ?? null)) {
+    $L = $j['limit'];
+    $lim = ['samples' => s_int($L['samples'] ?? 0), 'topPct' => s_clamp(s_int($L['topPct'] ?? 0), 0, 100)];
+    foreach ($LIMITS as $k) $lim[$k] = s_clamp(s_int($L[$k] ?? 0), 0, 100);
+    $top = is_string($L['top'] ?? null) ? $L['top'] : '';
+    $lim['top'] = in_array($top, $LIMITS, true) ? $top : 'unknown';
+    $out['limit'] = $lim;
+  }
+
+  return $out;
+}
+
 $a  = $_GET['a']  ?? '';
 $id = strtolower(trim((string) ($_GET['id'] ?? '')));
 $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
@@ -97,7 +202,10 @@ $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $a === '') {
   if (!rate_ok($dir, $ip)) jout(['ok' => false, 'error' => 'zu-viele'], 429);
   aufraeumen($dir);
-  if (belegt_mb($dir) >= MAX_GESAMT_MB) jout(['ok' => false, 'error' => 'server-voll'], 507);
+  $bel = belegung($dir);
+  if ($bel['mb'] >= MAX_GESAMT_MB || $bel['anzahl'] >= MAX_ANZAHL) {
+    jout(['ok' => false, 'error' => 'server-voll'], 507);
+  }
 
   $roh = file_get_contents('php://input', false, null, 0, MAX_BYTES + 1);
   if ($roh === false || $roh === '') jout(['ok' => false, 'error' => 'leer'], 400);
@@ -106,21 +214,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $a === '') {
   $j = json_decode($roh, true);
   if (!bericht_ok($j)) jout(['ok' => false, 'error' => 'kein-lumora-bericht'], 400);
 
-  // Pfade serverseitig entfernen - VERTEIDIGUNG IN DER TIEFE. Die App reinigt bereits
-  // vor dem Hochladen, aber hier landet alles, was jemand schickt: ein direkter POST
-  // (oder eine aeltere App-Version) koennte den vollen Pfad mitbringen, und darin steckt
-  // regelmaessig der Windows-Benutzername. Beim Live-Test genau so passiert: der Pfad
-  // stand in der og:description, also in der Vorschaukarte von Discord/WhatsApp.
-  $nurDatei = static function ($p) {
-    $p = str_replace('\\', '/', (string) $p);
-    $i = strrpos($p, '/');
-    return $i === false ? $p : substr($p, $i + 1);
-  };
-  if (isset($j['game'])) $j['game'] = $nurDatei($j['game']);
-  if (isset($j['context']) && is_array($j['context'])) {
-    unset($j['context']['game']);                 // dort steht der Pfad ein zweites Mal
-  }
-  unset($j['note']);                              // eigene Notizen sind privat
+  // Aus einer Whitelist neu aufbauen: nur bekannte Felder, feste Typen, gedeckelte
+  // Laengen, Label-Schluessel nur aus erlaubten Mengen. Pfade und die private Notiz
+  // fallen dabei von selbst weg, weil sie schlicht nicht uebernommen werden.
+  $j = bereinige($j);
 
   // Freie ID suchen
   $id = '';
@@ -234,6 +331,19 @@ if ($r) {
     : $spikes . ' Ruckler in ' . $min . ' min · ø ' . $fps . ' fps' . $spiel . ' – gemessen mit Lumora.';
 }
 $h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
+
+// Letzte Schutzschicht: selbst WENN doch einmal Fremdtext in die Seite geraet, darf er
+// kein Skript ausfuehren. script-src 'self' verbietet sowohl <script>-Einschleusung als
+// auch Inline-Handler (onerror=...). Die Seite braucht nur zwei eigene Skripte und ein
+// eigenes Stylesheet; Inline-STYLES (die Balkenbreiten) bleiben erlaubt - CSS kann kein
+// Skript starten, und ihre Werte sind ohnehin schon serverseitig auf Zahlen reduziert.
+// frame-ancestors 'none' unterbindet Einbettung (Clickjacking).
+header("Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+     . "img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');   // aeltere Browser ohne frame-ancestors
+// Referrer-Policy kommt bereits aus der globalen .htaccess (strict-origin-when-cross-origin);
+// der geteilte Link traegt ohnehin nur die oeffentliche ID, kein Geheimnis.
 ?><!DOCTYPE html>
 <html lang="<?= $lang ?>">
 <head>
