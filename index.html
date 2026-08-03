@@ -1104,6 +1104,36 @@
   </div>
 
   <!-- Spielzeit-Rückblick -->
+  <!-- Bericht teilen: zeigt VOR dem Hochladen den tatsächlich zu sendenden Text.
+       Bewusst der Rohtext und keine Beschreibung davon - nur so kann der Nutzer
+       wirklich prüfen, was das Haus verlässt. -->
+  <div class="overlay" id="shareOverlay" style="display:none">
+    <div class="dialog" style="max-width:760px">
+      <div class="review-head">
+        <h2>Bericht als Link teilen</h2>
+        <button class="btn-delete" onclick="document.getElementById('shareOverlay').style.display='none'" title="Schließen">✕</button>
+      </div>
+      <p class="settings-hint" style="margin:0 0 12px">
+        Der Bericht wird auf lumora-streaming.de abgelegt und ist über einen kurzen Link abrufbar.
+        Du kannst ihn jederzeit wieder zurückziehen. Es wird kein Konto angelegt.
+      </p>
+      <label class="switch-row"><input type="checkbox" id="shareOhneProzesse" onchange="anShareRefresh()">
+        <span>Prozessnamen weglassen (werden zu „Prozess A/B/C“ – die Aussage bleibt)</span></label>
+      <label class="switch-row"><input type="checkbox" id="shareOhneSpiel" onchange="anShareRefresh()">
+        <span>Spielnamen weglassen</span></label>
+      <p class="settings-hint" style="margin:12px 0 4px"><b>Das wird gesendet:</b> (Dateipfade sind bereits entfernt)</p>
+      <textarea id="shareVorschau" readonly spellcheck="false"
+        style="width:100%;height:210px;font-family:Consolas,monospace;font-size:11.5px;line-height:1.45;
+               background:rgba(0,0,0,.28);color:#c8d4e4;border:1px solid rgba(255,255,255,.09);
+               border-radius:9px;padding:10px;resize:vertical"></textarea>
+      <p class="settings-hint" id="shareStatus" style="margin:10px 0 0;min-height:18px"></p>
+      <div class="dialog-actions">
+        <button class="btn-browse" onclick="document.getElementById('shareOverlay').style.display='none'">Abbrechen</button>
+        <button class="btn-primary" id="shareSenden" onclick="anShareSend()">Hochladen und Link kopieren</button>
+      </div>
+    </div>
+  </div>
+
   <div class="overlay" id="reviewOverlay" style="display:none">
     <div class="dialog review-dialog">
       <div class="review-head">
@@ -1158,6 +1188,7 @@
   <!-- Info-Tooltip für das per Gamepad/Tastatur fokussierte Element -->
   <div class="nav-tooltip" id="navTooltip" style="display:none"></div>
 
+<script src="analyze-report.js"></script>
 <script>
 // --- i18n (Etappe 1: statisches UI) -------------------------------------------
 // Deutsch bleibt die Quellsprache im Markup. Bei Sprache Englisch uebersetzt
@@ -1167,6 +1198,29 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  // --- Bericht teilen (3.3.0) ---
+  "🔗 Als Link teilen": "🔗 Share as a link",
+  "Prozess ": "Process ",
+  "Hochladen und Link kopieren": "Upload and copy link",
+  "Wird hochgeladen …": "Uploading …",
+  "Fertig – Link ist in der Zwischenablage:": "Done – the link is in your clipboard:",
+  "Den geteilten Link zurückziehen? Er ist danach nicht mehr abrufbar.": "Withdraw the shared link? It will no longer be reachable afterwards.",
+  "Bericht als Link teilen": "Share report as a link",
+  "Der Bericht wird auf lumora-streaming.de abgelegt und ist über einen kurzen Link abrufbar. Du kannst ihn jederzeit wieder zurückziehen. Es wird kein Konto angelegt.": "The report is stored on lumora-streaming.de and reachable via a short link. You can withdraw it at any time. No account is created.",
+  "Prozessnamen weglassen (werden zu „Prozess A/B/C“ – die Aussage bleibt)": "Omit process names (they become \"Process A/B/C\" – the conclusion stays)",
+  "Spielnamen weglassen": "Omit the game name",
+  "Das wird gesendet:": "This is what will be sent:",
+  "(Dateipfade sind bereits entfernt)": "(file paths have already been removed)",
+  "Zu viele Uploads in kurzer Zeit. Bitte später erneut versuchen.": "Too many uploads in a short time. Please try again later.",
+  "Dieser Bericht ist zu groß zum Teilen.": "This report is too large to share.",
+  "Der Server nimmt gerade keine Berichte mehr an.": "The server is not accepting reports right now.",
+  "Keine Verbindung zum Server. Internetverbindung prüfen.": "No connection to the server. Please check your internet connection.",
+  "Das Hochladen hat nicht geklappt.": "The upload did not succeed.",
+  "geteilt": "shared",
+  "Teilen zurückziehen": "Withdraw sharing",
+
+  // Typografische Anfuehrungszeichen: im Englischen gerade statt deutsch
+  "„": "\"", "“": "\"",
   // --- 3.2.0: Restluecken aus dem Release-Check (Eingabe-Bruecke-Feineinstellung, Analyse-Kacheln) ---
   "Achse 0x": "Axis 0x",
   "Bereich": "Range",
@@ -3197,90 +3251,22 @@ async function anOpen() {
   document.querySelectorAll('#anCorner button').forEach(b => b.classList.toggle('active', b.dataset.c === corner))
   await anRefreshHistory()
 }
-function anEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
-// Urteils-Sätze in Klartext (verdictKey + Daten -> DE/EN via window.tr)
-function anVerdict(r) {
-  const n = anEsc(r.verdictName || ''), h = r.verdictHits | 0, t = r.spikes | 0
-  switch (r.verdictKey) {
-    case 'clean': return window.tr('Sauberer Lauf – keine Ruckler über der Schwelle. 👍')
-    case 'driver': return window.tr('Hauptverdächtiger: der Treiber ') + '„' + n + '“' + window.tr(' – auffällig bei ') + h + '/' + t + ' ' + window.tr('Rucklern')
-    case 'process': return window.tr('Hauptverdächtiger: das Programm ') + '„' + n + '“' + window.tr(' – auffällig bei ') + h + '/' + t + ' ' + window.tr('Rucklern')
-    case 'gpu-throttle': return window.tr('Hauptursache: die Grafikkarte drosselt') + ' (' + n + ') – ' + h + '/' + t
-    case 'vram': return window.tr('Hauptverdacht: Grafikspeicher lief voll – bei ') + h + '/' + t + ' ' + window.tr('Rucklern')
-    case 'disk': return window.tr('Hauptverdacht: Datenträger-Last – bei ') + h + '/' + t + ' ' + window.tr('Rucklern')
-    case 'proc-start': return window.tr('Hauptverdacht: Programmstarts im Hintergrund') + (n ? ' („' + n + '“)' : '') + ' – ' + h + '/' + t
-    default: return window.tr('Kein Systemstörer gefunden – die Ruckler kommen vermutlich aus dem Spiel selbst (z. B. Shader/Nachladen).')
-  }
-}
-function anVerdictColor(k) { return k === 'clean' ? '#3fbf6a' : (k === 'game-internal' ? '#d8a13a' : '#ff6b6b') }
-const AN_KIND = { driver: 'Treiber', process: 'Programm', 'gpu-throttle': 'GPU-Drosselung', vram: 'Grafikspeicher', disk: 'Datenträger', 'proc-start': 'Programmstart', 'game-internal': 'Spielintern' }
-// Frametime-Chart: DPR-scharf, Verlaufs-Füllung, 60/30-fps-Gitter, Spike-Marker
-function anDrawChart(cv, series, findings) {
-  const dpr = window.devicePixelRatio || 1
-  const w = cv.clientWidth || 640, h = cv.clientHeight || 150
-  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr)
-  const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0)
-  c.clearRect(0, 0, w, h)
-  if (!series || !series.length) return
-  const t0 = series[0][0], t1 = series[series.length - 1][0] || 1
-  let mx = 0; for (const p of series) if (p[1] > mx) mx = p[1]
-  const scale = Math.max(50, Math.ceil(mx * 1.15 / 10) * 10)
-  const X = t => ((t - t0) / Math.max(0.001, t1 - t0)) * (w - 34) + 2
-  const Y = v => h - 16 - Math.min(1, v / scale) * (h - 24)
-  c.strokeStyle = 'rgba(255,255,255,.08)'; c.lineWidth = 1
-  c.fillStyle = 'rgba(255,255,255,.35)'; c.font = '9px Consolas,monospace'; c.textAlign = 'left'
-  for (const ms of [16.7, 33.3]) {
-    const y = Y(ms)
-    if (y > 8) { c.beginPath(); c.moveTo(2, y + .5); c.lineTo(w - 32, y + .5); c.stroke(); c.fillText(ms === 16.7 ? '60' : '30', w - 28, y + 3) }
-  }
-  c.fillText(scale + 'ms', w - 32, 10)
-  const g = c.createLinearGradient(0, 0, 0, h)
-  g.addColorStop(0, 'rgba(96,190,255,.35)'); g.addColorStop(1, 'rgba(96,190,255,.02)')
-  c.beginPath(); c.moveTo(X(series[0][0]), h - 16)
-  for (const p of series) c.lineTo(X(p[0]), Y(p[1]))
-  c.lineTo(X(series[series.length - 1][0]), h - 16); c.closePath(); c.fillStyle = g; c.fill()
-  c.beginPath()
-  series.forEach((p, i) => { i ? c.lineTo(X(p[0]), Y(p[1])) : c.moveTo(X(p[0]), Y(p[1])) })
-  c.strokeStyle = 'rgba(140,210,255,.95)'; c.lineWidth = 1.4; c.stroke()
-  for (const f of (findings || [])) {
-    const x = X(f.t)
-    c.strokeStyle = 'rgba(255,90,90,.8)'; c.lineWidth = 1
-    c.beginPath(); c.moveTo(x + .5, 4); c.lineTo(x + .5, h - 16); c.stroke()
-    c.fillStyle = 'rgba(255,90,90,.9)'; c.beginPath(); c.arc(x + .5, Y(Math.min(f.ftMs, scale)), 2.6, 0, 7); c.fill()
-  }
-}
-function anStatTiles(r) {
-  const tile = (k, v, sub) => '<div class="an-tile"><div class="k">' + k + '</div><div class="v">' + v + '</div>' + (sub ? '<div class="s">' + sub + '</div>' : '') + '</div>'
-  const mins = Math.round((r.durS || 0) / 60 * 10) / 10
-  return '<div class="an-tiles">'
-    + tile(window.tr('Dauer'), mins + ' min', anEsc(r.game || ''))
-    + tile(window.tr('Ø FPS'), (r.avgFps || 0).toFixed(0), window.tr('Median ') + (r.medianFtMs || 0).toFixed(1) + ' ms')
-    + tile(window.tr('1%-Low'), (r.p1LowFps || 0).toFixed(0) + ' fps', 'p99 ' + (r.p99FtMs || 0).toFixed(1) + ' ms')
-    + tile(window.tr('Ruckler'), r.spikes | 0, (r.spikesPerMin || 0).toFixed(1) + '/min') + '</div>'
-}
-// Flaschenhals-Abschnitt: dominante Ursache + Verteilung als Balken. Bewusst nur
-// anzeigen, wenn genug Sekundenproben da sind - sonst behaupten wir nichts.
-const AN_LIMIT = { gpu: 'GPU-Limit', cpu: 'CPU-Limit', 'cpu-core': 'Einzelkern-Limit',
-                   framecap: 'FPS-Limit (VSync/Limiter)', throttle: 'GPU drosselt', vram: 'Grafikspeicher voll',
-                   unknown: 'Nicht eindeutig' }
-const AN_LIMIT_COL = { gpu: '#35e08a', cpu: '#ffb03a', 'cpu-core': '#ffb03a', framecap: '#4ce0ff',
-                       throttle: '#ff2a3c', vram: '#ff2a3c', unknown: '#6d86a0' }
-function anLimitSection(r) {
-  const L = r.limit
-  if (!L || !L.samples || L.samples < 10) return ''
-  const order = ['gpu', 'cpu', 'cpu-core', 'framecap', 'throttle', 'vram', 'unknown']
-  const rows = order.filter(k => (L[k] | 0) > 0).map(k =>
-    '<div class="an-aggrow"><span class="n">' + window.tr(AN_LIMIT[k]) + '</span>'
-    + '<span class="bar"><i style="width:' + (L[k] | 0) + '%;background:' + AN_LIMIT_COL[k] + '"></i></span>'
-    + '<span class="h">' + (L[k] | 0) + '%</span></div>').join('')
-  const topTxt = L.top && L.top !== 'unknown'
-    ? window.tr('Überwiegend') + ': <b>' + window.tr(AN_LIMIT[L.top] || L.top) + '</b> (' + (L.topPct | 0) + '% ' + window.tr('der Messzeit') + ')'
-    : window.tr('Kein klares Limit erkennbar.')
-  return '<h4 class="an-sub">' + window.tr('Flaschenhals') + '</h4>'
-    + '<p class="settings-hint" style="margin:2px 0 8px">' + topTxt + '</p>'
-    + '<div class="an-agg">' + rows + '</div>'
-    + '<p class="settings-hint" style="margin-top:-4px">' + window.tr('Ermittelt aus GPU-Auslastung, Kernlast und Frametime-Gleichmäßigkeit – eine Einschätzung, keine frame-genaue Messung.') + '</p>'
-}
+// --- Berichts-Darstellung: EINE Quelle fuer App und Webseite ---
+// Die Zeichen-/Formatier-Funktionen liegen in analyze-report.js (oben eingebunden) und
+// werden vom geteilten Bericht auf lumora-streaming.de MITBENUTZT. Bewusst kein
+// Duplikat: Kopien driften auseinander (Lightbox-Kopie, Klick-durch nur im Gaming-OSD,
+// recentFt nur an einer Lesestelle). Wer die Darstellung aendert, aendert sie dort.
+LumoraReport.setTranslator(function (t) { return window.tr(t) })
+const anEsc = LumoraReport.esc
+const anVerdict = LumoraReport.verdict
+const anVerdictColor = LumoraReport.verdictColor
+const anDrawChart = LumoraReport.drawChart
+const anStatTiles = LumoraReport.statTiles
+const anLimitSection = LumoraReport.limitSection
+const AN_KIND = LumoraReport.KIND
+const AN_LIMIT = LumoraReport.LIMIT
+const AN_LIMIT_COL = LumoraReport.LIMIT_COL
+
 async function anShowReport(file) {
   const r = await ipcRenderer.invoke('analyze-get', file)
   if (!r) return
@@ -3311,7 +3297,10 @@ async function anShowReport(file) {
     + '<canvas id="anChart" class="an-chart"></canvas>'
     + anLimitSection(r)
     + aggHtml + spikesHtml
-    + '<div class="an-actions"><button class="btn-browse" onclick="anExport(\'' + anEsc(file) + '\')">' + window.tr('Als Text kopieren') + '</button></div>'
+    + '<div class="an-actions">'
+    + '<button class="btn-browse" onclick="anExport(\'' + anEsc(file) + '\')">' + window.tr('Als Text kopieren') + '</button>'
+    + '<button class="btn-primary" onclick="anShare(\'' + anEsc(file) + '\')">' + window.tr('🔗 Als Link teilen') + '</button>'
+    + '</div>'
   requestAnimationFrame(() => { const cv = document.getElementById('anChart'); if (cv) anDrawChart(cv, r.ftSeries, r.findings) })
   // NUR den Einstellungs-Scrollbereich bewegen - scrollIntoView scrollte auch die
   // Eltern-Container und schob damit die Reiterleiste (#detailNav) aus dem Bild.
@@ -3333,6 +3322,11 @@ async function anRefreshHistory() {
       + '<span class="an-hmeta">' + anEsc((h.wall || '').replace('T', ' ')) + ' · ' + Math.round((h.durS || 0) / 60) + ' min · ' + (h.avgFps || 0).toFixed(0) + ' fps · ' + (h.spikesPerMin || 0).toFixed(1) + ' R/min</span>'
       + '<input class="an-note" placeholder="' + window.tr('Notiz…') + '" value="' + anEsc(h.note || '') + '" onchange="anNote(\'' + anEsc(h.file) + '\', this.value)">'
       + '<button class="btn-browse" onclick="anShowReport(\'' + anEsc(h.file) + '\')">' + window.tr('Anzeigen') + '</button>'
+      // Geteilte Läufe erkennbar machen: Link kopieren oder Teilen zurückziehen.
+      + (h.share && h.share.url
+          ? '<button class="btn-browse" title="' + anEsc(h.share.url) + '" onclick="navigator.clipboard.writeText(\'' + anEsc(h.share.url) + '\')">🔗 ' + window.tr('Link kopieren') + '</button>'
+            + '<button class="btn-cancel" title="' + window.tr('Teilen zurückziehen') + '" onclick="anUnshare(\'' + anEsc(h.file) + '\')">⤺</button>'
+          : '')
       + '<button class="btn-cancel" onclick="anDelete(\'' + anEsc(h.file) + '\')">✕</button>'
       + '</div>'
   }).join('')
@@ -3387,6 +3381,94 @@ async function anRenderCompare() {
     + row(window.tr('Median-Frametime (ms)'), ra.medianFtMs, rb.medianFtMs, 'down')
     + '<div class="an-hero" style="margin-top:10px;border-color:#4f8ef755"><div class="an-hero-dot" style="background:#4f8ef7"></div><div class="an-hero-txt">' + urteil + '</div></div>'
 }
+// --- Bericht teilen -------------------------------------------------------------
+// Regel aus dem Plan, nicht verhandelbar: Teilen ist IMMER eine Einzelentscheidung,
+// der Nutzer sieht VORHER den tatsaechlich zu sendenden Text, Pfade fliegen immer raus.
+// Der Bericht enthaelt Prozess- und Treibernamen; in Pfaden steckt regelmaessig der
+// Windows-Benutzername. Wer das verspielt, verspielt das Vertrauen der ganzen App.
+function anShareBasename(p) {
+  if (!p) return ''
+  const s2 = String(p).replace(/\\/g, '/')
+  return s2.slice(s2.lastIndexOf('/') + 1)
+}
+// Erzeugt die Fassung, die WIRKLICH hochgeht. opts: {ohneProzesse, ohneSpiel}
+function anShareClean(r, opts) {
+  const o = JSON.parse(JSON.stringify(r))
+  o.game = opts.ohneSpiel ? '' : anShareBasename(o.game)        // NIE der volle Pfad
+  delete o.note                                                  // eigene Notizen bleiben privat
+  delete o.pid
+  if (o.context) { delete o.context.game; }                      // dort steckt der Pfad nochmal
+  const anonym = {}
+  let lauf = 0
+  const deckname = (n) => {
+    if (!n) return n
+    if (!anonym[n]) anonym[n] = window.tr('Prozess ') + String.fromCharCode(65 + (lauf++ % 26))
+    return anonym[n]
+  }
+  if (opts.ohneProzesse) {
+    for (const a of (o.aggregate || [])) if (a.kind === 'process') a.name = deckname(a.name)
+    for (const f of (o.findings || [])) for (const su of (f.suspects || [])) {
+      if (su.kind === 'process') { su.name = deckname(su.name); su.evidence = '' }
+    }
+    if (o.verdictKey === 'process') o.verdictName = deckname(o.verdictName)
+  }
+  return o
+}
+async function anShare(file) {
+  const r = await ipcRenderer.invoke('analyze-get', file)
+  if (!r) return
+  let ohneProzesse = false, ohneSpiel = false
+  const vorschau = () => JSON.stringify(anShareClean(r, { ohneProzesse, ohneSpiel }), null, 1)
+  const ov = document.getElementById('shareOverlay')
+  const ta = document.getElementById('shareVorschau')
+  const st = document.getElementById('shareStatus')
+  const btn = document.getElementById('shareSenden')
+  document.getElementById('shareOhneProzesse').checked = false
+  document.getElementById('shareOhneSpiel').checked = false
+  ta.value = vorschau()
+  st.textContent = ''
+  btn.disabled = false
+  btn.textContent = window.tr('Hochladen und Link kopieren')
+  ov.dataset.file = file
+  ov.style.display = 'flex'
+  window.anShareRefresh = () => {
+    ohneProzesse = document.getElementById('shareOhneProzesse').checked
+    ohneSpiel = document.getElementById('shareOhneSpiel').checked
+    ta.value = vorschau()
+  }
+  window.anShareSend = async () => {
+    btn.disabled = true
+    st.textContent = window.tr('Wird hochgeladen …')
+    const nutzlast = anShareClean(r, { ohneProzesse, ohneSpiel })
+    const res = await ipcRenderer.invoke('analyze-share', nutzlast)
+    if (res && res.ok && res.url) {
+      // Link + Ruecknahme-Schluessel lokal beim Lauf merken
+      await ipcRenderer.invoke('analyze-note-share', file, { url: res.url, id: res.id, token: res.token })
+      try { await navigator.clipboard.writeText(res.url) } catch (e) {}
+      st.innerHTML = window.tr('Fertig – Link ist in der Zwischenablage:') + ' <b>' + anEsc(res.url) + '</b>'
+      btn.textContent = window.tr('Schließen')
+      btn.disabled = false
+      btn.onclick = () => { ov.style.display = 'none'; btn.onclick = null; anRefreshHistory() }
+    } else {
+      // Fehler ehrlich benennen statt still scheitern
+      const map = {
+        'zu-viele': 'Zu viele Uploads in kurzer Zeit. Bitte später erneut versuchen.',
+        'zu-gross': 'Dieser Bericht ist zu groß zum Teilen.',
+        'server-voll': 'Der Server nimmt gerade keine Berichte mehr an.',
+        'kein-netz': 'Keine Verbindung zum Server. Internetverbindung prüfen.',
+      }
+      const k = (res && res.error) || 'kein-netz'
+      st.textContent = window.tr(map[k] || 'Das Hochladen hat nicht geklappt.')
+      btn.disabled = false
+    }
+  }
+}
+async function anUnshare(file) {
+  if (!await lumoraConfirm(window.tr('Den geteilten Link zurückziehen? Er ist danach nicht mehr abrufbar.'))) return
+  await ipcRenderer.invoke('analyze-unshare', file)
+  anRefreshHistory()
+}
+
 async function anExport(file) {
   const r = await ipcRenderer.invoke('analyze-get', file)
   if (!r) return

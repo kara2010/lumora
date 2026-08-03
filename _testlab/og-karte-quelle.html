@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { width:1200px; height:630px; overflow:hidden;
+    font-family:"Segoe UI", system-ui, sans-serif; background:#0b0d12; color:#e7ecf4; }
+  .karte { position:relative; width:1200px; height:630px; padding:70px 78px;
+    display:flex; flex-direction:column; justify-content:space-between; overflow:hidden; }
+  .karte::before { content:""; position:absolute; top:-260px; right:-140px; width:820px; height:640px;
+    background:radial-gradient(closest-side, #ff6b6b, transparent 70%); opacity:.20; }
+  .karte::after { content:""; position:absolute; bottom:-320px; left:-200px; width:900px; height:700px;
+    background:radial-gradient(closest-side, #4f8ef7, transparent 70%); opacity:.16; }
+
+  .marke { position:relative; display:flex; align-items:center; gap:16px; }
+  .logo { width:54px; height:54px; border-radius:14px;
+    background:linear-gradient(135deg,#4f8ef7,#35e08a); position:relative; flex:0 0 auto; }
+  /* Zeichen statt Emoji: rendert auf jedem System identisch */
+  .logo::after { content:""; position:absolute; inset:15px 14px;
+    border:3.5px solid rgba(255,255,255,.94); border-radius:4px 4px 7px 7px; border-top-width:6px; }
+  .marke b { font-size:32px; letter-spacing:-.015em; display:block; }
+  .marke i { font-style:normal; font-size:15.5px; color:#8d97a8; display:block; margin-top:2px; }
+
+  .mitte { position:relative; }
+  .label { font-size:15.5px; letter-spacing:.20em; text-transform:uppercase; color:#98a3b4;
+    display:flex; align-items:center; gap:13px; margin-bottom:22px; }
+  .punkt { width:12px; height:12px; border-radius:50%; background:#ff6b6b;
+    box-shadow:0 0 0 6px rgba(255,107,107,.20); flex:0 0 auto; }
+  h1 { font-size:64px; line-height:1.08; letter-spacing:-.028em; font-weight:700; max-width:980px; }
+  .h1sub { font-size:25px; color:#9aa5b6; margin-top:20px; font-weight:400; }
+
+  .kurve { position:relative; height:92px; margin-top:36px; display:flex; align-items:flex-end; gap:5px;
+    border-bottom:1px solid rgba(255,255,255,.09); padding-bottom:2px; }
+  .kurve span { flex:1; background:linear-gradient(180deg,rgba(140,210,255,.95),rgba(96,190,255,.14));
+    border-radius:3px 3px 0 0; }
+  .kurve span.hoch { background:linear-gradient(180deg,#ff6b6b,rgba(255,107,107,.20)); }
+
+  .fuss { position:relative; display:flex; align-items:center; justify-content:space-between; }
+  .fuss > span.url { font-size:21px; color:#98a3b4; }
+  .pill { font-size:19px; font-weight:700; color:#ffffff; background:#4f8ef7;
+    padding:14px 30px; border-radius:12px; letter-spacing:.005em; }
+</style>
+</head>
+<body>
+<div class="karte">
+  <div class="marke">
+    <div class="logo"></div>
+    <div><b>Lumora</b><i>Spiele-Launcher mit Ruckler-Analyse</i></div>
+  </div>
+
+  <div class="mitte">
+    <div class="label"><span class="punkt"></span>Ruckler-Analyse &middot; Stutter report</div>
+    <h1>Warum ruckelt mein Spiel?</h1>
+    <div class="h1sub">Frametime-Spitzen mit Treiber, Prozess und GPU-Zustand belegt &ndash; in Klartext.</div>
+    <div class="kurve" id="k"></div>
+  </div>
+
+  <div class="fuss">
+    <span class="url">lumora-streaming.de</span>
+    <span class="pill">Kostenlos &amp; Open Source</span>
+  </div>
+</div>
+<script>
+  var hoehen = [22,26,24,28,25,23,27,26,24,29,26,25,88,31,26,24,27,25,28,26,24,27,
+                70,29,25,27,24,26,28,25,23,27,26,29,24,26,95,33,27,25,28,26,24,27,26,25,29,26,24,27];
+  document.getElementById('k').innerHTML = hoehen.map(function (h) {
+    return '<span class="' + (h > 55 ? 'hoch' : '') + '" style="height:' + h + '%"></span>';
+  }).join('');
+</script>
+</body>
+</html>
