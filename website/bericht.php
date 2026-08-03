@@ -141,7 +141,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $a === '') {
     'erstellt' => time(), 'token' => hash('sha256', $token),
   ]), LOCK_EX);
 
-  jout(['ok' => true, 'id' => $id, 'url' => 'https://lumora-streaming.de/b/' . $id, 'token' => $token]);
+  // Kurzer Link /b/<id> braucht eine Rewrite-Regel in .htaccess. Die kann das
+  // Deploy-Werkzeug nicht hochladen (es verweigert .htaccess absichtlich, um den
+  // Schaden eines geleakten Tokens zu begrenzen) - sie muss von Hand dazu. Also
+  // hier nachsehen, ob sie schon da ist, statt sie anzunehmen: sonst gaebe der
+  // Server eine Adresse heraus, die 404 liefert. Sobald die Regel hochgeladen
+  // ist, schalten die Links von selbst auf die kurze Form um.
+  $ht = __DIR__ . '/.htaccess';
+  $kurz = is_readable($ht) && strpos((string) @file_get_contents($ht), '^b/(') !== false;
+  $url = 'https://lumora-streaming.de/' . ($kurz ? 'b/' . $id : 'bericht.php?id=' . $id);
+  jout(['ok' => true, 'id' => $id, 'url' => $url, 'token' => $token]);
 }
 
 // ---------- Zuruecknehmen ----------
