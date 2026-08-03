@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.2.4"   # 3.2.4: App-Identitaet gesetzt, WebView2-Absturzerholung, VC++-Laufzeit-Pruefung im Installer.
+$version = "3.3.0"   # 3.3.0: Ruckler-Bericht per Link teilbar; A-Taste startet wieder, wenn sie in einem Gamepad-Hotkey steckt.
                      #        3.1.1 speicherte den Zustand korrekt, wendete ihn aber im Regelfall
                      #        des Nutzers nie an: bei Autostart mit --minimized ruft wWinMain kein
                      #        ShowWindow auf, und das spaetere Oeffnen per Tray/Hotkey zeigte das
@@ -153,7 +153,11 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 Copy-Item "$shell\build\Release\lumora_shell.exe" "$stage\lumora-shell.exe"
 
 # UI-Assets (was das WebView2 laedt) - genau die Dateien, die die Shell via app.lumora mappt
-foreach ($f in "index.html","styles.css","player.html","osd.html","analyze-osd.html","doorman.html","icon.ico","icon-64.png") {
+# analyze-report.js MUSS mit: index.html laedt es synchron (<script src>) und greift
+# direkt danach auf LumoraReport zu. Fehlt die Datei, wirft die Seite beim Laden und
+# bleibt im Boot-Screen haengen (3.3.0 genau so ausgeliefert). Es ist die gemeinsame
+# Quelle fuer App UND Website - beim Herausloesen aus index.html hier vergessen.
+foreach ($f in "index.html","analyze-report.js","styles.css","player.html","osd.html","analyze-osd.html","doorman.html","icon.ico","icon-64.png") {
   if (Test-Path "$root\$f") { Copy-Item "$root\$f" $stage }
 }
 # UI-Bilder/Assets (Logos etc.), die index.html/styles.css referenzieren
@@ -196,6 +200,21 @@ if (-not (Test-Path "$shell\MicrosoftEdgeWebview2Setup.exe")) {
   Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "$shell\MicrosoftEdgeWebview2Setup.exe"
 }
 Copy-Item "$shell\MicrosoftEdgeWebview2Setup.exe" $bootstrap
+
+# WAECHTER: jede lokale Datei, die index.html per <script src>/<link href> statisch
+# einbindet, MUSS im Paket liegen. Fehlt eine, startet die App gar nicht (weisser
+# Boot-Screen) - so ist 3.3.0 zunaechst rausgegangen, weil analyze-report.js fehlte.
+# Nur echte, statische Verweise pruefen (keine ${...}-JS-Ausdruecke, keine URLs).
+$html = Get-Content "$root\index.html" -Raw
+$refs = [regex]::Matches($html, '(?:src|href)="([^"?]+)"') | ForEach-Object { $_.Groups[1].Value } |
+        Where-Object { $_ -notmatch '^(https?:)?//|^data:|^#|^mailto:|\$\{|''|\+' } |
+        ForEach-Object { ($_ -replace '^\./','') } | Sort-Object -Unique
+$fehlend = @()
+foreach ($r in $refs) { if (-not (Test-Path (Join-Path $stage $r))) { $fehlend += $r } }
+if ($fehlend.Count) {
+  throw "ABBRUCH: index.html verweist auf Datei(en), die NICHT im Paket liegen: $($fehlend -join ', '). In die Staging-Liste aufnehmen (build-installer.ps1)."
+}
+Write-Output "Ressourcen-Waechter: alle $($refs.Count) von index.html referenzierten Dateien im Paket."
 
 $stageSize = [math]::Round((Get-ChildItem $stage -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1)
 Write-Output "Staging: $stageSize MB"
