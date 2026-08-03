@@ -127,6 +127,10 @@ static void ensureParentDir(const std::wstring& p) {
     SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);   // legt auch Zwischenebenen an
 }
 static bool writeFile(const std::wstring& p, const std::string& data) {
+    // Leerer oder wurzelrelativer Zielpfad (dataDir gab "" zurueck, weil weder %APPDATA%
+    // noch SHGetKnownFolderPath griff): NICHT schreiben - sonst landet die Datei im
+    // Laufwerks-Root. Lieber ein sauberer Fehlschlag mit Logzeile.
+    if (p.size() < 4 || p[1] != L':') { bcLogStream("writeFile ABGELEHNT (kein absoluter Pfad): " + narrow(p)); return false; }
     ensureParentDir(p);
     // ATOMAR: erst nach <ziel>.neu schreiben, dann per MoveFileEx ueber das Original
     // schieben. Vorher ging trunc+write DIREKT ins Ziel - die Datei wurde also zuerst
@@ -164,9 +168,23 @@ static std::string narrow(const std::wstring& w) {
 }
 
 // --- Modul: Einstellungen/Daten (gleiche Dateien wie die Electron-App -> Parallelbetrieb) ---
+// Bekannten Windows-Ordner robust holen: erst die Umgebungsvariable (schnell, im
+// Normalfall gesetzt), sonst SHGetKnownFolderPath (verlaesslich, unabhaengig von der
+// Umgebung). GRUND: war %APPDATA% leer (Dienst-/Task-Kontext, kaputtes Profil), lieferte
+// die reine env-Variante "\lumora" - den WURZELORDNER des aktuellen Laufwerks. Dorthin
+// wurden dann Einstellungen geschrieben (auf C:\ ohne Adminrecht = stiller Fehlschlag).
+static std::wstring knownFolder(const wchar_t* envName, REFKNOWNFOLDERID fid) {
+    wchar_t buf[MAX_PATH] = {};
+    if (GetEnvironmentVariableW(envName, buf, MAX_PATH) > 0 && buf[0]) return buf;
+    PWSTR p = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(fid, 0, nullptr, &p)) && p) {
+        std::wstring r = p; CoTaskMemFree(p); return r;
+    }
+    return L"";   // beide Wege gescheitert (praktisch unmoeglich) - Aufrufer schreibt nichts nach ""
+}
 static std::wstring dataDir() {
-    wchar_t appdata[MAX_PATH] = {}; GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
-    return std::wstring(appdata) + L"\\lumora";
+    std::wstring appdata = knownFolder(L"APPDATA", FOLDERID_RoamingAppData);
+    return appdata.empty() ? L"" : appdata + L"\\lumora";   // "" -> ensureParentDir/writeFile brechen sauber ab statt ins Laufwerks-Root zu schreiben
 }
 static std::wstring settingsPath() { return dataDir() + L"\\app-settings.json"; }
 // Letzter fehlerfrei gelesener Stand. Ohne ihn wurde ein LESE-Aussetzer (Virenscanner
@@ -830,8 +848,7 @@ static void createDoormanWindow() {
     // sichtbarer Fensterhintergrund mehr) und der blaue Rahmen bildet die Kontur.
     { DWM_WINDOW_CORNER_PREFERENCE cp = DWMWCP_ROUND;
       DwmSetWindowAttribute(g_doorHwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cp, sizeof(cp)); }
-    wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
-    std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
+    std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
     CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
@@ -3507,8 +3524,7 @@ static void createOsdWindow() {
         L"LumoraOsd", L"", WS_POPUP, mi.rcMonitor.left, mi.rcMonitor.top, w, hgt, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!g_osdHwnd) { bcLogStream("osd: CreateWindowExW fehlgeschlagen err=" + std::to_string(GetLastError())); return; }
     bcLogStream("osd: Overlay-Fenster erstellt (Composition)");
-    wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
-    std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
+    std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
     CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
@@ -3640,8 +3656,7 @@ static void createAnalyzeOsdWindow() {
     if (!g_anOsdHwnd) { bcLogStream("analyze-osd: CreateWindowExW err=" + std::to_string(GetLastError())); return; }
     applyAnalyzeOsdGeometry();   // SOFORT an die gewaehlte Ecke (Default oben rechts) - nie ueber dem Gaming-OSD stehen bleiben
     bcLogStream("analyze-osd: Overlay-Fenster erstellt");
-    wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
-    std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
+    std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
     CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
@@ -3897,8 +3912,7 @@ static void createOsdEditWindow() {
         nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!g_osdEditHwnd) { bcLogStream("osd-edit: CreateWindowExW fehlgeschlagen err=" + std::to_string(GetLastError())); return; }
     SetForegroundWindow(g_osdEditHwnd);   // best effort; Fenster ist topmost + klickbar, erster Klick aktiviert sonst
-    wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
-    std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
+    std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
     CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
@@ -5549,8 +5563,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
     // createOsdEditWindow. Ausfuehrliche Begruendung ueber createDoormanWindow.
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
-    wchar_t lad[MAX_PATH] = {}; GetEnvironmentVariableW(L"LOCALAPPDATA", lad, MAX_PATH);
-    std::wstring userData = std::wstring(lad) + L"\\lumora-shell";
+    std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
     HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [hwnd](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
