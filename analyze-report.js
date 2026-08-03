@@ -141,7 +141,7 @@
         + '<span class="h">' + (L[k] | 0) + '%</span></div>';
     }).join('');
     var topTxt = L.top && L.top !== 'unknown'
-      ? tr('Überwiegend') + ': <b>' + tr(LIMIT[L.top] || L.top) + '</b> (' + (L.topPct | 0) + '% ' + tr('der Messzeit') + ')'
+      ? tr('Überwiegend') + ': <b>' + esc(tr(LIMIT[L.top] || L.top)) + '</b> (' + (L.topPct | 0) + '% ' + tr('der Messzeit') + ')'
       : tr('Kein klares Limit erkennbar.');
     return '<h4 class="an-sub">' + tr('Flaschenhals') + '</h4>'
       + '<p class="settings-hint" style="margin:2px 0 8px">' + topTxt + '</p>'
@@ -154,19 +154,24 @@
   // Verdaechtigen-Balken (aggregate) - in der App und auf der Webseite gleich.
   function suspectSection(r) {
     if (!r.aggregate || !r.aggregate.length) return '';
-    var mxH = Math.max.apply(null, r.aggregate.map(function (a) { return a.hits; }));
+    // Jeder Wert aus dem Bericht wird escaped bzw. auf eine Zahl gezwungen, BEVOR er in
+    // innerHTML landet. Der Server whitelistet zwar schon (kind nur aus erlaubter Menge),
+    // aber dieselbe Funktion rendert auch in der App - und die darf sich nicht auf den
+    // Server verlassen. a.kind unescaped waere ein gespeichertes XSS gewesen.
+    var mxH = Math.max.apply(null, r.aggregate.map(function (a) { return a.hits | 0; })) || 1;
     return '<div class="an-agg">' + r.aggregate.map(function (a) {
-      return '<div class="an-aggrow"><span class="n">' + tr(KIND[a.kind] || a.kind)
+      var hits = a.hits | 0;
+      return '<div class="an-aggrow"><span class="n">' + esc(tr(KIND[a.kind] || a.kind))
         + (a.name ? ': ' + esc(a.name) : '') + '</span>'
-        + '<span class="bar"><i style="width:' + Math.round(a.hits / mxH * 100) + '%"></i></span>'
-        + '<span class="h">' + a.hits + '×</span></div>';
+        + '<span class="bar"><i style="width:' + Math.round(hits / mxH * 100) + '%"></i></span>'
+        + '<span class="h">' + hits + '×</span></div>';
     }).join('') + '</div>';
   }
 
   // Kontextzeile (Aufloesung, HDR, GPU, Treiber) - fehlende Felder fallen weg.
   function metaLine(r) {
     var m = r.context || {};
-    return [m.resolution, m.hdr ? 'HDR' : '', m.streaming ? tr('Streaming aktiv') : '',
+    return [esc(m.resolution || ''), m.hdr ? 'HDR' : '', m.streaming ? tr('Streaming aktiv') : '',
             esc(r.gpu || ''), r.gpuDriver ? tr('Treiber ') + esc(r.gpuDriver) : '']
       .filter(Boolean).join(' · ');
   }
