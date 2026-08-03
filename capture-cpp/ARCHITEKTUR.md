@@ -69,6 +69,28 @@ PowerShell-Timeout, VC++-Laufzeit, Xbox-Icons - durchweg FEHLENDER Code, nicht s
 organisierter. Eine Aufteilung haette davon nichts verhindert, kostet aber Zeit und
 bringt Regressionsrisiko. Ohne belegten Nutzen kein Umbau.
 
+## Stolperstein: Capture/Relay landen NICHT automatisch im Release
+
+`build-installer.ps1` baut **nur die Shell** neu. Capture, Relay und Elevate werden
+aus `bin/` KOPIERT, nicht gebaut. Wer eine dieser Komponenten aendert, muss das neue
+Binary von Hand nach `bin/` legen (Vorgaenger sichern) - sonst committet man den Fix,
+aber das naechste Release enthaelt still das ALTE Binary.
+
+Konkret schon passiert: der fps==0-Fix im Capture (c60c990) und der Relay-Toolset-
+Neubau. Ablauf beim naechsten Mal:
+
+```
+# Capture nach Aenderung:
+cmake --build capture-cpp/lumora-capture/build-vs22 --config Release
+cp bin/lumora-capture-native.exe bin/lumora-capture-native.vor-<grund>.exe   # sichern
+cp capture-cpp/lumora-capture/build-vs22/Release/lumora_capture.exe bin/lumora-capture-native.exe
+# (Umbenennung capture -> capture-native macht der Kopierschritt, nicht der Build)
+```
+
+Der Zeitstempel-Check aus RELEASE.md Schritt 6 faengt das ab - aber nur, wenn man ihn
+macht. Besser waere, build-installer die Capture-/Relay-Binaries selbst bauen zu lassen
+(dann kann nichts driften). Vorgemerkt, nicht dringend.
+
 ## Offene Risiken
 
 - **ViGEmBus ist archiviert** (Nov. 2023, Markenrechtsstreit, kein benannter Nachfolger).
