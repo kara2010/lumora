@@ -73,7 +73,11 @@
     var t0 = series[0][0], t1 = series[series.length - 1][0] || 1;
     var mx = 0; for (var i = 0; i < series.length; i++) if (series[i][1] > mx) mx = series[i][1];
     var scale = Math.max(50, Math.ceil(mx * 1.15 / 10) * 10);
-    var padR = 34 * f, padB = 16 * f;
+    // padR traegt die Achsenbeschriftung rechts. Sie enthaelt zwei VERSCHIEDENE
+    // Einheiten: oben die ms-Obergrenze, darunter die fps-Hilfslinien. Ohne die
+    // Einheit an den fps-Linien las sich die Spalte als "70ms / 30 / 60" - drei
+    // ms-Werte in unsinniger Reihenfolge. Einheit dran, dafuer etwas breiter.
+    var padR = 46 * f, padB = 16 * f;
     var X = function (t) { return ((t - t0) / Math.max(0.001, t1 - t0)) * (w - padR) + 2; };
     var Y = function (v) { return h - padB - Math.min(1, v / scale) * (h - padB - 8 * f); };
     c.strokeStyle = 'rgba(255,255,255,.08)'; c.lineWidth = 1;
@@ -82,7 +86,7 @@
       var y = Y(ms);
       if (y > 8 * f) {
         c.beginPath(); c.moveTo(2, y + .5); c.lineTo(w - padR + 2, y + .5); c.stroke();
-        c.fillText(ms === 16.7 ? '60' : '30', w - padR + 6, y + 3 * f);
+        c.fillText((ms === 16.7 ? '60' : '30') + ' fps', w - padR + 6, y + 3 * f);
       }
     });
     c.fillText(scale + 'ms', w - padR + 2, 10 * f);

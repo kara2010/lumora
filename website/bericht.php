@@ -106,6 +106,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $a === '') {
   $j = json_decode($roh, true);
   if (!bericht_ok($j)) jout(['ok' => false, 'error' => 'kein-lumora-bericht'], 400);
 
+  // Pfade serverseitig entfernen - VERTEIDIGUNG IN DER TIEFE. Die App reinigt bereits
+  // vor dem Hochladen, aber hier landet alles, was jemand schickt: ein direkter POST
+  // (oder eine aeltere App-Version) koennte den vollen Pfad mitbringen, und darin steckt
+  // regelmaessig der Windows-Benutzername. Beim Live-Test genau so passiert: der Pfad
+  // stand in der og:description, also in der Vorschaukarte von Discord/WhatsApp.
+  $nurDatei = static function ($p) {
+    $p = str_replace('\\', '/', (string) $p);
+    $i = strrpos($p, '/');
+    return $i === false ? $p : substr($p, $i + 1);
+  };
+  if (isset($j['game'])) $j['game'] = $nurDatei($j['game']);
+  if (isset($j['context']) && is_array($j['context'])) {
+    unset($j['context']['game']);                 // dort steht der Pfad ein zweites Mal
+  }
+  unset($j['note']);                              // eigene Notizen sind privat
+
   // Freie ID suchen
   $id = '';
   for ($v = 0; $v < 40 && $id === ''; $v++) {
@@ -143,25 +159,56 @@ if (($_SERVER['REQUEST_METHOD'] === 'DELETE' || $a === 'del') && id_ok($id)) {
 // ---------- Anzeigen ----------
 if (!id_ok($id) || !is_file(pfad($dir, $id))) {
   http_response_code(404);
-  $titel = 'Bericht nicht gefunden';
   $r = null;
 } else {
   $roh = (string) @file_get_contents(pfad($dir, $id));
   $r = json_decode($roh, true);
   @touch(pfad($dir, $id));                                 // Abruf = am Leben halten
-  $titel = 'Ruckler-Bericht';
 }
 
+// Sprache: ?lang=en erzwingt Englisch, sonst entscheidet der Browser. Das MUSS hier
+// serverseitig passieren - Titel und og:* werden von Discord/WhatsApp/Suchmaschinen
+// gelesen, die kein JavaScript ausfuehren. Die Seite selbst uebersetzt bericht.js
+// spaeter im Browser; wuerde der Kopf immer deutsch bleiben, saehe ein geteilter Link
+// in einem englischen Forum als deutsche Vorschaukarte aus.
+$lang = 'de';
+if (isset($_GET['lang'])) {
+  $lang = $_GET['lang'] === 'en' ? 'en' : 'de';
+} elseif (!preg_match('/\bde\b/i', $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '')
+       &&  preg_match('/\ben\b/i', $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '')) {
+  $lang = 'en';
+}
+$en = $lang === 'en';
+
 // Vorschautext fuer Chat-Programme aus den Kennzahlen bauen (og:description).
-$ogTitel = 'Ruckler-Analyse | Lumora';
-$ogText  = 'Ein mit Lumora gemessener Ruckler-Bericht.';
+// Ohne Bericht (zurueckgezogen oder Tippfehler in der ID) muss der Titel das auch
+// sagen - sonst steht im Reiter und in jeder Chat-Vorschau "Ruckler-Analyse", als
+// gaebe es die Seite noch.
+if ($r === null) {
+  $ogTitel = $en ? 'Report not found | Lumora' : 'Bericht nicht gefunden | Lumora';
+  $ogText  = $en ? 'This report is no longer available.'
+                 : 'Dieser Bericht ist nicht mehr verfügbar.';
+} else {
+  $ogTitel = $en ? 'Stutter analysis | Lumora' : 'Ruckler-Analyse | Lumora';
+  $ogText  = $en ? 'A stutter report measured with Lumora.'
+                 : 'Ein mit Lumora gemessener Ruckler-Bericht.';
+}
 if ($r) {
   $spikes = (int) ($r['spikes'] ?? 0);
   $fps    = (int) round((float) ($r['avgFps'] ?? 0));
   $min    = round(((float) ($r['durS'] ?? 0)) / 60, 1);
   $name   = (string) ($r['verdictName'] ?? '');
   $key    = (string) ($r['verdictKey'] ?? '');
-  $urteil = match ($key) {
+  $urteil = $en ? match ($key) {
+    'clean'        => 'Clean run – no stutters above the threshold',
+    'driver'       => 'Prime suspect: driver ' . $name,
+    'process'      => 'Prime suspect: process ' . $name,
+    'gpu-throttle' => 'The graphics card is throttling',
+    'vram'         => 'Video memory ran full',
+    'disk'         => 'Disk load',
+    'proc-start'   => 'Background program starts',
+    default        => 'No system cause found – likely game-internal',
+  } : match ($key) {
     'clean'        => 'Sauberer Lauf – keine Ruckler über der Schwelle',
     'driver'       => 'Hauptverdächtiger: Treiber ' . $name,
     'process'      => 'Hauptverdächtiger: Programm ' . $name,
@@ -172,12 +219,14 @@ if ($r) {
     default        => 'Keine Systemursache gefunden – vermutlich spielintern',
   };
   $ogTitel = $urteil . ' | Lumora';
-  $ogText  = $spikes . ' Ruckler in ' . $min . ' min · ø ' . $fps . ' fps'
-           . (($r['game'] ?? '') ? ' · ' . $r['game'] : '') . ' – gemessen mit Lumora.';
+  $spiel   = ($r['game'] ?? '') ? ' · ' . $r['game'] : '';
+  $ogText  = $en
+    ? $spikes . ' stutters in ' . $min . ' min · avg ' . $fps . ' fps' . $spiel . ' – measured with Lumora.'
+    : $spikes . ' Ruckler in ' . $min . ' min · ø ' . $fps . ' fps' . $spiel . ' – gemessen mit Lumora.';
 }
 $h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 ?><!DOCTYPE html>
-<html lang="de">
+<html lang="<?= $lang ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -187,6 +236,7 @@ $h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 <meta name="robots" content="noindex, follow">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="Lumora">
+<meta property="og:locale" content="<?= $en ? 'en_US' : 'de_DE' ?>">
 <meta property="og:title" content="<?= $h($ogTitel) ?>">
 <meta property="og:description" content="<?= $h($ogText) ?>">
 <meta property="og:image" content="https://lumora-streaming.de/bericht-og.png">
@@ -196,7 +246,7 @@ $h = fn($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 <meta name="twitter:title" content="<?= $h($ogTitel) ?>">
 <meta name="twitter:description" content="<?= $h($ogText) ?>">
 <meta name="twitter:image" content="https://lumora-streaming.de/bericht-og.png">
-<link rel="icon" href="/icon-64.png">
+<link rel="icon" href="/favicon-v2.png">
 <link rel="stylesheet" href="/bericht.css">
 </head>
 <body>

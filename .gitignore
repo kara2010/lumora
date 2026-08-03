@@ -76,3 +76,4 @@ RELEASE.md
 
 # VS2022-Build-Ausgabe der Capture-Komponente (wird erzeugt)
 capture-cpp/lumora-capture/build-vs22/
+_testlab/plan-*.json

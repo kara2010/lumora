@@ -77,7 +77,7 @@
   app.innerHTML =
     '<div class="kopf">'
     + '<a class="marke" href="https://lumora-streaming.de/' + (lang === 'en' ? 'en/' : '') + '">'
-    + '<img src="/icon-64.png" alt="" width="30" height="30">'
+    + '<img src="/icon.png" alt="" width="30" height="30">'
     + '<span><b>Lumora</b><span>' + tr('Spiele-Launcher mit Ruckler-Analyse') + '</span></span></a>'
     + (zeit ? '<div class="kopf-zeit">' + esc(zeit) + '</div>' : '')
     + '</div>'
@@ -113,7 +113,17 @@
     var cv = document.getElementById('kurve');
     if (cv) LumoraReport.drawChart(cv, r.ftSeries, r.findings, { scaleFactor: 1.6 });
   }
-  requestAnimationFrame(zeichnen);
+  // SOFORT zeichnen, NICHT nur per requestAnimationFrame. rAF feuert nur, wenn die
+  // Seite tatsaechlich Bilder komponiert - in einem Hintergrund-Tab, einer eingebetteten
+  // Vorschau oder einem Screenshot-Dienst passiert das nie. Genau das ist beim Teilen
+  // der Normalfall: der Link wird im Hintergrund geoeffnet. Live gemessen: Kacheln und
+  // Urteil standen da, das Canvas blieb bei 300x150 und komplett leer.
+  zeichnen();
+  requestAnimationFrame(zeichnen);                      // nach dem ersten Layout nachziehen
+  addEventListener('load', zeichnen);                   // Schriften/Layout endgueltig
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) zeichnen();                   // Tab wird erstmals sichtbar
+  });
 
   // Bei Grössenänderung neu zeichnen (Canvas ist pixelbasiert, nicht skalierbar).
   var t = null;

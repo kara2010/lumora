@@ -3301,7 +3301,11 @@ async function anShowReport(file) {
     + '<button class="btn-browse" onclick="anExport(\'' + anEsc(file) + '\')">' + window.tr('Als Text kopieren') + '</button>'
     + '<button class="btn-primary" onclick="anShare(\'' + anEsc(file) + '\')">' + window.tr('🔗 Als Link teilen') + '</button>'
     + '</div>'
-  requestAnimationFrame(() => { const cv = document.getElementById('anChart'); if (cv) anDrawChart(cv, r.ftSeries, r.findings) })
+  // Sofort UND per rAF zeichnen: rAF allein feuert nicht, solange das Fenster nichts
+  // komponiert (minimiert/verdeckt) - der Bericht stuende dann ohne Kurve da.
+  const anZeichnen = () => { const cv = document.getElementById('anChart'); if (cv) anDrawChart(cv, r.ftSeries, r.findings) }
+  anZeichnen()
+  requestAnimationFrame(anZeichnen)
   // NUR den Einstellungs-Scrollbereich bewegen - scrollIntoView scrollte auch die
   // Eltern-Container und schob damit die Reiterleiste (#detailNav) aus dem Bild.
   const sv = document.getElementById('settingsView')
