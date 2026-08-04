@@ -8,13 +8,16 @@
 // findet der Schluessel nichts mehr - und die englische Oberflaeche zeigt an
 // dieser Stelle STILL Deutsch. Kein Fehler, keine Warnung, nur dieser Check.
 //
-// Aufruf:  node _testlab/i18n-check.js [index.html] [i18n-ignore.txt]
+// Aufruf:  node _testlab/i18n-check.js [index.html] [i18n-ignore.txt] [minKeys]
+// minKeys: Plausibilitaetsschwelle "Parser kaputt?" - Standard 100 (index.html hat
+// >500 Schluessel); kleinere Seiten (analyze-werkbank.html) uebergeben ihren Wert.
 // Exit 0 = keine Luecken, Exit 1 = Luecken (Liste auf stdout), Exit 2 = Aufrufproblem.
 const fs = require('fs');
 const path = require('path');
 
 const htmlPath = process.argv[2] || path.join(__dirname, '..', 'index.html');
 const ignorePath = process.argv[3] || path.join(__dirname, 'i18n-ignore.txt');
+const minKeys = parseInt(process.argv[4], 10) || 100;
 
 let src;
 try { src = fs.readFileSync(htmlPath, 'utf8'); }
@@ -63,7 +66,7 @@ for (const line of dictSrc.split('\n')) {
   const m = /^("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*:/.exec(t);
   if (m) keys.add(norm(unq(m[1])));
 }
-if (keys.size < 100) { console.log('FEHLER: nur ' + keys.size + ' Schluessel gelesen - Parser passt nicht mehr'); process.exit(2); }
+if (keys.size < minKeys) { console.log('FEHLER: nur ' + keys.size + ' Schluessel gelesen (minKeys=' + minKeys + ') - Parser passt nicht mehr'); process.exit(2); }
 
 // Braucht dieser Text ueberhaupt eine Uebersetzung?
 function needsTranslation(s) {

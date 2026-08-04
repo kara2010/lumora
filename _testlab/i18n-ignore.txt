@@ -93,3 +93,6 @@ AMD (AMF)
 OK
 resources\gruppe.php
 -Block innerhalb
+Lumora Analyse-Werkbank
+Lumora · Analyse-Werkbank
+Ø FPS
