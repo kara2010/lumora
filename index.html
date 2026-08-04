@@ -3318,7 +3318,9 @@ async function anShowReport(file) {
     + aggHtml + spikesHtml
     + '<div class="an-actions">'
     + '<button class="btn-browse" onclick="anExport(\'' + anEsc(file) + '\')">' + window.tr('Als Text kopieren') + '</button>'
-    + '<button class="btn-primary" onclick="anShare(\'' + anEsc(file) + '\')">' + window.tr('🔗 Als Link teilen') + '</button>'
+    // Teilen-Knopf vorerst entfernt (Feature deaktiviert). anShare/anShareSend + das
+    // #shareOverlay + die analyze-share-IPC bleiben schlummernd im Code, damit sich die
+    // Funktion spaeter durch Wiedereinsetzen dieser einen Zeile reaktivieren laesst.
     + '</div>'
   // Sofort UND per rAF zeichnen: rAF allein feuert nicht, solange das Fenster nichts
   // komponiert (minimiert/verdeckt) - der Bericht stuende dann ohne Kurve da.
@@ -3345,11 +3347,7 @@ async function anRefreshHistory() {
       + '<span class="an-hmeta">' + anEsc((h.wall || '').replace('T', ' ')) + ' · ' + Math.round((h.durS || 0) / 60) + ' min · ' + (h.avgFps || 0).toFixed(0) + ' fps · ' + (h.spikesPerMin || 0).toFixed(1) + ' R/min</span>'
       + '<input class="an-note" placeholder="' + window.tr('Notiz…') + '" value="' + anEsc(h.note || '') + '" onchange="anNote(\'' + anEsc(h.file) + '\', this.value)">'
       + '<button class="btn-browse" onclick="anShowReport(\'' + anEsc(h.file) + '\')">' + window.tr('Anzeigen') + '</button>'
-      // Geteilte Läufe erkennbar machen: Link kopieren oder Teilen zurückziehen.
-      + (h.share && h.share.url
-          ? '<button class="btn-browse" title="' + anEsc(h.share.url) + '" onclick="navigator.clipboard.writeText(\'' + anEsc(h.share.url) + '\')">🔗 ' + window.tr('Link kopieren') + '</button>'
-            + '<button class="btn-cancel" title="' + window.tr('Teilen zurückziehen') + '" onclick="anUnshare(\'' + anEsc(h.file) + '\')">⤺</button>'
-          : '')
+      // Teilen-Verlaufsknoepfe (Link kopieren / zurueckziehen) vorerst entfernt - Feature deaktiviert.
       + '<button class="btn-cancel" onclick="anDelete(\'' + anEsc(h.file) + '\')">✕</button>'
       + '</div>'
   }).join('')
