@@ -4761,27 +4761,41 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "analyze-osd-preview" && args.size() >= 1 && args[0].is_boolean()) { analyzeOsdPreview(args[0].get<bool>()); return true; }
     if (channel == "osd-preview" && args.size() >= 1 && args[0].is_boolean()) { osdPreviewMode(args[0].get<bool>()); return true; }
     if (channel == "analyze-list") {   // Verlauf: alle Berichte mit Kopf-Metadaten (neueste zuerst)
+        // Meta-Cache je Datei (Groesse+Schreibzeit als Schluessel): v2-Reports sind
+        // 1-2 MB gross - ohne Cache parste jede Verlaufs-Anzeige alle Dateien komplett
+        // (bei 20 Laeufen spuerbar, bei 100 sekundenlang). Der erste Aufruf nach dem
+        // App-Start zahlt einmal, danach kostet die Liste nichts mehr. Notiz-/Teil-
+        // Aenderungen schreiben die Datei -> Schreibzeit aendert sich -> Neuparse.
+        static std::map<std::wstring, std::pair<uint64_t, json>> metaCache;
         json out = json::array();
         WIN32_FIND_DATAW fd{};
         HANDLE h = FindFirstFileW((analyzeDirW() + L"\\report-*.json").c_str(), &fd);
         if (h != INVALID_HANDLE_VALUE) {
-            std::vector<std::wstring> files;
-            do { files.push_back(fd.cFileName); } while (FindNextFileW(h, &fd));
+            std::vector<std::pair<std::wstring, uint64_t>> files;
+            do {
+                uint64_t stempel = ((uint64_t)fd.ftLastWriteTime.dwHighDateTime << 32 | fd.ftLastWriteTime.dwLowDateTime)
+                                 ^ ((uint64_t)fd.nFileSizeHigh << 32 | fd.nFileSizeLow);
+                files.push_back({ fd.cFileName, stempel });
+            } while (FindNextFileW(h, &fd));
             FindClose(h);
             std::sort(files.rbegin(), files.rend());   // Dateiname traegt den Zeitstempel
-            for (auto& fn : files) {
+            for (auto& [fn, stempel] : files) {
                 if (out.size() >= 100) break;
+                auto it = metaCache.find(fn);
+                if (it != metaCache.end() && it->second.first == stempel) { out.push_back(it->second.second); continue; }
                 json j = json::parse(readFile(analyzeDirW() + L"\\" + fn), nullptr, false);
                 if (!j.is_object()) continue;
-                out.push_back({ {"file", narrow(fn)}, {"wall", j.value("wall", "")}, {"game", j.value("game", "")},
-                                {"durS", j.value("durS", 0.0)}, {"spikes", j.value("spikes", 0)},
-                                {"avgFps", j.value("avgFps", 0.0)}, {"p1LowFps", j.value("p1LowFps", 0.0)},
-                                {"spikesPerMin", j.value("spikesPerMin", 0.0)},
-                                {"verdictKey", j.value("verdictKey", "")}, {"verdictName", j.value("verdictName", "")},
-                                {"note", j.value("note", "")},
-                                // Teil-Angaben mitgeben, damit der Verlauf "geteilt" zeigen
-                                // und den Link/die Ruecknahme anbieten kann.
-                                {"share", j.contains("share") ? j["share"] : json(nullptr)} });
+                json m = { {"file", narrow(fn)}, {"wall", j.value("wall", "")}, {"game", j.value("game", "")},
+                           {"durS", j.value("durS", 0.0)}, {"spikes", j.value("spikes", 0)},
+                           {"avgFps", j.value("avgFps", 0.0)}, {"p1LowFps", j.value("p1LowFps", 0.0)},
+                           {"spikesPerMin", j.value("spikesPerMin", 0.0)},
+                           {"verdictKey", j.value("verdictKey", "")}, {"verdictName", j.value("verdictName", "")},
+                           {"note", j.value("note", "")},
+                           // Teil-Angaben mitgeben, damit der Verlauf "geteilt" zeigen
+                           // und den Link/die Ruecknahme anbieten kann.
+                           {"share", j.contains("share") ? j["share"] : json(nullptr)} };
+                metaCache[fn] = { stempel, m };
+                out.push_back(std::move(m));
             }
         }
         return out;

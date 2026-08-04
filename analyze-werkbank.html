@@ -38,9 +38,61 @@
   #urteilPunkt { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
     box-shadow: 0 0 8px currentColor; }
 
-  /* Hauptbereich: Browser | Timeline | Beweis (Browser/Beweis kommen in Etappe 3) */
-  #haupt { display: grid; grid-template-columns: 0 1fr 0; min-height: 0; }
-  #mitte { display: flex; flex-direction: column; min-width: 0; padding: 14px 16px; gap: 10px; }
+  /* Hauptbereich: Lauf-Browser | Timeline | Beweis-Panel */
+  #haupt { display: grid; grid-template-columns: 236px 1fr 0; min-height: 0; }
+  #haupt.mit-beweis { grid-template-columns: 236px 1fr 300px; }
+  #mitte { display: flex; flex-direction: column; min-width: 0; padding: 14px 10px 14px 12px; gap: 8px; }
+
+  /* Lauf-Browser (links) */
+  #links { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line);
+    background: rgba(10,14,21,.6); }
+  #links h3 { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim);
+    padding: 12px 14px 8px; }
+  #laufListe { flex: 1; overflow-y: auto; min-height: 0; }
+  #laufListe::-webkit-scrollbar { width: 8px; } #laufListe::-webkit-scrollbar-thumb { background: #232b3a; border-radius: 8px; }
+  .lauf { padding: 9px 12px 8px 14px; border-bottom: 1px solid rgba(255,255,255,.04); cursor: pointer;
+    display: grid; grid-template-columns: 10px 1fr auto; gap: 4px 8px; align-items: center; }
+  .lauf:hover { background: rgba(76,224,255,.05); }
+  .lauf.aktiv { background: rgba(76,224,255,.09); box-shadow: inset 2px 0 0 var(--cyan); }
+  .lauf .punkt { width: 8px; height: 8px; border-radius: 50%; }
+  .lauf .spiel { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lauf .zeit { grid-column: 2; font-size: 10px; color: var(--dim); }
+  .lauf .kw { grid-column: 3; grid-row: 1 / span 2; text-align: right; font-size: 10px; color: var(--dim); line-height: 1.5; }
+  .lauf .vgl { grid-column: 1 / span 3; font-size: 10px; color: var(--violet); cursor: pointer;
+    opacity: 0; margin-top: 2px; }
+  .lauf:hover .vgl, .lauf .vgl.an { opacity: 1; }
+  .lauf .vgl.an { font-weight: 700; }
+
+  /* Beweis-Panel (rechts) */
+  #rechts { display: none; flex-direction: column; min-height: 0; border-left: 1px solid var(--line);
+    background: rgba(10,14,21,.6); }
+  #haupt.mit-beweis #rechts { display: flex; }
+  #rechts .bp-kopf { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
+  #rechts h3 { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); flex: 1; }
+  #rechts .bp-nav { display: flex; gap: 4px; }
+  #rechts .bp-nav button, #rechts .bp-zu { background: rgba(255,255,255,.05); border: 1px solid var(--line);
+    color: var(--text); border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: 12px; }
+  #rechts .bp-nav button:hover, #rechts .bp-zu:hover { background: rgba(76,224,255,.12); }
+  #bpInhalt { flex: 1; overflow-y: auto; padding: 4px 14px 14px; min-height: 0; }
+  #bpInhalt .bp-zeit { font-family: Consolas, monospace; font-size: 15px; font-weight: 700; color: #eaf6ff;
+    text-shadow: 0 0 10px rgba(255,70,86,.4); }
+  #bpInhalt .bp-ft { font-size: 11px; color: var(--dim); margin: 2px 0 12px; }
+  .verd { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 9px;
+    padding: 9px 11px; margin-bottom: 8px; }
+  .verd .vk { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .verd .vname { font-size: 12px; font-weight: 700; }
+  .verd .vart { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin-left: auto; }
+  .verd .vev { font-size: 11px; color: rgba(217,234,245,.8); font-family: Consolas, monospace; }
+  .verd .vbar { height: 3px; border-radius: 2px; background: rgba(255,255,255,.07); margin-top: 6px; overflow: hidden; }
+  .verd .vbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--bad), var(--warn)); }
+
+  /* Vergleichszeile unterm Kopf */
+  #vglZeile { display: none; align-items: center; gap: 8px; font-size: 11px; color: var(--text);
+    background: rgba(154,123,255,.08); border: 1px solid rgba(154,123,255,.3); border-radius: 8px;
+    padding: 5px 10px; }
+  #vglZeile.an { display: flex; }
+  #vglZeile .linie { width: 18px; height: 2px; background: rgba(154,123,255,.75); }
+  #vglZeile button { margin-left: auto; background: none; border: none; color: var(--dim); cursor: pointer; font-size: 13px; }
 
   #zeitleiste { flex: 1; min-height: 0; position: relative;
     background: var(--panel); border: 1px solid rgba(0,229,255,.16); border-radius: 12px;
@@ -69,18 +121,32 @@
     <span class="kopfstat"><b id="kSpk" class="mono">–</b><span data-i18n>Ruckler</span></span>
   </div>
   <div id="haupt">
-    <div id="links"></div>
+    <div id="links">
+      <h3 data-i18n>Läufe</h3>
+      <div id="laufListe"></div>
+    </div>
     <div id="mitte">
+      <div id="vglZeile"><span class="linie"></span><span id="vglText"></span><button onclick="vglAus()" title="Vergleich beenden">✕</button></div>
       <div id="zeitleiste">
         <canvas id="tlCanvas"></canvas>
         <div id="hinweis">
           <div class="gross" data-i18n>Kein Lauf geladen</div>
-          <div data-i18n>Über den Analyse-Reiter „In der Werkbank öffnen" wählen.</div>
+          <div data-i18n>Links einen Lauf wählen.</div>
         </div>
       </div>
-      <div style="text-align:center; font-size:10px; color:var(--dim); letter-spacing:.06em" data-i18n>Zoom: Mausrad · Verschieben: ziehen · Alles zeigen: Doppelklick</div>
+      <div style="text-align:center; font-size:10px; color:var(--dim); letter-spacing:.06em" data-i18n>Zoom: Mausrad · Verschieben: ziehen · Alles zeigen: Doppelklick · Ruckler anklicken für Beweise</div>
     </div>
-    <div id="rechts"></div>
+    <div id="rechts">
+      <div class="bp-kopf">
+        <h3 data-i18n>Beweise</h3>
+        <div class="bp-nav">
+          <button onclick="bpSpring(-1)" title="Voriger Ruckler">◀</button>
+          <button onclick="bpSpring(1)" title="Nächster Ruckler">▶</button>
+        </div>
+        <button class="bp-zu" onclick="bpZu()" title="Schließen">✕</button>
+      </div>
+      <div id="bpInhalt"></div>
+    </div>
   </div>
 </div>
 
@@ -110,11 +176,34 @@
     "Latenz": "latency",
     "max": "max",
     "Zoom: Mausrad · Verschieben: ziehen · Alles zeigen: Doppelklick": "Zoom: wheel · Pan: drag · Show all: double-click",
+    'Zoom: Mausrad · Verschieben: ziehen · Alles zeigen: Doppelklick · Ruckler anklicken für Beweise': 'Zoom: wheel · Pan: drag · Show all: double-click · Click a stutter for evidence',
+    'Läufe': 'Runs',
+    'Links einen Lauf wählen.': 'Choose a run on the left.',
+    'Beweise': 'Evidence',
+    'Median davor': 'median before',
+    'Keine Systemursache im Messfenster – vermutlich spielintern.': 'No system cause in the measurement window – likely game-internal.',
+    'Vergleichen': 'Compare',
+    'Vergleich aktiv': 'Comparison active',
+    'Vergleich mit': 'Comparing with',
+    'anderes Spiel': 'different game',
+    'Vergleich beenden': 'End comparison',
+    'Voriger Ruckler': 'Previous stutter',
+    'Nächster Ruckler': 'Next stutter',
+    'Schließen': 'Close',
+    // Verdaechtigen-Arten (dynamisch via LumoraReport.KIND - der i18n-Check sieht sie
+    // nicht, uebersetzt werden muessen sie trotzdem)
+    'Treiber': 'Driver',
+    'Programm': 'Program',
+    'GPU-Drosselung': 'GPU throttling',
+    'Grafikspeicher': 'Video memory',
+    'Programmstart': 'Program start',
+    'Spielintern': 'Game-internal',
   }
   let LANG = 'de'
   try { LANG = (localStorage.getItem('lumoraLang') || 'de') } catch (e) {}
   const tr = (t) => (LANG === 'en' && I18N_EN[t]) ? I18N_EN[t] : t
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.textContent) })
+  document.querySelectorAll('[title]').forEach((el) => { el.title = tr(el.title) })
   LumoraReport.setTranslator(tr)
 
   // --- Berichtsdaten -------------------------------------------------------------
@@ -141,8 +230,11 @@
       return
     }
     bericht = r
+    if (vglFile === file) { vglFile = null; if (timeline) timeline.ladenB(null); document.getElementById('vglZeile').classList.remove('an') }
+    bpZu()
     renderKopf()
     renderZeitleiste()
+    markiereAktiv()
   }
 
   function renderKopf() {
@@ -190,8 +282,114 @@
     }
   }
 
-  // Beweis-Panel folgt in Etappe 3 - bis dahin zoomt ein Spike-Klick ins Ereignis.
-  function zeigeBeweis(f) { if (timeline) timeline.zeigeFenster(f.t, 0.5) }
+  // --- Lauf-Browser (links) ------------------------------------------------------
+  let laeufe = []
+  async function ladeListe() {
+    try { laeufe = (await ipcRenderer.invoke('analyze-list')) || [] } catch (e) { laeufe = [] }
+    const el = document.getElementById('laufListe')
+    el.innerHTML = laeufe.map((h) => {
+      const col = LumoraReport.verdictColor(h)
+      const spiel = (h.game || '–').split(/[\\/]/).pop()
+      return '<div class="lauf' + (h.file === berichtFile ? ' aktiv' : '') + '" data-file="' + LumoraReport.esc(h.file) + '">'
+        + '<span class="punkt" style="background:' + col + '"></span>'
+        + '<span class="spiel">' + LumoraReport.esc(spiel) + '</span>'
+        + '<span class="kw">' + (h.avgFps || 0).toFixed(0) + ' fps<br>' + (h.spikesPerMin || 0).toFixed(1) + ' R/min</span>'
+        + '<span class="zeit">' + LumoraReport.esc((h.wall || '').replace('T', ' ')) + ' · ' + Math.round((h.durS || 0) / 60) + ' min'
+        + (h.note ? ' · ' + LumoraReport.esc(h.note) : '') + '</span>'
+        + '<span class="vgl' + (vglFile === h.file ? ' an' : '') + '" data-vgl="' + LumoraReport.esc(h.file) + '">'
+        + (vglFile === h.file ? tr('Vergleich aktiv') : tr('Vergleichen')) + '</span>'
+        + '</div>'
+    }).join('')
+    el.querySelectorAll('.lauf').forEach((n) => {
+      n.addEventListener('click', (e) => {
+        const v = e.target.getAttribute && e.target.getAttribute('data-vgl')
+        if (v) { vglMit(v); e.stopPropagation(); return }
+        ladeLauf(n.getAttribute('data-file'))
+      })
+    })
+  }
+  function markiereAktiv() {
+    document.querySelectorAll('#laufListe .lauf').forEach((n) => {
+      n.classList.toggle('aktiv', n.getAttribute('data-file') === berichtFile)
+    })
+  }
+
+  // --- Beweis-Panel (rechts) -----------------------------------------------------
+  let bpFinding = null
+  function zeigeBeweis(f) {
+    bpFinding = f
+    document.getElementById('haupt').classList.add('mit-beweis')
+    const inh = document.getElementById('bpInhalt')
+    const esc = LumoraReport.esc
+    const m = Math.floor(f.t / 60), s = (f.t - m * 60).toFixed(1)
+    let html = '<div class="bp-zeit">' + m + ':' + (s < 10 ? '0' : '') + s + '</div>'
+      + '<div class="bp-ft">' + f.ftMs.toFixed(0) + ' ms · ' + tr('Median davor') + ' ' + f.medianMs.toFixed(1) + ' ms'
+      + ' · ' + Math.round(f.ftMs / Math.max(0.1, f.medianMs)) + '×</div>'
+    const sus = f.suspects || []
+    if (!sus.length) html += '<div class="verd"><div class="vev">' + tr('Keine Systemursache im Messfenster – vermutlich spielintern.') + '</div></div>'
+    for (const su of sus) {
+      html += '<div class="verd">'
+        + '<div class="vk"><span class="vname">' + esc(su.name || '–') + '</span>'
+        + '<span class="vart">' + esc((LumoraReport.KIND[su.kind] ? tr(LumoraReport.KIND[su.kind]) : su.kind)) + '</span></div>'
+        + '<div class="vev">' + esc(su.evidence || '') + '</div>'
+        + '<div class="vbar"><i style="width:' + Math.round((su.score || 0) * 100) + '%"></i></div>'
+        + '</div>'
+    }
+    inh.innerHTML = html
+    if (timeline) {
+      timeline.aktiverSpike = f
+      timeline.zeigeFenster(f.t, 0.6)
+    }
+    // Timeline hat jetzt weniger Platz (rechte Spalte) -> nach dem Layout neu zeichnen
+    requestAnimationFrame(() => timeline && timeline.zeichnen())
+  }
+  function bpSpring(dir) {
+    if (!bericht || !bericht.findings || !bericht.findings.length) return
+    const fs = bericht.findings
+    let i = bpFinding ? fs.findIndex((x) => x.id === bpFinding.id) : -1
+    i = (i + dir + fs.length) % fs.length
+    zeigeBeweis(fs[i])
+  }
+  function bpZu() {
+    document.getElementById('haupt').classList.remove('mit-beweis')
+    bpFinding = null
+    if (timeline) { timeline.aktiverSpike = null; requestAnimationFrame(() => timeline.zeichnen()) }
+  }
+
+  // --- Vergleich (Lauf B als Overlay) --------------------------------------------
+  let vglFile = null
+  async function vglMit(file) {
+    if (file === berichtFile) return              // sich selbst vergleichen ist sinnlos
+    if (vglFile === file) { vglAus(); return }    // zweiter Klick schaltet aus
+    let rB = null
+    try {
+      const resp = await fetch('https://data.lumora/analyze/' + file + '?t=' + Date.now())
+      if (resp.ok) rB = await resp.json()
+    } catch (e) {}
+    if (!rB || !Array.isArray(rB.ftSeries)) return
+    vglFile = file
+    if (timeline) timeline.ladenB(rB)
+    // Klartext-Delta: Ruckler/min und 1%-Low gegenueber dem Hauptlauf
+    const dSpm = (bericht.spikesPerMin || 0) - (rB.spikesPerMin || 0)
+    const dLow = (bericht.p1LowFps || 0) - (rB.p1LowFps || 0)
+    const spielB = (rB.game || '').split(/[\\/]/).pop()
+    let txt = tr('Vergleich mit') + ' ' + spielB + ' (' + (rB.wall || '').replace('T', ' ') + '): '
+    txt += tr('Ruckler/min') + ' ' + (rB.spikesPerMin || 0).toFixed(1) + ' → ' + (bericht.spikesPerMin || 0).toFixed(1)
+    txt += ' · 1%-Low ' + (rB.p1LowFps || 0).toFixed(0) + ' → ' + (bericht.p1LowFps || 0).toFixed(0) + ' fps'
+    // Warnung bei abweichendem Kontext (anderes Spiel) - Vergleich waere irrefuehrend
+    if (spielB && bericht.game && spielB !== (bericht.game || '').split(/[\\/]/).pop()) {
+      txt += ' · ⚠ ' + tr('anderes Spiel')
+    }
+    document.getElementById('vglText').textContent = txt
+    document.getElementById('vglZeile').classList.add('an')
+    ladeListe()
+  }
+  function vglAus() {
+    vglFile = null
+    if (timeline) timeline.ladenB(null)
+    document.getElementById('vglZeile').classList.remove('an')
+    ladeListe()
+  }
 
   let resizeT = null
   addEventListener('resize', () => {
@@ -200,9 +398,10 @@
   })
 
   // Lauf-Wechsel aus der Shell (Fenster lebt schon, Nutzer waehlt anderen Lauf im Reiter)
-  ipcRenderer.on('wb-open', (e, file) => { if (typeof file === 'string' && file) ladeLauf(file) })
+  ipcRenderer.on('wb-open', (e, file) => { if (typeof file === 'string' && file) { ladeLauf(file); ladeListe() } })
 
-  // Start: Lauf aus dem Query-Parameter (vom ersten Navigate der Shell gesetzt)
+  // Start: Lauf-Browser fuellen; Lauf aus dem Query-Parameter (vom ersten Navigate)
+  ladeListe()
   const qf = new URLSearchParams(location.search).get('file')
   if (qf) ladeLauf(qf)
 </script>

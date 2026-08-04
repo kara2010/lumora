@@ -71,8 +71,7 @@
     this._binden();
   }
 
-  Timeline.prototype.laden = function (r) {
-    this.r = r;
+  function serieAusReport(r) {
     var s = ftFullEntpacken(r.ftFull);
     if (!s) {
       // v1-Bericht: ftSeries ([[t,ms],...]) als Ersatzserie - Zoom bleibt moeglich,
@@ -81,12 +80,33 @@
       s = { t: new Float64Array(ser.length), ft: new Float32Array(ser.length), n: ser.length };
       for (var i = 0; i < ser.length; i++) { s.t[i] = ser[i][0]; s.ft[i] = ser[i][1]; }
     }
+    return s;
+  }
+
+  Timeline.prototype.laden = function (r) {
+    this.r = r;
+    var s = serieAusReport(r);
     this.serie = s;
     this.pyr = s.n > 4096 ? pyramideBauen(s) : [];
     this.tMin = s.n ? s.t[0] : 0;
     this.tMax = s.n ? s.t[s.n - 1] : (r.durS || 1);
     if (this.tMax <= this.tMin) this.tMax = this.tMin + 1;
+    this.serieB = null; this.pyrB = null; this.rB = null;
+    this.aktiverSpike = null;
     this.spurenBauen();
+    this.gesamt();
+  };
+
+  // Vergleichslauf B als Overlay (nur die Maxima-Linie, halbtransparent violett).
+  // Beide Laeufe starten bei ihrer eigenen Session-Zeit ~0 - die Achsen sind damit
+  // direkt vergleichbar ("Minute 5 hier vs. Minute 5 dort").
+  Timeline.prototype.ladenB = function (r) {
+    if (!r) { this.serieB = null; this.pyrB = null; this.rB = null; this.zeichnen(); return; }
+    this.rB = r;
+    var s = serieAusReport(r);
+    this.serieB = s;
+    this.pyrB = s.n > 4096 ? pyramideBauen(s) : [];
+    if (s.n && s.t[s.n - 1] > this.tMax) { this.tMax = s.t[s.n - 1]; }
     this.gesamt();
   };
 
@@ -309,6 +329,14 @@
     for (var i3 = 0; i3 < sicht.length; i3++) { var s3 = sicht[i3]; if (i3) c.lineTo(s3.x, Y(s3.hi)); else c.moveTo(s3.x, Y(s3.hi)); }
     c.strokeStyle = 'rgba(150,215,255,.95)'; c.lineWidth = 1.2; c.stroke();
 
+    // Vergleichslauf B als Overlay-Linie (violett, halbtransparent)
+    if (this.serieB) {
+      var sichtB = this._sichtbar(g.w, this.serieB, this.pyrB);
+      c.beginPath();
+      for (var ib = 0; ib < sichtB.length; ib++) { var sb = sichtB[ib]; if (ib) c.lineTo(sb.x, Y(sb.hi)); else c.moveTo(sb.x, Y(sb.hi)); }
+      c.strokeStyle = 'rgba(154,123,255,.75)'; c.lineWidth = 1.2; c.stroke();
+    }
+
     // Spike-Marker
     var fs = this.r.findings || [];
     for (var i4 = 0; i4 < fs.length; i4++) {
@@ -337,17 +365,19 @@
     if (this.hover) this._hoverZeichnen(c, g, X, Y, sicht);
   };
 
-  // Sichtbare Punkte auf Pixelspalten reduzieren (LOD-Stufe nach Zoom waehlen)
-  Timeline.prototype._sichtbar = function (breite) {
-    var s = this.serie, t0 = this.t0, t1 = this.t1, spanne = t1 - t0;
+  // Sichtbare Punkte auf Pixelspalten reduzieren (LOD-Stufe nach Zoom waehlen).
+  // serie/pyr optional: ohne Angabe die Hauptserie, sonst der Vergleichslauf B.
+  Timeline.prototype._sichtbar = function (breite, serieArg, pyrArg) {
+    var s = serieArg || this.serie, t0 = this.t0, t1 = this.t1, spanne = t1 - t0;
     var out = [];
     if (!s.n) return out;
     // Punkte je Pixel in der Rohserie schaetzen -> passende Pyramidenstufe
     var gesamtSpanne = this.tMax - this.tMin;
     var rohProPixel = (s.n * (spanne / gesamtSpanne)) / breite;
+    var pyr = pyrArg || this.pyr;
     var quelle = { t: s.t, min: s.ft, max: s.ft, n: s.n, schritt: 1 };
-    for (var k = 0; k < this.pyr.length; k++) {
-      if (this.pyr[k].schritt <= rohProPixel * 0.5) quelle = this.pyr[k]; else break;
+    for (var k = 0; k < pyr.length; k++) {
+      if (pyr[k].schritt <= rohProPixel * 0.5) quelle = pyr[k]; else break;
     }
     // Binaersuche auf den ersten sichtbaren Index
     var lo = 0, hi = quelle.n - 1;
