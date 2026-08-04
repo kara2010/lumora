@@ -160,7 +160,7 @@ Copy-Item "$shell\build\Release\lumora_shell.exe" "$stage\lumora-shell.exe"
 # direkt danach auf LumoraReport zu. Fehlt die Datei, wirft die Seite beim Laden und
 # bleibt im Boot-Screen haengen (3.3.0 genau so ausgeliefert). Es ist die gemeinsame
 # Quelle fuer App UND Website - beim Herausloesen aus index.html hier vergessen.
-foreach ($f in "index.html","analyze-report.js","styles.css","player.html","osd.html","analyze-osd.html","analyze-werkbank.html","doorman.html","icon.ico","icon-64.png") {
+foreach ($f in "index.html","analyze-report.js","werkbank-timeline.js","styles.css","player.html","osd.html","analyze-osd.html","analyze-werkbank.html","doorman.html","icon.ico","icon-64.png") {
   if (Test-Path "$root\$f") { Copy-Item "$root\$f" $stage }
 }
 # UI-Bilder/Assets (Logos etc.), die index.html/styles.css referenzieren
