@@ -23,13 +23,13 @@
   <meta property="og:site_name"   content="Lumora">
   <meta property="og:url"         content="https://lumora-streaming.de/en/">
   <meta property="og:title"       content="Lumora – native game launcher with streaming, auto HDR and an input bridge">
-  <meta property="og:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.72 MB, for Windows 10 / 11.">
+  <meta property="og:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.73 MB, for Windows 10 / 11.">
   <meta property="og:locale"      content="en_US">
 
   <!-- Twitter Card -->
   <meta name="twitter:card"        content="summary_large_image">
   <meta name="twitter:title"       content="Lumora – native game launcher with streaming, auto HDR and an input bridge">
-  <meta name="twitter:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.72 MB, for Windows 10 / 11.">
+  <meta name="twitter:description" content="Native Windows launcher that unifies Steam, Epic, GOG, Xbox & co. in one cover library, fully gamepad-controlled. With game streaming via a link (1080p60, up to 4K), automatic HDR per game, an input bridge (joystick/wheel as an Xbox controller) and FPS/GPU/CPU display without Afterburner. Free, open source, 3.73 MB, for Windows 10 / 11.">
   <meta name="twitter:image"       content="https://lumora-streaming.de/screenshot.png">
 
   <!-- og:image -->
@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "3.2.4",
+        "softwareVersion": "3.3.0",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -744,7 +744,7 @@
 <section class="hero">
   <div class="hero-badge">⬡ Free · Windows 10 / 11</div>
   <h1>A native launcher for all your games.<br><em>With game streaming, automatic HDR and an input bridge.</em></h1>
-  <p>Lumora unifies Steam, Epic, GOG, Xbox &amp; more in one cover library — at your desk with a mouse, on the couch with a gamepad. Plus streaming a game via a link, automatic HDR per game, a joystick, wheel or flight stick as a virtual Xbox controller, and an FPS/hardware OSD <strong>without Afterburner &amp; co.</strong> Native C++ code, 3.72 MB, open source.</p>
+  <p>Lumora unifies Steam, Epic, GOG, Xbox &amp; more in one cover library — at your desk with a mouse, on the couch with a gamepad. Plus streaming a game via a link, automatic HDR per game, a joystick, wheel or flight stick as a virtual Xbox controller, and an FPS/hardware OSD <strong>without Afterburner &amp; co.</strong> Native C++ code, 3.73 MB, open source.</p>
   <div class="hero-pills">
     <span class="hero-pill">🗂 All stores in one library</span>
     <span class="hero-pill">📡 Streaming via link (up to 4K)</span>
@@ -754,7 +754,7 @@
   </div>
   <div class="hero-actions">
     <button class="btn-dl" onclick="startDownload()">
-      ⬇ Download &nbsp;·&nbsp; 3.72 MB
+      ⬇ Download &nbsp;·&nbsp; 3.73 MB
     </button>
     <a class="btn-ghost" href="#features">
       See all features
@@ -1041,8 +1041,18 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.2.4</span>
+          <span class="release-ver">3.3.0</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>Gamepad: A launches games again</strong> – even when the A button is part of a gamepad hotkey you assigned yourself (e.g. "A + LB" for the overlay). In that case the button was accidentally blocked from launching games; it now launches normally again, while the combination still triggers only the hotkey.</li>
+          <li><strong>Clean upgrade from the previous version</strong> – if you came from the older Lumora version, the taskbar briefly showed a wrong name without an icon. Setup now clears the old remnant, so Lumora appears with the correct name and icon again.</li>
+          <li>Your library and settings load more robustly at startup.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.2.4</span>
         </div>
         <ul>
           <li><strong>More robust under the hood</strong>: Lumora now registers with Windows under a fixed app identity, giving it clean grouping in the taskbar and for notifications. If the display component crashes (for example after a graphics-driver reset while gaming), Lumora reloads the interface automatically instead of staying stuck as a blank window. And the installer checks whether the required Microsoft runtime is present and installs it if needed – so Lumora starts reliably even on freshly set-up systems.</li>
@@ -1073,6 +1083,7 @@
           <li><strong>Launched games reliably come to the front</strong>: If you had brought Lumora to the foreground from another application via hotkey and then started a game, the game could end up sitting behind Lumora – you had to alt-tab to it. This comes down to a Windows safeguard: only the application that currently holds the foreground may hand it over. When a game is launched through Steam or a shortcut, that application is not Lumora. Lumora now passes the right along before launching and additionally brings the game window to the front itself once it appears. If you deliberately switched to something else in the meantime, that is left alone.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.2.0</span>
@@ -1086,7 +1097,6 @@
           <li>Stutter reports now record whether system events had to be dropped during the measurement – making it easy to see how solid the result is.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.1.2</span>
@@ -1432,7 +1442,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (31)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (32)</button>
   </div>
 </section>
 
@@ -1833,7 +1843,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Show less' : 'Show older versions (31)';
+    btn.textContent = open ? 'Show less' : 'Show older versions (32)';
   }
 
   function toggleFeatures() {
