@@ -1200,6 +1200,7 @@
 const I18N_EN = {
   // --- Bericht teilen (3.3.0) ---
   "🔗 Als Link teilen": "🔗 Share as a link",
+  "🔬 In der Werkbank öffnen": "🔬 Open in the workbench",
   "Prozess ": "Process ",
   "Hochladen und Link kopieren": "Upload and copy link",
   "Wird hochgeladen …": "Uploading …",
@@ -3321,6 +3322,7 @@ async function anShowReport(file) {
     // Teilen-Knopf vorerst entfernt (Feature deaktiviert). anShare/anShareSend + das
     // #shareOverlay + die analyze-share-IPC bleiben schlummernd im Code, damit sich die
     // Funktion spaeter durch Wiedereinsetzen dieser einen Zeile reaktivieren laesst.
+    + '<button class="btn-primary" onclick="anWerkbank(\'' + anEsc(file) + '\')">' + window.tr('🔬 In der Werkbank öffnen') + '</button>'
     + '</div>'
   // Sofort UND per rAF zeichnen: rAF allein feuert nicht, solange das Fenster nichts
   // komponiert (minimiert/verdeckt) - der Bericht stuende dann ohne Kurve da.
@@ -3497,6 +3499,9 @@ async function anUnshare(file) {
   anRefreshHistory()
 }
 
+// Analyse-Werkbank: eigenes Auswerte-Fenster (zoombare Timeline, Spuren, Vergleich).
+// Die Shell prueft den Dateinamen (anSafeName) und oeffnet/fokussiert das Fenster.
+function anWerkbank(file) { ipcRenderer.invoke('analyze-werkbank', file || '') }
 async function anExport(file) {
   const r = await ipcRenderer.invoke('analyze-get', file)
   if (!r) return

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Lumora Analyse-Werkbank</title>
+<style>
+  /* Analyse-Werkbank - Profiler-Leitmetapher in der Messgeraete-Designsprache des
+     Analyse-OSD (Praezisionsinstrument: dunkle Glasflaechen, Cyan-Akzente, Monospace-
+     Kennzahlen). Layout: Kopfzeile / Lauf-Browser links / Timeline mittig /
+     Beweis-Panel rechts. Etappe 1b: Geruest + Kopf + Kurve; Timeline folgt (Etappe 2). */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #080a0e; --panel: rgba(13,18,28,.92); --line: rgba(255,255,255,.07);
+    --cyan: #4ce0ff; --violet: #9a7bff; --text: #d9eaf5; --dim: #6d7f90;
+    --good: #35e08a; --warn: #ffc857; --bad: #ff4050;
+  }
+  html, body { height: 100%; background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; user-select: none; }
+  .mono { font-family: Consolas, 'DejaVu Sans Mono', monospace; font-variant-numeric: tabular-nums; }
+
+  #app { display: grid; grid-template-rows: 52px 1fr; height: 100%; }
+
+  /* Kopfzeile */
+  #kopf { display: flex; align-items: center; gap: 14px; padding: 0 16px;
+    background: linear-gradient(180deg, rgba(16,22,34,.95), rgba(10,14,22,.9));
+    border-bottom: 1px solid rgba(0,229,255,.14); }
+  #kopf .marke { font-size: 12px; letter-spacing: .22em; text-transform: uppercase; font-weight: 700;
+    background: linear-gradient(90deg, var(--cyan), var(--violet));
+    -webkit-background-clip: text; background-clip: text; color: transparent; white-space: nowrap; }
+  #laufName { font-size: 13px; color: var(--text); font-weight: 600; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 340px; }
+  #laufMeta { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #kopf .luft { flex: 1; }
+  .kopfstat { text-align: right; line-height: 1.15; }
+  .kopfstat b { display: block; font-size: 15px; font-weight: 700; color: #eaf6ff;
+    text-shadow: 0 0 10px rgba(0,229,255,.35); }
+  .kopfstat span { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+  #urteilPunkt { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
+    box-shadow: 0 0 8px currentColor; }
+
+  /* Hauptbereich: Browser | Timeline | Beweis (Browser/Beweis kommen in Etappe 3) */
+  #haupt { display: grid; grid-template-columns: 0 1fr 0; min-height: 0; }
+  #mitte { display: flex; flex-direction: column; min-width: 0; padding: 14px 16px; gap: 10px; }
+
+  #zeitleiste { flex: 1; min-height: 0; position: relative;
+    background: var(--panel); border: 1px solid rgba(0,229,255,.16); border-radius: 12px;
+    box-shadow: 0 14px 44px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05); overflow: hidden; }
+  #zeitleiste canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* Hinweise/Zustaende */
+  #hinweis { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 8px; color: var(--dim); font-size: 13px; text-align: center; padding: 24px; }
+  #hinweis .gross { font-size: 15px; color: var(--text); }
+  .pille { display: inline-block; font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px; color: var(--dim); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="kopf">
+    <span class="marke">Lumora · Analyse-Werkbank</span>
+    <span id="urteilPunkt" style="background:#556; color:#556"></span>
+    <span id="laufName">–</span>
+    <span id="laufMeta"></span>
+    <span class="luft"></span>
+    <span class="kopfstat"><b id="kAvg" class="mono">–</b><span>Ø FPS</span></span>
+    <span class="kopfstat"><b id="kLow" class="mono">–</b><span>1%-Low</span></span>
+    <span class="kopfstat"><b id="kMed" class="mono">–</b><span data-i18n>Median</span></span>
+    <span class="kopfstat"><b id="kSpk" class="mono">–</b><span data-i18n>Ruckler</span></span>
+  </div>
+  <div id="haupt">
+    <div id="links"></div>
+    <div id="mitte">
+      <div id="zeitleiste">
+        <canvas id="tlCanvas"></canvas>
+        <div id="hinweis">
+          <div class="gross" data-i18n>Kein Lauf geladen</div>
+          <div data-i18n>Über den Analyse-Reiter „In der Werkbank öffnen" wählen.</div>
+        </div>
+      </div>
+    </div>
+    <div id="rechts"></div>
+  </div>
+</div>
+
+<script src="analyze-report.js"></script>
+<script>
+  const { ipcRenderer } = require('electron')
+
+  // --- i18n: gleiche Mechanik wie index.html (deutscher Satz = Schluessel), gleiche
+  // Sprachquelle (localStorage lumoraLang, von index.html gepflegt - selber Origin).
+  const I18N_EN = {
+    'Median': 'Median',
+    'Ruckler': 'Stutters',
+    'Kein Lauf geladen': 'No run loaded',
+    'Über den Analyse-Reiter „In der Werkbank öffnen" wählen.': 'Choose "Open in the workbench" from the Analysis tab.',
+    'Bericht konnte nicht geladen werden.': 'The report could not be loaded.',
+    'Älterer Bericht (v1): Kurve in Berichtsauflösung, keine Spuren.': 'Older report (v1): curve at report resolution, no tracks.',
+    'Zeitleiste folgt in der nächsten Etappe.': 'Timeline coming in the next stage.',
+    'Ruckler/min': 'stutters/min',
+  }
+  let LANG = 'de'
+  try { LANG = (localStorage.getItem('lumoraLang') || 'de') } catch (e) {}
+  const tr = (t) => (LANG === 'en' && I18N_EN[t]) ? I18N_EN[t] : t
+  document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.textContent) })
+  LumoraReport.setTranslator(tr)
+
+  // --- Berichtsdaten -------------------------------------------------------------
+  let bericht = null      // geparstes Report-JSON (v1 oder v2)
+  let berichtFile = null
+
+  function zeigHinweis(zeilen) {
+    const h = document.getElementById('hinweis')
+    h.style.display = 'flex'
+    h.innerHTML = zeilen.map((z, i) => '<div class="' + (i === 0 ? 'gross' : '') + '">' + LumoraReport.esc(z) + '</div>').join('')
+  }
+
+  async function ladeLauf(file) {
+    if (!/^report-[0-9-]+\.json$/.test(file || '')) { zeigHinweis([tr('Bericht konnte nicht geladen werden.'), file || '']) ; return }
+    berichtFile = file
+    let r = null
+    try {
+      // Direkt vom data.lumora-Mapping: v2-Reports sind Megabytes, kein IPC-Umweg.
+      const resp = await fetch('https://data.lumora/analyze/' + file + '?t=' + Date.now())
+      if (resp.ok) r = await resp.json()
+    } catch (e) {}
+    if (!r || typeof r !== 'object' || !Array.isArray(r.ftSeries)) {
+      zeigHinweis([tr('Bericht konnte nicht geladen werden.'), file])
+      return
+    }
+    bericht = r
+    renderKopf()
+    renderZeitleiste()
+  }
+
+  function renderKopf() {
+    const r = bericht
+    document.getElementById('laufName').textContent = LumoraReport.verdict(r)
+    const spiel = (r.game || '').split(/[\\/]/).pop()
+    const min = Math.round((r.durS || 0) / 60)
+    document.getElementById('laufMeta').textContent =
+      (spiel ? spiel + ' · ' : '') + (r.wall || '').replace('T', ' ') + ' · ' + min + ' min'
+    document.getElementById('urteilPunkt').style.background = LumoraReport.verdictColor(r)
+    document.getElementById('urteilPunkt').style.color = LumoraReport.verdictColor(r)
+    document.getElementById('kAvg').textContent = (r.avgFps || 0).toFixed(0)
+    document.getElementById('kLow').textContent = (r.p1LowFps || 0).toFixed(0)
+    document.getElementById('kMed').textContent = (r.medianFtMs || 0).toFixed(1) + ' ms'
+    document.getElementById('kSpk').textContent = (r.spikes || 0) + ' · ' + (r.spikesPerMin || 0).toFixed(1) + '/min'
+    document.title = 'Lumora Analyse-Werkbank – ' + (spiel || berichtFile)
+  }
+
+  // Etappe 1b: Uebergangsdarstellung mit der geteilten Berichts-Kurve (drawChart).
+  // Etappe 2 ersetzt das durch die zoombare Timeline mit Spuren (werkbank-timeline.js).
+  function renderZeitleiste() {
+    document.getElementById('hinweis').style.display = 'none'
+    const cv = document.getElementById('tlCanvas')
+    // Sofort zeichnen + rAF + kurzer Timeout nachziehen (rAF allein feuert nicht ohne
+    // Komposition, und der Sofort-Aufruf kann vor dem Layout laufen -> Fallback-Hoehe;
+    // gleiche Lehre wie beim geteilten Bericht).
+    const mal = () => LumoraReport.drawChart(cv, bericht.ftSeries, bericht.findings, { scaleFactor: 1.3 })
+    mal(); requestAnimationFrame(mal); setTimeout(mal, 80)
+    if (!bericht.ftFull) {
+      const p = document.createElement('div')
+      p.className = 'pille'
+      p.style.cssText = 'position:absolute;top:10px;left:12px'
+      p.textContent = tr('Älterer Bericht (v1): Kurve in Berichtsauflösung, keine Spuren.')
+      document.getElementById('zeitleiste').appendChild(p)
+    }
+  }
+
+  let resizeT = null
+  addEventListener('resize', () => {
+    clearTimeout(resizeT)
+    resizeT = setTimeout(() => { if (bericht) renderZeitleiste() }, 120)
+  })
+
+  // Lauf-Wechsel aus der Shell (Fenster lebt schon, Nutzer waehlt anderen Lauf im Reiter)
+  ipcRenderer.on('wb-open', (e, file) => { if (typeof file === 'string' && file) ladeLauf(file) })
+
+  // Start: Lauf aus dem Query-Parameter (vom ersten Navigate der Shell gesetzt)
+  const qf = new URLSearchParams(location.search).get('file')
+  if (qf) ladeLauf(qf)
+</script>
+</body>
+</html>

@@ -819,19 +819,20 @@ static LRESULT CALLBACK doorWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProcW(h, m, w, l);
 }
 // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen! ####################
-// Fuenf Stellen erzeugen ein WebView2-Fenster nach DEMSELBEN Muster (Environment ->
+// Sechs Stellen erzeugen ein WebView2-Fenster nach DEMSELBEN Muster (Environment ->
 // Controller -> Host-Mappings -> SHIM_JS -> WebMessage-Handler -> Navigate -> sichtbar).
 // Zwischen Gaming-OSD und Analyse-OSD sind rund 34 der ~70 Zeilen woertlich identisch.
 //   createDoormanWindow()      (hier)
 //   createOsdWindow()          - Gaming-OSD, Composition + Click-Through
 //   createAnalyzeOsdWindow()   - Analyse-OSD, Composition + Click-Through
 //   createOsdEditWindow()      - OSD-Editor, normales Fenster
+//   createWerkbankWindow()     - Analyse-Werkbank, normales Fenster (resizable)
 //   wWinMain()                 - Hauptfenster, normaler Controller
 // Real passiert (bitte NICHT wiederholen): 67a44c7 Klick-durch nur im Gaming-OSD
 // gefixt, Analyse-OSD blieb kaputt; db76994 Transparenz/Groesse griffen beim ersten
 // Oeffnen nur in einem der beiden; 64dcbc3 Live-Vorschau nachtraeglich nachgezogen.
 // Zusammenfuehrung ist vorgemerkt (s. ARCHITEKTUR.md) - bis dahin gilt: wer eine
-// dieser Funktionen anfasst, prueft die anderen vier.
+// dieser Funktionen anfasst, prueft die anderen fuenf.
 // ####################################################################################
 static void createDoormanWindow() {
     if (g_doorHwnd) return;
@@ -3500,9 +3501,9 @@ static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
 // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
-// createOsdEditWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
+// createOsdEditWindow/createWerkbankWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
 // real passierten Faelle stehen ueber createDoormanWindow. Wer hier etwas aendert,
-// prueft die anderen vier.
+// prueft die anderen fuenf.
 static void createOsdWindow() {
     if (g_osdHwnd) return;
     static bool reg = false;
@@ -3643,9 +3644,9 @@ static LRESULT CALLBACK anOsdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
 // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
-// createOsdEditWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
+// createOsdEditWindow/createWerkbankWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
 // real passierten Faelle stehen ueber createDoormanWindow. Wer hier etwas aendert,
-// prueft die anderen vier.
+// prueft die anderen fuenf.
 static void createAnalyzeOsdWindow() {
     if (g_anOsdHwnd) return;
     static bool reg = false;
@@ -3896,9 +3897,9 @@ static LRESULT CALLBACK osdEditWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
 // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
-// createOsdEditWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
+// createOsdEditWindow/createWerkbankWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
 // real passierten Faelle stehen ueber createDoormanWindow. Wer hier etwas aendert,
-// prueft die anderen vier.
+// prueft die anderen fuenf.
 static void createOsdEditWindow() {
     if (g_osdEditHwnd) return;
     static bool reg = false;
@@ -3960,6 +3961,96 @@ static void destroyOsdEditWindow() {
     g_osdEditWv = nullptr; g_osdEditCtrl = nullptr;
     if (g_osdEditHwnd) { DestroyWindow(g_osdEditHwnd); g_osdEditHwnd = nullptr; }
     DeleteFileW((dataDir() + L"\\osd-edit-bg.bmp").c_str());   // Schnappschuss nicht liegen lassen
+}
+
+// --- Analyse-Werkbank: eigenstaendiges Auswerte-Fenster (ANALYSE-WERKBANK-PLAN.md) --
+static HWND g_wbHwnd = nullptr;
+static ComPtr<ICoreWebView2Controller> g_wbCtrl;
+static ComPtr<ICoreWebView2> g_wbWv;
+static void sendToWerkbank(const std::string& channel, const json& payload) {
+    if (!g_wbHwnd) return;
+    json m = { {"channel", channel}, {"payload", payload} };
+    PostMessageW(g_wbHwnd, WM_SHELL_OSDMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
+}
+static LRESULT CALLBACK wbWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_wbWv) g_wbWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
+    case WM_SIZE: if (g_wbCtrl) { RECT rc; GetClientRect(h, &rc); g_wbCtrl->put_Bounds(rc); } return 0;
+    case WM_GETMINMAXINFO: {   // Timeline + Spuren + Panels brauchen Platz
+        auto* mm = (MINMAXINFO*)l; mm->ptMinTrackSize.x = 1100; mm->ptMinTrackSize.y = 700; return 0; }
+    case WM_CLOSE: ShowWindow(h, SW_HIDE); return 0;   // verstecken statt zerstoeren: schneller Wiederauf
+    case WM_DESTROY: return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+// ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
+// Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
+// createOsdEditWindow/createWerkbankWindow + Hauptfenster (wWinMain). Ausfuehrliche
+// Begruendung und die real passierten Faelle stehen ueber createDoormanWindow.
+// Wer hier etwas aendert, prueft die anderen fuenf.
+static void createWerkbankWindow(const std::string& file) {
+    if (g_wbHwnd) {
+        // Fenster lebt schon (WM_CLOSE versteckt nur): zeigen, fokussieren, Lauf pushen.
+        ShowWindow(g_wbHwnd, SW_SHOW);
+        if (IsIconic(g_wbHwnd)) ShowWindow(g_wbHwnd, SW_RESTORE);
+        SetForegroundWindow(g_wbHwnd);
+        if (!file.empty()) sendToWerkbank("wb-open", file);
+        return;
+    }
+    static bool reg = false;
+    if (!reg) {
+        WNDCLASSW wc{}; wc.lpfnWndProc = wbWndProc; wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"LumoraWerkbank"; wc.hbrBackground = CreateSolidBrush(RGB(8, 9, 14));
+        wc.hIcon = LoadIconW(GetModuleHandleW(nullptr), L"IDI_ICON1"); wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        RegisterClassW(&wc); reg = true;
+    }
+    // Mittig auf dem Monitor des Hauptfensters, 1280x800 (Minimum 1100x700 via MINMAXINFO)
+    RECT wa{ 0, 0, 1920, 1080 };
+    { HMONITOR mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY);
+      MONITORINFO mi{ sizeof(mi) }; if (GetMonitorInfoW(mon, &mi)) wa = mi.rcWork; }
+    int w = (std::min)(1280L, wa.right - wa.left), h = (std::min)(800L, wa.bottom - wa.top);
+    g_wbHwnd = CreateWindowExW(0, L"LumoraWerkbank", L"Lumora Analyse-Werkbank",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        wa.left + (wa.right - wa.left - w) / 2, wa.top + (wa.bottom - wa.top - h) / 2, w, h,
+        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!g_wbHwnd) { bcLogStream("werkbank: CreateWindowExW fehlgeschlagen err=" + std::to_string(GetLastError())); return; }
+    SetForegroundWindow(g_wbHwnd);
+    std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
+    std::wstring navFile = widen(file);   // per Wert in den Callback (Query-Parameter beim ersten Navigate)
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [navFile](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(res) || !env || !g_wbHwnd) { bcLogStream("werkbank: Environment fehlt " + std::to_string(res)); return res; }
+                env->CreateCoreWebView2Controller(g_wbHwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [navFile](HRESULT r2, ICoreWebView2Controller* ctrl) -> HRESULT {
+                            if (FAILED(r2) || !ctrl || !g_wbHwnd) { bcLogStream("werkbank: Controller-Init " + std::to_string(r2)); return r2; }
+                            g_wbCtrl = ctrl; g_wbCtrl->get_CoreWebView2(&g_wbWv);
+                            if (!g_wbWv) return E_NOINTERFACE;
+                            RECT rc; GetClientRect(g_wbHwnd, &rc); g_wbCtrl->put_Bounds(rc);
+                            ComPtr<ICoreWebView2_3> wv3; g_wbWv.As(&wv3);
+                            if (wv3) {
+                                wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                                // data.lumora: die Werkbank laedt Reports (v2 = Megabytes)
+                                // DIREKT per fetch statt ueber den IPC-Umweg.
+                                wv3->SetVirtualHostNameToFolderMapping(L"data.lumora", dataDir().c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            }
+                            std::wstring shim = SHIM_JS; size_t vp = shim.find(L"%SHELL_VERSION%");
+                            if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
+                            g_wbWv->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
+                            g_wbWv->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* a) -> HRESULT {
+                                    LPWSTR j = nullptr;
+                                    if (SUCCEEDED(a->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_wbHwnd); CoTaskMemFree(j); }
+                                    return S_OK;
+                                }).Get(), nullptr);
+                            std::wstring url = L"https://app.lumora/analyze-werkbank.html";
+                            if (!navFile.empty()) url += L"?file=" + navFile;   // anSafeName-geprueft, keine Sonderzeichen
+                            g_wbWv->Navigate(url.c_str());
+                            return S_OK;
+                        }).Get());
+                return S_OK;
+            }).Get());
 }
 // Fenster auf die gemeldete Panel-Flaeche setzen und den DComp-Visual passend verschieben.
 static void applyOsdWindowGeometry() {
@@ -4712,6 +4803,20 @@ static json handleChannel(const std::string& channel, const json& args) {
         std::wstring fn = anSafeName(args); if (fn.empty()) return false;
         return DeleteFileW((analyzeDirW() + L"\\" + fn).c_str()) != 0;
     }
+    // Analyse-Werkbank oeffnen (leeres Argument = ohne vorgewaehlten Lauf). Der
+    // Dateiname laeuft durch anSafeName - er landet als Query-Parameter in einer
+    // Navigate-URL und im wb-open-Push, beides darf nur report-*.json sein.
+    // Kein Slow-Channel -> Handler laeuft auf dem UI-Thread, Fenster direkt erzeugen.
+    if (channel == "analyze-werkbank") {
+        std::string f;
+        if (!args.empty() && args[0].is_string()) {
+            std::wstring fn = anSafeName(args);
+            if (fn.empty() && !std::string(args[0]).empty()) return false;   // uebergeben, aber ungueltig
+            f = narrow(fn);
+        }
+        createWerkbankWindow(f);
+        return true;
+    }
     if (channel == "analyze-note" && args.size() >= 2 && args[1].is_string()) {
         std::wstring fn = anSafeName(args); if (fn.empty()) return false;
         json j = json::parse(readFile(analyzeDirW() + L"\\" + fn), nullptr, false);
@@ -5144,6 +5249,10 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             g_group = nullptr;
         }
         destroyTray();
+        // Werkbank-Fenster mit abraeumen (WM_CLOSE dort versteckt nur)
+        if (g_wbCtrl) g_wbCtrl->Close();
+        g_wbWv = nullptr; g_wbCtrl = nullptr;
+        if (g_wbHwnd) { DestroyWindow(g_wbHwnd); g_wbHwnd = nullptr; }
         saveWindowState(h); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -5598,7 +5707,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
 
     // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
     // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
-    // createOsdEditWindow. Ausfuehrliche Begruendung ueber createDoormanWindow.
+    // createOsdEditWindow/createWerkbankWindow. Ausfuehrliche Begruendung ueber createDoormanWindow.
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
     std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
     HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
