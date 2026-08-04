@@ -3419,6 +3419,13 @@ function anShareClean(r, opts) {
   delete o.note                                                  // eigene Notizen bleiben privat
   delete o.pid
   if (o.context) { delete o.context.game; }                      // dort steckt der Pfad nochmal
+  // Datenmodell v2 (Werkbank): volle Serien + Spuren + Namens-Tabellen sind fuer den
+  // GETEILTEN Bericht tabu - megabytegross (Serverlimit 256 KB) und names enthaelt
+  // ALLE gesehenen Prozessnamen, nicht nur die Verdaechtigen. Geteilt wird das
+  // v1-Subset (ftSeries reicht der Berichtsseite).
+  delete o.ftFull
+  delete o.tracks
+  delete o.names
   const anonym = {}
   let lauf = 0
   const deckname = (n) => {

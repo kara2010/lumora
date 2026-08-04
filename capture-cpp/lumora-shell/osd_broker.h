@@ -280,7 +280,7 @@ inline int runAnalyzeBroker() {
     char ts[32]; sprintf_s(ts, "%04d%02d%02d-%02d%02d%02d", lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond);
     char head[1024];
     sprintf_s(head,
-        "{\"version\":1,\"wall\":\"%04d-%02d-%02dT%02d:%02d:%02d\",\"durS\":%.0f,\"pid\":%u,"
+        "{\"version\":2,\"wall\":\"%04d-%02d-%02dT%02d:%02d:%02d\",\"durS\":%.0f,\"pid\":%u,"
         "\"frames\":%llu,\"avgFps\":%.1f,\"p1LowFps\":%.1f,\"medianFtMs\":%.2f,\"p99FtMs\":%.2f,"
         "\"spikes\":%u,\"spikesPerMin\":%.2f,\"presentOnly\":%s,\"kernelOk\":%s,\"errCode\":%u,"
         "\"verdictKey\":\"%s\",\"verdictHits\":%u,",
@@ -329,6 +329,10 @@ inline int runAnalyzeBroker() {
     // weichen jede Aussage auf - ein Bericht ohne diese Zahl saehe immer "sauber" aus.
     rep += ",\"eventsLost\":" + std::to_string(kernelOk ? kt.eventsLost() : 0)
          + ",\"buffersLost\":" + std::to_string(kernelOk ? kt.buffersLost() : 0);
+    // Datenmodell v2 (ANALYSE-WERKBANK-PLAN.md): volle ft-Serie + Session-Spuren +
+    // Namens-Tabellen fuer die Werkbank-Timeline. ftSeries oben bleibt absichtlich
+    // bestehen - Reiter-Bericht und Website lesen weiter das v1-Subset.
+    rep += "," + ana.v2Json();
     rep += "}";
     // Bericht ATOMAR schreiben (erst .neu, dann drueberschieben) und die Rohdaten NUR
     // bei Erfolg loeschen. Vorher: direktes wb + bedingungsloses DeleteFile - schlug der
