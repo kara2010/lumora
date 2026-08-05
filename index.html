@@ -819,8 +819,28 @@
 
         <!-- ===== EINGABE-BRUECKE ===== -->
         <div class="settings-panel" data-panel="eingabe" hidden>
+          <!-- Der Reiter hat ZWEI eigenstaendige Modi, die in entgegengesetzte
+               Richtungen uebersetzen. Sie teilen sich nichts ausser dem Reiter -
+               eigene Profile, eigene Dateien, eigene Schalter. Deshalb steht hier
+               oben die Landkarte, und darunter kommen die Modi NACHEINANDER, nie
+               ineinander verschachtelt. -->
           <div class="form-group">
             <label>Eingabe-Brücke</label>
+            <p class="settings-hint">Lumora übersetzt Eingaben in beide Richtungen – je nachdem, was dein Spiel versteht. Beide Modi sind unabhängig voneinander und können auch gleichzeitig laufen.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 4px">
+              <div style="padding:10px 12px;border:1px solid var(--border);border-radius:10px">
+                <div style="font-weight:600;margin-bottom:4px">① Gerät → Xbox-Gamepad</div>
+                <div class="settings-hint" style="margin:0">Für neue Spiele, die nur Gamepads kennen. Dein Lenkrad, Joystick oder Flightstick erscheint als Xbox-Controller.</div>
+              </div>
+              <div style="padding:10px 12px;border:1px solid var(--border);border-radius:10px">
+                <div style="font-weight:600;margin-bottom:4px">② Gamepad → Tastatur</div>
+                <div class="settings-hint" style="margin:0">Für alte Spiele, die noch keine Gamepads kannten. Dein Controller drückt die Tasten (GTA2, alte Shooter, Emulatoren).</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group" style="border-top:2px solid var(--border);padding-top:18px;margin-top:8px">
+            <label style="font-size:15px">① Gerät → Xbox-Gamepad</label>
             <p class="settings-hint">Verwandelt jedes Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z.&nbsp;B. Knopf = Vollgas) und umgekehrt.</p>
             <p class="settings-hint">⚠ Spiele sehen dann zwei Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.</p>
             <div class="setting-toggle-row">
@@ -833,37 +853,6 @@
             </div>
             <p class="settings-hint" id="ibSetupHint" style="display:none">Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber ViGEmBus ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps &amp; Features.</p>
           </div>
-          <!-- Tastatur-Modus: die Gegenrichtung (Gamepad -> Tastatur) fuer Klassiker,
-               die kein Gamepad kennen. Eigener Block, weil er WEDER ViGEmBus NOCH
-               ein Quellgeraet braucht - nur ein Xbox-Pad und ein Profil. -->
-          <div class="form-group" style="border-top:1px solid var(--border);padding-top:16px;margin-top:20px">
-            <label>🕹 Gamepad → Tastatur (für alte Spiele)</label>
-            <p class="settings-hint">Die Gegenrichtung: Dein Xbox-Controller steuert Klassiker, die noch gar keine Gamepads kannten (GTA2, alte Shooter, Emulator-Frontends). Lumora drückt für dich die Tasten. Kein Treiber nötig.</p>
-            <div class="path-row">
-              <select id="kbProfileSel" class="sort-select" style="flex:1" onchange="kbSelectProfile(this.value)"></select>
-              <button class="btn-browse" onclick="kbImport()" title="Profil aus Datei laden">📂 Importieren</button>
-              <button class="btn-browse" onclick="kbExport()" title="Profil als Datei sichern">💾 Exportieren</button>
-              <button class="btn-browse" onclick="kbDeleteProfile()">✕</button>
-            </div>
-            <p class="settings-hint" id="kbProfileInfo" style="margin-top:6px"></p>
-            <div class="setting-toggle-row" style="margin-top:8px">
-              <span class="setting-toggle-label" id="kbStatusLabel">Tastatur-Modus: aus</span>
-              <button class="btn-primary" id="kbToggleBtn" onclick="kbToggle()">▶ Aktivieren</button>
-            </div>
-            <p class="settings-hint">Tasten werden nur gesendet, solange das Spiel im Vordergrund ist – nie in andere Fenster.</p>
-            <div id="kbAssistBox" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:10px">
-              <div id="kbAssistText" style="font-size:14px;margin-bottom:8px"></div>
-              <div class="path-row">
-                <button class="btn-browse" onclick="kbAssistSkip()">Überspringen</button>
-                <button class="btn-cancel" onclick="kbAssistStop()">Abbrechen</button>
-              </div>
-            </div>
-            <div class="path-row" style="margin-top:8px">
-              <button class="btn-browse" onclick="kbAssistStart()">✨ Belegung Schritt für Schritt zuweisen</button>
-            </div>
-            <div id="kbMapList" style="margin-top:10px"></div>
-          </div>
-
           <div class="form-group">
             <label>Profil</label>
             <div class="path-row">
@@ -943,6 +932,52 @@
               <button class="btn-browse" onclick="ibLinkGame()">Verknüpfen</button>
             </div>
             <div id="ibLinkList" style="margin-top:8px"></div>
+          </div>
+
+          <!-- ===== Modus ②: Gamepad -> Tastatur ===================================
+               Steht bewusst KOMPLETT nach Modus ①: eigene Profile (kb-profiles.json),
+               eigene Schalter, kein Treiber, kein Quellgeraet. Beides ineinander zu
+               schachteln war der Fehler des ersten Wurfs. -->
+          <div class="form-group" style="border-top:2px solid var(--border);padding-top:18px;margin-top:24px">
+            <label style="font-size:15px">② Gamepad → Tastatur</label>
+            <p class="settings-hint">Für Klassiker, die noch gar keine Gamepads kannten (GTA2, alte Shooter, Emulator-Frontends). Lumora drückt für dich die Tasten. Kein Treiber nötig – nur ein Xbox-Controller und ein Profil.</p>
+            <p class="settings-hint">Tasten werden nur gesendet, solange das Spiel im Vordergrund ist – nie in andere Fenster.</p>
+          </div>
+
+          <div class="form-group">
+            <label>Profil</label>
+            <div class="path-row">
+              <select id="kbProfileSel" class="sort-select" style="flex:1" onchange="kbSelectProfile(this.value)"></select>
+              <button class="btn-browse" onclick="kbImport()" title="Profil aus Datei laden">📂 Importieren</button>
+              <button class="btn-browse" onclick="kbExport()" title="Profil als Datei sichern">💾 Exportieren</button>
+              <button class="btn-browse" onclick="kbDeleteProfile()">✕</button>
+            </div>
+            <p class="settings-hint" id="kbProfileInfo" style="margin-top:6px"></p>
+            <p class="settings-hint">Profile sind einzelne Dateien – so lassen sie sich mit anderen tauschen, ganz ohne Konto.</p>
+          </div>
+
+          <div class="form-group">
+            <label>Belegung</label>
+            <p class="settings-hint">Der Assistent fragt der Reihe nach: „Drücke die Tastatur-Taste für …" – und legt sie auf den passenden Controller-Knopf. Jeder Schritt ist überspringbar.</p>
+            <div class="path-row">
+              <button class="btn-browse" onclick="kbAssistStart()">✨ Belegung Schritt für Schritt zuweisen</button>
+            </div>
+            <div id="kbAssistBox" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:10px">
+              <div id="kbAssistText" style="font-size:14px;margin-bottom:8px"></div>
+              <div class="path-row">
+                <button class="btn-browse" onclick="kbAssistSkip()">Überspringen</button>
+                <button class="btn-cancel" onclick="kbAssistStop()">Abbrechen</button>
+              </div>
+            </div>
+            <div id="kbMapList" style="margin-top:10px"></div>
+          </div>
+
+          <div class="form-group">
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label" id="kbStatusLabel">Tastatur-Modus: aus</span>
+              <button class="btn-primary" id="kbToggleBtn" onclick="kbToggle()">▶ Aktivieren</button>
+            </div>
+            <p class="settings-hint">Trägt das Profil einen Spielnamen, aktiviert es sich beim Start dieses Spiels von selbst – und geht beim Beenden wieder aus.</p>
           </div>
         </div>
 
@@ -1229,6 +1264,20 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  // --- Eingabe-Reiter: Neugliederung in zwei Modi ---
+  "Lumora übersetzt Eingaben in beide Richtungen – je nachdem, was dein Spiel versteht. Beide Modi sind unabhängig voneinander und können auch gleichzeitig laufen.": "Lumora translates input in both directions – depending on what your game understands. The two modes are independent and can run at the same time.",
+  "① Gerät → Xbox-Gamepad": "① Device → Xbox gamepad",
+  "② Gamepad → Tastatur": "② Gamepad → keyboard",
+  "Für neue Spiele, die nur Gamepads kennen. Dein Lenkrad, Joystick oder Flightstick erscheint als Xbox-Controller.": "For modern games that only accept gamepads. Your wheel, joystick or flight stick shows up as an Xbox controller.",
+  "Für alte Spiele, die noch keine Gamepads kannten. Dein Controller drückt die Tasten (GTA2, alte Shooter, Emulatoren).": "For older games that never knew gamepads. Your controller presses the keys (GTA2, old shooters, emulators).",
+  "Für Klassiker, die noch gar keine Gamepads kannten (GTA2, alte Shooter, Emulator-Frontends). Lumora drückt für dich die Tasten. Kein Treiber nötig – nur ein Xbox-Controller und ein Profil.": "For classics that never knew gamepads (GTA2, old shooters, emulator front-ends). Lumora presses the keys for you. No driver needed – just an Xbox controller and a profile.",
+  "Profile sind einzelne Dateien – so lassen sie sich mit anderen tauschen, ganz ohne Konto.": "Profiles are individual files – easy to share with others, no account required.",
+  "Belegung": "Mapping",
+  "Der Assistent fragt der Reihe nach: „Drücke die Tastatur-Taste für …\" – und legt sie auf den passenden Controller-Knopf. Jeder Schritt ist überspringbar.": "The wizard asks step by step: \"Press the keyboard key for …\" – and maps it to the matching controller button. Every step can be skipped.",
+  "Trägt das Profil einen Spielnamen, aktiviert es sich beim Start dieses Spiels von selbst – und geht beim Beenden wieder aus.": "If the profile names a game, it activates itself when that game starts – and switches off again when it ends.",
+  "Mitgelieferte Profile lassen sich nicht löschen.": "Bundled profiles cannot be deleted.",
+  "(eigene Kopie)": "(your copy)",
+
   // --- Eingabe-Bruecke: Tastatur-Modus (Gamepad -> Tastatur) ---
   "Scancode": "Scancode",
   "Noch kein Profil – importieren oder zuweisen": "No profile yet – import or assign one",
@@ -2996,6 +3045,22 @@ function kbTastenName(sc, ext) {
 }
 function kbProf() { return (kbProfiles && kbCurrent && kbProfiles[kbCurrent]) || null }
 function kbSave() { if (kbProfiles) ipcRenderer.invoke('kb-save-profiles', kbProfiles) }
+// Haus-Profile (mitgeliefert, Schluessel "haus:…") werden nie ueberschrieben: wer eines
+// aendert, bekommt automatisch eine eigene Kopie. Sonst waere die Aenderung beim
+// Speichern still verloren, weil die Shell Haus-Schluessel nicht in die Nutzerdatei
+// schreibt - genau die Art stiller Datenverlust, die niemand bemerkt.
+function kbEigeneKopie() {
+  const p = kbProf()
+  if (!p || !kbCurrent.startsWith('haus:')) return p
+  const id = 'kb' + Date.now().toString(36)
+  const kopie = JSON.parse(JSON.stringify(p))
+  delete kopie.haus
+  kopie.name = (p.name || kbCurrent) + ' ' + window.tr('(eigene Kopie)')
+  kbProfiles[id] = kopie
+  kbCurrent = id
+  kbRenderProfiles()
+  return kopie
+}
 async function kbOpen() {
   kbProfiles = await ipcRenderer.invoke('kb-get-profiles') || {}
   const ids = Object.keys(kbProfiles)
@@ -3029,12 +3094,15 @@ function kbRenderMap() {
     + '</div>'
 }
 function kbDeleteMap(i) {
-  const p = kbProf(); if (!p) return
+  const p = kbEigeneKopie(); if (!p) return
   p.tasten.splice(i, 1); kbSave(); kbRenderMap()
   if (kbAktiv) ipcRenderer.invoke('kb-bridge-start', p)   // Aenderung sofort wirksam
 }
 async function kbDeleteProfile() {
   const p = kbProf(); if (!p) return
+  // Haus-Profile liegen im Programmordner - "Loeschen" wuerde sie beim naechsten
+  // Start wieder einlesen. Ehrlich sagen statt so tun, als haette es geklappt.
+  if (kbCurrent.startsWith('haus:')) { showToast(window.tr('Mitgelieferte Profile lassen sich nicht löschen.')); return }
   if (!await lumoraConfirm(window.tr('Profil löschen?') + '\n\n' + (p.name || kbCurrent))) return
   delete kbProfiles[kbCurrent]
   kbCurrent = Object.keys(kbProfiles)[0] || null
@@ -3119,7 +3187,7 @@ function kbAssistKey(e) {
   if (e.key === 'Escape') { kbAssistStop(); return }
   const m = KB_CODE_ZU_SCAN[e.code]
   if (!m) return                                    // unbekannte Taste: einfach ignorieren
-  const s = KB_ASSIST[kbAssistIdx], p = kbProf()
+  const s = KB_ASSIST[kbAssistIdx], p = kbEigeneKopie()
   p.tasten = (p.tasten || []).filter(x => x.quelle !== s.quelle)   // Quelle neu belegen
   const eintrag = { quelle: s.quelle, scancode: m[0], ext: !!m[1], aktion: window.tr(s.frage) }
   if (/^(L|R)(X|Y)[-+]$/.test(s.quelle) || s.quelle === 'LT' || s.quelle === 'RT') {
