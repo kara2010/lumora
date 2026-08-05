@@ -425,7 +425,10 @@ static json inputProfileForGame(const std::string& gamePath) {
 }
 // Aufruf NUR wenn das Spiel WIRKLICH laeuft (probeRunning/extWatch) - "Launch heisst
 // nicht laeuft": ein Startaufruf ohne erkannten Prozess aktiviert hier nie etwas.
+static void kbBridgeOnRunning(const std::string& gamePath);   // (unten, Tastatur-Modus)
 static void inputBridgeOnRunning(const std::string& gamePath) {
+    kbBridgeOnRunning(gamePath);                   // Tastatur-Modus zuerst: unabhaengig,
+                                                   // braucht weder Treiber noch Quellgeraet
     if (!loadSettings().value("inputBridgeAutoActivate", true)) return;
     if (lubridge::g_feeding.load()) return;        // manuell/anderes Spiel aktiv -> nicht anfassen
     if (!lubridge::busInstalled()) return;         // Setup nie automatisch anstossen (kein UAC ohne Klick)
@@ -435,11 +438,52 @@ static void inputBridgeOnRunning(const std::string& gamePath) {
     // wirklich angeschlossen ist - sonst entstuende grundlos ein zweites XInput-Geraet.
     if (lubridge::start(prof, "auto", true)) g_bridgeAutoGame = gamePath;
 }
+// --- Tastatur-Modus: dieselben zwei Haken, aber eigene Bedingungen ------------------
+// Zuordnung ueber den EXE-Namen im Profil ("spiel"), nicht ueber eine gameLinks-Tabelle:
+// ein getauschtes Community-Profil bringt seinen Spielbezug selbst mit und wirkt sofort,
+// ohne dass der Nutzer es erst mit einem Bibliothekseintrag verheiraten muss.
+// Kein busInstalled()-Vorbehalt (der Modus braucht keinen Treiber) und kein
+// requireDevice (das Xbox-Pad IST die Quelle - fehlt es, bleibt der Poll folgenlos).
+static std::string g_kbAutoGame;
+static json kbProfileForExe(const std::string& gamePath) {
+    std::string base = gamePath;
+    size_t sl = base.find_last_of("\\/");
+    if (sl != std::string::npos) base = base.substr(sl + 1);
+    for (auto& c : base) c = (char)tolower((unsigned char)c);
+    if (base.empty()) return nullptr;
+    json all = loadKbProfiles();
+    if (!all.is_object()) return nullptr;
+    for (auto& [id, p] : all.items()) {
+        if (!p.is_object()) continue;
+        std::string s = p.value("spiel", "");
+        for (auto& c : s) c = (char)tolower((unsigned char)c);
+        if (!s.empty() && s == base) return p;
+    }
+    return nullptr;
+}
+static void kbBridgeOnRunning(const std::string& gamePath) {
+    if (!loadSettings().value("inputBridgeAutoActivate", true)) return;
+    if (lubridge::g_kbActive.load()) return;       // manuell/anderes Spiel aktiv -> nicht anfassen
+    json prof = kbProfileForExe(gamePath);
+    if (prof.is_null()) return;
+    if (lubridge::kbStart(prof, "auto")) {
+        g_kbAutoGame = gamePath;
+        // Sichtbares Signal: sonst raetselt man, warum das Pad "komisch" reagiert.
+        sendToUi("toast", std::string("🕹 ") + prof.value("name", std::string("Profil")) + " aktiv");
+    }
+}
+static void kbBridgeOnEnd(const std::string& gamePath) {
+    if (!g_kbAutoGame.empty() && g_kbAutoGame == gamePath) {
+        lubridge::kbStop("spiel-beendet");
+        g_kbAutoGame.clear();
+    }
+}
 static void inputBridgeOnEnd(const std::string& gamePath) {
     if (!g_bridgeAutoGame.empty() && g_bridgeAutoGame == gamePath) {
         lubridge::stop("spiel-beendet");
         g_bridgeAutoGame.clear();
     }
+    kbBridgeOnEnd(gamePath);
 }
 
 // Fremdstart-Watcher (2s-Takt wie Electron-Nachruestung: HDR geht an, BEVOR das Spiel
@@ -5739,6 +5783,29 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                 check("GTA2-Hausprofil: unveraendert gueltig (16 Tasten)",
                       r.is_object() && r["tasten"].size() == 16 && r.value("spiel", std::string("")) == "gta2.exe");
             } else res += "HINW gta2.lumoraprofil im Programmordner nicht gefunden (nur im Repo)\n";
+        }
+        // 17-21) Spiel -> Profil: kbProfileForExe trifft ueber den EXE-Namen, egal wie
+        // der Aufrufer den Pfad schreibt. Ohne echte Datei arbeiten: Profile temporaer
+        // ablegen, danach den Vorzustand wiederherstellen (der Test darf NICHTS zerstoeren).
+        {
+            std::wstring pfad = kbProfilesPath();
+            std::string sicherung = readFile(pfad);
+            bool gabEs = !sicherung.empty();
+            json tmpProf = { {"p1", { {"name","GTA2"}, {"spiel","gta2.exe"},
+                                      {"tasten", json::array({ { {"quelle","A"}, {"scancode",57} } })} }} };
+            writeFile(pfad, tmpProf.dump());
+            check("Zuordnung: voller Pfad trifft",
+                  !kbProfileForExe("E:\\Games\\Grand Theft Auto 2\\gta2.exe").is_null());
+            check("Zuordnung: GROSSSCHREIBUNG trifft",
+                  !kbProfileForExe("E:\\Games\\GTA2\\GTA2.EXE").is_null());
+            check("Zuordnung: Schraegstriche treffen",
+                  !kbProfileForExe("E:/Games/gta2.exe").is_null());
+            check("Zuordnung: fremdes Spiel trifft NICHT",
+                  kbProfileForExe("C:\\Spiele\\forza.exe").is_null());
+            check("Zuordnung: leerer Pfad trifft NICHT", kbProfileForExe("").is_null());
+            if (gabEs) writeFile(pfad, sicherung); else DeleteFileW(pfad.c_str());
+            check("Zuordnung: Profildatei wiederhergestellt",
+                  gabEs ? (readFile(pfad) == sicherung) : (readFile(pfad).empty()));
         }
         res = "kbbridge-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + " (" + std::to_string(evs.size()) + " Ereignisse)\n" + res;
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
