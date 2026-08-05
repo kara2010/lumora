@@ -68,6 +68,7 @@
     this.spuren = [];         // sichtbare Spurdefinitionen
     this.hover = null;        // {x, t, idx}
     this.aktiverSpike = null;
+    this.geste = null;        // laufende Signatur-Geste {t, start} oder null
     this._binden();
   }
 
@@ -127,7 +128,7 @@
     }
     // cpu: [totalPct, maxCorePct, maxCore, topPid, topPct]
     if (hatWerte(tk.cpu, 0)) this.spuren.push({
-      key: 'cpu', titel: tr('CPU'), farbe: '#ffc857', max: 100, dt: dt, daten: tk.cpu,
+      key: 'cpu', titel: tr('CPU'), farbe: '#78c8ff', max: 100, dt: dt, daten: tk.cpu,
       wert: function (b) { return b[0]; },
       zweit: function (b) { return b[1]; },        // max-Kern als hellere Linie
       info: function (b) {
@@ -259,6 +260,8 @@
     }
     if (best && bestD <= 10) {
       this.aktiverSpike = best;
+      // Signatur-Geste starten (Blitz + Scanline; die Zeichenschleife traegt sie aus)
+      this.geste = { t: best.t, start: performance.now() };
       this.zeichnen();
       if (this.opts.onSpike) this.opts.onSpike(best);
     }
@@ -321,13 +324,50 @@
     c.fillStyle = 'rgba(255,255,255,.32)';
     c.fillText(skala + ' ms', 4, kurveOben + 8);
 
-    // Kurve als Min/Max-Band (LOD) + Maxima-Linie: Spitzen bleiben sichtbar
-    c.beginPath();
-    for (var i2 = 0; i2 < sicht.length; i2++) { var s = sicht[i2]; c.moveTo(s.x + .5, Y(s.lo)); c.lineTo(s.x + .5, Y(s.hi)); }
-    c.strokeStyle = 'rgba(96,190,255,.45)'; c.lineWidth = 1; c.stroke();
-    c.beginPath();
-    for (var i3 = 0; i3 < sicht.length; i3++) { var s3 = sicht[i3]; if (i3) c.lineTo(s3.x, Y(s3.hi)); else c.moveTo(s3.x, Y(s3.hi)); }
-    c.strokeStyle = 'rgba(150,215,255,.95)'; c.lineWidth = 1.2; c.stroke();
+    // Kurve als Min/Max-Band (LOD), nach SCHWEREGRAD gefaerbt: die Farbe ist Teil der
+    // Aussage (phosphor-gruen = ruhig, bernstein = grenzwertig, gluehrot = Ruckler).
+    // Drei Farb-Batches statt Segment-fuer-Segment-Stilwechsel (Canvas-Stilwechsel je
+    // Segment ist der teuerste Pfad); Glow nur fuer den roten Batch - shadowBlur auf
+    // allem wuerde beim Pannen sichtbar Zeit kosten.
+    var FARBEN = [
+      { max: 14, band: 'rgba(63,224,200,.40)', linie: 'rgba(120,255,225,.95)', glow: null },
+      { max: 24, band: 'rgba(255,190,70,.45)', linie: 'rgba(255,205,110,.95)', glow: null },
+      { max: 1e9, band: 'rgba(255,74,66,.55)', linie: 'rgba(255,110,100,1)', glow: 'rgba(255,74,66,.85)' }
+    ];
+    for (var fb = 0; fb < FARBEN.length; fb++) {
+      var F = FARBEN[fb], lo = fb ? FARBEN[fb - 1].max : -1;
+      // Band (vertikale Min-Max-Striche)
+      c.beginPath();
+      var hat = false;
+      for (var i2 = 0; i2 < sicht.length; i2++) {
+        var s = sicht[i2];
+        if (s.hi <= lo || s.hi > F.max) continue;
+        c.moveTo(s.x + .5, Y(s.lo)); c.lineTo(s.x + .5, Y(s.hi)); hat = true;
+      }
+      if (hat) {
+        if (F.glow) { c.shadowColor = F.glow; c.shadowBlur = 12; }
+        c.strokeStyle = F.band; c.lineWidth = 1; c.stroke();
+        c.shadowBlur = 0;
+      }
+    }
+    // Maxima-Linie durchgehend, segmentweise gefaerbt (zusammenhaengende Farb-Laeufe
+    // als ein Pfad - Stilwechsel nur an Farbgrenzen, nicht je Segment)
+    var lauf = -1;
+    for (var i3 = 0; i3 < sicht.length; i3++) {
+      var s3 = sicht[i3];
+      var stufe = s3.hi <= FARBEN[0].max ? 0 : (s3.hi <= FARBEN[1].max ? 1 : 2);
+      if (stufe !== lauf) {
+        if (lauf >= 0) c.stroke();
+        c.beginPath();
+        if (i3) c.moveTo(sicht[i3 - 1].x, Y(sicht[i3 - 1].hi));
+        c.strokeStyle = FARBEN[stufe].linie; c.lineWidth = 1.3;
+        if (FARBEN[stufe].glow) { c.shadowColor = FARBEN[stufe].glow; c.shadowBlur = 10; } else c.shadowBlur = 0;
+        lauf = stufe;
+      }
+      c.lineTo(s3.x, Y(s3.hi));
+    }
+    if (lauf >= 0) c.stroke();
+    c.shadowBlur = 0;
 
     // Vergleichslauf B als Overlay-Linie (violett, halbtransparent)
     if (this.serieB) {
@@ -337,17 +377,50 @@
       c.strokeStyle = 'rgba(154,123,255,.75)'; c.lineWidth = 1.2; c.stroke();
     }
 
-    // Spike-Marker
+    // Spike-Marker: duenne Ereignislinie + gluehender Kopf (Phosphor-Look)
     var fs = this.r.findings || [];
     for (var i4 = 0; i4 < fs.length; i4++) {
       var f = fs[i4];
       if (f.t < t0 || f.t > t1) continue;
       var fx = X(f.t), aktiv = this.aktiverSpike && this.aktiverSpike.id === f.id;
-      c.strokeStyle = aktiv ? 'rgba(255,200,60,.95)' : 'rgba(255,70,86,.75)';
-      c.lineWidth = aktiv ? 2 : 1;
-      c.beginPath(); c.moveTo(fx, kurveOben); c.lineTo(fx, kurveUnten); c.stroke();
-      c.fillStyle = aktiv ? '#ffc83c' : '#ff4656';
+      c.strokeStyle = aktiv ? 'rgba(255,190,70,.9)' : 'rgba(255,74,66,.45)';
+      c.lineWidth = 1;
+      c.beginPath(); c.moveTo(fx + .5, kurveOben); c.lineTo(fx + .5, kurveUnten); c.stroke();
+      c.fillStyle = aktiv ? '#ffbe46' : '#ff4a42';
+      c.shadowColor = aktiv ? 'rgba(255,190,70,.9)' : 'rgba(255,74,66,.9)'; c.shadowBlur = 12;
       c.beginPath(); c.arc(fx, kurveOben + 5, aktiv ? 4 : 3, 0, 6.2832); c.fill();
+      c.shadowBlur = 0;
+    }
+
+    // Signatur-Geste Teil 1 (Blitz blueht + Scanline): laeuft ~700 ms nach Spike-Klick.
+    // Bewusst die EINZIGE Bewegung des Instruments - Drama nur im Moment der Erkenntnis.
+    if (this.geste) {
+      var p = (performance.now() - this.geste.start) / 700;
+      if (p >= 1) { this.geste = null; }
+      else {
+        var gx = X(this.geste.t);
+        if (gx >= g.padL - 40 && gx <= g.padL + g.w + 40) {
+          // 1) Blitz blueht: expandierender Lichtring um den Spike-Kopf
+          var e1 = Math.min(1, p / 0.55), r1 = 8 + e1 * 46;
+          var grad = c.createRadialGradient(gx, kurveOben + 5, 2, gx, kurveOben + 5, r1);
+          grad.addColorStop(0, 'rgba(255,190,120,' + (0.5 * (1 - e1)) + ')');
+          grad.addColorStop(1, 'rgba(255,74,66,0)');
+          c.fillStyle = grad;
+          c.beginPath(); c.arc(gx, kurveOben + 5, r1, 0, 6.2832); c.fill();
+          // 2) Scanline: fahrender Lichtstreifen vom Spike zum Beweis-Panel (rechts)
+          var e2 = Math.max(0, (p - 0.15) / 0.85);
+          var sx = gx + e2 * (g.padL + g.w - gx);
+          var sg = c.createLinearGradient(sx - 26, 0, sx + 4, 0);
+          sg.addColorStop(0, 'rgba(63,224,200,0)');
+          sg.addColorStop(1, 'rgba(63,224,200,' + (0.22 * (1 - p * 0.6)) + ')');
+          c.fillStyle = sg;
+          c.fillRect(sx - 26, kurveOben, 30, g.kurveH);
+          c.fillStyle = 'rgba(180,255,240,' + (0.5 * (1 - p)) + ')';
+          c.fillRect(sx + 2, kurveOben, 1.5, g.kurveH);
+        }
+        var self2 = this;
+        requestAnimationFrame(function () { self2.zeichnen(); });
+      }
     }
 
     // --- Spuren
@@ -402,13 +475,13 @@
   Timeline.prototype._spurZeichnen = function (c, sp, g, y, X) {
     var h = g.spurH, dt = sp.dt, daten = sp.daten;
     // Rahmen + Titel
-    c.fillStyle = 'rgba(255,255,255,.02)';
-    c.fillRect(g.padL, y, g.w, h);
-    c.strokeStyle = 'rgba(255,255,255,.06)'; c.lineWidth = 1;
-    c.strokeRect(g.padL + .5, y + .5, g.w - 1, h - 1);
+    // Randlos (Labor-Design): kein Kasten - nur eine Haarlinie als Grundlinie und
+    // ein Mikrolabel. Die Spur selbst traegt die Form.
+    c.strokeStyle = 'rgba(255,255,255,.05)'; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(g.padL, y + h + .5); c.lineTo(g.padL + g.w, y + h + .5); c.stroke();
     c.font = '9px Consolas, monospace'; c.textAlign = 'right';
-    c.fillStyle = 'rgba(255,255,255,.4)';
-    c.fillText(sp.titel, g.padL - 5, y + 11);
+    c.fillStyle = 'rgba(255,255,255,.28)';
+    c.fillText(sp.titel.toUpperCase(), g.padL - 8, y + 11);
 
     var i0 = Math.max(0, Math.floor(this.t0 / dt) - 1);
     var i1 = Math.min(daten.length - 1, Math.ceil(this.t1 / dt) + 1);
@@ -448,7 +521,7 @@
         if (e2) { c.moveTo(x2, y2); e2 = false; } else c.lineTo(x2, y2);
         c.lineTo(X((k + 1) * dt), y2);
       }
-      c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1; c.stroke();
+      c.strokeStyle = 'rgba(255,255,255,.20)'; c.lineWidth = 1; c.stroke();
     }
     sp._y = y;   // fuer den Hover-Text
   };
@@ -510,8 +583,8 @@
     var bh = zeilen.length * 13 + 8;
     var bx = hx + 12 + bw > g.padL + g.w ? hx - bw - 12 : hx + 12;
     var by = Math.min(g.padT + 6, g.ch - bh - 4);
-    c.fillStyle = 'rgba(8,12,20,.92)';
-    c.strokeStyle = 'rgba(76,224,255,.28)';
+    c.fillStyle = 'rgba(5,8,12,.94)';
+    c.strokeStyle = 'rgba(63,224,200,.30)';
     c.beginPath();
     if (c.roundRect) c.roundRect(bx, by, bw, bh, 6); else c.rect(bx, by, bw, bh);
     c.fill(); c.stroke();
