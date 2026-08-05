@@ -4,107 +4,129 @@
 <meta charset="utf-8">
 <title>Lumora Analyse-Werkbank</title>
 <style>
-  /* Analyse-Werkbank - Profiler-Leitmetapher in der Messgeraete-Designsprache des
-     Analyse-OSD (Praezisionsinstrument: dunkle Glasflaechen, Cyan-Akzente, Monospace-
-     Kennzahlen). Layout: Kopfzeile / Lauf-Browser links / Timeline mittig /
-     Beweis-Panel rechts. Etappe 1b: Geruest + Kopf + Kurve; Timeline folgt (Etappe 2). */
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* Analyse-Werkbank - Designsprache "randloses Laborinstrument" (Nutzer-Entscheid
+     2026-08-05): KEINE Karten, KEINE Rahmen, KEINE Rundungen. Das Signal fuellt die
+     Flaeche; Chrome besteht nur aus Haarlinien und Monospace-Mikrolabels. Die Kurve
+     faerbt sich nach Schweregrad (phosphor-gruen -> bernstein -> gluehrot) und
+     leuchtet wie ein Oszilloskop. Einzige Ausnahme von der Ruhe: die Signatur-Geste
+     beim Spike-Klick (Blitz blueht, Scanline, Beweis entwickelt sich wie auf einem
+     Roentgenschirm) - Drama genau im Moment der Erkenntnis, sonst nirgends. */
+  * { margin: 0; padding: 0; box-sizing: border-box; border-radius: 0; }
   :root {
-    --bg: #080a0e; --panel: rgba(13,18,28,.92); --line: rgba(255,255,255,.07);
-    --cyan: #4ce0ff; --violet: #9a7bff; --text: #d9eaf5; --dim: #6d7f90;
-    --good: #35e08a; --warn: #ffc857; --bad: #ff4050;
+    --bg: #05070a; --line: rgba(255,255,255,.06);
+    --phos: #3fe0c8; --violet: #9a7bff; --text: #cdd7e0; --hell: #eef5fb;
+    --dim: #5a6b7a; --mikro: #4a5866; --warn: #ffbe46; --bad: #ff4a42;
   }
   html, body { height: 100%; background: var(--bg); color: var(--text);
     font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; user-select: none; }
   .mono { font-family: Consolas, 'DejaVu Sans Mono', monospace; font-variant-numeric: tabular-nums; }
 
-  #app { display: grid; grid-template-rows: 52px 1fr; height: 100%; }
+  /* minmax(0,1fr) fuer die EINE Spalte: eine implizite Grid-Spalte waechst sonst auf
+     min-content - der Kopf war real 1309px breit (gemessen), body overflow:hidden
+     verschluckte den Rest, und keine flex-shrink-Regel IM Kopf konnte das je fixen. */
+  #app { display: grid; grid-template-rows: 66px 1fr; grid-template-columns: minmax(0, 1fr); height: 100%; }
 
-  /* Kopfzeile */
-  #kopf { display: flex; align-items: center; gap: 14px; padding: 0 16px;
-    background: linear-gradient(180deg, rgba(16,22,34,.95), rgba(10,14,22,.9));
-    border-bottom: 1px solid rgba(0,229,255,.14); }
-  #kopf .marke { font-size: 12px; letter-spacing: .22em; text-transform: uppercase; font-weight: 700;
-    background: linear-gradient(90deg, var(--cyan), var(--violet));
-    -webkit-background-clip: text; background-clip: text; color: transparent; white-space: nowrap; }
-  #laufName { font-size: 13px; color: var(--text); font-weight: 600; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; max-width: 340px; }
-  #laufMeta { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Kopfzeile: Baseline-Reihe, grosse duenne Zahlen, Mikrolabels */
+  #kopf { display: flex; align-items: baseline; gap: 20px; padding: 18px 24px 0;
+    border-bottom: 1px solid var(--line); }
+  #kopf .marke { font: 600 10px/1 Consolas, monospace; letter-spacing: .42em;
+    text-transform: uppercase; color: var(--phos); white-space: nowrap; }
+  #laufName { font-size: 13px; color: var(--hell); font-weight: 500; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 400px; flex-shrink: 1; min-width: 80px; }
+  #laufMeta { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 3; min-width: 0; }
   #kopf .luft { flex: 1; }
-  .kopfstat { text-align: right; line-height: 1.15; }
-  .kopfstat b { display: block; font-size: 15px; font-weight: 700; color: #eaf6ff;
-    text-shadow: 0 0 10px rgba(0,229,255,.35); }
-  .kopfstat span { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
-  #urteilPunkt { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
-    box-shadow: 0 0 8px currentColor; }
+  .kopfstat { text-align: right; flex-shrink: 0; }
+  .kopfstat b { font: 300 26px/1 Consolas, monospace; color: var(--hell); letter-spacing: -.02em; }
+  .kopfstat b em { font-size: 13px; color: var(--dim); font-style: normal; margin-left: 1px; }
+  .kopfstat span { display: block; white-space: nowrap; font: 9px/1 Consolas, monospace; letter-spacing: .24em;
+    text-transform: uppercase; color: var(--mikro); margin-top: 5px; }
+  #urteilPunkt { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+    align-self: center; box-shadow: 0 0 8px currentColor; }
 
-  /* Hauptbereich: Lauf-Browser | Timeline | Beweis-Panel */
-  #haupt { display: grid; grid-template-columns: 236px 1fr 0; min-height: 0; }
-  #haupt.mit-beweis { grid-template-columns: 236px 1fr 300px; }
-  #mitte { display: flex; flex-direction: column; min-width: 0; padding: 14px 10px 14px 12px; gap: 8px; }
+  /* Hauptbereich: Lauf-Browser | Buehne | Beweis-Panel - nur Haarlinien trennen */
+  #haupt { display: grid; grid-template-columns: 232px 1fr 0; min-height: 0; }
+  #haupt.mit-beweis { grid-template-columns: 232px 1fr 304px; }
+  #mitte { display: flex; flex-direction: column; min-width: 0; }
 
-  /* Lauf-Browser (links) */
-  #links { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line);
-    background: rgba(10,14,21,.6); }
-  #links h3 { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim);
-    padding: 12px 14px 8px; }
+  /* Lauf-Browser: blanke Zeilen, aktiver Lauf = Phosphor-Haarlinie links */
+  #links { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+  #links h3 { font: 600 9px/1 Consolas, monospace; letter-spacing: .3em; text-transform: uppercase;
+    color: var(--mikro); padding: 16px 16px 10px; }
   #laufListe { flex: 1; overflow-y: auto; min-height: 0; }
-  #laufListe::-webkit-scrollbar { width: 8px; } #laufListe::-webkit-scrollbar-thumb { background: #232b3a; border-radius: 8px; }
-  .lauf { padding: 9px 12px 8px 14px; border-bottom: 1px solid rgba(255,255,255,.04); cursor: pointer;
-    display: grid; grid-template-columns: 10px 1fr auto; gap: 4px 8px; align-items: center; }
-  .lauf:hover { background: rgba(76,224,255,.05); }
-  .lauf.aktiv { background: rgba(76,224,255,.09); box-shadow: inset 2px 0 0 var(--cyan); }
-  .lauf .punkt { width: 8px; height: 8px; border-radius: 50%; }
-  .lauf .spiel { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .lauf .zeit { grid-column: 2; font-size: 10px; color: var(--dim); }
-  .lauf .kw { grid-column: 3; grid-row: 1 / span 2; text-align: right; font-size: 10px; color: var(--dim); line-height: 1.5; }
-  .lauf .vgl { grid-column: 1 / span 3; font-size: 10px; color: var(--violet); cursor: pointer;
-    opacity: 0; margin-top: 2px; }
+  #laufListe::-webkit-scrollbar { width: 6px; } #laufListe::-webkit-scrollbar-thumb { background: #1a222c; }
+  .lauf { padding: 10px 14px 9px 16px; cursor: pointer;
+    display: grid; grid-template-columns: 8px 1fr auto; gap: 3px 8px; align-items: center;
+    border-left: 2px solid transparent; }
+  .lauf:hover { background: rgba(63,224,200,.04); }
+  .lauf.aktiv { border-left-color: var(--phos); background: rgba(63,224,200,.05); }
+  .lauf .punkt { width: 6px; height: 6px; border-radius: 50%; }
+  .lauf .spiel { font-size: 12px; font-weight: 600; color: var(--hell); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lauf .zeit { grid-column: 2; font: 10px/1.3 Consolas, monospace; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lauf .kw { grid-column: 3; grid-row: 1 / span 2; text-align: right; font: 10px/1.5 Consolas, monospace; color: var(--dim); }
+  .lauf .vgl { grid-column: 1 / span 3; font: 10px/1 Consolas, monospace; letter-spacing: .1em;
+    color: var(--violet); cursor: pointer; opacity: 0; margin-top: 3px; text-transform: uppercase; }
   .lauf:hover .vgl, .lauf .vgl.an { opacity: 1; }
   .lauf .vgl.an { font-weight: 700; }
 
-  /* Beweis-Panel (rechts) */
-  #rechts { display: none; flex-direction: column; min-height: 0; border-left: 1px solid var(--line);
-    background: rgba(10,14,21,.6); }
+  /* Beweis-Panel: Roentgenschirm - Bloecke durch Haarlinien getrennt, Befund
+     "entwickelt" sich beim Oeffnen (Signatur-Geste, s. .entwickeln unten) */
+  #rechts { display: none; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
   #haupt.mit-beweis #rechts { display: flex; }
-  #rechts .bp-kopf { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
-  #rechts h3 { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); flex: 1; }
-  #rechts .bp-nav { display: flex; gap: 4px; }
-  #rechts .bp-nav button, #rechts .bp-zu { background: rgba(255,255,255,.05); border: 1px solid var(--line);
-    color: var(--text); border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: 12px; }
-  #rechts .bp-nav button:hover, #rechts .bp-zu:hover { background: rgba(76,224,255,.12); }
-  #bpInhalt { flex: 1; overflow-y: auto; padding: 4px 14px 14px; min-height: 0; }
-  #bpInhalt .bp-zeit { font-family: Consolas, monospace; font-size: 15px; font-weight: 700; color: #eaf6ff;
-    text-shadow: 0 0 10px rgba(255,70,86,.4); }
-  #bpInhalt .bp-ft { font-size: 11px; color: var(--dim); margin: 2px 0 12px; }
-  .verd { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 9px;
-    padding: 9px 11px; margin-bottom: 8px; }
-  .verd .vk { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
-  .verd .vname { font-size: 12px; font-weight: 700; }
-  .verd .vart { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin-left: auto; }
-  .verd .vev { font-size: 11px; color: rgba(217,234,245,.8); font-family: Consolas, monospace; }
-  .verd .vbar { height: 3px; border-radius: 2px; background: rgba(255,255,255,.07); margin-top: 6px; overflow: hidden; }
-  .verd .vbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--bad), var(--warn)); }
+  #rechts .bp-kopf { display: flex; align-items: center; gap: 6px; padding: 16px 16px 10px; }
+  #rechts h3 { font: 600 9px/1 Consolas, monospace; letter-spacing: .3em; text-transform: uppercase;
+    color: var(--mikro); flex: 1; }
+  #rechts .bp-nav { display: flex; gap: 2px; }
+  #rechts .bp-nav button, #rechts .bp-zu { background: none; border: none;
+    color: var(--dim); padding: 2px 8px; cursor: pointer; font: 12px Consolas, monospace; }
+  #rechts .bp-nav button:hover, #rechts .bp-zu:hover { color: var(--phos); }
+  #bpInhalt { flex: 1; overflow-y: auto; padding: 2px 16px 16px; min-height: 0; }
+  #bpInhalt::-webkit-scrollbar { width: 6px; } #bpInhalt::-webkit-scrollbar-thumb { background: #1a222c; }
+  #bpInhalt .bp-zeit { font: 300 24px/1 Consolas, monospace; color: var(--hell); }
+  #bpInhalt .bp-ft { font: 10px/1.4 Consolas, monospace; letter-spacing: .06em; color: var(--dim); margin: 4px 0 14px; }
+  .verd { border-top: 1px solid var(--line); padding: 10px 0 11px; }
+  .verd .vk { display: flex; align-items: baseline; gap: 7px; margin-bottom: 4px; }
+  .verd .vname { font-size: 12px; font-weight: 700; color: var(--hell); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .verd .vart { font: 8px/1 Consolas, monospace; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--mikro); margin-left: auto; white-space: nowrap; flex-shrink: 0; }
+  .verd .vev { font: 11px/1.5 Consolas, monospace; color: rgba(205,215,224,.75); }
+  .verd .vbar { height: 2px; background: rgba(255,255,255,.06); margin-top: 7px; overflow: hidden; }
+  .verd .vbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--bad), var(--warn));
+    box-shadow: 0 0 6px rgba(255,74,66,.6); }
 
-  /* Vergleichszeile unterm Kopf */
-  #vglZeile { display: none; align-items: center; gap: 8px; font-size: 11px; color: var(--text);
-    background: rgba(154,123,255,.08); border: 1px solid rgba(154,123,255,.3); border-radius: 8px;
-    padding: 5px 10px; }
+  /* Signatur-Geste Teil 2: der Befund entwickelt sich wie auf einem Roentgenschirm -
+     aus Unschaerfe und Phosphor-Schimmer in die Schaerfe, Bloecke nacheinander. */
+  .entwickeln > * { animation: entwickeln .5s cubic-bezier(.2,.7,.3,1) both; }
+  .entwickeln > *:nth-child(2) { animation-delay: .08s; }
+  .entwickeln > *:nth-child(3) { animation-delay: .16s; }
+  .entwickeln > *:nth-child(4) { animation-delay: .24s; }
+  .entwickeln > *:nth-child(5) { animation-delay: .32s; }
+  .entwickeln > *:nth-child(n+6) { animation-delay: .4s; }
+  @keyframes entwickeln {
+    0% { opacity: 0; filter: blur(7px) brightness(2.4); transform: translateX(6px); }
+    55% { opacity: 1; filter: blur(1.5px) brightness(1.5); }
+    100% { opacity: 1; filter: blur(0) brightness(1); transform: translateX(0); }
+  }
+  .verd .vbar i { transform-origin: left; animation: vbar .7s cubic-bezier(.2,.7,.2,1) both; animation-delay: .3s; }
+  @keyframes vbar { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+  /* Vergleichszeile: Haarlinie, kein Kasten */
+  #vglZeile { display: none; align-items: center; gap: 8px; font: 11px Consolas, monospace;
+    color: var(--text); border-bottom: 1px solid rgba(154,123,255,.25); padding: 6px 24px; }
   #vglZeile.an { display: flex; }
   #vglZeile .linie { width: 18px; height: 2px; background: rgba(154,123,255,.75); }
   #vglZeile button { margin-left: auto; background: none; border: none; color: var(--dim); cursor: pointer; font-size: 13px; }
+  #vglZeile button:hover { color: var(--violet); }
 
-  #zeitleiste { flex: 1; min-height: 0; position: relative;
-    background: var(--panel); border: 1px solid rgba(0,229,255,.16); border-radius: 12px;
-    box-shadow: 0 14px 44px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05); overflow: hidden; }
+  /* Buehne: randlos - das Signal ist die Oberflaeche */
+  #zeitleiste { flex: 1; min-height: 0; position: relative; overflow: hidden; }
   #zeitleiste canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 
   /* Hinweise/Zustaende */
   #hinweis { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     flex-direction: column; gap: 8px; color: var(--dim); font-size: 13px; text-align: center; padding: 24px; }
   #hinweis .gross { font-size: 15px; color: var(--text); }
-  .pille { display: inline-block; font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
-    border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px; color: var(--dim); }
+  .pille { display: inline-block; font: 9px/1 Consolas, monospace; letter-spacing: .18em;
+    text-transform: uppercase; border: 1px solid var(--line); padding: 4px 10px; color: var(--dim); }
 </style>
 </head>
 <body>
@@ -246,10 +268,12 @@
       (spiel ? spiel + ' · ' : '') + (r.wall || '').replace('T', ' ') + ' · ' + min + ' min'
     document.getElementById('urteilPunkt').style.background = LumoraReport.verdictColor(r)
     document.getElementById('urteilPunkt').style.color = LumoraReport.verdictColor(r)
+    // Grosse duenne Ziffern, Einheiten als kleine <em> (Labor-Look). Werte sind
+    // Zahlen aus dem eigenen Report - kein esc noetig, Formatierer erzwingen Ziffern.
     document.getElementById('kAvg').textContent = (r.avgFps || 0).toFixed(0)
     document.getElementById('kLow').textContent = (r.p1LowFps || 0).toFixed(0)
-    document.getElementById('kMed').textContent = (r.medianFtMs || 0).toFixed(1) + ' ms'
-    document.getElementById('kSpk').textContent = (r.spikes || 0) + ' · ' + (r.spikesPerMin || 0).toFixed(1) + '/min'
+    document.getElementById('kMed').innerHTML = (r.medianFtMs || 0).toFixed(1) + '<em>ms</em>'
+    document.getElementById('kSpk').innerHTML = (r.spikes || 0) + '<em>' + (r.spikesPerMin || 0).toFixed(1) + '/min</em>'
     document.title = 'Lumora Analyse-Werkbank – ' + (spiel || berichtFile)
   }
 
@@ -336,6 +360,11 @@
         + '</div>'
     }
     inh.innerHTML = html
+    // Signatur-Geste Teil 2: der Befund "entwickelt" sich wie auf einem Roentgenschirm.
+    // Klasse kurz entfernen und im naechsten Frame neu setzen, damit die Animation bei
+    // JEDEM Spike-Wechsel laeuft (nicht nur beim ersten Oeffnen).
+    inh.classList.remove('entwickeln')
+    requestAnimationFrame(() => inh.classList.add('entwickeln'))
     if (timeline) {
       timeline.aktiverSpike = f
       timeline.zeigeFenster(f.t, 0.6)
