@@ -1,0 +1,28 @@
+{
+  "lumoraProfil": 1,
+  "name": "Grand Theft Auto 2",
+  "spiel": "gta2.exe",
+  "modus": "tastatur",
+  "autor": "Lumora",
+  "notiz": "Xbox-Pad fuer GTA2 (1999). Linker Stick UND Steuerkreuz lenken, RT feuert, A ist Handbremse/Sprung, B steigt ein und aus. Belegung aus der Spiel-Registry uebernommen (Standardsteuerung).",
+  "tasten": [
+    { "quelle": "LY-", "scancode": 72,  "ext": true,  "schwelle": 0.40, "loesen": 0.25, "aktion": "Vorwaerts" },
+    { "quelle": "LY+", "scancode": 80,  "ext": true,  "schwelle": 0.40, "loesen": 0.25, "aktion": "Zurueck" },
+    { "quelle": "LX-", "scancode": 75,  "ext": true,  "schwelle": 0.35, "loesen": 0.22, "aktion": "Links" },
+    { "quelle": "LX+", "scancode": 77,  "ext": true,  "schwelle": 0.35, "loesen": 0.22, "aktion": "Rechts" },
+
+    { "quelle": "DU",  "scancode": 72,  "ext": true,  "aktion": "Vorwaerts (Steuerkreuz)" },
+    { "quelle": "DD",  "scancode": 80,  "ext": true,  "aktion": "Zurueck (Steuerkreuz)" },
+    { "quelle": "DL",  "scancode": 75,  "ext": true,  "aktion": "Links (Steuerkreuz)" },
+    { "quelle": "DR",  "scancode": 77,  "ext": true,  "aktion": "Rechts (Steuerkreuz)" },
+
+    { "quelle": "RT",  "scancode": 29,  "ext": false, "schwelle": 0.30, "loesen": 0.18, "aktion": "Angriff" },
+    { "quelle": "A",   "scancode": 57,  "ext": false, "aktion": "Handbremse/Sprung" },
+    { "quelle": "B",   "scancode": 28,  "ext": false, "aktion": "Eingabe/Ende (ein-/aussteigen)" },
+    { "quelle": "X",   "scancode": 45,  "ext": false, "aktion": "Naechste Waffe" },
+    { "quelle": "Y",   "scancode": 44,  "ext": false, "aktion": "Letzte Waffe" },
+    { "quelle": "LB",  "scancode": 15,  "ext": false, "aktion": "Spezial" },
+    { "quelle": "RB",  "scancode": 56,  "ext": false, "aktion": "Spezial 2" },
+    { "quelle": "START", "scancode": 1, "ext": false, "aktion": "Pause (ESC)" }
+  ]
+}
