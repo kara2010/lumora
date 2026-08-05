@@ -163,6 +163,16 @@ Copy-Item "$shell\build\Release\lumora_shell.exe" "$stage\lumora-shell.exe"
 foreach ($f in "index.html","analyze-report.js","werkbank-timeline.js","styles.css","player.html","osd.html","analyze-osd.html","analyze-werkbank.html","doorman.html","icon.ico","icon-64.png") {
   if (Test-Path "$root\$f") { Copy-Item "$root\$f" $stage }
 }
+# Haus-Profile der Eingabe-Bruecke (Tastatur-Modus). Sie sind der Beweis, dass die
+# Funktion sofort taugt ("GTA2 laeuft out of the box") - fehlen sie im Paket, steht
+# der Nutzer vor einer leeren Profil-Liste. Gleiche Falle wie analyze-report.js.
+if (Test-Path "$root\profile") {
+  New-Item -ItemType Directory -Force "$stage\profile" | Out-Null
+  Copy-Item "$root\profile\*.lumoraprofil" "$stage\profile" -ErrorAction SilentlyContinue
+  $anz = (Get-ChildItem "$stage\profile\*.lumoraprofil" -ErrorAction SilentlyContinue).Count
+  Write-Output "Haus-Profile: $anz mitgeliefert"
+}
+
 # UI-Bilder/Assets (Logos etc.), die index.html/styles.css referenzieren
 foreach ($f in Get-ChildItem "$root\*.png","$root\*.svg" -ErrorAction SilentlyContinue) {
   if ($f.Length -lt 500KB) { Copy-Item $f.FullName $stage }   # Screenshots (mehrere MB) NICHT ins Paket

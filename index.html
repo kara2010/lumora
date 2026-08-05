@@ -833,6 +833,37 @@
             </div>
             <p class="settings-hint" id="ibSetupHint" style="display:none">Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber ViGEmBus ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps &amp; Features.</p>
           </div>
+          <!-- Tastatur-Modus: die Gegenrichtung (Gamepad -> Tastatur) fuer Klassiker,
+               die kein Gamepad kennen. Eigener Block, weil er WEDER ViGEmBus NOCH
+               ein Quellgeraet braucht - nur ein Xbox-Pad und ein Profil. -->
+          <div class="form-group" style="border-top:1px solid var(--border);padding-top:16px;margin-top:20px">
+            <label>🕹 Gamepad → Tastatur (für alte Spiele)</label>
+            <p class="settings-hint">Die Gegenrichtung: Dein Xbox-Controller steuert Klassiker, die noch gar keine Gamepads kannten (GTA2, alte Shooter, Emulator-Frontends). Lumora drückt für dich die Tasten. Kein Treiber nötig.</p>
+            <div class="path-row">
+              <select id="kbProfileSel" class="sort-select" style="flex:1" onchange="kbSelectProfile(this.value)"></select>
+              <button class="btn-browse" onclick="kbImport()" title="Profil aus Datei laden">📂 Importieren</button>
+              <button class="btn-browse" onclick="kbExport()" title="Profil als Datei sichern">💾 Exportieren</button>
+              <button class="btn-browse" onclick="kbDeleteProfile()">✕</button>
+            </div>
+            <p class="settings-hint" id="kbProfileInfo" style="margin-top:6px"></p>
+            <div class="setting-toggle-row" style="margin-top:8px">
+              <span class="setting-toggle-label" id="kbStatusLabel">Tastatur-Modus: aus</span>
+              <button class="btn-primary" id="kbToggleBtn" onclick="kbToggle()">▶ Aktivieren</button>
+            </div>
+            <p class="settings-hint">Tasten werden nur gesendet, solange das Spiel im Vordergrund ist – nie in andere Fenster.</p>
+            <div id="kbAssistBox" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:10px">
+              <div id="kbAssistText" style="font-size:14px;margin-bottom:8px"></div>
+              <div class="path-row">
+                <button class="btn-browse" onclick="kbAssistSkip()">Überspringen</button>
+                <button class="btn-cancel" onclick="kbAssistStop()">Abbrechen</button>
+              </div>
+            </div>
+            <div class="path-row" style="margin-top:8px">
+              <button class="btn-browse" onclick="kbAssistStart()">✨ Belegung Schritt für Schritt zuweisen</button>
+            </div>
+            <div id="kbMapList" style="margin-top:10px"></div>
+          </div>
+
           <div class="form-group">
             <label>Profil</label>
             <div class="path-row">
@@ -1198,6 +1229,48 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  // --- Eingabe-Bruecke: Tastatur-Modus (Gamepad -> Tastatur) ---
+  "Scancode": "Scancode",
+  "Noch kein Profil – importieren oder zuweisen": "No profile yet – import or assign one",
+  "Gilt für": "Applies to",
+  "Gilt für jedes Spiel im Vordergrund": "Applies to whichever game is in the foreground",
+  "Profil löschen?": "Delete profile?",
+  "Profil gespeichert:": "Profile saved:",
+  "Profil konnte nicht gelesen werden.": "The profile could not be read.",
+  "Profil importiert:": "Profile imported:",
+  "Kein Profil mit Zuordnungen gewählt.": "No profile with assignments selected.",
+  "Tastatur-Modus konnte nicht starten.": "Keyboard mode could not start.",
+  "Tastatur-Modus:": "Keyboard mode:",
+  "an": "on",
+  "aus": "off",
+  "Neues Tastatur-Profil": "New keyboard profile",
+  "Belegung fertig.": "Mapping complete.",
+  "Drücke die Tastatur-Taste für:": "Press the keyboard key for:",
+  "wird belegt auf": "will be mapped to",
+  "🕹 Gamepad → Tastatur (für alte Spiele)": "🕹 Gamepad → keyboard (for older games)",
+  "Die Gegenrichtung: Dein Xbox-Controller steuert Klassiker, die noch gar keine Gamepads kannten (GTA2, alte Shooter, Emulator-Frontends). Lumora drückt für dich die Tasten. Kein Treiber nötig.": "The other direction: your Xbox controller drives classics that never knew gamepads (GTA2, old shooters, emulator front-ends). Lumora presses the keys for you. No driver needed.",
+  "📂 Importieren": "📂 Import",
+  "💾 Exportieren": "💾 Export",
+  "Tastatur-Modus: aus": "Keyboard mode: off",
+  "Tasten werden nur gesendet, solange das Spiel im Vordergrund ist – nie in andere Fenster.": "Keys are only sent while the game is in the foreground – never into other windows.",
+  "Überspringen": "Skip",
+  "✨ Belegung Schritt für Schritt zuweisen": "✨ Assign the mapping step by step",
+  "Profil aus Datei laden": "Load profile from file",
+  "Profil als Datei sichern": "Save profile to file",
+  "⏹ Deaktivieren": "⏹ Deactivate",
+  "Vorwärts / Gas": "Forward / accelerate",
+  "Rückwärts / Bremse": "Reverse / brake",
+  "Nach links": "Turn left",
+  "Nach rechts": "Turn right",
+  "Angriff / Feuer": "Attack / fire",
+  "Springen / Handbremse": "Jump / handbrake",
+  "Aktion / Ein- und Aussteigen": "Action / enter and exit",
+  "Nächste Waffe": "Next weapon",
+  "Vorherige Waffe": "Previous weapon",
+  "Sonderfunktion 1": "Special 1",
+  "Sonderfunktion 2": "Special 2",
+  "Pause / Menü": "Pause / menu",
+
   // --- Bericht teilen (3.3.0) ---
   "🔗 Als Link teilen": "🔗 Share as a link",
   "🔬 In der Werkbank öffnen": "🔬 Open in the workbench",
@@ -2870,6 +2943,200 @@ function ibSave() {
   ipcRenderer.invoke('input-bridge-save-profiles', ibProfiles)
   const p = ibProf(); if (p) ipcRenderer.invoke('input-bridge-set-profile', p)   // Regler wirken sofort
 }
+// ===== Tastatur-Modus: Gamepad -> Tastatur (EINGABEBRUECKE-PROFILE-PLAN.md) =====
+// Eigener Zustand neben der ViGEm-Bruecke: andere Datei (kb-profiles.json), andere
+// IPC-Kanaele, kein Treiber. Profile sind Dateien (.lumoraprofil) - Austausch laeuft
+// ueber den normalen Datei-Dialog, ohne Konto und ohne Server.
+let kbProfiles = null, kbCurrent = null, kbAktiv = false
+// Reihenfolge des Assistenten: die haeufigsten Aktionen zuerst, damit man nach den
+// ersten Schritten schon fahren kann und den Rest ueberspringen darf.
+const KB_ASSIST = [
+  { quelle: 'LY-', frage: 'Vorwärts / Gas' },
+  { quelle: 'LY+', frage: 'Rückwärts / Bremse' },
+  { quelle: 'LX-', frage: 'Nach links' },
+  { quelle: 'LX+', frage: 'Nach rechts' },
+  { quelle: 'RT',  frage: 'Angriff / Feuer' },
+  { quelle: 'A',   frage: 'Springen / Handbremse' },
+  { quelle: 'B',   frage: 'Aktion / Ein- und Aussteigen' },
+  { quelle: 'X',   frage: 'Nächste Waffe' },
+  { quelle: 'Y',   frage: 'Vorherige Waffe' },
+  { quelle: 'LB',  frage: 'Sonderfunktion 1' },
+  { quelle: 'RB',  frage: 'Sonderfunktion 2' },
+  { quelle: 'START', frage: 'Pause / Menü' },
+]
+// Anzeigenamen der Quellen (nur Darstellung - gespeichert wird der Kurzcode)
+const KB_QUELLE_NAMEN = {
+  'LY-': 'Linker Stick ▲', 'LY+': 'Linker Stick ▼', 'LX-': 'Linker Stick ◀', 'LX+': 'Linker Stick ▶',
+  'RY-': 'Rechter Stick ▲', 'RY+': 'Rechter Stick ▼', 'RX-': 'Rechter Stick ◀', 'RX+': 'Rechter Stick ▶',
+  'LT': 'Linker Trigger', 'RT': 'Rechter Trigger', 'A': 'A', 'B': 'B', 'X': 'X', 'Y': 'Y',
+  'LB': 'LB (Schulter links)', 'RB': 'RB (Schulter rechts)', 'BACK': 'Back / View', 'START': 'Start / Menü',
+  'LS': 'Linker Stick (Klick)', 'RS': 'Rechter Stick (Klick)',
+  'DU': 'Steuerkreuz ▲', 'DD': 'Steuerkreuz ▼', 'DL': 'Steuerkreuz ◀', 'DR': 'Steuerkreuz ▶',
+}
+// Scancode -> Anzeigename. Die Tabelle deckt die Tasten ab, die Spiele real belegen;
+// alles andere wird als "Scancode NN" gezeigt statt zu raten.
+const KB_SCAN_NAMEN = {
+  1:'Esc', 14:'Rücktaste', 15:'Tab', 28:'Eingabe', 29:'Strg links', 42:'Umschalt links',
+  54:'Umschalt rechts', 56:'Alt links', 57:'Leertaste', 58:'Feststell',
+  59:'F1', 60:'F2', 61:'F3', 62:'F4', 63:'F5', 64:'F6', 65:'F7', 66:'F8', 67:'F9', 68:'F10', 87:'F11', 88:'F12',
+  2:'1', 3:'2', 4:'3', 5:'4', 6:'5', 7:'6', 8:'7', 9:'8', 10:'9', 11:'0',
+  16:'Q', 17:'W', 18:'E', 19:'R', 20:'T', 21:'Z', 22:'U', 23:'I', 24:'O', 25:'P',
+  30:'A', 31:'S', 32:'D', 33:'F', 34:'G', 35:'H', 36:'J', 37:'K', 38:'L',
+  44:'Y', 45:'X', 46:'C', 47:'V', 48:'B', 49:'N', 50:'M',
+  71:'Num 7', 72:'Num 8', 73:'Num 9', 75:'Num 4', 76:'Num 5', 77:'Num 6', 79:'Num 1', 80:'Num 2', 81:'Num 3', 82:'Num 0',
+}
+function kbTastenName(sc, ext) {
+  if (ext) {   // E0-Praefix: dieselben Zahlen bedeuten andere Tasten
+    const e = { 72:'Pfeil ▲', 80:'Pfeil ▼', 75:'Pfeil ◀', 77:'Pfeil ▶',
+                71:'Pos1', 79:'Ende', 73:'Bild ▲', 81:'Bild ▼', 82:'Einfg', 83:'Entf',
+                28:'Num-Eingabe', 29:'Strg rechts', 56:'Alt Gr' }
+    return e[sc] || (window.tr('Scancode') + ' E0+' + sc)
+  }
+  return KB_SCAN_NAMEN[sc] || (window.tr('Scancode') + ' ' + sc)
+}
+function kbProf() { return (kbProfiles && kbCurrent && kbProfiles[kbCurrent]) || null }
+function kbSave() { if (kbProfiles) ipcRenderer.invoke('kb-save-profiles', kbProfiles) }
+async function kbOpen() {
+  kbProfiles = await ipcRenderer.invoke('kb-get-profiles') || {}
+  const ids = Object.keys(kbProfiles)
+  if (!kbCurrent || !kbProfiles[kbCurrent]) kbCurrent = ids[0] || null
+  kbRenderProfiles(); kbRenderMap(); kbRefreshStatus()
+}
+function kbRenderProfiles() {
+  const sel = document.getElementById('kbProfileSel'); if (!sel || !kbProfiles) return
+  const ids = Object.keys(kbProfiles)
+  sel.innerHTML = ids.length
+    ? ids.map(id => `<option value="${anEsc(id)}" ${id === kbCurrent ? 'selected' : ''}>${anEsc(kbProfiles[id].name || id)}</option>`).join('')
+    : `<option value="">${window.tr('Noch kein Profil – importieren oder zuweisen')}</option>`
+  const p = kbProf(), info = document.getElementById('kbProfileInfo')
+  if (info) info.textContent = p
+    ? (p.spiel ? window.tr('Gilt für') + ' ' + p.spiel : window.tr('Gilt für jedes Spiel im Vordergrund'))
+      + (p.notiz ? ' · ' + p.notiz : '')
+    : ''
+}
+function kbSelectProfile(id) { if (kbProfiles && kbProfiles[id]) { kbCurrent = id; kbRenderProfiles(); kbRenderMap() } }
+function kbRenderMap() {
+  const box = document.getElementById('kbMapList'); if (!box) return
+  const p = kbProf()
+  if (!p || !Array.isArray(p.tasten) || !p.tasten.length) { box.innerHTML = ''; return }
+  box.innerHTML = '<div style="display:grid;grid-template-columns:1fr auto 1fr auto;gap:6px 10px;align-items:center;font-size:13px">'
+    + p.tasten.map((t, i) =>
+        `<span>${anEsc(KB_QUELLE_NAMEN[t.quelle] || t.quelle)}</span>`
+      + `<span style="color:var(--text-dim)">→</span>`
+      + `<span><b>${anEsc(kbTastenName(t.scancode, !!t.ext))}</b>${t.aktion ? ' <span style="color:var(--text-dim)">· ' + anEsc(t.aktion) + '</span>' : ''}</span>`
+      + `<button class="btn-cancel" onclick="kbDeleteMap(${i})" title="${window.tr('Zuordnung entfernen')}">✕</button>`
+      ).join('')
+    + '</div>'
+}
+function kbDeleteMap(i) {
+  const p = kbProf(); if (!p) return
+  p.tasten.splice(i, 1); kbSave(); kbRenderMap()
+  if (kbAktiv) ipcRenderer.invoke('kb-bridge-start', p)   // Aenderung sofort wirksam
+}
+async function kbDeleteProfile() {
+  const p = kbProf(); if (!p) return
+  if (!await lumoraConfirm(window.tr('Profil löschen?') + '\n\n' + (p.name || kbCurrent))) return
+  delete kbProfiles[kbCurrent]
+  kbCurrent = Object.keys(kbProfiles)[0] || null
+  kbSave(); kbRenderProfiles(); kbRenderMap()
+}
+// --- Export/Import: EINE Datei je Profil, damit sie sich direkt verschicken laesst
+async function kbExport() {
+  const p = kbProf(); if (!p) return
+  const datei = { lumoraProfil: 1, name: p.name || kbCurrent, spiel: p.spiel || '', modus: 'tastatur',
+                  autor: p.autor || '', notiz: p.notiz || '', tasten: p.tasten || [] }
+  const r = await ipcRenderer.invoke('kb-export-profile', datei)
+  if (r && r.ok) showToast(window.tr('Profil gespeichert:') + ' ' + r.datei)
+}
+async function kbImport() {
+  const r = await ipcRenderer.invoke('kb-import-profile')
+  if (!r || !r.ok) { if (r && r.error) showToast(window.tr('Profil konnte nicht gelesen werden.')); return }
+  const id = 'kb' + Date.now().toString(36)
+  kbProfiles[id] = r.profil
+  kbCurrent = id; kbSave(); kbRenderProfiles(); kbRenderMap()
+  showToast(window.tr('Profil importiert:') + ' ' + (r.profil.name || id))
+}
+// --- Aktivieren/Deaktivieren
+async function kbToggle() {
+  if (kbAktiv) { await ipcRenderer.invoke('kb-bridge-stop'); kbAktiv = false; kbRefreshStatus(); return }
+  const p = kbProf()
+  if (!p || !Array.isArray(p.tasten) || !p.tasten.length) { showToast(window.tr('Kein Profil mit Zuordnungen gewählt.')); return }
+  const r = await ipcRenderer.invoke('kb-bridge-start', p)
+  kbAktiv = !!(r && r.ok)
+  if (!kbAktiv) showToast(window.tr('Tastatur-Modus konnte nicht starten.'))
+  kbRefreshStatus()
+}
+async function kbRefreshStatus() {
+  const s = await ipcRenderer.invoke('kb-bridge-status') || {}
+  kbAktiv = !!s.active
+  const lbl = document.getElementById('kbStatusLabel'), btn = document.getElementById('kbToggleBtn')
+  if (lbl) lbl.textContent = window.tr('Tastatur-Modus:') + ' ' + (kbAktiv ? (window.tr('an') + (s.name ? ' (' + s.name + ')' : '')) : window.tr('aus'))
+  if (btn) btn.textContent = kbAktiv ? window.tr('⏹ Deaktivieren') : window.tr('▶ Aktivieren')
+}
+// --- Mapping-Assistent: "Druecke die Taste fuer X" statt Formular ---------------
+// Der Nutzer drueckt eine echte TASTATUR-Taste; wir lesen ihren Scancode aus dem
+// KeyboardEvent (event.code -> Scancode-Tabelle). Die Gamepad-Quelle gibt der
+// Assistent vor - genau umgekehrt zum ViGEm-Assistenten, wo das Ziel feststeht.
+let kbAssistIdx = -1
+const KB_CODE_ZU_SCAN = {
+  Escape:[1,0], Digit1:[2,0], Digit2:[3,0], Digit3:[4,0], Digit4:[5,0], Digit5:[6,0], Digit6:[7,0],
+  Digit7:[8,0], Digit8:[9,0], Digit9:[10,0], Digit0:[11,0], Backspace:[14,0], Tab:[15,0],
+  KeyQ:[16,0], KeyW:[17,0], KeyE:[18,0], KeyR:[19,0], KeyT:[20,0], KeyY:[21,0], KeyU:[22,0],
+  KeyI:[23,0], KeyO:[24,0], KeyP:[25,0], Enter:[28,0], ControlLeft:[29,0],
+  KeyA:[30,0], KeyS:[31,0], KeyD:[32,0], KeyF:[33,0], KeyG:[34,0], KeyH:[35,0], KeyJ:[36,0], KeyK:[37,0], KeyL:[38,0],
+  ShiftLeft:[42,0], KeyZ:[44,0], KeyX:[45,0], KeyC:[46,0], KeyV:[47,0], KeyB:[48,0], KeyN:[49,0], KeyM:[50,0],
+  ShiftRight:[54,0], AltLeft:[56,0], Space:[57,0], CapsLock:[58,0],
+  F1:[59,0], F2:[60,0], F3:[61,0], F4:[62,0], F5:[63,0], F6:[64,0], F7:[65,0], F8:[66,0], F9:[67,0], F10:[68,0], F11:[87,0], F12:[88,0],
+  Numpad7:[71,0], Numpad8:[72,0], Numpad9:[73,0], Numpad4:[75,0], Numpad5:[76,0], Numpad6:[77,0],
+  Numpad1:[79,0], Numpad2:[80,0], Numpad3:[81,0], Numpad0:[82,0],
+  ArrowUp:[72,1], ArrowDown:[80,1], ArrowLeft:[75,1], ArrowRight:[77,1],
+  Home:[71,1], End:[79,1], PageUp:[73,1], PageDown:[81,1], Insert:[82,1], Delete:[83,1],
+  NumpadEnter:[28,1], ControlRight:[29,1], AltRight:[56,1],
+}
+function kbAssistStart() {
+  if (!kbProf()) {   // ohne Profil: eines anlegen, sonst laeuft der Assistent ins Leere
+    const id = 'kb' + Date.now().toString(36)
+    kbProfiles = kbProfiles || {}
+    kbProfiles[id] = { name: window.tr('Neues Tastatur-Profil'), spiel: '', tasten: [] }
+    kbCurrent = id; kbRenderProfiles()
+  }
+  kbAssistIdx = 0
+  document.getElementById('kbAssistBox').style.display = 'block'
+  addEventListener('keydown', kbAssistKey, true)
+  kbAssistZeig()
+}
+function kbAssistZeig() {
+  const t = document.getElementById('kbAssistText')
+  if (kbAssistIdx >= KB_ASSIST.length) { kbAssistStop(); showToast(window.tr('Belegung fertig.')); return }
+  const s = KB_ASSIST[kbAssistIdx]
+  t.innerHTML = window.tr('Drücke die Tastatur-Taste für:') + ' <b>' + anEsc(window.tr(s.frage)) + '</b>'
+    + '<div style="color:var(--text-dim);margin-top:4px">' + window.tr('wird belegt auf') + ' '
+    + anEsc(KB_QUELLE_NAMEN[s.quelle] || s.quelle) + ' · ' + (kbAssistIdx + 1) + '/' + KB_ASSIST.length + '</div>'
+}
+function kbAssistKey(e) {
+  if (kbAssistIdx < 0) return
+  e.preventDefault(); e.stopPropagation()
+  if (e.key === 'Escape') { kbAssistStop(); return }
+  const m = KB_CODE_ZU_SCAN[e.code]
+  if (!m) return                                    // unbekannte Taste: einfach ignorieren
+  const s = KB_ASSIST[kbAssistIdx], p = kbProf()
+  p.tasten = (p.tasten || []).filter(x => x.quelle !== s.quelle)   // Quelle neu belegen
+  const eintrag = { quelle: s.quelle, scancode: m[0], ext: !!m[1], aktion: window.tr(s.frage) }
+  if (/^(L|R)(X|Y)[-+]$/.test(s.quelle) || s.quelle === 'LT' || s.quelle === 'RT') {
+    eintrag.schwelle = 0.40; eintrag.loesen = 0.25   // Analogquelle -> Hysterese mitgeben
+  }
+  p.tasten.push(eintrag)
+  kbAssistIdx++; kbSave(); kbRenderMap(); kbAssistZeig()
+}
+function kbAssistSkip() { kbAssistIdx++; kbAssistZeig() }
+function kbAssistStop() {
+  kbAssistIdx = -1
+  removeEventListener('keydown', kbAssistKey, true)
+  const b = document.getElementById('kbAssistBox'); if (b) b.style.display = 'none'
+  if (kbAktiv) { const p = kbProf(); if (p) ipcRenderer.invoke('kb-bridge-start', p) }
+}
+ipcRenderer.on('kb-bridge-active', () => kbRefreshStatus())
+
 async function ibOpen() {   // beim Oeffnen des Tabs: alles frisch laden
   ibProfiles = await ipcRenderer.invoke('input-bridge-get-profiles') || { profiles: {}, gameLinks: {}, defaultProfile: null }
   if (!ibProfiles.profiles) ibProfiles.profiles = {}
@@ -2877,6 +3144,7 @@ async function ibOpen() {   // beim Oeffnen des Tabs: alles frisch laden
   const ids = Object.keys(ibProfiles.profiles)
   if (!ibCurrent || !ibProfiles.profiles[ibCurrent]) ibCurrent = ids[0] || null
   ibRenderProfiles(); ibRenderMap(); ibRenderLinks(); ibRefreshDevices(); ibRefreshStatus()
+  kbOpen()   // Tastatur-Modus teilt sich den Reiter, hat aber eigenen Zustand
 }
 function ibRenderProfiles() {
   const sel = document.getElementById('ibProfileSel')
