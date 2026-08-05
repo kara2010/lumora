@@ -740,33 +740,87 @@ inline double kbQuellWert(KbAxis a, const XINPUT_GAMEPAD& g) {
 
 // Reine Zustandsmaschine (Kantenerkennung + Hysterese), Ausgabe ueber einen
 // injizierbaren Sink - dadurch im Selbsttest OHNE echtes SendInput pruefbar.
+// Gehoert die Achse zu einem Stick (dann RADIAL auswerten) oder ist sie eindimensional
+// (Trigger -> weiter per Schwelle)?
+inline bool kbIstStick(KbAxis a) { return a >= KbAxis::LXM && a <= KbAxis::RYP; }
+inline bool kbIstLinkerStick(KbAxis a) { return a >= KbAxis::LXM && a <= KbAxis::LYP; }
+// Sollrichtung der Achse als Winkel (Grad, 0 = rechts, 90 = oben - Mathe-Konvention)
+inline double kbSollWinkel(KbAxis a) {
+    switch (a) {
+    case KbAxis::LXP: case KbAxis::RXP: return 0.0;     // rechts
+    case KbAxis::LYM: case KbAxis::RYM: return 90.0;    // oben
+    case KbAxis::LXM: case KbAxis::RXM: return 180.0;   // links
+    default:                            return 270.0;   // unten (LYP/RYP)
+    }
+}
+
 struct KbEngine {
     KbProfile prof;
-    std::vector<uint8_t> down;                              // je Map: Taste gedrueckt?
+    std::vector<uint8_t> down;                              // je Map: Zuordnung aktiv?
+    std::map<uint32_t, int> held;                           // je TASTE: wie viele Quellen halten sie?
     std::function<void(WORD sc, bool ext, bool pressed)> sink;
-    void reset() { down.assign(prof.maps.size(), 0); }
+    void reset() { down.assign(prof.maps.size(), 0); held.clear(); }
+
+    // Taste nur beim ERSTEN Halter druecken und beim LETZTEN loslassen. Ohne diesen
+    // Zaehler riss eine Quelle die Taste hoch, obwohl eine zweite sie noch hielt -
+    // im GTA2-Profil liegen Stick UND Steuerkreuz auf denselben Pfeiltasten.
+    void setzeTaste(const KbMap& m, bool an) {
+        uint32_t k = (uint32_t)m.scancode | (m.ext ? 0x100u : 0u);
+        int& n = held[k];
+        if (an) { if (++n == 1 && sink) sink(m.scancode, m.ext, true); }
+        else    { if (--n <= 0) { n = 0; if (sink) sink(m.scancode, m.ext, false); } }
+    }
+
     void tick(const XINPUT_GAMEPAD& g, bool erlaubt) {
+        // Stick-Vektoren EINMAL vorab: die Richtungen eines Sticks gehoeren zusammen
+        // und werden radial ausgewertet (Betrag + Winkel), nicht je Achse. Per-Achse
+        // erzeugte tote Zonen bei Diagonalen - real gemeldet als "die Bewegungen
+        // blockieren sich beim Richtungswechsel": bei 20 Grad neben "oben" lag X bei
+        // 0.34 und blieb unter der Lenkschwelle, also fuhr man geradeaus statt zu lenken.
+        // Genau diese Kombination (Gas + Lenken) braucht GTA2 permanent.
+        const double lx = g.sThumbLX / 32767.0, ly = g.sThumbLY / 32767.0;
+        const double rx = g.sThumbRX / 32767.0, ry = g.sThumbRY / 32767.0;
+        const double lr = std::sqrt(lx * lx + ly * ly), rr = std::sqrt(rx * rx + ry * ry);
+        const double lw = (lr > 0.001) ? std::atan2(ly, lx) * 57.29577951308232 : 0.0;
+        const double rw = (rr > 0.001) ? std::atan2(ry, rx) * 57.29577951308232 : 0.0;
+
         for (size_t i = 0; i < prof.maps.size(); ++i) {
             const KbMap& m = prof.maps[i];
             bool want = false;
             if (erlaubt) {
                 if (m.btnMask) want = (g.wButtons & m.btnMask) != 0;
-                else {
+                else if (kbIstStick(m.axis)) {
+                    const bool links = kbIstLinkerStick(m.axis);
+                    const double r = links ? lr : rr;
+                    const double w = links ? lw : rw;
+                    // Betrag mit Hysterese: druecken ab schwelle, halten bis unter loesen
+                    if (r >= (down[i] ? m.loesen : m.schwelle)) {
+                        double d = w - kbSollWinkel(m.axis);
+                        while (d > 180.0) d -= 360.0;
+                        while (d < -180.0) d += 360.0;
+                        if (d < 0) d = -d;
+                        // +-80 Grad statt der "sauberen" 8-Wege-Aufteilung (+-67.5):
+                        // Fahrspiele brauchen Gas UND feines Gegenlenken GLEICHZEITIG.
+                        // Mit 67.5 fiel schon bei 20 Grad Neigung neben "oben" das Lenken
+                        // weg (links waere 70 Grad entfernt) - das fuehlte sich an, als
+                        // wuerden sich die Richtungen gegenseitig blockieren. Bei 80 Grad
+                        // ueberlappen benachbarte Richtungen breit, die GEGENUEBERLIEGENDE
+                        // bleibt mit 180 Grad sicher aus, und reines Links/Rechts (Gas
+                        // 90 Grad entfernt) dreht weiterhin auf der Stelle.
+                        want = d <= (down[i] ? 86.0 : 80.0);
+                    }
+                } else {
+                    // Trigger: eindimensional, Schwelle wie bisher
                     double v = kbQuellWert(m.axis, g);
-                    // Hysterese: druecken erst ab schwelle, halten bis unter loesen -
-                    // sonst flattert die Taste, wenn der Stick genau am Uebergang steht.
                     want = down[i] ? (v > m.loesen) : (v >= m.schwelle);
                 }
             }
-            if (want != (down[i] != 0)) {
-                down[i] = want ? 1 : 0;
-                if (sink) sink(m.scancode, m.ext, want);
-            }
+            if (want != (down[i] != 0)) { down[i] = want ? 1 : 0; setzeTaste(m, want); }
         }
     }
     void releaseAll() {
         for (size_t i = 0; i < prof.maps.size(); ++i)
-            if (down[i]) { down[i] = 0; if (sink) sink(prof.maps[i].scancode, prof.maps[i].ext, false); }
+            if (down[i]) { down[i] = 0; setzeTaste(prof.maps[i], false); }
     }
 };
 

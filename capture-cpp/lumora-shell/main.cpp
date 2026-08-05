@@ -5819,6 +5819,87 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                       r.is_object() && r["tasten"].size() == 16 && r.value("spiel", std::string("")) == "gta2.exe");
             } else res += "HINW gta2.lumoraprofil im Programmordner nicht gefunden (nur im Repo)\n";
         }
+        // --- Fahrverhalten: radiale Stick-Auswertung + Mehrfachbelegung ------------
+        // Anlass: "Bewegungen blockieren sich beim Richtungswechsel gegenseitig".
+        // Zwei Ursachen, beide hier abgesichert.
+        {
+            json fahr = { {"tasten", json::array({
+                { {"quelle","LY-"}, {"scancode",72}, {"ext",true}, {"schwelle",0.35}, {"loesen",0.22} },
+                { {"quelle","LY+"}, {"scancode",80}, {"ext",true}, {"schwelle",0.35}, {"loesen",0.22} },
+                { {"quelle","LX-"}, {"scancode",75}, {"ext",true}, {"schwelle",0.35}, {"loesen",0.22} },
+                { {"quelle","LX+"}, {"scancode",77}, {"ext",true}, {"schwelle",0.35}, {"loesen",0.22} },
+                { {"quelle","DU"},  {"scancode",72}, {"ext",true} },   // SELBE Taste wie LY-
+                { {"quelle","DL"},  {"scancode",75}, {"ext",true} },   // SELBE Taste wie LX-
+            })} };
+            lubridge::KbEngine f;
+            f.prof = lubridge::parseKbProfile(fahr);
+            f.reset();
+            std::vector<Ev> fe;
+            f.sink = [&](WORD sc, bool ext, bool d) { fe.push_back({ sc, ext, d }); };
+            auto stick = [](double gradWinkel, double staerke) {
+                XINPUT_GAMEPAD g{};
+                double r = gradWinkel * 3.14159265358979 / 180.0;
+                g.sThumbLX = (SHORT)(cos(r) * staerke * 32767.0);
+                g.sThumbLY = (SHORT)(sin(r) * staerke * 32767.0);
+                return g;
+            };
+            auto anzahl = [&](WORD sc, bool down) {
+                int n = 0; for (auto& e : fe) if (e.sc == sc && e.down == down) ++n; return n;
+            };
+            auto gedrueckt = [&](WORD sc) {   // aktueller Zustand der Taste
+                int z = 0; for (auto& e : fe) if (e.sc == sc) z = e.down ? 1 : 0; return z == 1;
+            };
+            // A) Flache Diagonale 20 Grad neben "oben": frueher X=0.34 -> KEIN Lenken.
+            //    Radial muessen Gas UND Lenken kommen.
+            fe.clear(); f.reset();
+            f.tick(stick(110.0, 1.0), true);   // 110 Grad = oben, 20 Grad nach links
+            check("Diagonale 20 Grad: Gas UND Lenken", gedrueckt(72) && gedrueckt(75));
+            // B) Flache Diagonale andersherum (20 Grad neben "links"): beides aktiv
+            fe.clear(); f.reset();
+            f.tick(stick(160.0, 1.0), true);
+            check("Diagonale 70 Grad: Lenken UND Gas", gedrueckt(75) && gedrueckt(72));
+            // C) Genau 45 Grad: beide Nachbarrichtungen, keine dritte
+            fe.clear(); f.reset();
+            f.tick(stick(45.0, 1.0), true);
+            check("45 Grad: genau oben+rechts", gedrueckt(72) && gedrueckt(77) && !gedrueckt(75) && !gedrueckt(80));
+            // D) Reines "rechts": NUR rechts, kein Gas
+            fe.clear(); f.reset();
+            f.tick(stick(0.0, 1.0), true);
+            check("0 Grad: nur rechts", gedrueckt(77) && !gedrueckt(72) && !gedrueckt(80));
+            // E) Richtungswechsel links->rechts ueber die Mitte: sauber getrennt,
+            //    nie beide Lenkrichtungen gleichzeitig (das wuerde GTA2 blockieren).
+            fe.clear(); f.reset();
+            bool nieBeide = true;
+            for (int k = 0; k <= 20; ++k) {
+                double w = 180.0 - k * 9.0;                  // 180 -> 0 Grad
+                f.tick(stick(w, 1.0), true);
+                if (gedrueckt(75) && gedrueckt(77)) nieBeide = false;
+            }
+            check("Wechsel links->rechts: nie beide Lenktasten", nieBeide);
+            check("Wechsel endet auf rechts", gedrueckt(77) && !gedrueckt(75));
+            // F) Sektorgrenze: Zittern um 67.5 Grad darf nicht flattern (Winkel-Hysterese)
+            fe.clear(); f.reset();
+            f.tick(stick(45.0, 1.0), true);                  // rechts aktiv
+            int vorher = anzahl(77, false);
+            for (int k = 0; k < 20; ++k) f.tick(stick(k % 2 ? 66.0 : 70.0, 1.0), true);
+            check("Sektorgrenze: kein Flattern", anzahl(77, false) == vorher);
+            // G) Mehrfachbelegung: Stick UND Steuerkreuz auf derselben Taste.
+            //    Eine Quelle loslassen darf die Taste NICHT hochreissen.
+            fe.clear(); f.reset();
+            XINPUT_GAMEPAD beides = stick(90.0, 1.0);        // Stick oben -> 72
+            beides.wButtons = XINPUT_GAMEPAD_DPAD_UP;        // Steuerkreuz oben -> auch 72
+            f.tick(beides, true);
+            check("Zwei Quellen, eine Taste: 1x gedrueckt", anzahl(72, true) == 1);
+            XINPUT_GAMEPAD nurPad{}; nurPad.wButtons = XINPUT_GAMEPAD_DPAD_UP;   // Stick los
+            f.tick(nurPad, true);
+            check("Stick los, Steuerkreuz haelt: Taste bleibt", gedrueckt(72) && anzahl(72, false) == 0);
+            f.tick(XINPUT_GAMEPAD{}, true);                  // auch Steuerkreuz los
+            check("Letzte Quelle los: Taste geht hoch", !gedrueckt(72) && anzahl(72, false) == 1);
+            // H) Schwacher Stick unter der Deadzone: nichts
+            fe.clear(); f.reset();
+            f.tick(stick(90.0, 0.20), true);
+            check("Stick 0.20: unter Deadzone, still", fe.empty());
+        }
         // 17-21) Spiel -> Profil: kbProfileForExe trifft ueber den EXE-Namen, egal wie
         // der Aufrufer den Pfad schreibt. Ohne echte Datei arbeiten: Profile temporaer
         // ablegen, danach den Vorzustand wiederherstellen (der Test darf NICHTS zerstoeren).
