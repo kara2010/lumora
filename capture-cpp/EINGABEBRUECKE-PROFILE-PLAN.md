@@ -29,9 +29,29 @@ Geräte für neue Spiele UND neue Geräte für alte Spiele. Eigenes Verkaufsargu
   → Folge fürs Senden: `SendInput` mit `KEYEVENTF_SCANCODE` (+ `EXTENDEDKEY`
   für die Pfeiltasten), NICHT mit virtuellen Keycodes. Ein VK-basierter
   Ansatz scheitert bei DirectInput-Ära-Spielen typischerweise still.
-- Die Standard-BELEGUNG (welche Taste welche Aktion) steht weder in den
-  KB.cfg noch in den .gxt-Textarchiven. Sie wird beim ersten Spielstart in die
-  Registry geschrieben → **von dort auslesen, nicht raten** (s. Etappe 4).
+- **Standardbelegung ausgelesen** (2026-08-05, Spiel lief inzwischen):
+  `HKLMSOFTWAREWOW6432NodeDMA Design LtdGTA2Control` enthaelt 12
+  Eintraege als ROHE SCANCODES - genau die Werte, die SendInput braucht:
+
+  | # | Aktion | Scancode | Taste |
+  |---|---|---|---|
+  | 0 | Vorwaerts | 200 (0xC8) | Pfeil oben (E0+0x48) |
+  | 1 | Zurueck | 208 (0xD0) | Pfeil unten (E0+0x50) |
+  | 2 | Links | 203 (0xCB) | Pfeil links (E0+0x4B) |
+  | 3 | Rechts | 205 (0xCD) | Pfeil rechts (E0+0x4D) |
+  | 4 | Angriff | 29 (0x1D) | Strg links |
+  | 5 | Eingabe/Ende | 28 (0x1C) | Eingabetaste |
+  | 6 | Handbremse/Sprung | 57 (0x39) | Leertaste |
+  | 7 | Letzte Waffe | 44 (0x2C) | Y (QWERTZ) |
+  | 8 | Naechste Waffe | 45 (0x2D) | X |
+  | 9 | Spezial | 15 (0x0F) | TAB |
+  | 10 | Spezial 2 | 56 (0x38) | Alt links |
+  | 11 | (nicht im Manager gezeigt) | 54 (0x36) | Umschalt rechts |
+
+  Deckt sich 1:1 mit dem Steuerungs-Reiter des GTA2 Managers.
+  **Wichtig:** Scancode 0x2C heisst auf QWERTZ "Y", auf QWERTY "Z" - das
+  Profil speichert deshalb SCANCODES, keine Buchstaben, und ist damit
+  layoutunabhaengig.
 
 ## Profilformat v1 (`.lumoraprofil`)
 
