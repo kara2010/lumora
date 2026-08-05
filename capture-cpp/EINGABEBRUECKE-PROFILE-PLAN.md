@@ -18,8 +18,9 @@ Geräte für neue Spiele UND neue Geräte für alte Spiele. Eigenes Verkaufsargu
 ## Belegte Fakten (gemessen, nicht angenommen)
 
 - Installation: `E:\Games\Grand Theft Auto 2`, `gta2.exe` vom 27.04.2004
-  (Rockstar-Freeware-Neuauflage der 1999er-Version), Registry-Zweig
-  `HKCU\SOFTWARE\DMA Design Ltd\GTA2` existiert NOCH NICHT (nie gestartet).
+  (Rockstar-Freeware-Neuauflage der 1999er-Version). Die Einstellungen liegen
+  NICHT unter HKCU, sondern maschinenweit unter
+  `HKLM\SOFTWARE\WOW6432Node\DMA Design Ltd\GTA2` (32-Bit-Sicht).
 - **GTA2 arbeitet auf Scancode-Ebene.** Beleg: `data\Keyboard\*_KB.cfg` ist
   eine Tabelle mit 257 Einträgen, Index = PS/2-Set-1-Scancode
   (0x01 ESCAPE, 0x0E BSPACE, 0x0F TAB, 0x1C RETURN, 0x1D L_CTRL, 0x2A LSHIFT,
@@ -30,7 +31,7 @@ Geräte für neue Spiele UND neue Geräte für alte Spiele. Eigenes Verkaufsargu
   für die Pfeiltasten), NICHT mit virtuellen Keycodes. Ein VK-basierter
   Ansatz scheitert bei DirectInput-Ära-Spielen typischerweise still.
 - **Standardbelegung ausgelesen** (2026-08-05, Spiel lief inzwischen):
-  `HKLMSOFTWAREWOW6432NodeDMA Design LtdGTA2Control` enthaelt 12
+  `HKLM\SOFTWARE\WOW6432Node\DMA Design Ltd\GTA2\Control` enthaelt 12
   Eintraege als ROHE SCANCODES - genau die Werte, die SendInput braucht:
 
   | # | Aktion | Scancode | Taste |
@@ -97,10 +98,11 @@ alte Profile bleiben gültig.
 3. **UI im Eingabe-Reiter**: Modusumschalter, Profil-Liste mit
    Export/Import/Duplizieren, **Mapping-Assistent** („Drücke jetzt die Taste
    für *Feuer*") statt Formular.
-4. **GTA2-Profil**: Spiel einmal starten lassen → Registry
-   `HKCU\SOFTWARE\DMA Design Ltd\GTA2` auslesen → echte Standardbelegung ins
-   Profil übernehmen. Danach Test mit echtem Pad im echten Spiel: Fahren,
-   Lenken, Schießen, Ein-/Aussteigen, Waffenwechsel.
+4. **GTA2-Profil** — Belegung erledigt (s.o.), Datei liegt unter
+   `profile/gta2.lumoraprofil` (16 Zuordnungen, maschinell gegen die
+   Scancode-Tabelle des Spiels geprüft). OFFEN: Test mit echtem Pad im echten
+   Spiel — Fahren, Lenken, Schießen, Ein-/Aussteigen, Waffenwechsel.
+   Erst danach gilt das Profil als fertig.
 5. **Anbindung an die Bibliothek**: Profil an einen Spieleintrag hängen
    (die Auto-Aktivierung pro Spiel existiert bereits), Overlay-Hinweis
    „Profil GTA2 aktiv" beim Einschalten.
