@@ -362,9 +362,38 @@ static json loadInputProfiles() {
 // ViGEm-Profile, andere Lebensdauer, und ein kaputter Import darf die bewaehrten
 // Geraeteprofile nicht mitreissen.
 static std::wstring kbProfilesPath() { return dataDir() + L"\\kb-profiles.json"; }
+static json sanitizeKbProfile(const json& j);   // (unten)
+// Mitgelieferte HAUS-Profile aus <Programmordner>\profile\*.lumoraprofil dazumischen.
+// Ohne diesen Schritt lag die GTA2-Datei zwar im Paket, tauchte aber nirgends auf -
+// die Liste speist sich sonst NUR aus kb-profiles.json, die es beim ersten Start gar
+// nicht gibt. Haus-Profile werden NICHT in die Nutzerdatei kopiert: so bekommt der
+// Nutzer Korrekturen mit dem naechsten Update, und eine eigene Aenderung unter
+// gleichem Schluessel gewinnt trotzdem (Nutzerdatei ueberschreibt beim Mischen).
+static json loadKbHouseProfiles() {
+    json out = json::object();
+    std::wstring dir = g_appDir + L"\\profile";
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW((dir + L"\\*.lumoraprofil").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        json j = json::parse(readFile(dir + L"\\" + fd.cFileName), nullptr, false);
+        json p = sanitizeKbProfile(j);          // auch Haus-Profile durch die Reinigung
+        if (p.is_null()) continue;
+        std::wstring n = fd.cFileName;
+        size_t dot = n.find_last_of(L'.');
+        std::string id = "haus:" + narrow(dot == std::wstring::npos ? n : n.substr(0, dot));
+        p["haus"] = true;                       // UI kann sie kennzeichnen
+        out[id] = p;
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return out;
+}
 static json loadKbProfiles() {
+    json out = loadKbHouseProfiles();
     json j = json::parse(readFile(kbProfilesPath()), nullptr, false);
-    return j.is_object() ? j : json::object();
+    if (j.is_object()) for (auto& [k, v] : j.items()) out[k] = v;   // Nutzer gewinnt
+    return out;
 }
 // Ein importiertes Profil ist FREMDES Material (aus einem Forum, per Chat). Es wird
 // nie roh uebernommen, sondern feldweise neu aufgebaut: nur bekannte Felder, Typen
@@ -5109,7 +5138,13 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "kb-bridge-status") return lubridge::kbStatus();
     if (channel == "kb-get-profiles") return loadKbProfiles();
     if (channel == "kb-save-profiles" && args.size() >= 1 && args[0].is_object()) {
-        return writeFile(kbProfilesPath(), args[0].dump(2));
+        // Haus-Profile NICHT mitschreiben: sie kommen aus dem Programmordner und
+        // sollen mit dem naechsten Update aktualisierbar bleiben. Sonst friert der
+        // erste Speichervorgang eine Kopie ein, die nie wieder korrigiert wird.
+        json nutzer = json::object();
+        for (auto& [k, v] : args[0].items())
+            if (k.rfind("haus:", 0) != 0) nutzer[k] = v;
+        return writeFile(kbProfilesPath(), nutzer.dump(2));
     }
     // Export/Import als DATEI (.lumoraprofil): so tauscht die Community Profile
     // ueber Foren/Chat - ohne Konto, ohne Server, ohne Moderation.
