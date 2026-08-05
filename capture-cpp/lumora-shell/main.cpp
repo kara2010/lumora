@@ -248,6 +248,30 @@ static json pickPathDialog(const wchar_t* title, bool folder, const wchar_t* fil
     return out;
 }
 
+// Speichern-unter-Dialog (Gegenstueck zu pickPathDialog): liefert den gewaehlten
+// Pfad oder "" bei Abbruch. Eigene Funktion statt Parameter an pickPathDialog,
+// weil IFileSaveDialog ein anderes Interface ist (Vorschlagsname, Endung anhaengen).
+static std::wstring saveFileDialog(const wchar_t* title, const wchar_t* filterName,
+                                   const wchar_t* filterSpec, const std::wstring& vorschlag) {
+    ComPtr<IFileSaveDialog> dlg;
+    if (FAILED(CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg)))) return L"";
+    dlg->SetTitle(title);
+    COMDLG_FILTERSPEC fs[2] = { { filterName, filterSpec }, { L"Alle Dateien", L"*.*" } };
+    dlg->SetFileTypes(2, fs);
+    // Vorschlagsname ohne Pfadtrenner (der Profilname kommt aus einer Datei, die
+    // jemand anders geschrieben haben kann - er darf kein Verzeichnis erzwingen)
+    std::wstring v = vorschlag;
+    for (auto& c : v) if (c == L'\\' || c == L'/' || c == L':' || c == L'*' || c == L'?' ||
+                          c == L'"' || c == L'<' || c == L'>' || c == L'|') c = L'_';
+    if (!v.empty()) dlg->SetFileName(v.c_str());
+    if (filterSpec && wcslen(filterSpec) > 1) dlg->SetDefaultExtension(filterSpec + 2);   // "*.x" -> "x"
+    if (FAILED(dlg->Show(g_hwnd))) return L"";
+    ComPtr<IShellItem> item; if (FAILED(dlg->GetResult(&item))) return L"";
+    LPWSTR p = nullptr; if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &p)) || !p) return L"";
+    std::wstring out = p; CoTaskMemFree(p);
+    return out;
+}
+
 // --- Modul: Datei-Icon als data-URL (SHGetFileInfo -> GDI+ -> PNG-Base64) ---
 static std::string b64encode(const uint8_t* d, size_t n) {
     static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -333,6 +357,63 @@ static std::wstring inputProfilesPath() { return dataDir() + L"\\input-profiles.
 static json loadInputProfiles() {
     json j = json::parse(readFile(inputProfilesPath()), nullptr, false);
     return j.is_object() ? j : json{ {"profiles", json::object()}, {"gameLinks", json::object()}, {"defaultProfile", nullptr} };
+}
+// Tastatur-Profile (Gamepad -> Scancodes) in EIGENER Datei: anderes Schema als die
+// ViGEm-Profile, andere Lebensdauer, und ein kaputter Import darf die bewaehrten
+// Geraeteprofile nicht mitreissen.
+static std::wstring kbProfilesPath() { return dataDir() + L"\\kb-profiles.json"; }
+static json loadKbProfiles() {
+    json j = json::parse(readFile(kbProfilesPath()), nullptr, false);
+    return j.is_object() ? j : json::object();
+}
+// Ein importiertes Profil ist FREMDES Material (aus einem Forum, per Chat). Es wird
+// nie roh uebernommen, sondern feldweise neu aufgebaut: nur bekannte Felder, Typen
+// geprueft, Laengen und Wertebereiche begrenzt. Alles andere fliegt still raus.
+static json sanitizeKbProfile(const json& j) {
+    if (!j.is_object()) return nullptr;
+    auto txt = [&](const char* k, size_t max) {
+        std::string s = j.value(k, std::string(""));
+        if (s.size() > max) s.resize(max);
+        std::string o; o.reserve(s.size());
+        for (char c : s) if ((unsigned char)c >= 0x20) o += c;   // Steuerzeichen raus
+        return o;
+    };
+    json p = { {"name", txt("name", 80)}, {"spiel", txt("spiel", 80)},
+               {"autor", txt("autor", 60)}, {"notiz", txt("notiz", 300)},
+               {"tasten", json::array()} };
+    if (p["name"].get<std::string>().empty()) p["name"] = "Importiertes Profil";
+    // spiel: nur der Dateiname, nie ein Pfad (ein geteiltes Profil darf keine
+    // fremden Verzeichnisse mitschleppen)
+    { std::string s = p["spiel"];
+      size_t sl = s.find_last_of("\\/");
+      if (sl != std::string::npos) s = s.substr(sl + 1);
+      for (auto& c : s) c = (char)tolower((unsigned char)c);
+      p["spiel"] = s; }
+    if (!j.contains("tasten") || !j["tasten"].is_array()) return nullptr;
+    static const std::set<std::string> quellen = {
+        "A","B","X","Y","LB","RB","BACK","START","LS","RS","DU","DD","DL","DR",
+        "LX-","LX+","LY-","LY+","RX-","RX+","RY-","RY+","LT","RT" };
+    for (auto& t : j["tasten"]) {
+        if (!t.is_object()) continue;
+        std::string q = t.value("quelle", std::string(""));
+        if (!quellen.count(q)) continue;
+        if (!t.contains("scancode") || !t["scancode"].is_number_integer()) continue;
+        int sc = t["scancode"].get<int>();
+        if (sc < 1 || sc > 127) continue;
+        json e = { {"quelle", q}, {"scancode", sc}, {"ext", t.value("ext", false)} };
+        std::string akt = t.value("aktion", std::string("")); if (akt.size() > 60) akt.resize(60);
+        if (!akt.empty()) e["aktion"] = akt;
+        if (t.contains("schwelle") && t["schwelle"].is_number()) {
+            double s = t["schwelle"].get<double>(), l = t.value("loesen", s * 0.6);
+            if (s < 0.05) s = 0.05; if (s > 0.95) s = 0.95;
+            if (!(l < s)) l = s * 0.6; if (l < 0.02) l = 0.02;
+            e["schwelle"] = s; e["loesen"] = l;
+        }
+        p["tasten"].push_back(e);
+        if (p["tasten"].size() >= 64) break;   // Obergrenze: kein Riesen-Import
+    }
+    if (p["tasten"].empty()) return nullptr;
+    return p;
 }
 static std::string g_bridgeAutoGame;   // Spielpfad, der die Bruecke AUTO-aktiviert hat ("" = manuell/aus)
 static json inputProfileForGame(const std::string& gamePath) {
@@ -4982,6 +5063,34 @@ static json handleChannel(const std::string& channel, const json& args) {
     }
     if (channel == "kb-bridge-stop") { lubridge::kbStop("manuell"); return true; }
     if (channel == "kb-bridge-status") return lubridge::kbStatus();
+    if (channel == "kb-get-profiles") return loadKbProfiles();
+    if (channel == "kb-save-profiles" && args.size() >= 1 && args[0].is_object()) {
+        return writeFile(kbProfilesPath(), args[0].dump(2));
+    }
+    // Export/Import als DATEI (.lumoraprofil): so tauscht die Community Profile
+    // ueber Foren/Chat - ohne Konto, ohne Server, ohne Moderation.
+    if (channel == "kb-export-profile" && args.size() >= 1 && args[0].is_object()) {
+        json p = sanitizeKbProfile(args[0]);       // auch beim EXPORT reinigen: nichts
+        if (p.is_null()) return json{ {"ok", false}, {"error", "profil-leer"} };   // Fremdes mitgeben
+        p["lumoraProfil"] = 1; p["modus"] = "tastatur";
+        std::wstring ziel = saveFileDialog(L"Profil exportieren",
+            L"Lumora-Profil", L"*.lumoraprofil",
+            widen(p.value("name", std::string("profil"))) + L".lumoraprofil");
+        if (ziel.empty()) return json{ {"ok", false}, {"error", "abgebrochen"} };
+        if (!writeFile(ziel, p.dump(2))) return json{ {"ok", false}, {"error", "schreibfehler"} };
+        std::wstring nur = ziel; size_t sl = nur.find_last_of(L"\\/");
+        return json{ {"ok", true}, {"datei", narrow(sl == std::wstring::npos ? nur : nur.substr(sl + 1))} };
+    }
+    if (channel == "kb-import-profile") {
+        json pfad = pickPathDialog(L"Profil importieren", false, L"Lumora-Profil", L"*.lumoraprofil");
+        if (!pfad.is_string()) return json{ {"ok", false}, {"error", "abgebrochen"} };
+        std::string roh = readFile(widen(pfad.get<std::string>()));
+        if (roh.size() > 256 * 1024) return json{ {"ok", false}, {"error", "zu-gross"} };
+        json j = json::parse(roh, nullptr, false);
+        json p = sanitizeKbProfile(j);
+        if (p.is_null()) return json{ {"ok", false}, {"error", "kein-lumora-profil"} };
+        return json{ {"ok", true}, {"profil", p} };
+    }
     if (channel == "input-bridge-selftest") {
         // Geschlossener Kreis ohne Fremdtools: das virtuelle Pad ueber XInput
         // zuruecklesen - beweist Treiber + Mapping-Ausgabe in einem Rutsch.
@@ -5576,6 +5685,61 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         auto kp = lubridge::parseKbProfile(kaputt);
         check("Parser: 1 gueltiger Eintrag, Hysterese erzwungen",
               kp.maps.size() == 1 && kp.maps[0].loesen < kp.maps[0].schwelle);
+        // 10-15) Import-Reinigung: ein Profil aus fremder Hand ist ungeprueftes
+        // Material. sanitizeKbProfile baut es feldweise NEU auf - hier mit
+        // boesartigen Eingaben belegt, statt darauf zu vertrauen.
+        {
+            json boese = {
+                {"name", std::string(500, 'A')},                        // Ueberlaenge
+                {"spiel", "C:\\Users\\Opfer\\Spiele\\GTA2\\gta2.exe"},  // voller Pfad
+                {"notiz", "Zeile1\nZeile2\tTab"},                       // Steuerzeichen
+                {"boesesFeld", "rm -rf"},                               // unbekanntes Feld
+                {"tasten", json::array({
+                    { {"quelle","A"}, {"scancode",57} },                        // gut
+                    { {"quelle","EVIL"}, {"scancode",30} },                     // unbekannte Quelle
+                    { {"quelle","B"}, {"scancode",999} },                       // Scancode ausserhalb
+                    { {"quelle","X"}, {"scancode",-5} },                        // negativ
+                    { {"quelle","LX-"}, {"scancode",75}, {"ext",true},
+                      {"schwelle",5.0}, {"loesen",9.0} },                       // Bereich + Hysterese kaputt
+                    { {"quelle","Y"}, {"scancode",44}, {"aktion", std::string(200,'Z')} },   // Ueberlange Aktion
+                })}
+            };
+            json rein = sanitizeKbProfile(boese);
+            bool ok = rein.is_object();
+            check("Import: boeses Profil wird angenommen (gereinigt)", ok);
+            if (ok) {
+                check("Import: Name gekuerzt (<=80)", rein.value("name", std::string("")).size() <= 80);
+                check("Import: Pfad auf Dateinamen reduziert", rein.value("spiel", std::string("")) == "gta2.exe");
+                check("Import: Steuerzeichen entfernt",
+                      rein.value("notiz", std::string("")).find('\n') == std::string::npos &&
+                      rein.value("notiz", std::string("")).find('\t') == std::string::npos);
+                check("Import: unbekanntes Feld verworfen", !rein.contains("boesesFeld"));
+                check("Import: nur die 3 gueltigen Tasten", rein["tasten"].size() == 3);
+                bool hyst = true, aktOk = true;
+                for (auto& t : rein["tasten"]) {
+                    if (t.contains("schwelle")) {
+                        double s = t["schwelle"], l = t["loesen"];
+                        if (!(s <= 0.95 && s >= 0.05 && l < s)) hyst = false;
+                    }
+                    if (t.contains("aktion") && t["aktion"].get<std::string>().size() > 60) aktOk = false;
+                }
+                check("Import: Schwellen geklemmt + Hysterese erzwungen", hyst);
+                check("Import: Aktionstext gekuerzt", aktOk);
+            }
+            // Ein Profil OHNE gueltige Taste darf nicht durchkommen
+            json leer = { {"name","X"}, {"tasten", json::array({ { {"quelle","NIX"}, {"scancode",1} } })} };
+            check("Import: Profil ohne gueltige Taste abgelehnt", sanitizeKbProfile(leer).is_null());
+            check("Import: Nicht-Objekt abgelehnt", sanitizeKbProfile(json("text")).is_null());
+        }
+        // 16) Das ausgelieferte GTA2-Haus-Profil muss die Reinigung unveraendert passieren
+        {
+            json g = json::parse(readFile(g_appDir + L"\\profile\\gta2.lumoraprofil"), nullptr, false);
+            if (g.is_object()) {
+                json r = sanitizeKbProfile(g);
+                check("GTA2-Hausprofil: unveraendert gueltig (16 Tasten)",
+                      r.is_object() && r["tasten"].size() == 16 && r.value("spiel", std::string("")) == "gta2.exe");
+            } else res += "HINW gta2.lumoraprofil im Programmordner nicht gefunden (nur im Repo)\n";
+        }
         res = "kbbridge-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + " (" + std::to_string(evs.size()) + " Ereignisse)\n" + res;
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
         return fehler ? 1 : 0;
