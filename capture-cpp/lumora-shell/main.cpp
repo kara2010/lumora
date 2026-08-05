@@ -4975,6 +4975,13 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "input-bridge-monitor") { lubridge::setMonitor(args.size() >= 1 && args[0].is_boolean() && args[0].get<bool>()); return true; }
     if (channel == "input-bridge-capture") { lubridge::setCapture(args.size() >= 1 && args[0].is_boolean() && args[0].get<bool>()); return true; }
     if (channel == "input-bridge-status") return lubridge::status();
+    // Tastatur-Modus (Gamepad -> Scancodes, EINGABEBRUECKE-PROFILE-PLAN.md Etappe 1):
+    // eigenstaendig neben der ViGEm-Bruecke - braucht weder Treiber noch Setup-Dialog.
+    if (channel == "kb-bridge-start" && args.size() >= 1 && args[0].is_object()) {
+        return json{ {"ok", lubridge::kbStart(args[0], "manuell")} };
+    }
+    if (channel == "kb-bridge-stop") { lubridge::kbStop("manuell"); return true; }
+    if (channel == "kb-bridge-status") return lubridge::kbStatus();
     if (channel == "input-bridge-selftest") {
         // Geschlossener Kreis ohne Fremdtools: das virtuelle Pad ueber XInput
         // zuruecklesen - beweist Treiber + Mapping-Ausgabe in einem Rutsch.
@@ -5508,6 +5515,70 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
             "pfad=" + narrow(argv[i + 1]) + "\nquelle=" + art +
             "\nbytes(base64)=" + std::to_string(url.size()) + "\n");
         return 0;
+    }
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-kbbridge") == 0) {
+        // Selbsttest des Tastatur-Modus (Gamepad -> Scancodes): die reine
+        // Zustandsmaschine (KbEngine) mit synthetischen XInput-Zustaenden und einem
+        // Aufzeichnungs-Sink - KEIN echtes SendInput. Prueft Kantenerkennung,
+        // Hysterese (kein Flattern zwischen loesen und schwelle), Fokus-Entzug
+        // und releaseAll. Laeuft VOR dem Single-Instance-Mutex (wie alle Tests).
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        json prof = { {"name","Test"}, {"spiel","test.exe"}, {"tasten", json::array({
+            { {"quelle","LY-"}, {"scancode",72}, {"ext",true},  {"schwelle",0.40}, {"loesen",0.25} },
+            { {"quelle","A"},   {"scancode",57}, {"ext",false} },
+            { {"quelle","RT"},  {"scancode",29}, {"ext",false}, {"schwelle",0.30}, {"loesen",0.18} },
+        })} };
+        lubridge::KbEngine e;
+        e.prof = lubridge::parseKbProfile(prof);
+        e.reset();
+        struct Ev { WORD sc; bool ext, down; };
+        std::vector<Ev> evs;
+        e.sink = [&](WORD sc, bool ext, bool d) { evs.push_back({ sc, ext, d }); };
+        auto pad = [](SHORT ly, WORD btn, BYTE rt) { XINPUT_GAMEPAD g{}; g.sThumbLY = ly; g.wButtons = btn; g.bRightTrigger = rt; return g; };
+        std::string res; int fehler = 0;
+        auto check = [&](const char* name, bool ok) { res += std::string(ok ? "OK   " : "FEHL ") + name + "\n"; if (!ok) ++fehler; };
+        // 1) Neutral: nichts feuert
+        e.tick(pad(0, 0, 0), true);
+        check("neutral -> keine Ereignisse", evs.empty());
+        // 2) Stick hoch (0.98) -> Pfeil-oben faellt (72, ext, down)
+        e.tick(pad(32000, 0, 0), true);
+        check("Stick hoch -> C_UP down (ext)", evs.size() == 1 && evs[0].sc == 72 && evs[0].ext && evs[0].down);
+        // 3) Hysterese haelt: 0.27 liegt unter schwelle(0.40) aber ueber loesen(0.25)
+        e.tick(pad(9000, 0, 0), true);
+        check("0.27 -> gehalten (Hysterese)", evs.size() == 1);
+        // 4) 0.21 unter loesen -> up
+        e.tick(pad(7000, 0, 0), true);
+        check("0.21 -> C_UP up", evs.size() == 2 && !evs[1].down && evs[1].sc == 72);
+        // 5) Flattern zwischen loesen und schwelle (losgelassen startend): NICHTS feuert
+        for (int k = 0; k < 20; ++k) e.tick(pad(k % 2 ? 9800 : 11400, 0, 0), true);   // 0.30 / 0.35
+        check("Pendeln 0.30/0.35 -> stumm", evs.size() == 2);
+        // 6) Knopf A: genau eine Kante je Richtung
+        e.tick(pad(0, XINPUT_GAMEPAD_A, 0), true);
+        e.tick(pad(0, XINPUT_GAMEPAD_A, 0), true);
+        e.tick(pad(0, 0, 0), true);
+        check("A-Kanten: 1x down, 1x up", evs.size() == 4 && evs[2].sc == 57 && evs[2].down && !evs[2].ext && evs[3].sc == 57 && !evs[3].down);
+        // 7) Fokus-Entzug loest gedrueckte Taste sofort
+        e.tick(pad(0, 0, 200), true);                       // RT 0.78 -> down
+        e.tick(pad(0, 0, 200), false);                      // erlaubt=false -> up trotz gehaltenem Trigger
+        check("Fokus weg -> RT-Taste los", evs.size() == 6 && evs[4].sc == 29 && evs[4].down && !evs[5].down);
+        // 8) releaseAll laesst nichts klemmen
+        e.tick(pad(32000, XINPUT_GAMEPAD_A, 0), true);      // zwei Tasten runter
+        size_t vorher = evs.size();
+        e.releaseAll();
+        bool alleLos = evs.size() == vorher + 2 && !evs[vorher].down && !evs[vorher + 1].down;
+        check("releaseAll loest alle", alleLos);
+        // 9) Parser-Haertung: kaputte Eintraege fliegen raus, Hysterese wird erzwungen
+        json kaputt = { {"tasten", json::array({
+            { {"quelle","LY-"}, {"scancode",0} },                      // Scancode ungueltig
+            { {"quelle","WAS"}, {"scancode",30} },                     // unbekannte Quelle
+            { {"quelle","LX+"}, {"scancode",77}, {"ext",true}, {"schwelle",0.5}, {"loesen",0.9} },  // loesen > schwelle
+        })} };
+        auto kp = lubridge::parseKbProfile(kaputt);
+        check("Parser: 1 gueltiger Eintrag, Hysterese erzwungen",
+              kp.maps.size() == 1 && kp.maps[0].loesen < kp.maps[0].schwelle);
+        res = "kbbridge-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + " (" + std::to_string(evs.size()) + " Ereignisse)\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
     }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-datadir") == 0) {
         // Belegt, dass Lumora seinen Datenordner selbst anlegt. Ohne das schlug seit dem
