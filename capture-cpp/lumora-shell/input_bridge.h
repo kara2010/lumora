@@ -15,6 +15,8 @@
 #include <hidpi.h>
 #pragma comment(lib, "hid.lib")
 #pragma comment(lib, "setupapi.lib")
+#include <Xinput.h>
+#pragma comment(lib, "xinput9_1_0.lib")   // Tastatur-Modus liest das echte Pad per XInput
 #include "ViGEm/Client.h"
 #include "json.hpp"
 #include <thread>
@@ -651,8 +653,218 @@ inline void setCapture(bool on) {
 inline json status() {
     return { {"active", g_feeding.load()}, {"busInstalled", busInstalled()}, {"slot", g_vigemSlot.load()} };
 }
+// ===================================================================================
+// Tastatur-Modus: Gamepad -> Scancodes (EINGABEBRUECKE-PROFILE-PLAN.md, Etappe 1)
+// Die Gegenrichtung zur ViGEm-Bruecke oben: ein ECHTES Xbox-Pad (XInput) steuert
+// Spiele der DirectInput-Aera, die kein XInput kennen (GTA2 & Co.), ueber
+// Tastatur-Scancodes. Gesendet wird mit KEYEVENTF_SCANCODE (+EXTENDEDKEY fuer
+// E0-Tasten wie die Pfeile) - GTA2 liest nachweislich auf Scancode-Ebene
+// (data\Keyboard\*_KB.cfg ist eine PS/2-Set-1-Tabelle); virtuelle Keycodes
+// kaemen dort nie an.
+// ===================================================================================
+
+// Quelle einer Zuordnung: entweder ein Knopf (btnMask) oder eine Achsenrichtung (axis).
+// Achsen-Konvention wie in der Web-Gamepad-API der UI: Y- = Stick nach OBEN
+// (XInput meldet oben als positives sThumbLY - die Umrechnung passiert in kbQuellWert).
+enum class KbAxis : uint8_t { NONE, LXM, LXP, LYM, LYP, RXM, RXP, RYM, RYP, LT, RT };
+struct KbMap {
+    std::string quelle;               // Original-String (Diagnose/Status)
+    WORD btnMask = 0;                 // XINPUT_GAMEPAD_*, 0 = Achse
+    KbAxis axis = KbAxis::NONE;
+    WORD scancode = 0; bool ext = false;
+    double schwelle = 0.50, loesen = 0.35;   // nur fuer Achsen (Hysterese)
+};
+struct KbProfile {
+    std::string name;
+    std::string spiel;                // exe-Basisname (klein); leer = jedes fremde Fenster
+    std::vector<KbMap> maps;
+};
+
+inline KbProfile parseKbProfile(const json& p) {
+    static const std::map<std::string, WORD> btn = {
+        {"A",XINPUT_GAMEPAD_A},{"B",XINPUT_GAMEPAD_B},{"X",XINPUT_GAMEPAD_X},{"Y",XINPUT_GAMEPAD_Y},
+        {"LB",XINPUT_GAMEPAD_LEFT_SHOULDER},{"RB",XINPUT_GAMEPAD_RIGHT_SHOULDER},
+        {"BACK",XINPUT_GAMEPAD_BACK},{"START",XINPUT_GAMEPAD_START},
+        {"LS",XINPUT_GAMEPAD_LEFT_THUMB},{"RS",XINPUT_GAMEPAD_RIGHT_THUMB},
+        {"DU",XINPUT_GAMEPAD_DPAD_UP},{"DD",XINPUT_GAMEPAD_DPAD_DOWN},
+        {"DL",XINPUT_GAMEPAD_DPAD_LEFT},{"DR",XINPUT_GAMEPAD_DPAD_RIGHT} };
+    static const std::map<std::string, KbAxis> ax = {
+        {"LX-",KbAxis::LXM},{"LX+",KbAxis::LXP},{"LY-",KbAxis::LYM},{"LY+",KbAxis::LYP},
+        {"RX-",KbAxis::RXM},{"RX+",KbAxis::RXP},{"RY-",KbAxis::RYM},{"RY+",KbAxis::RYP},
+        {"LT",KbAxis::LT},{"RT",KbAxis::RT} };
+    KbProfile r;
+    r.name = p.value("name", "");
+    r.spiel = p.value("spiel", "");
+    for (auto& c : r.spiel) c = (char)tolower((unsigned char)c);
+    for (auto& t : p.value("tasten", json::array())) {
+        KbMap m;
+        m.quelle = t.value("quelle", "");
+        int sc = t.value("scancode", 0);
+        if (sc < 1 || sc > 127) continue;              // Basis-Scancode; E0 kommt ueber ext
+        m.scancode = (WORD)sc;
+        m.ext = t.value("ext", false);
+        auto bi = btn.find(m.quelle);
+        auto ai = ax.find(m.quelle);
+        if (bi != btn.end()) m.btnMask = bi->second;
+        else if (ai != ax.end()) {
+            m.axis = ai->second;
+            m.schwelle = t.value("schwelle", 0.50);
+            m.loesen   = t.value("loesen", m.schwelle * 0.6);
+            if (m.schwelle < 0.05) m.schwelle = 0.05; if (m.schwelle > 0.95) m.schwelle = 0.95;
+            if (m.loesen >= m.schwelle) m.loesen = m.schwelle * 0.6;   // Hysterese erzwingen
+            if (m.loesen < 0.02) m.loesen = 0.02;
+        } else continue;                               // unbekannte Quelle: ignorieren (vorwaertskompatibel)
+        r.maps.push_back(m);
+    }
+    return r;
+}
+
+// Quellwert 0..1 aus dem XInput-Zustand (Achsenrichtungen einzeln, Trigger direkt)
+inline double kbQuellWert(KbAxis a, const XINPUT_GAMEPAD& g) {
+    auto pos = [](SHORT v) { return v > 0 ? v / 32767.0 : 0.0; };
+    auto neg = [](SHORT v) { return v < 0 ? -v / 32768.0 : 0.0; };
+    switch (a) {
+    case KbAxis::LXM: return neg(g.sThumbLX);
+    case KbAxis::LXP: return pos(g.sThumbLX);
+    case KbAxis::LYM: return pos(g.sThumbLY);   // Web-Konvention: Y- = oben = XInput-positiv
+    case KbAxis::LYP: return neg(g.sThumbLY);
+    case KbAxis::RXM: return neg(g.sThumbRX);
+    case KbAxis::RXP: return pos(g.sThumbRX);
+    case KbAxis::RYM: return pos(g.sThumbRY);
+    case KbAxis::RYP: return neg(g.sThumbRY);
+    case KbAxis::LT:  return g.bLeftTrigger / 255.0;
+    case KbAxis::RT:  return g.bRightTrigger / 255.0;
+    default: return 0.0;
+    }
+}
+
+// Reine Zustandsmaschine (Kantenerkennung + Hysterese), Ausgabe ueber einen
+// injizierbaren Sink - dadurch im Selbsttest OHNE echtes SendInput pruefbar.
+struct KbEngine {
+    KbProfile prof;
+    std::vector<uint8_t> down;                              // je Map: Taste gedrueckt?
+    std::function<void(WORD sc, bool ext, bool pressed)> sink;
+    void reset() { down.assign(prof.maps.size(), 0); }
+    void tick(const XINPUT_GAMEPAD& g, bool erlaubt) {
+        for (size_t i = 0; i < prof.maps.size(); ++i) {
+            const KbMap& m = prof.maps[i];
+            bool want = false;
+            if (erlaubt) {
+                if (m.btnMask) want = (g.wButtons & m.btnMask) != 0;
+                else {
+                    double v = kbQuellWert(m.axis, g);
+                    // Hysterese: druecken erst ab schwelle, halten bis unter loesen -
+                    // sonst flattert die Taste, wenn der Stick genau am Uebergang steht.
+                    want = down[i] ? (v > m.loesen) : (v >= m.schwelle);
+                }
+            }
+            if (want != (down[i] != 0)) {
+                down[i] = want ? 1 : 0;
+                if (sink) sink(m.scancode, m.ext, want);
+            }
+        }
+    }
+    void releaseAll() {
+        for (size_t i = 0; i < prof.maps.size(); ++i)
+            if (down[i]) { down[i] = 0; if (sink) sink(prof.maps[i].scancode, prof.maps[i].ext, false); }
+    }
+};
+
+// Echter Sink: Scancode per SendInput (KEYEVENTF_SCANCODE, EXTENDEDKEY fuer E0)
+inline void kbSendScancode(WORD sc, bool ext, bool pressed) {
+    INPUT in{}; in.type = INPUT_KEYBOARD;
+    in.ki.wScan = sc;
+    in.ki.dwFlags = KEYEVENTF_SCANCODE
+                  | (ext ? KEYEVENTF_EXTENDEDKEY : 0)
+                  | (pressed ? 0 : KEYEVENTF_KEYUP);
+    SendInput(1, &in, sizeof(INPUT));
+}
+
+inline std::atomic<bool> g_kbActive{ false };
+inline std::thread g_kbThread;
+inline std::mutex g_kbMx;                 // schuetzt g_kbEngine (IPC-Start vs. Poll-Thread)
+inline KbEngine g_kbEngine;
+
+// Vordergrund-Pruefung: Tasten fliessen NUR, wenn das Zielspiel vorne ist (bzw. bei
+// leerem Ziel: irgendein fremdes Fenster, nie Lumora selbst). Die Pruefung sitzt im
+// SENDE-Pfad, nicht nur beim Aktivieren - sonst tippt das Pad nach einem Alt-Tab
+// munter in fremde Fenster.
+inline bool kbFokusErlaubt(const std::string& spiel) {
+    HWND fg = GetForegroundWindow();
+    if (!fg) return false;
+    DWORD pid = 0; GetWindowThreadProcessId(fg, &pid);
+    if (!pid || pid == GetCurrentProcessId()) return false;
+    if (spiel.empty()) return true;
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return false;
+    wchar_t buf[MAX_PATH]; DWORD n = MAX_PATH;
+    bool ok = QueryFullProcessImageNameW(h, 0, buf, &n) != 0;
+    CloseHandle(h);
+    if (!ok) return false;
+    std::wstring w(buf); size_t p = w.find_last_of(L"\\/");
+    std::string base = narrow8(p == std::wstring::npos ? w : w.substr(p + 1));
+    for (auto& c : base) c = (char)tolower((unsigned char)c);
+    return base == spiel;
+}
+
+inline void kbThreadProc() {
+    // Fokus nur alle ~250 ms nachschlagen (OpenProcess je Poll waere Verschwendung);
+    // WECHSELT der Fokus weg, loest der naechste Tick trotzdem sofort alle Tasten,
+    // weil erlaubt=false jede Zuordnung auf "will nicht gedrueckt" zieht.
+    bool erlaubt = false; DWORD fokusTick = 0;
+    while (g_kbActive.load()) {
+        DWORD jetzt = GetTickCount();
+        std::string spiel; { std::lock_guard<std::mutex> lk(g_kbMx); spiel = g_kbEngine.prof.spiel; }
+        if (jetzt - fokusTick >= 250) { erlaubt = kbFokusErlaubt(spiel); fokusTick = jetzt; }
+        XINPUT_STATE st{}; bool pad = false;
+        for (DWORD i = 0; i < 4; ++i) {
+            if ((LONG)i == g_vigemSlot.load()) continue;   // nie das eigene virtuelle Pad lesen
+            if (XInputGetState(i, &st) == ERROR_SUCCESS) { pad = true; break; }
+        }
+        {
+            std::lock_guard<std::mutex> lk(g_kbMx);
+            if (pad) g_kbEngine.tick(st.Gamepad, erlaubt);
+            else g_kbEngine.releaseAll();                  // Pad abgezogen -> nichts klemmen lassen
+        }
+        Sleep(4);
+    }
+    std::lock_guard<std::mutex> lk(g_kbMx);
+    g_kbEngine.releaseAll();
+}
+
+inline bool kbStart(const json& profil, const std::string& reason) {
+    KbProfile p = parseKbProfile(profil);
+    if (p.maps.empty()) {
+        if (g_push) g_push("kb-bridge-active", { {"active", false}, {"reason", "profil-leer"} });
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_kbMx);
+        g_kbEngine.releaseAll();                           // Profilwechsel im Lauf: nichts klemmen lassen
+        g_kbEngine.prof = std::move(p);
+        g_kbEngine.reset();
+        g_kbEngine.sink = kbSendScancode;
+    }
+    if (!g_kbActive.exchange(true)) {
+        if (g_kbThread.joinable()) g_kbThread.join();
+        g_kbThread = std::thread(kbThreadProc);
+    }
+    if (g_push) g_push("kb-bridge-active", { {"active", true}, {"reason", reason}, {"name", profil.value("name", "")} });
+    return true;
+}
+inline void kbStop(const std::string& reason) {
+    if (!g_kbActive.exchange(false)) return;
+    if (g_kbThread.joinable()) g_kbThread.join();          // Thread loest beim Ende alle Tasten
+    if (g_push) g_push("kb-bridge-active", { {"active", false}, {"reason", reason} });
+}
+inline json kbStatus() {
+    std::lock_guard<std::mutex> lk(g_kbMx);
+    return { {"active", g_kbActive.load()}, {"name", g_kbEngine.prof.name}, {"spiel", g_kbEngine.prof.spiel} };
+}
+
 // Beim App-Ende: Pad weg, Thread beenden (ViGEm-Verbindung sauber schliessen).
 inline void shutdown() {
+    kbStop("app-ende");
     vigemStop();
     if (g_vigem) { vigem_disconnect(g_vigem); vigem_free(g_vigem); g_vigem = nullptr; }
     if (g_bridgeWnd) PostMessageW(g_bridgeWnd, LUBRIDGE_WM_STOP, 0, 0);
