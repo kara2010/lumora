@@ -5157,7 +5157,8 @@ static json handleChannel(const std::string& channel, const json& args) {
     }
     if (channel == "kb-bridge-status") return lubridge::kbStatus();
     if (channel == "kb-bridge-monitor") {
-        lubridge::kbSetMonitor(args.size() >= 1 && args[0].is_boolean() && args[0].get<bool>());
+        lubridge::kbSetMonitor(args.size() >= 1 && args[0].is_boolean() && args[0].get<bool>(),
+                               args.size() >= 2 && args[1].is_object() ? args[1] : json());
         return true;
     }
     if (channel == "kb-bridge-monitor-read") return lubridge::kbMonitor();
@@ -5862,10 +5863,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         // Zwei Ursachen, beide hier abgesichert.
         {
             json fahr = { {"tasten", json::array({
-                { {"quelle","LY-"}, {"scancode",72}, {"ext",true}, {"schwelle",0.26}, {"loesen",0.16} },
-                { {"quelle","LY+"}, {"scancode",80}, {"ext",true}, {"schwelle",0.26}, {"loesen",0.16} },
-                { {"quelle","LX-"}, {"scancode",75}, {"ext",true}, {"schwelle",0.26}, {"loesen",0.16} },
-                { {"quelle","LX+"}, {"scancode",77}, {"ext",true}, {"schwelle",0.26}, {"loesen",0.16} },
+                { {"quelle","LY-"}, {"scancode",72}, {"ext",true}, {"schwelle",0.13}, {"loesen",0.07} },
+                { {"quelle","LY+"}, {"scancode",80}, {"ext",true}, {"schwelle",0.13}, {"loesen",0.07} },
+                { {"quelle","LX-"}, {"scancode",75}, {"ext",true}, {"schwelle",0.13}, {"loesen",0.07} },
+                { {"quelle","LX+"}, {"scancode",77}, {"ext",true}, {"schwelle",0.13}, {"loesen",0.07} },
                 { {"quelle","DU"},  {"scancode",72}, {"ext",true} },   // SELBE Taste wie LY-
                 { {"quelle","DL"},  {"scancode",75}, {"ext",true} },   // SELBE Taste wie LX-
             })} };
@@ -5948,10 +5949,73 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
             check("Stick los, Steuerkreuz haelt: Taste bleibt", gedrueckt(72) && anzahl(72, false) == 0);
             f.tick(XINPUT_GAMEPAD{}, true);                  // auch Steuerkreuz los
             check("Letzte Quelle los: Taste geht hoch", !gedrueckt(72) && anzahl(72, false) == 1);
-            // H) Schwacher Stick unter der Deadzone: nichts
+            // H) Ruhezone: leichtes Rauschen/Drift darf NICHTS ausloesen. Laut echtem
+            //    Mitschnitt liegt die Ruhelage bei ~0.05 - 0.10 ist also klar Rauschen,
+            //    0.22 dagegen eine bewusste (kleine) Bewegung und muss ankommen.
             fe.clear(); f.reset();
-            f.tick(stick(90.0, 0.20), true);
-            check("Stick 0.20: unter Deadzone, still", fe.empty());
+            f.tick(stick(90.0, 0.10), true);
+            check("Stick 0.10: Rauschen, still", fe.empty());
+            fe.clear(); f.reset();
+            f.tick(stick(90.0, 0.22), true);
+            check("Stick 0.22: bewusste Bewegung, kommt an", gedrueckt(72));
+            // I) ECHTE AUFZEICHNUNG (kb-mitschnitt.txt vom 2026-08-05): genau die
+            //    Bewegung, bei der sich Gas und Lenken "gegenseitig blockierten".
+            //    Der Stick erreicht bei vollem Ausschlag in einer Richtung auf der
+            //    anderen Achse nur 0.08..0.38 - die Schwellen muessen darunter liegen,
+            //    sonst flattert die Taste im Sekundentakt. Werte sind Rohdaten.
+            {
+                struct P { double x, y; };
+                // Vorwaerts halten und dabei links/rechts lenken
+                const P vor[] = { {-0.05,0.28}, {-0.38,1.00}, {-0.14,1.00}, {0.35,1.00}, {0.15,1.00},
+                                  {0.29,1.00}, {0.15,1.00}, {0.28,1.00}, {0.16,1.00}, {-0.27,1.00},
+                                  {-0.15,1.00}, {0.31,1.00}, {0.14,1.00}, {-0.26,1.00}, {-0.14,1.00} };
+                fe.clear(); f.reset();
+                int gasAus = 0;
+                for (const P& p : vor) {
+                    XINPUT_GAMEPAD g{};
+                    g.sThumbLX = (SHORT)(p.x * 32767.0); g.sThumbLY = (SHORT)(p.y * 32767.0);
+                    f.tick(g, true);
+                    if (!gedrueckt(72)) ++gasAus;        // Gas darf NIE ausfallen
+                }
+                check("Echte Aufzeichnung: Gas bleibt durchgehend", gasAus == 0);
+                // Lenken darf beim Halten nicht flattern: hoechstens die echten
+                // Richtungswechsel (5 Vorzeichenwechsel in der Aufzeichnung)
+                int lenkKanten = anzahl(75, true) + anzahl(77, true);
+                check("Echte Aufzeichnung: kein Lenk-Flattern", lenkKanten <= 6);
+                // Stark lenken und dabei Gas halten (X am Anschlag, Y klein)
+                const P quer[] = { {1.00,0.28}, {1.00,0.14}, {0.76,-0.26}, {1.00,-0.14},
+                                   {1.00,0.28}, {0.96,0.08}, {0.85,-0.31} };
+                fe.clear(); f.reset();
+                int lenkAus = 0;
+                for (const P& p : quer) {
+                    XINPUT_GAMEPAD g{};
+                    g.sThumbLX = (SHORT)(p.x * 32767.0); g.sThumbLY = (SHORT)(p.y * 32767.0);
+                    f.tick(g, true);
+                    if (!gedrueckt(77)) ++lenkAus;       // Lenken darf NIE ausfallen
+                }
+                check("Echte Aufzeichnung: Lenken bleibt bei vollem Ausschlag", lenkAus == 0);
+            }
+        }
+        // 16b) STUMMER Betrieb (Empfindlichkeit einstellen): erkennen ja, senden nein.
+        // Ohne das wuerde beim Schieben der Regler in irgendein Fenster getippt.
+        // Wichtig ist auch der Rueckweg: nach dem Umschalten muss die Taste wieder
+        // ankommen - ein im stummen Betrieb hochgezaehlter Halter darf nicht kleben.
+        {
+            lubridge::KbEngine s;
+            s.prof = lubridge::parseKbProfile(prof);
+            s.reset();
+            std::vector<Ev> se;
+            s.sink = [&](WORD sc, bool ext, bool d) { se.push_back({ sc, ext, d }); };
+            s.stumm = true;
+            s.tick(pad(32000, 0, 0), true);
+            check("Stumm: erkannt, aber nichts gesendet", se.empty() && s.down[0]);
+            // Umschalten wie im Poll-Thread: freigeben, Flag drehen, Zaehler leeren
+            s.releaseAll(); s.stumm = false; s.reset();
+            check("Stumm->Senden: Umschalten sendet nichts", se.empty());
+            s.tick(pad(32000, 0, 0), true);
+            check("Nach Umschalten kommt die Taste an", se.size() == 1 && se[0].sc == 72 && se[0].down);
+            s.releaseAll(); s.stumm = true; s.reset();   // zurueck ins Beobachten
+            check("Senden->Stumm: Taste wird sauber losgelassen", se.size() == 2 && !se[1].down);
         }
         // 17-21) Spiel -> Profil: kbProfileForExe trifft ueber den EXE-Namen, egal wie
         // der Aufrufer den Pfad schreibt. Ohne echte Datei arbeiten: Profile temporaer
