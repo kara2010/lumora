@@ -490,13 +490,21 @@ static json kbProfileForExe(const std::string& gamePath) {
     }
     return nullptr;
 }
+static std::string g_kbManuellAus;      // Spiel, fuer das der Nutzer bewusst abgeschaltet hat
+static std::string g_kbLaufendesSpiel;  // Spiel, das den Modus gerade automatisch traegt
 static void kbBridgeOnRunning(const std::string& gamePath) {
-    if (!loadSettings().value("inputBridgeAutoActivate", true)) return;
+    // EIGENER Schalter (nicht der der ViGEm-Bruecke): die beiden Modi haben nichts
+    // miteinander zu tun, und wer den Tastatur-Modus nicht automatisch will, soll
+    // deswegen nicht die Lenkrad-Automatik verlieren.
+    if (!loadSettings().value("kbBridgeAutoActivate", true)) return;
+    // Bewusst abgeschaltet? Dann nicht ungefragt wieder anspringen.
+    if (!g_kbManuellAus.empty() && g_kbManuellAus == gamePath) return;
     if (lubridge::g_kbActive.load()) return;       // manuell/anderes Spiel aktiv -> nicht anfassen
     json prof = kbProfileForExe(gamePath);
     if (prof.is_null()) return;
     if (lubridge::kbStart(prof, "auto")) {
         g_kbAutoGame = gamePath;
+        g_kbLaufendesSpiel = gamePath;   // fuer "manuell aus" merken
         // Sichtbares Signal: sonst raetselt man, warum das Pad "komisch" reagiert.
         sendToUi("toast", std::string("🕹 ") + prof.value("name", std::string("Profil")) + " aktiv");
     }
@@ -506,6 +514,10 @@ static void kbBridgeOnEnd(const std::string& gamePath) {
         lubridge::kbStop("spiel-beendet");
         g_kbAutoGame.clear();
     }
+    // Spiel ist vorbei -> die bewusste Abschaltung gilt nur fuer DIESE Sitzung.
+    // Beim naechsten Start soll die Automatik wieder greifen duerfen.
+    if (!g_kbManuellAus.empty() && g_kbManuellAus == gamePath) g_kbManuellAus.clear();
+    if (!g_kbLaufendesSpiel.empty() && g_kbLaufendesSpiel == gamePath) g_kbLaufendesSpiel.clear();
 }
 static void inputBridgeOnEnd(const std::string& gamePath) {
     if (!g_bridgeAutoGame.empty() && g_bridgeAutoGame == gamePath) {
@@ -5134,7 +5146,15 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "kb-bridge-start" && args.size() >= 1 && args[0].is_object()) {
         return json{ {"ok", lubridge::kbStart(args[0], "manuell")} };
     }
-    if (channel == "kb-bridge-stop") { lubridge::kbStop("manuell"); return true; }
+    if (channel == "kb-bridge-stop") {
+        // Bewusstes Abschalten merken: sonst koennte die Automatik denselben Modus
+        // fuer dasselbe laufende Spiel gleich wieder anwerfen - der Nutzer haette
+        // einen Schalter, der nichts bewirkt.
+        if (!g_kbLaufendesSpiel.empty()) g_kbManuellAus = g_kbLaufendesSpiel;
+        g_kbAutoGame.clear();
+        lubridge::kbStop("manuell");
+        return true;
+    }
     if (channel == "kb-bridge-status") return lubridge::kbStatus();
     if (channel == "kb-get-profiles") return loadKbProfiles();
     if (channel == "kb-save-profiles" && args.size() >= 1 && args[0].is_object()) {
@@ -5824,10 +5844,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         // Zwei Ursachen, beide hier abgesichert.
         {
             json fahr = { {"tasten", json::array({
-                { {"quelle","LY-"}, {"scancode",72}, {"ext",true}, {"schwelle",0.35}, {"loesen",0.22} },
-                { {"quelle","LY+"}, {"scancode",80}, {"ext",true}, {"schwelle",0.35}, {"loesen",0.22} },
-                { {"quelle","LX-"}, {"scancode",75}, {"ext",true}, {"schwelle",0.35}, {"loesen",0.22} },
-                { {"quelle","LX+"}, {"scancode",77}, {"ext",true}, {"schwelle",0.35}, {"loesen",0.22} },
+                { {"quelle","LY-"}, {"scancode",72}, {"ext",true}, {"schwelle",0.26}, {"loesen",0.16} },
+                { {"quelle","LY+"}, {"scancode",80}, {"ext",true}, {"schwelle",0.26}, {"loesen",0.16} },
+                { {"quelle","LX-"}, {"scancode",75}, {"ext",true}, {"schwelle",0.26}, {"loesen",0.16} },
+                { {"quelle","LX+"}, {"scancode",77}, {"ext",true}, {"schwelle",0.26}, {"loesen",0.16} },
                 { {"quelle","DU"},  {"scancode",72}, {"ext",true} },   // SELBE Taste wie LY-
                 { {"quelle","DL"},  {"scancode",75}, {"ext",true} },   // SELBE Taste wie LX-
             })} };
@@ -5849,23 +5869,38 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
             auto gedrueckt = [&](WORD sc) {   // aktueller Zustand der Taste
                 int z = 0; for (auto& e : fe) if (e.sc == sc) z = e.down ? 1 : 0; return z == 1;
             };
-            // A) Flache Diagonale 20 Grad neben "oben": frueher X=0.34 -> KEIN Lenken.
-            //    Radial muessen Gas UND Lenken kommen.
+            // A) DER GEMELDETE FALL: vorwaerts halten und dabei lenken. Ueber den ganzen
+            //    Neigungsbereich muss BEIDES gleichzeitig kommen - genau hier fuehlte es
+            //    sich an, als wuerden die Richtungen sich gegenseitig blockieren.
+            {
+                bool immerBeides = true; int erstesLenkenBei = -1;
+                for (int grad = 5; grad <= 60; grad += 5) {
+                    fe.clear(); f.reset();
+                    f.tick(stick(90.0 + grad, 1.0), true);      // oben, um grad nach links
+                    bool gas = gedrueckt(72), lenk = gedrueckt(75);
+                    if (!gas) immerBeides = false;
+                    if (lenk && erstesLenkenBei < 0) erstesLenkenBei = grad;
+                    if (grad >= 20 && !(gas && lenk)) immerBeides = false;
+                }
+                check("Vorwaerts + Lenken ab 20 Grad durchgehend", immerBeides);
+                check("Lenken setzt frueh ein (<=20 Grad)", erstesLenkenBei > 0 && erstesLenkenBei <= 20);
+            }
+            // B) Dasselbe rueckwaerts: zurueck gehen UND lenken
             fe.clear(); f.reset();
-            f.tick(stick(110.0, 1.0), true);   // 110 Grad = oben, 20 Grad nach links
-            check("Diagonale 20 Grad: Gas UND Lenken", gedrueckt(72) && gedrueckt(75));
-            // B) Flache Diagonale andersherum (20 Grad neben "links"): beides aktiv
-            fe.clear(); f.reset();
-            f.tick(stick(160.0, 1.0), true);
-            check("Diagonale 70 Grad: Lenken UND Gas", gedrueckt(75) && gedrueckt(72));
+            f.tick(stick(250.0, 1.0), true);   // unten, 20 Grad nach links
+            check("Rueckwaerts + Lenken gleichzeitig", gedrueckt(80) && gedrueckt(75));
             // C) Genau 45 Grad: beide Nachbarrichtungen, keine dritte
             fe.clear(); f.reset();
             f.tick(stick(45.0, 1.0), true);
             check("45 Grad: genau oben+rechts", gedrueckt(72) && gedrueckt(77) && !gedrueckt(75) && !gedrueckt(80));
-            // D) Reines "rechts": NUR rechts, kein Gas
+            // D) Reines "rechts": NUR rechts, kein Gas (dreht auf der Stelle)
             fe.clear(); f.reset();
             f.tick(stick(0.0, 1.0), true);
             check("0 Grad: nur rechts", gedrueckt(77) && !gedrueckt(72) && !gedrueckt(80));
+            // D2) Reines "oben": NUR Gas, kein Lenken
+            fe.clear(); f.reset();
+            f.tick(stick(90.0, 1.0), true);
+            check("90 Grad: nur Gas, kein Lenken", gedrueckt(72) && !gedrueckt(75) && !gedrueckt(77));
             // E) Richtungswechsel links->rechts ueber die Mitte: sauber getrennt,
             //    nie beide Lenkrichtungen gleichzeitig (das wuerde GTA2 blockieren).
             fe.clear(); f.reset();
