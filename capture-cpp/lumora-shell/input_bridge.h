@@ -666,6 +666,13 @@ inline json status() {
 // Quelle einer Zuordnung: entweder ein Knopf (btnMask) oder eine Achsenrichtung (axis).
 // Achsen-Konvention wie in der Web-Gamepad-API der UI: Y- = Stick nach OBEN
 // (XInput meldet oben als positives sThumbLY - die Umrechnung passiert in kbQuellWert).
+// Gemeinsame Ruhezone eines Sticks: darunter gilt er als losgelassen. Faengt das
+// Ruhe-Rauschen/den Drift abgenutzter Sticks ab, OHNE die Achsen aneinanderzukoppeln.
+// Pro Profil einstellbar - abgenutzte Sticks driften staerker, und wie weit ein Stick
+// bei vollem Ausschlag auf der ANDEREN Achse noch kommt, ist von Pad zu Pad
+// verschieden (real gemessen: nur 0.08..0.38). Feste Werte koennen das nicht treffen.
+constexpr double KB_STICK_RUHE_STD = 0.18;
+
 enum class KbAxis : uint8_t { NONE, LXM, LXP, LYM, LYP, RXM, RXP, RYM, RYP, LT, RT };
 struct KbMap {
     std::string quelle;               // Original-String (Diagnose/Status)
@@ -677,6 +684,7 @@ struct KbMap {
 struct KbProfile {
     std::string name;
     std::string spiel;                // exe-Basisname (klein); leer = jedes fremde Fenster
+    double ruhe = KB_STICK_RUHE_STD;  // Stick-Ruhezone, pro Profil einstellbar
     std::vector<KbMap> maps;
 };
 
@@ -694,6 +702,9 @@ inline KbProfile parseKbProfile(const json& p) {
         {"LT",KbAxis::LT},{"RT",KbAxis::RT} };
     KbProfile r;
     r.name = p.value("name", "");
+    r.ruhe = p.value("ruhe", KB_STICK_RUHE_STD);
+    if (r.ruhe < 0.02) r.ruhe = 0.02;
+    if (r.ruhe > 0.60) r.ruhe = 0.60;
     r.spiel = p.value("spiel", "");
     for (auto& c : r.spiel) c = (char)tolower((unsigned char)c);
     for (auto& t : p.value("tasten", json::array())) {
@@ -744,15 +755,17 @@ inline double kbQuellWert(KbAxis a, const XINPUT_GAMEPAD& g) {
 // (Trigger -> reine Schwelle)?
 inline bool kbIstStick(KbAxis a) { return a >= KbAxis::LXM && a <= KbAxis::RYP; }
 inline bool kbIstLinkerStick(KbAxis a) { return a >= KbAxis::LXM && a <= KbAxis::LYP; }
-// Gemeinsame Ruhezone eines Sticks: darunter gilt er als losgelassen. Faengt das
-// Ruhe-Rauschen/den Drift abgenutzter Sticks ab, OHNE die Achsen aneinanderzukoppeln.
-constexpr double KB_STICK_RUHE = 0.18;
 
 struct KbEngine {
     KbProfile prof;
     std::vector<uint8_t> down;                              // je Map: Zuordnung aktiv?
     std::map<uint32_t, int> held;                           // je TASTE: wie viele Quellen halten sie?
     std::function<void(WORD sc, bool ext, bool pressed)> sink;
+    // STUMM: erkennen ja, senden nein. Beim Einstellen der Empfindlichkeit soll die
+    // Anzeige zeigen, was ausloesen WUERDE, ohne in ein fremdes Fenster zu tippen.
+    // Ueber erlaubt=false ginge das nicht - das zieht jede Zuordnung auf "nicht
+    // gedrueckt", die Anzeige bliebe also immer leer.
+    bool stumm = false;
     void reset() { down.assign(prof.maps.size(), 0); held.clear(); }
 
     // Taste nur beim ERSTEN Halter druecken und beim LETZTEN loslassen. Ohne diesen
@@ -761,8 +774,8 @@ struct KbEngine {
     void setzeTaste(const KbMap& m, bool an) {
         uint32_t k = (uint32_t)m.scancode | (m.ext ? 0x100u : 0u);
         int& n = held[k];
-        if (an) { if (++n == 1 && sink) sink(m.scancode, m.ext, true); }
-        else    { if (--n <= 0) { n = 0; if (sink) sink(m.scancode, m.ext, false); } }
+        if (an) { if (++n == 1 && sink && !stumm) sink(m.scancode, m.ext, true); }
+        else    { if (--n <= 0) { n = 0; if (sink && !stumm) sink(m.scancode, m.ext, false); } }
     }
 
     void tick(const XINPUT_GAMEPAD& g, bool erlaubt) {
@@ -796,7 +809,7 @@ struct KbEngine {
                     // einzelnen Achsen.
                     const bool links = kbIstLinkerStick(m.axis);
                     const double r = links ? lr : rr;
-                    if (r >= KB_STICK_RUHE) {
+                    if (r >= prof.ruhe) {
                         double v = kbQuellWert(m.axis, g);
                         want = down[i] ? (v > m.loesen) : (v >= m.schwelle);
                     }
@@ -870,15 +883,35 @@ inline bool kbFokusErlaubt(const std::string& spiel) {
     return base == spiel;
 }
 
+// Laeuft der Poll-Thread? Er wird auch fuer den reinen BEOBACHTUNGS-Betrieb gebraucht
+// (Empfindlichkeit einstellen, ohne dass Tasten gesendet werden).
+inline std::atomic<bool> g_kbThreadLaeuft{ false };
 inline void kbThreadProc() {
     // Fokus nur alle ~250 ms nachschlagen (OpenProcess je Poll waere Verschwendung);
     // WECHSELT der Fokus weg, loest der naechste Tick trotzdem sofort alle Tasten,
     // weil erlaubt=false jede Zuordnung auf "will nicht gedrueckt" zieht.
     bool erlaubt = false; DWORD fokusTick = 0;
-    while (g_kbActive.load()) {
+    // Laeuft weiter, solange der Modus aktiv ist ODER jemand zuschaut (Einstellen).
+    while (g_kbActive.load() || g_kbMonitor.load()) {
         DWORD jetzt = GetTickCount();
         std::string spiel; { std::lock_guard<std::mutex> lk(g_kbMx); spiel = g_kbEngine.prof.spiel; }
         if (jetzt - fokusTick >= 250) { erlaubt = kbFokusErlaubt(spiel); fokusTick = jetzt; }
+        // Reiner Beobachtungs-Betrieb (Modus aus, nur Einstellen): erkennen ja,
+        // senden nein. Zusaetzlich zaehlt der Fokus dann nicht - beim Einstellen ist
+        // Lumora vorne, nicht das Spiel; sonst saehe man ueberhaupt nichts.
+        const bool beobachten = !g_kbActive.load();
+        if (beobachten) erlaubt = true;
+        {
+            // Umschalten zwischen Beobachten und Senden: Zaehler leeren, sonst haengt
+            // eine im stummen Betrieb hochgezaehlte Taste danach fest bzw. wird nie
+            // gedrueckt (der Zaehler stuende schon auf 1).
+            std::lock_guard<std::mutex> lk(g_kbMx);
+            if (g_kbEngine.stumm != beobachten) {
+                g_kbEngine.releaseAll();
+                g_kbEngine.stumm = beobachten;
+                g_kbEngine.reset();
+            }
+        }
         XINPUT_STATE st{}; bool pad = false;
         for (DWORD i = 0; i < 4; ++i) {
             if ((LONG)i == g_vigemSlot.load()) continue;   // nie das eigene virtuelle Pad lesen
@@ -951,22 +984,46 @@ inline bool kbStart(const json& profil, const std::string& reason) {
         g_kbEngine.sink = kbSendScancode;
     }
     if (!g_kbActive.exchange(true)) {
-        if (g_kbThread.joinable()) g_kbThread.join();
-        g_kbThread = std::thread(kbThreadProc);
+        // Laeuft der Thread schon als reiner Beobachter (Empfindlichkeit einstellen),
+        // uebernimmt er den aktiven Betrieb einfach mit - kein zweiter Thread.
+        if (!g_kbThreadLaeuft.exchange(true)) {
+            if (g_kbThread.joinable()) g_kbThread.join();
+            g_kbThread = std::thread([] { kbThreadProc(); g_kbThreadLaeuft = false; });
+        }
     }
     if (g_push) g_push("kb-bridge-active", { {"active", true}, {"reason", reason}, {"name", profil.value("name", "")} });
     return true;
 }
 inline void kbStop(const std::string& reason) {
     if (!g_kbActive.exchange(false)) return;
-    if (g_kbThread.joinable()) g_kbThread.join();          // Thread loest beim Ende alle Tasten
+    // Nur warten, wenn der Thread danach wirklich endet. Beobachtet gerade jemand
+    // (Empfindlichkeit einstellen), laeuft er weiter - dann waere join() ein Haenger.
+    if (!g_kbMonitor.load() && g_kbThread.joinable()) g_kbThread.join();
     if (g_push) g_push("kb-bridge-active", { {"active", false}, {"reason", reason} });
 }
 inline json kbStatus() {
     std::lock_guard<std::mutex> lk(g_kbMx);
     return { {"active", g_kbActive.load()}, {"name", g_kbEngine.prof.name}, {"spiel", g_kbEngine.prof.spiel} };
 }
-inline void kbSetMonitor(bool on) { g_kbMonitor = on; }
+// Beobachten ohne Senden: startet den Poll-Thread, falls der Modus aus ist. So kann
+// man die Empfindlichkeit einstellen und den Stick dabei sehen, ohne dass Tasten in
+// irgendein Fenster gehen (Engine laeuft stumm, s. kbThreadProc).
+// Das zu beobachtende Profil muss mitgegeben werden - ohne aktiven Modus steckt in
+// der Engine sonst gar keine Belegung, und die Anzeige bliebe leer.
+inline void kbSetMonitor(bool on, const json& profil = json()) {
+    if (on && !g_kbActive.load() && profil.is_object()) {
+        KbProfile p = parseKbProfile(profil);
+        std::lock_guard<std::mutex> lk(g_kbMx);
+        g_kbEngine.releaseAll();
+        g_kbEngine.prof = p;
+        g_kbEngine.reset();
+    }
+    g_kbMonitor = on;
+    if (on && !g_kbActive.load() && !g_kbThreadLaeuft.exchange(true)) {
+        if (g_kbThread.joinable()) g_kbThread.join();
+        g_kbThread = std::thread([] { kbThreadProc(); g_kbThreadLaeuft = false; });
+    }
+}
 inline void kbSetTrace(bool on, const std::wstring& pfad) {
     if (on) {
         g_kbTracePath = pfad;

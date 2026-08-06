@@ -989,6 +989,34 @@
           </div>
 
           <div class="form-group">
+            <label>Empfindlichkeit</label>
+            <p class="settings-hint">Jeder Controller ist anders: Bei vollem Ausschlag in eine Richtung erreicht die andere Achse oft nur einen Bruchteil. Liegt die Ansprechschwelle darüber, fällt beim Lenken das Gas weg (oder umgekehrt). Bewege den Stick – der Punkt zeigt, was ankommt, die Ringe zeigen die Schwellen.</p>
+            <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
+              <canvas id="kbStickCv" width="180" height="180" style="width:180px;height:180px;flex:0 0 auto;background:rgba(255,255,255,.02);border-radius:12px"></canvas>
+              <div style="flex:1 1 260px;min-width:0">
+                <div class="an-osdrow">
+                  <span class="an-osdlbl">Ruhezone</span>
+                  <input type="range" id="kbRuhe" min="2" max="45" step="1" oninput="kbEmpfindlichkeit()">
+                  <span id="kbRuheVal" class="mono">–</span>
+                </div>
+                <p class="settings-hint" style="margin:2px 0 8px">Darunter gilt der Stick als losgelassen (gegen Zittern und Drift).</p>
+                <div class="an-osdrow">
+                  <span class="an-osdlbl">Ansprechen</span>
+                  <input type="range" id="kbAn" min="5" max="60" step="1" oninput="kbEmpfindlichkeit()">
+                  <span id="kbAnVal" class="mono">–</span>
+                </div>
+                <p class="settings-hint" style="margin:2px 0 8px">Ab hier zählt eine Richtung als gedrückt. Niedriger = feineres Lenken.</p>
+                <div class="an-osdrow">
+                  <span class="an-osdlbl">Loslassen</span>
+                  <input type="range" id="kbAus" min="2" max="55" step="1" oninput="kbEmpfindlichkeit()">
+                  <span id="kbAusVal" class="mono">–</span>
+                </div>
+                <p class="settings-hint" style="margin:2px 0 0">Muss unter „Ansprechen" liegen. Der Abstand verhindert Flattern am Übergang.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
             <label>Live-Prüfung</label>
             <p class="settings-hint">Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Solange der Tastatur-Modus läuft, steuert der Stick nicht mehr Lumoras Menü – du kannst also gefahrlos ausprobieren.</p>
             <div id="kbMonitor" class="settings-hint" style="font-family:monospace;white-space:pre-wrap;min-height:48px">–</div>
@@ -1284,6 +1312,22 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "Jeder Controller ist anders: Bei vollem Ausschlag in eine Richtung erreicht die andere Achse oft nur einen Bruchteil. Liegt die Ansprechschwelle darüber, fällt beim Lenken das Gas weg (oder umgekehrt). Bewege den Stick – der Punkt zeigt, was ankommt, die Ringe zeigen die Schwellen.": "Every controller is different: at full deflection in one direction, the other axis often only reaches a fraction of its range. If the trigger threshold sits above that, steering cancels the throttle (or the other way round). Move the stick – the dot shows what gets through, the guides show the thresholds.",
+  "Ruhezone": "Rest zone",
+  "Darunter gilt der Stick als losgelassen (gegen Zittern und Drift).": "Below this the stick counts as released (guards against jitter and drift).",
+  "Ansprechen": "Trigger at",
+  "Ab hier zählt eine Richtung als gedrückt. Niedriger = feineres Lenken.": "From here on a direction counts as pressed. Lower = finer steering.",
+  "Loslassen": "Release below",
+  "Muss unter „Ansprechen\" liegen. Der Abstand verhindert Flattern am Übergang.": "Must stay below \"Trigger at\". The gap prevents chatter at the crossover.",
+  "Modus:": "Mode:",
+  "an – Tasten werden gesendet": "on – keys are being sent",
+  "aus – nur Anzeige, es wird nichts gesendet": "off – display only, nothing is sent",
+  "kein Pad": "no pad",
+  "Profil ": "Profile ",
+  " – nicht verbunden": " – not connected",
+  "Deadzone": "Dead zone",
+  " — nicht belegt (klicken zum Zuweisen)": " — unassigned (click to assign)",
+  " ist bereit – zum Aktivieren neu starten.": " is ready – restart to activate.",
   "Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Solange der Tastatur-Modus läuft, steuert der Stick nicht mehr Lumoras Menü – du kannst also gefahrlos ausprobieren.": "Shows what the bridge currently reads from the controller and which keys it presses. While keyboard mode is running, the stick no longer controls Lumora's menu – so you can try things out safely.",
   "Klemmt etwas erst im Spiel? Dann Mitschnitt einschalten, kurz spielen und die Datei zur Auswertung weitergeben – sie hält fest, was der Controller wirklich gemeldet hat.": "Something only goes wrong inside the game? Turn on recording, play briefly, then pass the file on for analysis – it captures what the controller actually reported.",
   "Solange der Tastatur-Modus läuft, steuert der Stick nicht mehr Lumoras Menü – du kannst also gefahrlos ausprobieren.": "While keyboard mode is running, the stick no longer controls Lumora's menu – so you can try things out safely.",
@@ -3108,6 +3152,7 @@ async function kbOpen() {
   const ids = Object.keys(kbProfiles)
   if (!kbCurrent || !kbProfiles[kbCurrent]) kbCurrent = ids[0] || null
   kbRenderProfiles(); kbRenderMap(); kbRefreshStatus()
+  kbEmpfLaden(); kbStickZeichnen()
   kbMonitorStart()
 }
 // Live-Pruefung: fragt den Zustand aus der Shell ab, solange der Reiter offen ist.
@@ -3116,23 +3161,119 @@ async function kbOpen() {
 let kbMonTimer = null
 function kbMonitorStart() {
   if (kbMonTimer) return
-  ipcRenderer.invoke('kb-bridge-monitor', true)
+  ipcRenderer.invoke('kb-bridge-monitor', true, kbProf() || null)
   kbMonTimer = setInterval(async () => {
     const el = document.getElementById('kbMonitor')
     if (!el || !el.offsetParent) { kbMonitorStop(); return }   // Reiter zu -> aufhoeren
     const d = await ipcRenderer.invoke('kb-bridge-monitor-read')
     if (!d || typeof d !== 'object') return
-    if (!kbAktiv) { el.textContent = window.tr('Tastatur-Modus ist aus – zum Prüfen aktivieren.'); return }
+    kbStickWerte = { lx: d.lx || 0, ly: d.ly || 0, rt: d.rt || 0, pad: !!d.pad }
+    kbStickZeichnen()
     const f = (v) => (v >= 0 ? ' ' : '') + (v || 0).toFixed(2)
     const z = []
     z.push(window.tr('Controller:') + ' ' + (d.pad ? window.tr('erkannt') : window.tr('KEINER GEFUNDEN')))
-    z.push(window.tr('Vordergrund:') + ' ' + (d.fokus ? window.tr('Tasten gehen durch') : window.tr('blockiert') + (d.spiel ? ' (' + window.tr('wartet auf') + ' ' + d.spiel + ')' : '')))
+    z.push(window.tr('Modus:') + ' ' + (kbAktiv ? window.tr('an – Tasten werden gesendet') : window.tr('aus – nur Anzeige, es wird nichts gesendet')))
+    if (kbAktiv) z.push(window.tr('Vordergrund:') + ' ' + (d.fokus ? window.tr('Tasten gehen durch') : window.tr('blockiert') + (d.spiel ? ' (' + window.tr('wartet auf') + ' ' + d.spiel + ')' : '')))
     z.push('Stick  X=' + f(d.lx) + '   Y=' + f(d.ly) + '   RT=' + f(d.rt))
     z.push(window.tr('Erkannt:') + ' ' + ((d.quellen && d.quellen.length) ? d.quellen.join(' + ') : '–'))
     z.push(window.tr('Tasten gedrückt:') + ' ' + ((d.tasten && d.tasten.length) ? d.tasten.map(kbTastenName).join(' + ') : '–'))
     el.textContent = z.join('\n')
   }, 100)
 }
+// --- Empfindlichkeit: Regler + Live-Bild des Sticks ------------------------------
+// Die Werte gehoeren ins PROFIL (nicht global): jeder Controller erreicht bei vollem
+// Ausschlag in einer Richtung auf der anderen Achse andere Maximalwerte - real
+// gemessen nur 0.08..0.38. Ein fester Wert kann das nicht treffen.
+let kbStickWerte = { lx: 0, ly: 0, rt: 0, pad: false }
+function kbEmpfWerte() {
+  const p = kbProf()
+  const erste = p && (p.tasten || []).find(t => t.schwelle !== undefined && /^L[XY]/.test(t.quelle))
+  return {
+    ruhe: (p && p.ruhe !== undefined) ? p.ruhe : 0.18,
+    an:   erste ? erste.schwelle : 0.13,
+    aus:  erste ? erste.loesen   : 0.07,
+  }
+}
+function kbEmpfLaden() {
+  const w = kbEmpfWerte()
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = Math.round(v * 100) }
+  set('kbRuhe', w.ruhe); set('kbAn', w.an); set('kbAus', w.aus)
+  kbEmpfAnzeige(w)
+}
+function kbEmpfAnzeige(w) {
+  const t = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = Math.round(v * 100) + '%' }
+  t('kbRuheVal', w.ruhe); t('kbAnVal', w.an); t('kbAusVal', w.aus)
+}
+function kbEmpfindlichkeit() {
+  const p = kbEigeneKopie(); if (!p) return
+  const g = (id) => (parseInt((document.getElementById(id) || {}).value, 10) || 0) / 100
+  let ruhe = g('kbRuhe'), an = g('kbAn'), aus = g('kbAus')
+  // Reihenfolge erzwingen: loslassen < ansprechen. Sonst flattert die Taste - genau
+  // der Fehler, der das Fahren unbrauchbar gemacht hat.
+  if (aus >= an) { aus = Math.max(0.02, an - 0.03); const e = document.getElementById('kbAus'); if (e) e.value = Math.round(aus * 100) }
+  p.ruhe = ruhe
+  for (const t of (p.tasten || [])) {
+    if (t.schwelle === undefined || !/^L[XY]/.test(t.quelle)) continue
+    t.schwelle = an; t.loesen = aus
+  }
+  kbEmpfAnzeige({ ruhe, an, aus })
+  kbSave()
+  if (kbMonTimer && !kbAktiv) ipcRenderer.invoke('kb-bridge-monitor', true, p)   // Beobachter mit neuen Werten
+  if (kbAktiv) ipcRenderer.invoke('kb-bridge-start', p)   // sofort wirksam
+}
+// Live-Bild: Stick-Position, Zonen-Ringe, ausloesende Richtungen. Zeigt unmittelbar,
+// warum eine Bewegung (nicht) ankommt.
+function kbStickZeichnen() {
+  const cv = document.getElementById('kbStickCv'); if (!cv) return
+  const dpr = window.devicePixelRatio || 1
+  const S = 180
+  if (cv.width !== Math.round(S * dpr)) { cv.width = Math.round(S * dpr); cv.height = Math.round(S * dpr) }
+  const c = cv.getContext('2d')
+  c.setTransform(dpr, 0, 0, dpr, 0, 0)
+  c.clearRect(0, 0, S, S)
+  const w = kbEmpfWerte(), M = S / 2, R = S / 2 - 12
+  const lx = kbStickWerte.lx, ly = kbStickWerte.ly
+  const r = Math.sqrt(lx * lx + ly * ly)
+  // Aussenkreis
+  c.strokeStyle = 'rgba(255,255,255,.14)'; c.lineWidth = 1
+  c.beginPath(); c.arc(M, M, R, 0, 6.2832); c.stroke()
+  // Ruhezone
+  c.fillStyle = 'rgba(255,255,255,.05)'
+  c.beginPath(); c.arc(M, M, R * w.ruhe, 0, 6.2832); c.fill()
+  // Schwellen als Achsen-Baender (so wirken sie wirklich: pro Achse, nicht radial)
+  const band = (v, farbe) => {
+    c.strokeStyle = farbe; c.lineWidth = 1; c.setLineDash([3, 3])
+    for (const s of [-1, 1]) {
+      c.beginPath(); c.moveTo(M + s * R * v, M - R); c.lineTo(M + s * R * v, M + R); c.stroke()
+      c.beginPath(); c.moveTo(M - R, M + s * R * v); c.lineTo(M + R, M + s * R * v); c.stroke()
+    }
+    c.setLineDash([])
+  }
+  band(w.aus, 'rgba(255,200,60,.35)')
+  band(w.an, 'rgba(80,220,140,.55)')
+  // Achsenkreuz
+  c.strokeStyle = 'rgba(255,255,255,.10)'
+  c.beginPath(); c.moveTo(M, M - R); c.lineTo(M, M + R); c.moveTo(M - R, M); c.lineTo(M + R, M); c.stroke()
+  // Welche Richtungen loesen aus? (gleiche Regel wie in der Bruecke)
+  const aktiv = []
+  if (r >= w.ruhe) {
+    if (-lx >= w.an) aktiv.push('◀'); if (lx >= w.an) aktiv.push('▶')
+    if (ly >= w.an) aktiv.push('▲'); if (-ly >= w.an) aktiv.push('▼')
+  }
+  // Stick-Punkt (Y nach oben = positiv, Bildschirm-Y ist umgekehrt)
+  const px = M + lx * R, py = M - ly * R
+  c.strokeStyle = 'rgba(120,200,255,.45)'; c.lineWidth = 1.5
+  c.beginPath(); c.moveTo(M, M); c.lineTo(px, py); c.stroke()
+  c.fillStyle = aktiv.length ? '#4fe08a' : (kbStickWerte.pad ? '#7ab6ff' : '#555')
+  c.shadowColor = c.fillStyle; c.shadowBlur = aktiv.length ? 12 : 4
+  c.beginPath(); c.arc(px, py, 6, 0, 6.2832); c.fill()
+  c.shadowBlur = 0
+  // Ausloesende Richtungen als Text
+  c.font = '13px Consolas, monospace'; c.textAlign = 'center'
+  c.fillStyle = aktiv.length ? '#4fe08a' : 'rgba(255,255,255,.28)'
+  c.fillText(aktiv.length ? aktiv.join(' ') : (kbStickWerte.pad ? '–' : window.tr('kein Pad')), M, S - 2)
+}
+
 let kbTraceAn = false
 async function kbTraceToggle() {
   const r = await ipcRenderer.invoke("kb-bridge-trace", !kbTraceAn)
@@ -3160,7 +3301,9 @@ function kbRenderProfiles() {
       + (p.notiz ? ' · ' + p.notiz : '')
     : ''
 }
-function kbSelectProfile(id) { if (kbProfiles && kbProfiles[id]) { kbCurrent = id; kbRenderProfiles(); kbRenderMap() } }
+function kbSelectProfile(id) {
+  setTimeout(() => { kbEmpfLaden(); if (kbMonTimer && !kbAktiv) ipcRenderer.invoke('kb-bridge-monitor', true, kbProf() || null) }, 0)   // Regler + Beobachter nachziehen
+  if (kbProfiles && kbProfiles[id]) { kbCurrent = id; kbRenderProfiles(); kbRenderMap() } }
 function kbRenderMap() {
   const box = document.getElementById('kbMapList'); if (!box) return
   const p = kbProf()

@@ -6,10 +6,10 @@
   "autor": "Lumora",
   "notiz": "Xbox-Pad fuer GTA2 (1999). WICHTIG zur Steuerung: GTA2 lenkt wie ein Panzer - links/rechts DREHEN das Fahrzeug bzw. die Figur, sie bewegen sich nicht seitwaerts. Zum Kurvenfahren Stick schraeg halten: nach oben gibt Gas, die Neigung dreht. RT feuert, A ist Handbremse/Sprung, B steigt ein und aus. Belegung aus der Spiel-Registry uebernommen (Standardsteuerung).",
   "tasten": [
-    { "quelle": "LY-", "scancode": 72,  "ext": true,  "schwelle": 0.26, "loesen": 0.16, "aktion": "Vorwaerts" },
-    { "quelle": "LY+", "scancode": 80,  "ext": true,  "schwelle": 0.26, "loesen": 0.16, "aktion": "Zurueck" },
-    { "quelle": "LX-", "scancode": 75,  "ext": true,  "schwelle": 0.26, "loesen": 0.16, "aktion": "Links" },
-    { "quelle": "LX+", "scancode": 77,  "ext": true,  "schwelle": 0.26, "loesen": 0.16, "aktion": "Rechts" },
+    { "quelle": "LY-", "scancode": 72,  "ext": true,  "schwelle": 0.13, "loesen": 0.07, "aktion": "Vorwaerts" },
+    { "quelle": "LY+", "scancode": 80,  "ext": true,  "schwelle": 0.13, "loesen": 0.07, "aktion": "Zurueck" },
+    { "quelle": "LX-", "scancode": 75,  "ext": true,  "schwelle": 0.13, "loesen": 0.07, "aktion": "Links" },
+    { "quelle": "LX+", "scancode": 77,  "ext": true,  "schwelle": 0.13, "loesen": 0.07, "aktion": "Rechts" },
 
     { "quelle": "DU",  "scancode": 72,  "ext": true,  "aktion": "Vorwaerts (Steuerkreuz)" },
     { "quelle": "DD",  "scancode": 80,  "ext": true,  "aktion": "Zurueck (Steuerkreuz)" },
