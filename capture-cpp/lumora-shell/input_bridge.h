@@ -740,19 +740,13 @@ inline double kbQuellWert(KbAxis a, const XINPUT_GAMEPAD& g) {
 
 // Reine Zustandsmaschine (Kantenerkennung + Hysterese), Ausgabe ueber einen
 // injizierbaren Sink - dadurch im Selbsttest OHNE echtes SendInput pruefbar.
-// Gehoert die Achse zu einem Stick (dann RADIAL auswerten) oder ist sie eindimensional
-// (Trigger -> weiter per Schwelle)?
+// Gehoert die Achse zu einem Stick (gemeinsame Ruhezone) oder ist sie eindimensional
+// (Trigger -> reine Schwelle)?
 inline bool kbIstStick(KbAxis a) { return a >= KbAxis::LXM && a <= KbAxis::RYP; }
 inline bool kbIstLinkerStick(KbAxis a) { return a >= KbAxis::LXM && a <= KbAxis::LYP; }
-// Sollrichtung der Achse als Winkel (Grad, 0 = rechts, 90 = oben - Mathe-Konvention)
-inline double kbSollWinkel(KbAxis a) {
-    switch (a) {
-    case KbAxis::LXP: case KbAxis::RXP: return 0.0;     // rechts
-    case KbAxis::LYM: case KbAxis::RYM: return 90.0;    // oben
-    case KbAxis::LXM: case KbAxis::RXM: return 180.0;   // links
-    default:                            return 270.0;   // unten (LYP/RYP)
-    }
-}
+// Gemeinsame Ruhezone eines Sticks: darunter gilt er als losgelassen. Faengt das
+// Ruhe-Rauschen/den Drift abgenutzter Sticks ab, OHNE die Achsen aneinanderzukoppeln.
+constexpr double KB_STICK_RUHE = 0.18;
 
 struct KbEngine {
     KbProfile prof;
@@ -790,24 +784,21 @@ struct KbEngine {
             if (erlaubt) {
                 if (m.btnMask) want = (g.wButtons & m.btnMask) != 0;
                 else if (kbIstStick(m.axis)) {
+                    // ACHSEN UNABHAENGIG auswerten - wie vier getrennte Tastaturtasten.
+                    // Eine Panzersteuerung (GTA2: links/rechts DREHEN) verlangt genau das:
+                    // vor/zurueck gehen und dabei JEDERZEIT lenken koennen.
+                    // Winkel-Sektoren waren hier der falsche Weg: sie koppeln die Achsen
+                    // wieder aneinander, sodass bei fast senkrechtem Stick das Lenken
+                    // wegfiel (links lag 85 Grad entfernt) - dieselbe gefuehlte Blockade,
+                    // nur an einer anderen Stelle.
+                    // Radialer Anteil bleibt NUR als gemeinsame Ruhezone gegen Stick-Drift:
+                    // erst wenn der Stick ueberhaupt spuerbar ausgelenkt ist, zaehlen die
+                    // einzelnen Achsen.
                     const bool links = kbIstLinkerStick(m.axis);
                     const double r = links ? lr : rr;
-                    const double w = links ? lw : rw;
-                    // Betrag mit Hysterese: druecken ab schwelle, halten bis unter loesen
-                    if (r >= (down[i] ? m.loesen : m.schwelle)) {
-                        double d = w - kbSollWinkel(m.axis);
-                        while (d > 180.0) d -= 360.0;
-                        while (d < -180.0) d += 360.0;
-                        if (d < 0) d = -d;
-                        // +-80 Grad statt der "sauberen" 8-Wege-Aufteilung (+-67.5):
-                        // Fahrspiele brauchen Gas UND feines Gegenlenken GLEICHZEITIG.
-                        // Mit 67.5 fiel schon bei 20 Grad Neigung neben "oben" das Lenken
-                        // weg (links waere 70 Grad entfernt) - das fuehlte sich an, als
-                        // wuerden sich die Richtungen gegenseitig blockieren. Bei 80 Grad
-                        // ueberlappen benachbarte Richtungen breit, die GEGENUEBERLIEGENDE
-                        // bleibt mit 180 Grad sicher aus, und reines Links/Rechts (Gas
-                        // 90 Grad entfernt) dreht weiterhin auf der Stelle.
-                        want = d <= (down[i] ? 86.0 : 80.0);
+                    if (r >= KB_STICK_RUHE) {
+                        double v = kbQuellWert(m.axis, g);
+                        want = down[i] ? (v > m.loesen) : (v >= m.schwelle);
                     }
                 } else {
                     // Trigger: eindimensional, Schwelle wie bisher
