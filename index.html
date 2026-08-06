@@ -3318,6 +3318,9 @@ function kbEmpfindlichkeit() {
   // der Fehler, der das Fahren unbrauchbar gemacht hat.
   if (aus >= an) { aus = Math.max(0.02, an - 0.03); const e = document.getElementById('kbAus'); if (e) e.value = Math.round(aus * 100) }
   p.ruhe = ruhe
+  // Ab jetzt sind es EIGENE Werte: Lumora zieht dieses Profil nicht mehr still auf
+  // den Stand des mitgelieferten Profils nach.
+  p.eigeneWerte = true
   for (const t of (p.tasten || [])) {
     if (t.schwelle === undefined || !/^L[XY]/.test(t.quelle)) continue
     t.schwelle = an; t.loesen = aus
