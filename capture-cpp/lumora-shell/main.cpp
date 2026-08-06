@@ -9,6 +9,8 @@
 // Aufruf: lumora-shell [--appdir <Ordner mit index.html>]   (Default: aktuelles Verzeichnis)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#define DIRECTINPUT_VERSION 0x0800
+#include <dinput.h>   // GTA2 liest die Tastatur hierueber - Messung muss denselben Weg gehen
 #include <windowsx.h>
 #include <dwmapi.h>   // runde Fensterecken (Tuersteher-Fenster)
 #include <shellapi.h>
@@ -389,10 +391,49 @@ static json loadKbHouseProfiles() {
     FindClose(h);
     return out;
 }
+// Eine eigene Kopie eines mitgelieferten Profils friert dessen Stand ein und bekommt
+// spaetere Korrekturen NIE mit. Das hat beim GTA2-Profil echten Schaden angerichtet:
+// die verbesserten Lenkschwellen lagen im Haus-Profil, gespielt wurde monatelang mit
+// den alten - man konnte nicht laufen und gleichzeitig lenken.
+// Darum werden Schwellen und fehlende Tasten aus dem Haus-Profil nachgezogen, SOLANGE
+// der Anwender die Empfindlichkeit nicht selbst eingestellt hat (dann steht
+// "eigeneWerte" drin und Lumora fasst nichts an).
+static void kbZieheHausstandNach(json& nutzer, const json& haus) {
+    for (auto& [id, p] : nutzer.items()) {
+        if (!p.is_object() || p.value("eigeneWerte", false)) continue;
+        std::string spiel = p.value("spiel", "");
+        for (auto& c : spiel) c = (char)tolower((unsigned char)c);
+        if (spiel.empty()) continue;
+        for (auto& [hid, h] : haus.items()) {
+            if (!h.is_object()) continue;
+            std::string hs = h.value("spiel", "");
+            for (auto& c : hs) c = (char)tolower((unsigned char)c);
+            if (hs != spiel) continue;
+            if (h.contains("ruhe") && !p.contains("ruhe")) p["ruhe"] = h["ruhe"];
+            if (!p.contains("tasten") || !p["tasten"].is_array()) break;
+            for (auto& ht : h.value("tasten", json::array())) {
+                std::string q = ht.value("quelle", "");
+                bool da = false;
+                for (auto& pt : p["tasten"]) {
+                    if (pt.value("quelle", "") != q) continue;
+                    da = true;
+                    if (ht.contains("schwelle")) { pt["schwelle"] = ht["schwelle"]; pt["loesen"] = ht["loesen"]; }
+                    break;
+                }
+                if (!da) p["tasten"].push_back(ht);   // spaeter dazugekommene Taste
+            }
+            break;
+        }
+    }
+}
 static json loadKbProfiles() {
-    json out = loadKbHouseProfiles();
+    json haus = loadKbHouseProfiles();
+    json out = haus;
     json j = json::parse(readFile(kbProfilesPath()), nullptr, false);
-    if (j.is_object()) for (auto& [k, v] : j.items()) out[k] = v;   // Nutzer gewinnt
+    if (j.is_object()) {
+        kbZieheHausstandNach(j, haus);
+        for (auto& [k, v] : j.items()) out[k] = v;   // Nutzer gewinnt
+    }
     return out;
 }
 // Ein importiertes Profil ist FREMDES Material (aus einem Forum, per Chat). Es wird
@@ -6041,6 +6082,139 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                   gabEs ? (readFile(pfad) == sicherung) : (readFile(pfad).empty()));
         }
         res = "kbbridge-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + " (" + std::to_string(evs.size()) + " Ereignisse)\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
+    }
+    // Ende-zu-Ende: die KOMPLETTE Kette einmal messen - Stick-Werte rein, echtes
+    // SendInput raus, und am Ende am BETRIEBSSYSTEM nachsehen, welche Tasten wirklich
+    // liegen. Genau die Luecke, die alle bisherigen Tests offen liessen: die
+    // Zustandsmaschine war gruen, trotzdem kam im Spiel nichts an.
+    // Zusaetzlich wird jeder SendInput-Aufruf protokolliert (Rueckgabe + Fehlercode) -
+    // ohne das bleibt bei "nichts kommt an" nur Raten.
+    // Der entscheidende Messpunkt: GTA2 liest die Tastatur AUSSCHLIESSLICH ueber
+    // DirectInput (gta2.exe importiert DirectInputCreate und KEINE der Win32-Tasten-
+    // APIs). Ob eine Taste "liegt", misst GetAsyncKeyState - das ist ein ANDERER Weg
+    // als der, den das Spiel benutzt. Dieser Test fragt deshalb dieselbe Schnittstelle
+    // wie das Spiel: DirectInput-Tastatur oeffnen, unsere Tasten schicken, Geraete-
+    // zustand lesen. Erst das beweist, was im Spiel wirklich ankommt.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-kbdinput") == 0) {
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string res; int fehler = 0;
+        auto pruef = [&](const char* was, bool ok) {
+            res += std::string(ok ? "OK   " : "FEHL ") + was + "\n"; if (!ok) ++fehler;
+        };
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        IDirectInput8W* di = nullptr; IDirectInputDevice8W* kb = nullptr;
+        hr = DirectInput8Create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION,
+                                IID_IDirectInput8W, (void**)&di, nullptr);
+        if (FAILED(hr) || !di) {
+            res += "FEHL DirectInput8Create hr=" + std::to_string((long)hr) + "\n"; ++fehler;
+        } else {
+            hr = di->CreateDevice(GUID_SysKeyboard, &kb, nullptr);
+            if (SUCCEEDED(hr)) hr = kb->SetDataFormat(&c_dfDIKeyboard);
+            // Ein unsichtbares Fenster reicht; HINTERGRUND+nicht-exklusiv, damit die
+            // Messung auch ohne Vordergrund laeuft (wie hier ohne Spiel).
+            HWND h = CreateWindowExW(0, L"STATIC", L"lumora-di", 0, 0, 0, 1, 1,
+                                     HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+            if (SUCCEEDED(hr)) hr = kb->SetCooperativeLevel(h, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+            if (SUCCEEDED(hr)) hr = kb->Acquire();
+            if (FAILED(hr)) { res += "FEHL DirectInput-Tastatur hr=" + std::to_string((long)hr) + "\n"; ++fehler; }
+            else {
+                BYTE st[256];
+                auto lies = [&](void) { kb->Acquire(); kb->GetDeviceState(sizeof(st), st); };
+                auto dik = [&](int c) { return (st[c] & 0x80) != 0; };
+                // DIK-Codes exakt so, wie GTA2 sie in der Registry stehen hat:
+                // 200 = oben, 208 = unten, 203 = links, 205 = rechts.
+                Sleep(60); lies();
+                pruef("Ausgangslage: keine Pfeiltaste in DirectInput", !dik(200) && !dik(203) && !dik(205));
+                lubridge::kbSendScancode(0x48, true, true);  Sleep(60); lies();
+                pruef("Pfeil oben erreicht DirectInput (DIK 200)", dik(200));
+                lubridge::kbSendScancode(0x4B, true, true);  Sleep(60); lies();
+                pruef("oben UND links GLEICHZEITIG in DirectInput", dik(200) && dik(203));
+                lubridge::kbSendScancode(0x4B, true, false);
+                lubridge::kbSendScancode(0x4D, true, true);  Sleep(60); lies();
+                pruef("Richtungswechsel: oben bleibt, rechts kommt", dik(200) && dik(205) && !dik(203));
+                lubridge::kbSendScancode(0x4D, true, false);
+                lubridge::kbSendScancode(0x48, true, false); Sleep(60); lies();
+                pruef("alles los: DirectInput sauber", !dik(200) && !dik(203) && !dik(205));
+                char b[128]; sprintf_s(b, "Rohzustand zuletzt: 200=%d 203=%d 205=%d 208=%d\n",
+                                       (int)dik(200), (int)dik(203), (int)dik(205), (int)dik(208));
+                res += b;
+                kb->Unacquire();
+            }
+            if (kb) kb->Release();
+            if (h) DestroyWindow(h);
+            di->Release();
+        }
+        CoUninitialize();
+        res = "kbdinput-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
+    }
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-kbkette") == 0) {
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string res; int fehler = 0;
+        auto liegt = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+        auto pruef = [&](const char* was, bool ok) {
+            res += std::string(ok ? "OK   " : "FEHL ") + was + "\n"; if (!ok) ++fehler;
+        };
+        // 1) Taugt SendInput hier ueberhaupt? Rueckgabe und Fehlercode festhalten.
+        {
+            INPUT in{}; in.type = INPUT_KEYBOARD; in.ki.wScan = 0x48;
+            in.ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY;
+            SetLastError(0);
+            UINT n = SendInput(1, &in, sizeof(INPUT));
+            DWORD err = GetLastError();
+            char b[160]; sprintf_s(b, "SendInput Rueckgabe=%u Fehler=%lu  ->  VK_UP liegt=%d\n",
+                                   n, (unsigned long)err, (int)0);
+            Sleep(40);
+            sprintf_s(b, "SendInput Rueckgabe=%u Fehler=%lu  ->  VK_UP liegt=%d\n",
+                      n, (unsigned long)err, (int)liegt(VK_UP));
+            res += b;
+            in.ki.dwFlags |= KEYEVENTF_KEYUP; SendInput(1, &in, sizeof(INPUT)); Sleep(40);
+        }
+        // 2) Die echte Frage: Laufen UND Lenken gleichzeitig. Gefuettert wird die
+        //    Engine mit dem Profil aus der Anwender-Datei (nicht mit einem Wunschwert!),
+        //    ausgegeben wird ueber das echte SendInput.
+        json prof = kbProfileForExe("gta2.exe");
+        bool ausDatei = !prof.is_null();
+        if (!ausDatei) prof = json::parse(readFile(exeDir() + L"\\profile\\gta2.lumoraprofil"), nullptr, false);
+        res += std::string("Profilquelle: ") + (ausDatei ? "Anwender-Profil (kb-profiles.json)" : "mitgeliefertes Haus-Profil") + "\n";
+        if (prof.is_discarded() || prof.is_null()) {
+            res += "FEHL kein GTA2-Profil gefunden\n"; ++fehler;
+        } else {
+            for (auto& t : prof.value("tasten", json::array()))
+                if (t.value("quelle", "") == "LX-")
+                    res += "  Lenk-Schwelle im benutzten Profil: an=" + std::to_string(t.value("schwelle", 0.0))
+                         + " aus=" + std::to_string(t.value("loesen", 0.0)) + "\n";
+            lubridge::KbEngine e;
+            e.prof = lubridge::parseKbProfile(prof);
+            e.reset();
+            e.sink = lubridge::kbSendScancode;                 // ECHTES SendInput
+            auto stick = [](double x, double y) {
+                XINPUT_GAMEPAD g{};
+                g.sThumbLX = (SHORT)(x * 32767.0); g.sThumbLY = (SHORT)(y * 32767.0);
+                return g;
+            };
+            pruef("Ausgangslage: nichts liegt", !liegt(VK_UP) && !liegt(VK_LEFT) && !liegt(VK_RIGHT));
+            // Stick voll nach oben - laufen
+            e.tick(stick(0.00, 1.00), true); Sleep(60);
+            pruef("Laufen: Pfeil oben liegt", liegt(VK_UP));
+            // Und jetzt seitlich, so weit wie dieser Stick bei vollem Ausschlag kommt
+            for (double x : { 0.10, 0.20, 0.30, -0.10, -0.20, -0.30 }) {
+                e.tick(stick(x, 1.00), true); Sleep(50);
+                char b[128]; sprintf_s(b, "  X=%+.2f -> oben=%d links=%d rechts=%d\n",
+                                       x, (int)liegt(VK_UP), (int)liegt(VK_LEFT), (int)liegt(VK_RIGHT));
+                res += b;
+            }
+            e.tick(stick(0.30, 1.00), true); Sleep(60);
+            pruef("Laufen UND rechts GLEICHZEITIG", liegt(VK_UP) && liegt(VK_RIGHT));
+            e.tick(stick(-0.30, 1.00), true); Sleep(60);
+            pruef("Richtungswechsel ohne Stehenbleiben", liegt(VK_UP) && liegt(VK_LEFT) && !liegt(VK_RIGHT));
+            e.releaseAll(); Sleep(60);
+            pruef("Losgelassen: nichts klemmt", !liegt(VK_UP) && !liegt(VK_LEFT) && !liegt(VK_RIGHT));
+        }
+        res = "kbkette-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
         return fehler ? 1 : 0;
     }
