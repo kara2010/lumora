@@ -829,6 +829,12 @@ inline std::atomic<bool> g_kbActive{ false };
 inline std::thread g_kbThread;
 inline std::mutex g_kbMx;                 // schuetzt g_kbEngine (IPC-Start vs. Poll-Thread)
 inline KbEngine g_kbEngine;
+// Live-Diagnose: was liest der Poll-Thread WIRKLICH? Ohne diese Anzeige bleibt bei
+// "der Controller macht nicht, was ich will" nur Raten - Pad-Werte, Fokus und die
+// daraus abgeleiteten Tasten sind sonst von aussen unsichtbar.
+inline std::atomic<bool> g_kbMonitor{ false };
+inline std::mutex g_kbMonMx;
+inline json g_kbMonData = json::object();
 
 // Vordergrund-Pruefung: Tasten fliessen NUR, wenn das Zielspiel vorne ist (bzw. bei
 // leerem Ziel: irgendein fremdes Fenster, nie Lumora selbst). Die Pruefung sitzt im
@@ -870,6 +876,26 @@ inline void kbThreadProc() {
             std::lock_guard<std::mutex> lk(g_kbMx);
             if (pad) g_kbEngine.tick(st.Gamepad, erlaubt);
             else g_kbEngine.releaseAll();                  // Pad abgezogen -> nichts klemmen lassen
+            // Live-Diagnose (nur wenn der Reiter offen ist): Rohwerte + abgeleitete Tasten
+            if (g_kbMonitor.load()) {
+                static DWORD letzterPush = 0;
+                if (jetzt - letzterPush >= 100) {
+                    letzterPush = jetzt;
+                    json aktiv = json::array();
+                    for (size_t i = 0; i < g_kbEngine.prof.maps.size(); ++i)
+                        if (g_kbEngine.down[i]) aktiv.push_back(g_kbEngine.prof.maps[i].quelle);
+                    json tasten = json::array();
+                    for (auto& [k, n] : g_kbEngine.held) if (n > 0) tasten.push_back((int)(k & 0xFF));
+                    json d = {
+                        {"pad", pad}, {"fokus", erlaubt}, {"spiel", spiel},
+                        {"lx", pad ? st.Gamepad.sThumbLX / 32767.0 : 0.0},
+                        {"ly", pad ? st.Gamepad.sThumbLY / 32767.0 : 0.0},
+                        {"rt", pad ? st.Gamepad.bRightTrigger / 255.0 : 0.0},
+                        {"quellen", aktiv}, {"tasten", tasten}
+                    };
+                    { std::lock_guard<std::mutex> lm(g_kbMonMx); g_kbMonData = d; }
+                }
+            }
         }
         Sleep(4);
     }
@@ -905,6 +931,11 @@ inline void kbStop(const std::string& reason) {
 inline json kbStatus() {
     std::lock_guard<std::mutex> lk(g_kbMx);
     return { {"active", g_kbActive.load()}, {"name", g_kbEngine.prof.name}, {"spiel", g_kbEngine.prof.spiel} };
+}
+inline void kbSetMonitor(bool on) { g_kbMonitor = on; }
+inline json kbMonitor() {
+    std::lock_guard<std::mutex> lk(g_kbMonMx);
+    return g_kbMonData;
 }
 
 // Beim App-Ende: Pad weg, Thread beenden (ViGEm-Verbindung sauber schliessen).
