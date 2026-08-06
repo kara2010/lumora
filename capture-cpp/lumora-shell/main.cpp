@@ -5156,6 +5156,11 @@ static json handleChannel(const std::string& channel, const json& args) {
         return true;
     }
     if (channel == "kb-bridge-status") return lubridge::kbStatus();
+    if (channel == "kb-bridge-monitor") {
+        lubridge::kbSetMonitor(args.size() >= 1 && args[0].is_boolean() && args[0].get<bool>());
+        return true;
+    }
+    if (channel == "kb-bridge-monitor-read") return lubridge::kbMonitor();
     if (channel == "kb-get-profiles") return loadKbProfiles();
     if (channel == "kb-save-profiles" && args.size() >= 1 && args[0].is_object()) {
         // Haus-Profile NICHT mitschreiben: sie kommen aus dem Programmordner und

@@ -827,7 +827,11 @@
           <div class="form-group">
             <label>Eingabe-Brücke</label>
             <p class="settings-hint">Lumora übersetzt Eingaben in beide Richtungen – je nachdem, was dein Spiel versteht. Beide Modi sind unabhängig voneinander und können auch gleichzeitig laufen.</p>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 4px">
+            <!-- minmax(0,1fr): eine nackte 1fr-Spalte hat min-width:auto und waechst auf
+                 min-content - der laengste unumbrechbare Text machte den ganzen Reiter
+                 breiter als das Fenster und schob die Reiterleiste seitlich weg
+                 ("Bibliothek" war angeschnitten). Gleiche Falle wie in der Werkbank. -->
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin:10px 0 4px">
               <div style="padding:10px 12px;border:1px solid var(--border);border-radius:10px">
                 <div style="font-weight:600;margin-bottom:4px">① Gerät → Xbox-Gamepad</div>
                 <div class="settings-hint" style="margin:0">Für neue Spiele, die nur Gamepads kennen. Dein Lenkrad, Joystick oder Flightstick erscheint als Xbox-Controller.</div>
@@ -982,6 +986,12 @@
               <span class="setting-toggle-label" id="kbStatusLabel">Tastatur-Modus: aus</span>
               <button class="btn-primary" id="kbToggleBtn" onclick="kbToggle()">▶ Aktivieren</button>
             </div>
+          </div>
+
+          <div class="form-group">
+            <label>Live-Prüfung</label>
+            <p class="settings-hint">Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Damit lässt sich sofort sehen, ob eine Bewegung ankommt – bewege den Stick und beobachte die Zeile.</p>
+            <div id="kbMonitor" class="settings-hint" style="font-family:monospace;white-space:pre-wrap;min-height:48px">–</div>
           </div>
         </div>
 
@@ -1268,6 +1278,18 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "Live-Prüfung": "Live check",
+  "Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Damit lässt sich sofort sehen, ob eine Bewegung ankommt – bewege den Stick und beobachte die Zeile.": "Shows what the bridge currently reads from the controller and which keys it presses. Move the stick and watch the line to see instantly whether a movement registers.",
+  "Tastatur-Modus ist aus – zum Prüfen aktivieren.": "Keyboard mode is off – activate it to run the check.",
+  "Controller:": "Controller:",
+  "erkannt": "detected",
+  "KEINER GEFUNDEN": "NONE FOUND",
+  "Vordergrund:": "Foreground:",
+  "Tasten gehen durch": "keys are getting through",
+  "blockiert": "blocked",
+  "wartet auf": "waiting for",
+  "Erkannt:": "Detected:",
+  "Tasten gedrückt:": "Keys pressed:",
   "Bei passenden Spielen automatisch aktivieren": "Activate automatically for matching games",
   "Trägt das Profil einen Spielnamen, springt es beim Start dieses Spiels von selbst an – und geht beim Beenden wieder aus. Schaltest du hier von Hand ab, bleibt es für dieses Spiel aus, bis du es beendest.": "If the profile names a game, it starts by itself when that game launches – and switches off when it ends. If you turn it off by hand, it stays off for that game until you quit it.",
   // --- Eingabe-Reiter: Neugliederung in zwei Modi ---
@@ -3072,6 +3094,34 @@ async function kbOpen() {
   const ids = Object.keys(kbProfiles)
   if (!kbCurrent || !kbProfiles[kbCurrent]) kbCurrent = ids[0] || null
   kbRenderProfiles(); kbRenderMap(); kbRefreshStatus()
+  kbMonitorStart()
+}
+// Live-Pruefung: fragt den Zustand aus der Shell ab, solange der Reiter offen ist.
+// Bewusst Abholen statt Push - 10 Aufrufe/s sind guenstiger als ein Dauerstrom, und
+// beim Verlassen des Reiters hoert es garantiert auf (kein Leerlauf im Hintergrund).
+let kbMonTimer = null
+function kbMonitorStart() {
+  if (kbMonTimer) return
+  ipcRenderer.invoke('kb-bridge-monitor', true)
+  kbMonTimer = setInterval(async () => {
+    const el = document.getElementById('kbMonitor')
+    if (!el || !el.offsetParent) { kbMonitorStop(); return }   // Reiter zu -> aufhoeren
+    const d = await ipcRenderer.invoke('kb-bridge-monitor-read')
+    if (!d || typeof d !== 'object') return
+    if (!kbAktiv) { el.textContent = window.tr('Tastatur-Modus ist aus – zum Prüfen aktivieren.'); return }
+    const f = (v) => (v >= 0 ? ' ' : '') + (v || 0).toFixed(2)
+    const z = []
+    z.push(window.tr('Controller:') + ' ' + (d.pad ? window.tr('erkannt') : window.tr('KEINER GEFUNDEN')))
+    z.push(window.tr('Vordergrund:') + ' ' + (d.fokus ? window.tr('Tasten gehen durch') : window.tr('blockiert') + (d.spiel ? ' (' + window.tr('wartet auf') + ' ' + d.spiel + ')' : '')))
+    z.push('Stick  X=' + f(d.lx) + '   Y=' + f(d.ly) + '   RT=' + f(d.rt))
+    z.push(window.tr('Erkannt:') + ' ' + ((d.quellen && d.quellen.length) ? d.quellen.join(' + ') : '–'))
+    z.push(window.tr('Tasten gedrückt:') + ' ' + ((d.tasten && d.tasten.length) ? d.tasten.map(kbTastenName).join(' + ') : '–'))
+    el.textContent = z.join('\n')
+  }, 100)
+}
+function kbMonitorStop() {
+  if (kbMonTimer) { clearInterval(kbMonTimer); kbMonTimer = null }
+  ipcRenderer.invoke('kb-bridge-monitor', false)
 }
 function kbRenderProfiles() {
   const sel = document.getElementById('kbProfileSel'); if (!sel || !kbProfiles) return
