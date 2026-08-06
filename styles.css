@@ -2457,6 +2457,13 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 .an-osdlbl { width: 100px; font-size: 12.5px; opacity: .8; flex: 0 0 auto; }
 .an-osdrow input[type=range] { flex: 1; max-width: 260px; }
 .an-osdval { width: 46px; font-size: 12px; opacity: .65; font-variant-numeric: tabular-nums; }
+/* Eingabe-Bruecke: Warnung, wenn die Ansprechschwelle ueber dem liegt, was der Stick
+   auf der Gegenachse ueberhaupt erreicht - dann kann man beim Laufen nicht lenken. */
+.kb-warn { color: #ffb454 !important; opacity: 1 !important; }
+/* Hinweis, dass ein mitgeliefertes Profil seit der eigenen Kopie verbessert wurde. */
+.kb-haus-hinweis { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 10px 12px; margin: 0 0 10px; border-radius: 10px; font-size: 12.5px;
+  background: rgba(255,180,84,.10); border: 1px solid rgba(255,180,84,.28); }
 /* Der Positions-Wahler im Analyse-Reiter nutzt jetzt .osd-corners/.osd-corner aus dem
    Overlay-Reiter (identische Optik, eine Stilquelle) - die frueheren .an-corner-Regeln
    sind damit tot und entfernt. */

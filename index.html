@@ -474,6 +474,10 @@
           </div>
           <div class="form-group">
             <label>Empfindlichkeit</label>
+            <div id="kbHausHinweis" class="kb-haus-hinweis" style="display:none">
+              <span id="kbHausText"></span>
+              <button class="btn-secondary" onclick="kbHausUebernehmen()">Verbesserte Werte übernehmen</button>
+            </div>
             <p class="settings-hint">Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28&nbsp;ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45&nbsp;ms).</p>
             <div class="an-sense" id="anSense">
               <button data-v="0" onclick="anSetSense(0)">Empfindlich</button>
@@ -1012,6 +1016,11 @@
                   <span id="kbAusVal" class="mono">–</span>
                 </div>
                 <p class="settings-hint" style="margin:2px 0 0">Muss unter „Ansprechen" liegen. Der Abstand verhindert Flattern am Übergang.</p>
+                <p class="settings-hint" id="kbHuelle" style="margin:10px 0 6px">–</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <button class="btn-secondary" onclick="kbHuelleUebernehmen()">Werte aus Messung übernehmen</button>
+                  <button class="btn-secondary" onclick="kbHuelleReset()">Messung neu starten</button>
+                </div>
               </div>
             </div>
           </div>
@@ -1312,6 +1321,20 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "Noch nicht gemessen: Stick einmal ganz nach oben halten und dabei voll nach links und rechts drehen, dann dasselbe zur Seite.": "Not measured yet: hold the stick fully up while turning it all the way left and right, then do the same sideways.",
+  "Zu hoch:": "Too high:",
+  "Dein Stick erreicht auf der Gegenachse nur": "On the opposite axis your stick only reaches",
+  "Bei \"Ansprechen\"": "With \"Trigger at\" set to",
+  "kannst du beim Laufen nicht lenken.": "you cannot steer while moving.",
+  "Gemessen: Gegenachse erreicht": "Measured: opposite axis reaches",
+  "\"Ansprechen\" liegt mit": "\"Trigger at\" sits at",
+  "darunter, beides geht gleichzeitig.": "below that, so both work at once.",
+  "Das mitgelieferte Profil": "The bundled profile",
+  "wurde seit deiner Kopie verbessert": "has been improved since you copied it",
+  "Zuordnungen": "mappings",
+  "Werte aus Messung übernehmen": "Apply measured values",
+  "Messung neu starten": "Restart measurement",
+  "Verbesserte Werte übernehmen": "Apply improved values",
   "Jeder Controller ist anders: Bei vollem Ausschlag in eine Richtung erreicht die andere Achse oft nur einen Bruchteil. Liegt die Ansprechschwelle darüber, fällt beim Lenken das Gas weg (oder umgekehrt). Bewege den Stick – der Punkt zeigt, was ankommt, die Ringe zeigen die Schwellen.": "Every controller is different: at full deflection in one direction, the other axis often only reaches a fraction of its range. If the trigger threshold sits above that, steering cancels the throttle (or the other way round). Move the stick – the dot shows what gets through, the guides show the thresholds.",
   "Ruhezone": "Rest zone",
   "Darunter gilt der Stick als losgelassen (gegen Zittern und Drift).": "Below this the stick counts as released (guards against jitter and drift).",
@@ -3141,6 +3164,11 @@ function kbEigeneKopie() {
   const id = 'kb' + Date.now().toString(36)
   const kopie = JSON.parse(JSON.stringify(p))
   delete kopie.haus
+  // Herkunft merken: eine Kopie friert den Stand von heute ein und bekommt spaetere
+  // Korrekturen am mitgelieferten Profil NIE mit. Genau daran ist das GTA2-Lenken
+  // haengengeblieben - die verbesserten Schwellen lagen im Haus-Profil, gespielt
+  // wurde aber mit der alten Kopie. Mit der Herkunft kann die App das erkennen.
+  kopie.stammtVon = kbCurrent
   kopie.name = (p.name || kbCurrent) + ' ' + window.tr('(eigene Kopie)')
   kbProfiles[id] = kopie
   kbCurrent = id
@@ -3152,7 +3180,7 @@ async function kbOpen() {
   const ids = Object.keys(kbProfiles)
   if (!kbCurrent || !kbProfiles[kbCurrent]) kbCurrent = ids[0] || null
   kbRenderProfiles(); kbRenderMap(); kbRefreshStatus()
-  kbEmpfLaden(); kbStickZeichnen()
+  kbEmpfLaden(); kbStickZeichnen(); kbHausAbgleich(); kbHuelleReset()
   kbMonitorStart()
 }
 // Live-Pruefung: fragt den Zustand aus der Shell ab, solange der Reiter offen ist.
@@ -3168,7 +3196,8 @@ function kbMonitorStart() {
     const d = await ipcRenderer.invoke('kb-bridge-monitor-read')
     if (!d || typeof d !== 'object') return
     kbStickWerte = { lx: d.lx || 0, ly: d.ly || 0, rt: d.rt || 0, pad: !!d.pad }
-    kbStickZeichnen()
+    if (d.pad) kbHuelleProbe(d.lx || 0, d.ly || 0)
+    kbStickZeichnen(); kbHuelleZeigen()
     const f = (v) => (v >= 0 ? ' ' : '') + (v || 0).toFixed(2)
     const z = []
     z.push(window.tr('Controller:') + ' ' + (d.pad ? window.tr('erkannt') : window.tr('KEINER GEFUNDEN')))
@@ -3180,6 +3209,83 @@ function kbMonitorStart() {
     el.textContent = z.join('\n')
   }, 100)
 }
+// --- Was schafft DIESER Stick wirklich? ------------------------------------------
+// Ein Stick erreicht bei vollem Ausschlag nach oben seitlich nicht annaehernd 1.0 -
+// bei diesem Pad real nur 0.08..0.38. Liegt die Ansprechschwelle darueber, kann man
+// beim Laufen nicht lenken: genau der gemeldete Fehler. Statt zu schaetzen misst
+// Lumora die Huelle mit, waehrend man den Stick bewegt.
+let kbHuelle = { xBeiY: 0, yBeiX: 0, proben: 0 }
+function kbHuelleProbe(lx, ly) {
+  const ax = Math.abs(lx), ay = Math.abs(ly)
+  if (ay >= 0.85) { kbHuelle.xBeiY = Math.max(kbHuelle.xBeiY, ax); kbHuelle.proben++ }
+  if (ax >= 0.85) { kbHuelle.yBeiX = Math.max(kbHuelle.yBeiX, ay); kbHuelle.proben++ }
+}
+function kbHuelleReset() { kbHuelle = { xBeiY: 0, yBeiX: 0, proben: 0 }; kbHuelleZeigen() }
+function kbHuelleZeigen() {
+  const el = document.getElementById('kbHuelle'); if (!el) return
+  const w = kbEmpfWerte()
+  const m = Math.min(kbHuelle.xBeiY || 9, kbHuelle.yBeiX || 9)
+  if (kbHuelle.proben < 5 || m > 8) {
+    el.className = 'settings-hint'
+    el.textContent = window.tr('Noch nicht gemessen: Stick einmal ganz nach oben halten und dabei voll nach links und rechts drehen, dann dasselbe zur Seite.')
+    return
+  }
+  const p = (v) => Math.round(v * 100) + '%'
+  if (w.an >= m) {
+    el.className = 'settings-hint kb-warn'
+    el.textContent = window.tr('Zu hoch:') + ' ' + window.tr('Dein Stick erreicht auf der Gegenachse nur') + ' ' + p(m) + '. '
+      + window.tr('Bei "Ansprechen"') + ' ' + p(w.an) + ' ' + window.tr('kannst du beim Laufen nicht lenken.')
+  } else {
+    el.className = 'settings-hint'
+    el.textContent = window.tr('Gemessen: Gegenachse erreicht') + ' ' + p(m) + ' — '
+      + window.tr('"Ansprechen" liegt mit') + ' ' + p(w.an) + ' ' + window.tr('darunter, beides geht gleichzeitig.')
+  }
+}
+// Vorschlag aus der Messung: klar unter der Huelle bleiben (60 %), Loslassen mit
+// deutlichem Abstand darunter (55 % davon) gegen Flattern am Uebergang.
+function kbHuelleUebernehmen() {
+  const m = Math.min(kbHuelle.xBeiY || 0, kbHuelle.yBeiX || 0)
+  if (kbHuelle.proben < 5 || m <= 0) return
+  const an = Math.max(0.05, Math.min(0.60, m * 0.6))
+  const aus = Math.max(0.02, an * 0.55)
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = Math.round(v * 100) }
+  set('kbAn', an); set('kbAus', aus)
+  kbEmpfindlichkeit()
+}
+// --- Kopie vs. mitgeliefertes Profil ---------------------------------------------
+// Eine eigene Kopie bekommt Korrekturen am Haus-Profil nicht mit. Das still zu
+// lassen hat gekostet: gespielt wurde monatelang mit veralteten Schwellen.
+function kbHausAbgleich() {
+  const box = document.getElementById('kbHausHinweis'); if (!box) return
+  const p = kbProf()
+  const h = p && p.stammtVon ? kbProfiles[p.stammtVon] : null
+  if (!h) { box.style.display = 'none'; return }
+  const anders = []
+  for (const t of (h.tasten || [])) {
+    if (t.schwelle === undefined) continue
+    const e = (p.tasten || []).find(x => x.quelle === t.quelle)
+    if (!e) { anders.push(t.quelle); continue }
+    if (e.schwelle !== t.schwelle || e.loesen !== t.loesen) anders.push(t.quelle)
+  }
+  if (!anders.length) { box.style.display = 'none'; return }
+  box.style.display = ''
+  const txt = document.getElementById('kbHausText')
+  if (txt) txt.textContent = window.tr('Das mitgelieferte Profil') + ' „' + (h.name || p.stammtVon) + '" '
+    + window.tr('wurde seit deiner Kopie verbessert') + ' (' + anders.length + ' ' + window.tr('Zuordnungen') + ').'
+}
+function kbHausUebernehmen() {
+  const p = kbEigeneKopie(); if (!p || !p.stammtVon) return
+  const h = kbProfiles[p.stammtVon]; if (!h) return
+  for (const t of (h.tasten || [])) {
+    const e = (p.tasten || []).find(x => x.quelle === t.quelle)
+    if (!e) { p.tasten.push(JSON.parse(JSON.stringify(t))); continue }
+    if (t.schwelle !== undefined) { e.schwelle = t.schwelle; e.loesen = t.loesen }
+  }
+  if (h.ruhe !== undefined) p.ruhe = h.ruhe
+  kbSave(); kbEmpfLaden(); kbRenderMap(); kbHausAbgleich()
+  if (kbAktiv) ipcRenderer.invoke('kb-bridge-start', p)
+}
+
 // --- Empfindlichkeit: Regler + Live-Bild des Sticks ------------------------------
 // Die Werte gehoeren ins PROFIL (nicht global): jeder Controller erreicht bei vollem
 // Ausschlag in einer Richtung auf der anderen Achse andere Maximalwerte - real
@@ -3217,6 +3323,7 @@ function kbEmpfindlichkeit() {
     t.schwelle = an; t.loesen = aus
   }
   kbEmpfAnzeige({ ruhe, an, aus })
+  kbHuelleZeigen(); kbHausAbgleich()
   kbSave()
   if (kbMonTimer && !kbAktiv) ipcRenderer.invoke('kb-bridge-monitor', true, p)   // Beobachter mit neuen Werten
   if (kbAktiv) ipcRenderer.invoke('kb-bridge-start', p)   // sofort wirksam
@@ -3302,7 +3409,7 @@ function kbRenderProfiles() {
     : ''
 }
 function kbSelectProfile(id) {
-  setTimeout(() => { kbEmpfLaden(); if (kbMonTimer && !kbAktiv) ipcRenderer.invoke('kb-bridge-monitor', true, kbProf() || null) }, 0)   // Regler + Beobachter nachziehen
+  setTimeout(() => { kbEmpfLaden(); kbHausAbgleich(); kbHuelleReset(); if (kbMonTimer && !kbAktiv) ipcRenderer.invoke('kb-bridge-monitor', true, kbProf() || null) }, 0)   // Regler + Beobachter nachziehen
   if (kbProfiles && kbProfiles[id]) { kbCurrent = id; kbRenderProfiles(); kbRenderMap() } }
 function kbRenderMap() {
   const box = document.getElementById('kbMapList'); if (!box) return
