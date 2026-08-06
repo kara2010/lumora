@@ -5161,6 +5161,19 @@ static json handleChannel(const std::string& channel, const json& args) {
         return true;
     }
     if (channel == "kb-bridge-monitor-read") return lubridge::kbMonitor();
+    // Mitschnitt in %APPDATA%\lumora\kb-mitschnitt.txt: erlaubt das Messen WAEHREND
+    // des Spielens - die Live-Anzeige taugt dafuer nicht, weil man zum Pruefen den
+    // Stick bewegen muesste und damit in Lumora navigiert statt im Spiel zu sein.
+    // Datenordner im Explorer zeigen (Mitschnitt weitergeben, Profile sichern).
+    if (channel == "open-data-folder") {
+        ShellExecuteW(nullptr, L"open", dataDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        return true;
+    }
+    if (channel == "kb-bridge-trace") {
+        bool an = args.size() >= 1 && args[0].is_boolean() && args[0].get<bool>();
+        lubridge::kbSetTrace(an, dataDir() + L"\\kb-mitschnitt.txt");
+        return json{ {"an", an}, {"pfad", narrow(dataDir() + L"\\kb-mitschnitt.txt")} };
+    }
     if (channel == "kb-get-profiles") return loadKbProfiles();
     if (channel == "kb-save-profiles" && args.size() >= 1 && args[0].is_object()) {
         // Haus-Profile NICHT mitschreiben: sie kommen aus dem Programmordner und
@@ -5964,6 +5977,48 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                   gabEs ? (readFile(pfad) == sicherung) : (readFile(pfad).empty()));
         }
         res = "kbbridge-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + " (" + std::to_string(evs.size()) + " Ereignisse)\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
+    }
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-kbsend") == 0) {
+        // Prueft die SENDE-KETTE selbst (nicht die Logik): kommen mehrere gleichzeitig
+        // gehaltene Scancode-Tasten im System an? Genau das war bisher unbewiesen -
+        // die Zustandsmaschine ist durch --test-kbbridge belegt, SendInput nicht.
+        // Gemessen wird mit GetAsyncKeyState: das liest den globalen Tastaturzustand
+        // und funktioniert unabhaengig davon, welches Fenster gerade vorn ist.
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string res; int fehler = 0;
+        auto pruef = [&](const char* was, bool ok) {
+            res += std::string(ok ? "OK   " : "FEHL ") + was + "\n"; if (!ok) ++fehler;
+        };
+        auto liegt = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+        // Ausgangslage: nichts darf haengen (sonst ist die Messung wertlos)
+        pruef("Ausgangslage: Pfeiltasten frei", !liegt(VK_UP) && !liegt(VK_LEFT) && !liegt(VK_RIGHT));
+        // 1) Pfeil oben (Basis-Scancode 0x48 + EXTENDEDKEY)
+        lubridge::kbSendScancode(0x48, true, true);  Sleep(30);
+        pruef("Pfeil oben kommt an", liegt(VK_UP));
+        // 2) Pfeil links ZUSAETZLICH - beide muessen gleichzeitig liegen
+        lubridge::kbSendScancode(0x4B, true, true);  Sleep(30);
+        bool beide = liegt(VK_UP) && liegt(VK_LEFT);
+        pruef("oben + links GLEICHZEITIG", beide);
+        // 3) Nur links loesen: oben muss weiter liegen
+        lubridge::kbSendScancode(0x4B, true, false); Sleep(30);
+        pruef("links los, oben bleibt", liegt(VK_UP) && !liegt(VK_LEFT));
+        // 4) Gegenrichtung dazu (oben + rechts), wie beim Lenken in die andere Richtung
+        lubridge::kbSendScancode(0x4D, true, true);  Sleep(30);
+        pruef("oben + rechts gleichzeitig", liegt(VK_UP) && liegt(VK_RIGHT));
+        // 5) Alles loesen - nichts darf klemmen
+        lubridge::kbSendScancode(0x4D, true, false);
+        lubridge::kbSendScancode(0x48, true, false); Sleep(30);
+        pruef("alles gelost, nichts klemmt", !liegt(VK_UP) && !liegt(VK_LEFT) && !liegt(VK_RIGHT));
+        // 6) Nicht-erweiterte Taste (Strg links = Angriff) parallel zu einer Pfeiltaste
+        lubridge::kbSendScancode(0x48, true, true);
+        lubridge::kbSendScancode(0x1D, false, true); Sleep(30);
+        pruef("Pfeil + Strg links gleichzeitig", liegt(VK_UP) && liegt(VK_LCONTROL));
+        lubridge::kbSendScancode(0x1D, false, false);
+        lubridge::kbSendScancode(0x48, true, false); Sleep(30);
+        pruef("beide wieder los", !liegt(VK_UP) && !liegt(VK_LCONTROL));
+        res = "kbsend-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
         return fehler ? 1 : 0;
     }

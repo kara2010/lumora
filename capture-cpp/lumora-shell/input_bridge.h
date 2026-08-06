@@ -835,6 +835,18 @@ inline KbEngine g_kbEngine;
 inline std::atomic<bool> g_kbMonitor{ false };
 inline std::mutex g_kbMonMx;
 inline json g_kbMonData = json::object();
+// MITSCHNITT: dasselbe in eine Datei, damit man WAEHREND des Spielens messen kann.
+// Die Live-Anzeige taugt dafuer nicht - wer den Stick bewegt, um sie zu pruefen,
+// navigiert damit in Lumora und ist gar nicht im Spiel. Aufgezeichnet wird nur bei
+// AENDERUNGEN (Kanten), sonst waere die Datei in Sekunden unlesbar gross.
+inline std::atomic<bool> g_kbTrace{ false };
+inline std::wstring g_kbTracePath;
+inline void kbTraceZeile(const std::string& s) {
+    if (g_kbTracePath.empty()) return;
+    FILE* f = nullptr; _wfopen_s(&f, g_kbTracePath.c_str(), L"a");
+    if (!f) return;
+    fwrite(s.data(), 1, s.size(), f); fwrite("\n", 1, 1, f); fclose(f);
+}
 
 // Vordergrund-Pruefung: Tasten fliessen NUR, wenn das Zielspiel vorne ist (bzw. bei
 // leerem Ziel: irgendein fremdes Fenster, nie Lumora selbst). Die Pruefung sitzt im
@@ -876,6 +888,28 @@ inline void kbThreadProc() {
             std::lock_guard<std::mutex> lk(g_kbMx);
             if (pad) g_kbEngine.tick(st.Gamepad, erlaubt);
             else g_kbEngine.releaseAll();                  // Pad abgezogen -> nichts klemmen lassen
+            // Mitschnitt: jede AENDERUNG festhalten (Fokus, erkannte Quellen, Tasten)
+            // plus die Stick-Rohwerte im Moment der Aenderung.
+            if (g_kbTrace.load()) {
+                static std::string letzterZustand;
+                static DWORD letzteZeile = 0;
+                std::string q, t;
+                for (size_t i = 0; i < g_kbEngine.prof.maps.size(); ++i)
+                    if (g_kbEngine.down[i]) { if (!q.empty()) q += "+"; q += g_kbEngine.prof.maps[i].quelle; }
+                for (auto& [k, n] : g_kbEngine.held) if (n > 0) { if (!t.empty()) t += "+"; char b[8]; sprintf_s(b, "%u", k & 0xFF); t += b; }
+                std::string zustand = (pad ? "pad " : "KEIN-PAD ") + std::string(erlaubt ? "fokus-ok " : "fokus-blockiert ")
+                                    + "q[" + q + "] t[" + t + "]";
+                if (zustand != letzterZustand) {
+                    letzterZustand = zustand;
+                    char b[192];
+                    sprintf_s(b, "%6u ms  X=%+.2f Y=%+.2f RT=%.2f  %s", jetzt - letzteZeile ? jetzt : jetzt,
+                              pad ? st.Gamepad.sThumbLX / 32767.0 : 0.0,
+                              pad ? st.Gamepad.sThumbLY / 32767.0 : 0.0,
+                              pad ? st.Gamepad.bRightTrigger / 255.0 : 0.0, zustand.c_str());
+                    kbTraceZeile(b);
+                    letzteZeile = jetzt;
+                }
+            }
             // Live-Diagnose (nur wenn der Reiter offen ist): Rohwerte + abgeleitete Tasten
             if (g_kbMonitor.load()) {
                 static DWORD letzterPush = 0;
@@ -933,6 +967,17 @@ inline json kbStatus() {
     return { {"active", g_kbActive.load()}, {"name", g_kbEngine.prof.name}, {"spiel", g_kbEngine.prof.spiel} };
 }
 inline void kbSetMonitor(bool on) { g_kbMonitor = on; }
+inline void kbSetTrace(bool on, const std::wstring& pfad) {
+    if (on) {
+        g_kbTracePath = pfad;
+        DeleteFileW(pfad.c_str());                     // frisch beginnen
+        kbTraceZeile("# Lumora Tastatur-Bruecke - Mitschnitt");
+        kbTraceZeile("# Spalten: Zeit  Stick-X  Stick-Y  RT  Pad/Fokus  q[erkannte Quellen]  t[gedrueckte Scancodes]");
+        kbTraceZeile("# Aufgezeichnet wird NUR bei Aenderungen.");
+    }
+    g_kbTrace = on;
+}
+inline bool kbTraceAn() { return g_kbTrace.load(); }
 inline json kbMonitor() {
     std::lock_guard<std::mutex> lk(g_kbMonMx);
     return g_kbMonData;

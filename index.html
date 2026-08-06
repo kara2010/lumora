@@ -990,8 +990,14 @@
 
           <div class="form-group">
             <label>Live-Prüfung</label>
-            <p class="settings-hint">Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Damit lässt sich sofort sehen, ob eine Bewegung ankommt – bewege den Stick und beobachte die Zeile.</p>
+            <p class="settings-hint">Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Solange der Tastatur-Modus läuft, steuert der Stick nicht mehr Lumoras Menü – du kannst also gefahrlos ausprobieren.</p>
             <div id="kbMonitor" class="settings-hint" style="font-family:monospace;white-space:pre-wrap;min-height:48px">–</div>
+            <p class="settings-hint" style="margin-top:12px">Klemmt etwas erst im Spiel? Dann Mitschnitt einschalten, kurz spielen und die Datei zur Auswertung weitergeben – sie hält fest, was der Controller wirklich gemeldet hat.</p>
+            <div class="path-row">
+              <button class="btn-browse" id="kbTraceBtn" onclick="kbTraceToggle()">⏺ Mitschnitt starten</button>
+              <button class="btn-browse" onclick="kbTraceOeffnen()">📂 Ordner öffnen</button>
+            </div>
+            <p class="settings-hint" id="kbTraceInfo" style="margin-top:6px"></p>
           </div>
         </div>
 
@@ -1278,6 +1284,14 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Solange der Tastatur-Modus läuft, steuert der Stick nicht mehr Lumoras Menü – du kannst also gefahrlos ausprobieren.": "Shows what the bridge currently reads from the controller and which keys it presses. While keyboard mode is running, the stick no longer controls Lumora's menu – so you can try things out safely.",
+  "Klemmt etwas erst im Spiel? Dann Mitschnitt einschalten, kurz spielen und die Datei zur Auswertung weitergeben – sie hält fest, was der Controller wirklich gemeldet hat.": "Something only goes wrong inside the game? Turn on recording, play briefly, then pass the file on for analysis – it captures what the controller actually reported.",
+  "Solange der Tastatur-Modus läuft, steuert der Stick nicht mehr Lumoras Menü – du kannst also gefahrlos ausprobieren.": "While keyboard mode is running, the stick no longer controls Lumora's menu – so you can try things out safely.",
+  "⏺ Mitschnitt starten": "⏺ Start recording",
+  "⏹ Mitschnitt beenden": "⏹ Stop recording",
+  "📂 Ordner öffnen": "📂 Open folder",
+  "Läuft. Jetzt das Spiel starten und ein paar Bewegungen machen, danach hier beenden.": "Running. Now start the game, move around a little, then stop it here.",
+  "Gespeichert:": "Saved:",
   "Live-Prüfung": "Live check",
   "Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Damit lässt sich sofort sehen, ob eine Bewegung ankommt – bewege den Stick und beobachte die Zeile.": "Shows what the bridge currently reads from the controller and which keys it presses. Move the stick and watch the line to see instantly whether a movement registers.",
   "Tastatur-Modus ist aus – zum Prüfen aktivieren.": "Keyboard mode is off – activate it to run the check.",
@@ -3119,6 +3133,17 @@ function kbMonitorStart() {
     el.textContent = z.join('\n')
   }, 100)
 }
+let kbTraceAn = false
+async function kbTraceToggle() {
+  const r = await ipcRenderer.invoke("kb-bridge-trace", !kbTraceAn)
+  kbTraceAn = !!(r && r.an)
+  const b = document.getElementById("kbTraceBtn"), i = document.getElementById("kbTraceInfo")
+  if (b) b.textContent = kbTraceAn ? window.tr("⏹ Mitschnitt beenden") : window.tr("⏺ Mitschnitt starten")
+  if (i) i.textContent = kbTraceAn
+    ? window.tr("Läuft. Jetzt das Spiel starten und ein paar Bewegungen machen, danach hier beenden.")
+    : (r && r.pfad ? window.tr("Gespeichert:") + " " + r.pfad : "")
+}
+function kbTraceOeffnen() { ipcRenderer.invoke("open-data-folder") }
 function kbMonitorStop() {
   if (kbMonTimer) { clearInterval(kbMonTimer); kbMonTimer = null }
   ipcRenderer.invoke('kb-bridge-monitor', false)
@@ -6541,6 +6566,10 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       // 3) Navigation nur im Vordergrund und nicht, während die Kombi aktiv ist
       //    (damit der Toggle-Moment nicht zusätzlich navigiert).
       if (comboDown || !document.hasFocus()) return
+      // Tastatur-Modus aktiv? Dann gehoert das Pad dem Spiel, nicht Lumoras Menue.
+      // Sonst navigiert derselbe Stick, der gerade Pfeiltasten senden soll, nebenbei
+      // durch die Oberflaeche - man kann die Bruecke dann gar nicht beobachten.
+      if (kbAktiv) return
 
       // dn() blendet die Hotkey-Knöpfe hier aus – ihre Einzelaktion hat 2c) schon
       // beim Loslassen erledigt, gpTap/gpEdge halten deren Flanke sauber auf „aus".
