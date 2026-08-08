@@ -419,6 +419,7 @@
             <div class="osd-values-block">
               <span class="osd-field-label">Werte</span>
               <div id="osdFieldsUi" class="osd-fields"></div>
+              <p class="settings-hint">Reihenfolge frei wählbar: Werte mit der Maus ziehen, Gruppen mit ▲▼ verschieben – das OSD übernimmt es sofort.</p>
             </div>
             <div class="osd-field" id="osdSetupRow" style="display:none">
               <span class="osd-field-label">Einrichtung</span>
@@ -1357,6 +1358,9 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "nach oben": "move up",
+  "nach unten": "move down",
+  "Reihenfolge frei wählbar: Werte mit der Maus ziehen, Gruppen mit ▲▼ verschieben – das OSD übernimmt es sofort.": "Order is fully adjustable: drag values with the mouse, move groups with ▲▼ – the OSD applies it immediately.",
   "Summe (Sitzung)": "Total (session)",
   "läuft": "running",
   "wird beim nächsten Spielstart erfasst": "will be recorded from the next game start",
@@ -4724,7 +4728,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setOsdEnabled').checked = !!s.osdEnabled
       document.getElementById('setOsdTheme').value = s.osdTheme || 'bar'
       renderGpuOptions(s.osdGpu || 'auto')
-      renderOsdFields(s.osdFields)
+      renderOsdFields(s.osdFields, s.osdOrder)
       document.getElementById('osdSetupRow').style.display = s.osdSetupDeclined ? 'flex' : 'none'
       // Datenquellen live anzeigen (GPU/CPU/FPS) – beantwortet "woher kommen die Werte".
       ipcRenderer.invoke('osd-sources').then(q => {
@@ -4818,23 +4822,74 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       fps: [['fps','FPS'],['frametime','Frametime'],['graph','Graph']],
       net: [['rate','Rate'],['total','Summe (Sitzung)']],
     }
-    let osdFieldsState = { gpu: [], cpu: [], fps: [] }
-    function renderOsdFields(fields) {
+    let osdFieldsState = { gpu: [], cpu: [], fps: [], net: [] }
+    // Freie Reihenfolge: osdOrderState = Gruppen, osdFieldsState[cat] = Werte je Gruppe
+    // (die Arrays SIND die Reihenfolge - frueher wurde beim Umschalten stur auf die
+    // Definitionsreihenfolge zurücksortiert, Sortieren war damit unmoeglich).
+    let osdOrderState = ['gpu', 'cpu', 'fps', 'net']
+    function osdCatOrder() {
+      const std = Object.keys(OSD_FIELD_DEFS)
+      const o = osdOrderState.filter(c => std.includes(c))
+      for (const c of std) if (!o.includes(c)) o.push(c)
+      return o
+    }
+    function renderOsdFields(fields, order) {
       fields = fields || {}
+      if (Array.isArray(order) && order.length) osdOrderState = order.slice()
+      const vorher = osdFieldsState
       osdFieldsState = {}
-      for (const cat of Object.keys(OSD_FIELD_DEFS))
-        osdFieldsState[cat] = Array.isArray(fields[cat]) ? fields[cat].slice() : OSD_FIELD_DEFS[cat].map(d => d[0])
-      document.getElementById('osdFieldsUi').innerHTML = Object.keys(OSD_FIELD_DEFS).map(cat =>
-        `<div class="osd-fields-grp"><div class="grp">${cat.toUpperCase()}</div><div class="osd-chips-grid">` +
-        OSD_FIELD_DEFS[cat].map(([f, lbl]) =>
-          `<button type="button" class="osd-chip${osdFieldsState[cat].includes(f) ? ' on' : ''}" data-cat="${cat}" data-f="${f}" onclick="toggleOsdField('${cat}','${f}')">${window.tr(lbl)}</button>`
-        ).join('') + `</div></div>`
-      ).join('')
+      for (const cat of Object.keys(OSD_FIELD_DEFS)) {
+        const q = Array.isArray(fields[cat]) ? fields[cat] : (Array.isArray(vorher[cat]) && fields === vorher ? vorher[cat] : null)
+        osdFieldsState[cat] = q ? q.slice() : OSD_FIELD_DEFS[cat].map(d => d[0])
+      }
+      const cats = osdCatOrder()
+      document.getElementById('osdFieldsUi').innerHTML = cats.map((cat, ci) => {
+        const defs = OSD_FIELD_DEFS[cat]
+        const lblOf = f => { const d = defs.find(x => x[0] === f); return d ? d[1] : f }
+        // Chips in gespeicherter Reihenfolge; abgewaehlte hinten in Definitionsreihenfolge
+        const aktiv = osdFieldsState[cat].filter(f => defs.some(d => d[0] === f))
+        const chips = aktiv.concat(defs.map(d => d[0]).filter(f => !aktiv.includes(f)))
+        return `<div class="osd-fields-grp"><div class="grp">${cat.toUpperCase()}`
+          + `<span class="osd-grp-move">`
+          + `<button type="button" title="${window.tr('nach oben')}" ${ci === 0 ? 'disabled' : ''} onclick="moveOsdCat('${cat}',-1)">▲</button>`
+          + `<button type="button" title="${window.tr('nach unten')}" ${ci === cats.length - 1 ? 'disabled' : ''} onclick="moveOsdCat('${cat}',1)">▼</button>`
+          + `</span></div><div class="osd-chips-grid" data-cat="${cat}">`
+          + chips.map(f =>
+              `<button type="button" draggable="true" class="osd-chip${osdFieldsState[cat].includes(f) ? ' on' : ''}" data-cat="${cat}" data-f="${f}" onclick="toggleOsdField('${cat}','${f}')">${window.tr(lblOf(f))}</button>`
+            ).join('')
+          + `</div></div>`
+      }).join('')
+      // Drag & Drop: Werte innerhalb ihrer Gruppe frei ordnen
+      document.querySelectorAll('#osdFieldsUi .osd-chip').forEach(el => {
+        el.addEventListener('dragstart', e => { osdDragChip = el; e.dataTransfer.effectAllowed = 'move' })
+        el.addEventListener('dragover', e => e.preventDefault())
+        el.addEventListener('drop', e => osdChipDrop(e, el))
+      })
+    }
+    let osdDragChip = null
+    function osdChipDrop(e, ziel) {
+      e.preventDefault()
+      if (!osdDragChip || ziel === osdDragChip || ziel.dataset.cat !== osdDragChip.dataset.cat) { osdDragChip = null; return }
+      const cat = ziel.dataset.cat
+      // Ablage VOR dem Ziel-Chip; neue Reihenfolge direkt aus dem DOM ablesen
+      ziel.parentNode.insertBefore(osdDragChip, ziel)
+      const alle = [...ziel.parentNode.querySelectorAll('.osd-chip')].map(x => x.dataset.f)
+      osdFieldsState[cat] = alle.filter(f => osdFieldsState[cat].includes(f))
+      osdDragChip = null
+      onOsdSettingChange()
+    }
+    function moveOsdCat(cat, dir) {
+      const o = osdCatOrder(), i = o.indexOf(cat), j = i + dir
+      if (j < 0 || j >= o.length) return
+      o.splice(i, 1); o.splice(j, 0, cat)
+      osdOrderState = o
+      renderOsdFields(osdFieldsState, osdOrderState)
+      onOsdSettingChange()
     }
     function toggleOsdField(cat, f) {
       const arr = osdFieldsState[cat], i = arr.indexOf(f)
       if (i >= 0) arr.splice(i, 1)
-      else { arr.push(f); const ord = OSD_FIELD_DEFS[cat].map(d => d[0]); arr.sort((a, b) => ord.indexOf(a) - ord.indexOf(b)) }
+      else arr.push(f)   // ans Ende - die Reihenfolge bestimmt der Nutzer, nicht die Definition
       const btn = document.querySelector(`.osd-chip[data-cat="${cat}"][data-f="${f}"]`)
       if (btn) btn.classList.toggle('on', arr.includes(f))
       onOsdSettingChange()
@@ -4850,6 +4905,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         osdRenderer: 'window',
         osdTheme: document.getElementById('setOsdTheme').value,
         osdFields: osdFieldsState,
+        osdOrder: osdOrderState,
         osdFpsSource: document.getElementById('setOsdFpsSource').value,
         osdScale: parseFloat(document.getElementById('setOsdScale').value),
         osdOpacity: parseFloat(document.getElementById('setOsdOpacity').value),

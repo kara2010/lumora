@@ -309,9 +309,20 @@
     return catList(cat).filter(f => !skip.includes(f));
   }
 
+  // Reihenfolge der Gruppen: frei sortierbar (Einstellungen -> Overlay -> Werte).
+  // Unbekannte/fehlende Eintraege haengen in der Standardreihenfolge hinten dran -
+  // eine alte Konfiguration ohne gespeicherte Reihenfolge bleibt so unveraendert.
+  function orderList() {
+    const std = ['gpu','cpu','fps','net'];
+    const o = Array.isArray(cfg.order) ? cfg.order.filter(c => std.includes(c)) : [];
+    for (const c of std) if (!o.includes(c)) o.push(c);
+    return o;
+  }
+
   function buildCompact() {
     let h = '<div class="osd t-compact">';
-    for (const cat of ['gpu','cpu','fps']) {
+    for (const cat of orderList()) {
+      if (cat === 'net') { h += netSeg('grp'); continue; }
       if (!catList(cat).length) continue;
       h += `<div class="grp ${cat === 'gpu' ? 'nv' : cat === 'cpu' ? 'amd' : 'fps'}">`;
       if (cat !== 'fps') {
@@ -327,13 +338,18 @@
       }
       h += '</div>';
     }
-    h += netSeg('grp');
     return h + '</div>';
   }
 
   function buildMin() {
     let h = '<div class="osd t-min">';
-    for (const cat of ['gpu','cpu']) {
+    for (const cat of orderList()) {
+      if (cat === 'net') { h += netSeg('line'); continue; }
+      if (cat === 'fps') {
+        if (catList('fps').length && has('fps','fps'))
+          h += `<div class="line"><span class="k fp">FPS</span><span class="v big" data-role="fps.fps">–</span>${has('fps','frametime')?`<span class="sub">${val('fps.frametime','ms')}</span>`:''}</div>`;
+        continue;
+      }
       const rs = rowsFor(cat); if (!catList(cat).length) continue;
       h += `<div class="line"><span class="k ${cat==='gpu'?'nv':'amd'}">${cat.toUpperCase()}</span>`;
       const parts = [];
@@ -343,15 +359,21 @@
       if (has(cat,'load')) parts.push(`<span class="sub">${val(cat+'.load','%')}</span>`);
       h += parts.join('<span class="sub" style="opacity:.4">·</span>') + '</div>';
     }
-    if (catList('fps').length && has('fps','fps'))
-      h += `<div class="line"><span class="k fp">FPS</span><span class="v big" data-role="fps.fps">–</span>${has('fps','frametime')?`<span class="sub">${val('fps.frametime','ms')}</span>`:''}</div>`;
-    h += netSeg('line');
     return h + '</div>';
   }
 
   function buildBar() {
     let h = '<div class="osd t-bar">';
-    for (const cat of ['gpu','cpu']) {
+    for (const cat of orderList()) {
+      if (cat === 'net') { h += netSeg('grp'); continue; }
+      if (cat === 'fps') {
+        if (!catList('fps').length) continue;
+        h += `<div class="grp fps"><div class="head"><span class="name">FPS${has('fps','frametime')?` · <span data-role="fps.frametime">–</span> ms`:''}</span>`;
+        h += has('fps','fps') ? `<span class="big"><span data-role="fps.fps">–</span></span></div>` : `<span></span></div>`;
+        if (has('fps','graph')) h += `<canvas data-role="ftgraph" width="320" height="40"></canvas>`;
+        h += `</div>`;
+        continue;
+      }
       if (!catList(cat).length) continue;
       h += `<div class="grp ${cat==='gpu'?'nv':'amd'}">`;
       h += `<div class="head"><span class="name" data-role="${cat}.name">–</span>`;
@@ -361,19 +383,13 @@
       for (const f of rowsFor(cat)) h += `<span class="row" data-row="${cat}.${f}">${LABEL[f]} ${val(cat+'.'+f, UNIT[f])}</span>`;
       h += `</div></div>`;
     }
-    if (catList('fps').length) {
-      h += `<div class="grp fps"><div class="head"><span class="name">FPS${has('fps','frametime')?` · <span data-role="fps.frametime">–</span> ms`:''}</span>`;
-      h += has('fps','fps') ? `<span class="big"><span data-role="fps.fps">–</span></span></div>` : `<span></span></div>`;
-      if (has('fps','graph')) h += `<canvas data-role="ftgraph" width="320" height="40"></canvas>`;
-      h += `</div>`;
-    }
-    h += netSeg('grp');
     return h + '</div>';
   }
 
   function buildNeon() {
     let h = '<div class="osd t-neon">';
-    for (const cat of ['gpu','cpu','fps']) {
+    for (const cat of orderList()) {
+      if (cat === 'net') { h += netSeg('grp'); continue; }
       if (!catList(cat).length) continue;
       const cls = cat==='gpu'?'nv':cat==='cpu'?'amd':'fps';
       h += `<div class="grp ${cls}"><div class="head">`;
@@ -384,32 +400,42 @@
       else if (has('fps','frametime')) h += `<div class="stats"><span class="row" data-row="fps.frametime">frametime ${val('fps.frametime','ms')}</span></div>`;
       h += `</div>`;
     }
-    h += netSeg('grp');
     return h + '</div>';
   }
 
   function buildStrip() {
     let h = '<div class="osd t-strip">';
-    for (const cat of ['gpu','cpu']) {
+    for (const cat of orderList()) {
+      if (cat === 'net') { h += netSeg('seg'); continue; }
+      if (cat === 'fps') {
+        if (!catList('fps').length) continue;
+        h += `<div class="seg fps"><span class="nm">FPS</span>`;
+        if (has('fps','fps')) h += `<span class="m"><span data-role="fps.fps">–</span></span>`;
+        if (has('fps','frametime')) h += `<span class="m" style="font-size:13px" data-row="fps.frametime">${val('fps.frametime','ms')}</span>`;
+        h += `</div>`;
+        continue;
+      }
       if (!catList(cat).length) continue;
       h += `<div class="seg ${cat==='gpu'?'nv':'amd'}"><span class="nm" data-role="${cat}.name">–</span>`;
       if (has(cat,'load')) h += `<span class="m">${val(cat+'.load','%')}</span>`;
       for (const f of rowsFor(cat)) h += `<span class="m" data-row="${cat}.${f}">${val(cat+'.'+f, UNIT[f])}</span>`;
       h += `</div>`;
     }
-    if (catList('fps').length) {
-      h += `<div class="seg fps"><span class="nm">FPS</span>`;
-      if (has('fps','fps')) h += `<span class="m"><span data-role="fps.fps">–</span></span>`;
-      if (has('fps','frametime')) h += `<span class="m" style="font-size:13px" data-row="fps.frametime">${val('fps.frametime','ms')}</span>`;
-      h += `</div>`;
-    }
-    h += netSeg('seg');
     return h + '</div>';
   }
 
   function buildTiles() {
     let h = '<div class="osd t-tiles">';
-    for (const cat of ['gpu','cpu']) {
+    for (const cat of orderList()) {
+      if (cat === 'net') { h += netSeg('tile'); continue; }
+      if (cat === 'fps') {
+        if (!catList('fps').length) continue;
+        h += `<div class="tile fps"><div class="cap">FPS</div>`;
+        h += has('fps','fps') ? `<div class="num"><span data-role="fps.fps">–</span></div>` : `<div class="num">–</div>`;
+        if (has('fps','frametime')) h += `<div class="sub" data-row="fps.frametime"><span data-role="fps.frametime">–</span> ms</div>`;
+        h += `</div>`;
+        continue;
+      }
       if (!catList(cat).length) continue;
       h += `<div class="tile ${cat==='gpu'?'nv':'amd'}"><div class="cap" data-role="${cat}.name">–</div>`;
       h += has(cat,'load') ? `<div class="num">${val(cat+'.load','%')}</div>` : `<div class="num">–</div>`;
@@ -417,41 +443,6 @@
       if (subs.length) h += `<div class="sub">${subs.join(' · ')}</div>`;
       h += `</div>`;
     }
-    if (catList('fps').length) {
-      h += `<div class="tile fps"><div class="cap">FPS</div>`;
-      h += has('fps','fps') ? `<div class="num"><span data-role="fps.fps">–</span></div>` : `<div class="num">–</div>`;
-      if (has('fps','frametime')) h += `<div class="sub" data-row="fps.frametime"><span data-role="fps.frametime">–</span> ms</div>`;
-      h += `</div>`;
-    }
-    h += netSeg('tile');
-    return h + '</div>';
-  }
-
-  // Netz-Segment (Design je Theme wie die FPS-Gruppe; grp-net blendet die ganze
-  // Gruppe aus, solange keine Zaehlung laeuft - sonst stuende dauerhaft ein "-"-Block).
-  function netSeg(kind) {
-    if (!catList('net').length) return '';
-    const rate = has('net','rate'), total = has('net','total');
-    if (!rate && !total) return '';
-    if (kind === 'seg')   // Leiste
-      return '<div class="seg fps grp-net"><span class="nm">NET</span>'
-        + (rate ? '<span class="m" style="font-size:13px"><span data-role="net.rate">\u2013</span></span>' : '')
-        + (total ? '<span class="m" style="font-size:13px"><span data-role="net.total">\u2013</span></span>' : '')
-        + '</div>';
-    if (kind === 'tile')  // Kacheln
-      return '<div class="tile fps grp-net"><div class="cap">NET</div>'
-        + '<div class="num" style="font-size:16px"><span data-role="net.rate">\u2013</span></div>'
-        + (total ? '<div class="sub"><span data-role="net.total">\u2013</span></div>' : '')
-        + '</div>';
-    if (kind === 'line')  // Minimal
-      return '<div class="line grp-net"><span class="k fp">NET</span>'
-        + (rate ? '<span class="sub"><span data-role="net.rate">\u2013</span></span>' : '')
-        + (total ? '<span class="sub"><span data-role="net.total">\u2013</span></span>' : '')
-        + '</div>';
-    // Standard: eigener Gruppenblock (Kompakt/Balken/Neon)
-    let h = '<div class="grp fps grp-net"><div class="head"><span class="name">NET</span>';
-    h += rate ? '<span class="big" style="font-size:14px"><span data-role="net.rate">\u2013</span></span></div>' : '<span></span></div>';
-    if (total) h += '<div class="stats"><span class="row">' + '\u03a3 ' + '<span class="v" data-role="net.total">\u2013</span></span></div>';
     return h + '</div>';
   }
 
@@ -547,6 +538,7 @@
     let rebuild = false;
     if (c.theme && c.theme !== cfg.theme) { cfg.theme = c.theme; rebuild = true; }
     if (c.fields) { cfg.fields = c.fields; rebuild = true; }
+    if (c.order) { cfg.order = c.order; rebuild = true; }
     if (c.accent) { cfg.accent = c.accent; document.documentElement.style.setProperty('--accent', c.accent); }
     if (c.corner) { document.body.classList.remove('pos-tl','pos-tr','pos-bl','pos-br'); document.body.classList.add('pos-' + c.corner); }
     if (c.opacity != null) { cfg.opacity = c.opacity; document.documentElement.style.setProperty('--panel-op', c.opacity); }
