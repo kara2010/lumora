@@ -7,17 +7,19 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.2.6"   # 3.2.6: Hauptfenster ragte maximiert unter die Taskleiste (Rahmen-Zuschnitt
-                     #        jetzt auf die Arbeitsflaeche statt auf feste System-DPI-Werte); Bibliothek
-                     #        und Einstellungen scrollten dadurch teils nicht mehr (Flex-Container ohne
-                     #        min-height:0). Neu: Netzwerk-Statistik pro Spiel (zuschaltbar, Allgemein) -
-                     #        uebertragene MB je Sitzung + gesamt, in der Bibliothek und als eigene
-                     #        NET-Gruppe im OSD (Rate + Sitzungssumme, abwaehlbar). OSD-Werte und
-                     #        -Gruppen jetzt frei per Drag & Drop sortierbar.
-$prev_3_2_5 = ""  # 3.2.5: A-Taste startete keine Spiele mehr, wenn sie in einem Gamepad-Hotkey
+# ACHTUNG 3.2.6 wurde ZURUECKGEZOGEN (2026-08-08): das OSD war damit kaputt. Feed,
+# Website und GitHub-Release stehen wieder auf 3.2.5; der 3.2.6-Code bleibt hier im
+# Repo, ist aber NICHT veroeffentlicht. Vor einer erneuten Veroeffentlichung muss der
+# OSD-Fehler gefunden und behoben sein - dann mit NEUER Nummer (3.2.7) ausliefern:
+# wer 3.2.6 schon gezogen hatte, bekaeme eine gleich hohe Nummer nie als Update
+# angeboten (der Updater vergleicht nur die Versionsnummer, s. RELEASE.md 12).
+$version = "3.2.5"   # 3.2.5: A-Taste startete keine Spiele mehr, wenn sie in einem Gamepad-Hotkey
                      #        steckte (galt auch fuer B/X/Y/Start); Installer raeumt eine tote
                      #        Electron-Verknuepfung auf, die die Taskleisten-Identitaet ueberlagerte;
                      #        robusteres Laden von Bibliothek/Einstellungen beim Start.
+# 3.2.6 (zurueckgezogen): Taskleisten-/Scroll-Fix, Netzwerk-Statistik pro Spiel inkl.
+#        NET-Gruppe im OSD, OSD-Werte per Drag & Drop sortierbar. Verdacht fuer den
+#        OSD-Ausfall: die Umbauten in osd.html (netSeg/orderList) - noch nicht belegt.
 $prev_3_1_1 = ""  # 3.1.1: OSD-Vorschau in den Einstellungen wirkt jetzt wirklich - sie lief bis
                      #        zur letzten Zeile und wurde dort verworfen (osdEnsureVisible pruefte
                      #        nur osdEnabled, nicht die Vorschau) - und greift jetzt bei JEDER
