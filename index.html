@@ -419,7 +419,7 @@
             <div class="osd-values-block">
               <span class="osd-field-label">Werte</span>
               <div id="osdFieldsUi" class="osd-fields"></div>
-              <p class="settings-hint">Reihenfolge frei wählbar: Werte mit der Maus ziehen, Gruppen mit ▲▼ verschieben – das OSD übernimmt es sofort.</p>
+              <p class="settings-hint">Alles per Drag & Drop: Werte ziehen, ganze Gruppen am ⠿-Griff packen – die Liste ordnet sich live um, das OSD übernimmt es sofort.</p>
             </div>
             <div class="osd-field" id="osdSetupRow" style="display:none">
               <span class="osd-field-label">Einrichtung</span>
@@ -1208,9 +1208,10 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "Gruppe ziehen": "Drag group",
   "nach oben": "move up",
   "nach unten": "move down",
-  "Reihenfolge frei wählbar: Werte mit der Maus ziehen, Gruppen mit ▲▼ verschieben – das OSD übernimmt es sofort.": "Order is fully adjustable: drag values with the mouse, move groups with ▲▼ – the OSD applies it immediately.",
+  "Alles per Drag & Drop: Werte ziehen, ganze Gruppen am ⠿-Griff packen – die Liste ordnet sich live um, das OSD übernimmt es sofort.": "Everything via drag & drop: drag values, grab whole groups by the ⠿ handle – the list reorders live and the OSD applies it immediately.",
   "Summe (Sitzung)": "Total (session)",
   "läuft": "running",
   "wird beim nächsten Spielstart erfasst": "will be recorded from the next game start",
@@ -3922,9 +3923,9 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       net: [['rate','Rate'],['total','Summe (Sitzung)']],
     }
     let osdFieldsState = { gpu: [], cpu: [], fps: [], net: [] }
-    // Freie Reihenfolge: osdOrderState = Gruppen, osdFieldsState[cat] = Werte je Gruppe
-    // (die Arrays SIND die Reihenfolge - frueher wurde beim Umschalten stur auf die
-    // Definitionsreihenfolge zurücksortiert, Sortieren war damit unmoeglich).
+    // Freie Reihenfolge, komplett per Drag & Drop: Werte-Chips innerhalb ihrer Gruppe,
+    // ganze Gruppen am ⠿-Griff. Waehrend des Ziehens ordnet die Liste LIVE um (das
+    // Element weicht unter dem Zeiger aus) - erst das Loslassen speichert.
     let osdOrderState = ['gpu', 'cpu', 'fps', 'net']
     function osdCatOrder() {
       const std = Object.keys(OSD_FIELD_DEFS)
@@ -3941,48 +3942,83 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         const q = Array.isArray(fields[cat]) ? fields[cat] : (Array.isArray(vorher[cat]) && fields === vorher ? vorher[cat] : null)
         osdFieldsState[cat] = q ? q.slice() : OSD_FIELD_DEFS[cat].map(d => d[0])
       }
-      const cats = osdCatOrder()
-      document.getElementById('osdFieldsUi').innerHTML = cats.map((cat, ci) => {
+      const box = document.getElementById('osdFieldsUi')
+      box.innerHTML = osdCatOrder().map(cat => {
         const defs = OSD_FIELD_DEFS[cat]
         const lblOf = f => { const d = defs.find(x => x[0] === f); return d ? d[1] : f }
-        // Chips in gespeicherter Reihenfolge; abgewaehlte hinten in Definitionsreihenfolge
         const aktiv = osdFieldsState[cat].filter(f => defs.some(d => d[0] === f))
         const chips = aktiv.concat(defs.map(d => d[0]).filter(f => !aktiv.includes(f)))
-        return `<div class="osd-fields-grp"><div class="grp">${cat.toUpperCase()}`
-          + `<span class="osd-grp-move">`
-          + `<button type="button" title="${window.tr('nach oben')}" ${ci === 0 ? 'disabled' : ''} onclick="moveOsdCat('${cat}',-1)">▲</button>`
-          + `<button type="button" title="${window.tr('nach unten')}" ${ci === cats.length - 1 ? 'disabled' : ''} onclick="moveOsdCat('${cat}',1)">▼</button>`
-          + `</span></div><div class="osd-chips-grid" data-cat="${cat}">`
+        return `<div class="osd-fields-grp" data-cat="${cat}">`
+          + `<div class="grp"><span class="osd-grp-griff" draggable="true" title="${window.tr('Gruppe ziehen')}">⠿</span>${cat.toUpperCase()}</div>`
+          + `<div class="osd-chips-grid" data-cat="${cat}">`
           + chips.map(f =>
               `<button type="button" draggable="true" class="osd-chip${osdFieldsState[cat].includes(f) ? ' on' : ''}" data-cat="${cat}" data-f="${f}" onclick="toggleOsdField('${cat}','${f}')">${window.tr(lblOf(f))}</button>`
             ).join('')
           + `</div></div>`
       }).join('')
-      // Drag & Drop: Werte innerhalb ihrer Gruppe frei ordnen
-      document.querySelectorAll('#osdFieldsUi .osd-chip').forEach(el => {
-        el.addEventListener('dragstart', e => { osdDragChip = el; e.dataTransfer.effectAllowed = 'move' })
-        el.addEventListener('dragover', e => e.preventDefault())
-        el.addEventListener('drop', e => osdChipDrop(e, el))
+      osdDndWire(box)
+    }
+    // --- Drag & Drop (live umordnend) --------------------------------------------
+    // Ein Regelwerk fuer beides: Chips wandern innerhalb ihres Gitters, Gruppen
+    // innerhalb der Liste. Beim dragover wird das gezogene Element sofort an die
+    // Zielposition gesetzt (vor/nach dem Element unter dem Zeiger, je nach
+    // Zeigerposition) - so sieht man das Ergebnis, BEVOR man loslaesst.
+    let osdDrag = null   // { el, art: 'chip'|'grp' }
+    function osdDndWire(box) {
+      box.querySelectorAll('.osd-chip').forEach(el => {
+        el.addEventListener('dragstart', e => {
+          osdDrag = { el, art: 'chip' }
+          e.dataTransfer.effectAllowed = 'move'
+          // Standard-Geisterbild vom Element selbst; leicht verzoegert stylen, sonst
+          // uebernimmt das Geisterbild schon die abgesenkte Optik
+          setTimeout(() => el.classList.add('osd-dragging'), 0)
+        })
+        el.addEventListener('dragend', () => osdDropFertig())
       })
+      box.querySelectorAll('.osd-grp-griff').forEach(griff => {
+        const grp = griff.closest('.osd-fields-grp')
+        griff.addEventListener('dragstart', e => {
+          osdDrag = { el: grp, art: 'grp' }
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setDragImage(grp, 20, 12)   // die GANZE Gruppe als Geisterbild
+          setTimeout(() => grp.classList.add('osd-dragging'), 0)
+        })
+        griff.addEventListener('dragend', () => osdDropFertig())
+      })
+      box.addEventListener('dragover', e => {
+        if (!osdDrag) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        if (osdDrag.art === 'chip') {
+          const grid = e.target.closest('.osd-chips-grid')
+          if (!grid || grid.dataset.cat !== osdDrag.el.dataset.cat) return   // nur die eigene Gruppe
+          const ueber = e.target.closest('.osd-chip')
+          if (!ueber || ueber === osdDrag.el) return
+          const r = ueber.getBoundingClientRect()
+          const nach = e.clientX > r.left + r.width / 2
+          grid.insertBefore(osdDrag.el, nach ? ueber.nextSibling : ueber)
+        } else {
+          const ueber = e.target.closest('.osd-fields-grp')
+          if (!ueber || ueber === osdDrag.el) return
+          const r = ueber.getBoundingClientRect()
+          const nach = e.clientY > r.top + r.height / 2
+          osdDrag.el.parentNode.insertBefore(osdDrag.el, nach ? ueber.nextSibling : ueber)
+        }
+      })
+      box.addEventListener('drop', e => e.preventDefault())
     }
-    let osdDragChip = null
-    function osdChipDrop(e, ziel) {
-      e.preventDefault()
-      if (!osdDragChip || ziel === osdDragChip || ziel.dataset.cat !== osdDragChip.dataset.cat) { osdDragChip = null; return }
-      const cat = ziel.dataset.cat
-      // Ablage VOR dem Ziel-Chip; neue Reihenfolge direkt aus dem DOM ablesen
-      ziel.parentNode.insertBefore(osdDragChip, ziel)
-      const alle = [...ziel.parentNode.querySelectorAll('.osd-chip')].map(x => x.dataset.f)
-      osdFieldsState[cat] = alle.filter(f => osdFieldsState[cat].includes(f))
-      osdDragChip = null
-      onOsdSettingChange()
-    }
-    function moveOsdCat(cat, dir) {
-      const o = osdCatOrder(), i = o.indexOf(cat), j = i + dir
-      if (j < 0 || j >= o.length) return
-      o.splice(i, 1); o.splice(j, 0, cat)
-      osdOrderState = o
-      renderOsdFields(osdFieldsState, osdOrderState)
+    function osdDropFertig() {
+      if (!osdDrag) return
+      osdDrag.el.classList.remove('osd-dragging')
+      const box = document.getElementById('osdFieldsUi')
+      // Endstand direkt aus dem DOM ablesen - die Ansicht IST das Ergebnis
+      osdOrderState = [...box.querySelectorAll('.osd-fields-grp')].map(g => g.dataset.cat)
+      for (const grid of box.querySelectorAll('.osd-chips-grid')) {
+        const cat = grid.dataset.cat
+        const alle = [...grid.querySelectorAll('.osd-chip')].map(x => x.dataset.f)
+        osdFieldsState[cat] = alle.filter(f => osdFieldsState[cat].includes(f))
+      }
+      osdDrag = null
       onOsdSettingChange()
     }
     function toggleOsdField(cat, f) {
