@@ -7,13 +7,17 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-$version = "3.2.5"   # 3.2.5: A-Taste startet wieder, wenn sie in einem Gamepad-Hotkey steckt; Installer raeumt tote Electron-Verknuepfung (Taskleisten-Symbol); robusteres Laden beim Start. (Teilen-Feature bewusst NICHT ausgeliefert - Patch, kein Minor.)
-                     #        3.1.1 speicherte den Zustand korrekt, wendete ihn aber im Regelfall
-                     #        des Nutzers nie an: bei Autostart mit --minimized ruft wWinMain kein
-                     #        ShowWindow auf, und das spaetere Oeffnen per Tray/Hotkey zeigte das
-                     #        Fenster ueber SW_SHOW in Normalgroesse. Jetzt zieht showMainWindow den
-                     #        gespeicherten Zustand beim ERSTEN Zeigen nach (danach nicht mehr, damit
-                     #        ein bewusst verkleinertes Fenster nicht wieder aufgerissen wird).
+$version = "3.2.6"   # 3.2.6: Hauptfenster ragte maximiert unter die Taskleiste (Rahmen-Zuschnitt
+                     #        jetzt auf die Arbeitsflaeche statt auf feste System-DPI-Werte); Bibliothek
+                     #        und Einstellungen scrollten dadurch teils nicht mehr (Flex-Container ohne
+                     #        min-height:0). Neu: Netzwerk-Statistik pro Spiel (zuschaltbar, Allgemein) -
+                     #        uebertragene MB je Sitzung + gesamt, in der Bibliothek und als eigene
+                     #        NET-Gruppe im OSD (Rate + Sitzungssumme, abwaehlbar). OSD-Werte und
+                     #        -Gruppen jetzt frei per Drag & Drop sortierbar.
+$prev_3_2_5 = ""  # 3.2.5: A-Taste startete keine Spiele mehr, wenn sie in einem Gamepad-Hotkey
+                     #        steckte (galt auch fuer B/X/Y/Start); Installer raeumt eine tote
+                     #        Electron-Verknuepfung auf, die die Taskleisten-Identitaet ueberlagerte;
+                     #        robusteres Laden von Bibliothek/Einstellungen beim Start.
 $prev_3_1_1 = ""  # 3.1.1: OSD-Vorschau in den Einstellungen wirkt jetzt wirklich - sie lief bis
                      #        zur letzten Zeile und wurde dort verworfen (osdEnsureVisible pruefte
                      #        nur osdEnabled, nicht die Vorschau) - und greift jetzt bei JEDER
