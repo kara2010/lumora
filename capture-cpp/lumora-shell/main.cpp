@@ -4988,10 +4988,38 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         break;   // weiter zu DefWindowProc (Broadcast normal behandeln lassen)
     case WM_NCCALCSIZE: {   // BEIDE wParam-Faelle behandeln: beim initialen Fensteraufbau kommt
         auto* pr = (RECT*)l;   // FALSE - unbehandelt blieb da die System-Titelleiste stehen (Start im Fenster-Modus)
-        if (IsZoomed(h)) {     // maximiert die unsichtbaren Frame-Insets abziehen, sonst ragt das Fenster ueber den Monitor
-            int fx = GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-            int fy = GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-            pr->left += fx; pr->right -= fx; pr->top += fy; pr->bottom -= fy;
+        if (IsZoomed(h)) {
+            // Maximiert schlaegt Windows das Fenster inklusive unsichtbarem Rahmen vor -
+            // es ragt auf allen Seiten ueber die Arbeitsflaeche hinaus, unten also in die
+            // Taskleiste. Frueher wurde hier pauschal SM_CXFRAME abgezogen; das sind
+            // System-DPI-Werte und passen auf einem hochaufloesenden Monitor nicht genau,
+            // weshalb ein Rest stehenblieb (gemessen: 18 px unter der Arbeitsflaeche).
+            // Statt zu rechnen wird jetzt direkt auf die Arbeitsflaeche GESCHNITTEN -
+            // das stimmt unabhaengig von Rahmenbreite, DPI und Taskleisten-Position.
+            HMONITOR hm = MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO mi{ sizeof(mi) };
+            if (GetMonitorInfoW(hm, &mi)) {
+                RECT wa = mi.rcWork;
+                // Automatisch ausgeblendete Taskleiste verkleinert die Arbeitsflaeche
+                // NICHT. Deckt ein Fenster ihre Kante vollstaendig ab, laesst sie sich
+                // nicht mehr hervorholen - darum dort einen Pixel frei lassen.
+                APPBARDATA ab{ sizeof(ab) };
+                if ((SHAppBarMessage(ABM_GETSTATE, &ab) & ABS_AUTOHIDE) != 0) {
+                    const UINT kanten[4] = { ABE_BOTTOM, ABE_TOP, ABE_LEFT, ABE_RIGHT };
+                    for (UINT kante : kanten) {
+                        APPBARDATA f{ sizeof(f) }; f.uEdge = kante; f.rc = mi.rcMonitor;
+                        if (!SHAppBarMessage(ABM_GETAUTOHIDEBAREX, &f)) continue;
+                        if (kante == ABE_BOTTOM) wa.bottom -= 1;
+                        else if (kante == ABE_TOP) wa.top += 1;
+                        else if (kante == ABE_LEFT) wa.left += 1;
+                        else wa.right -= 1;
+                    }
+                }
+                if (pr->left   < wa.left)   pr->left   = wa.left;
+                if (pr->top    < wa.top)    pr->top    = wa.top;
+                if (pr->right  > wa.right)  pr->right  = wa.right;
+                if (pr->bottom > wa.bottom) pr->bottom = wa.bottom;
+            }
         }
         return 0;
     }
@@ -5011,6 +5039,9 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
         mmi->ptMinTrackSize.x = MulDiv(700, dpi, 96);
         mmi->ptMinTrackSize.y = MulDiv(500, dpi, 96);
+        // Die maximierte Groesse wird NICHT hier begrenzt: Windows legt den unsichtbaren
+        // Rahmen um die Vorgabe herum, das Fenster ragt dann trotzdem hinaus (gemessen).
+        // Zugeschnitten wird darum in WM_NCCALCSIZE, wo die Client-Flaeche entsteht.
         return 0;
     }
     case WM_SIZE:
@@ -5397,6 +5428,57 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
             "pfad=" + narrow(argv[i + 1]) + "\nquelle=" + art +
             "\nbytes(base64)=" + std::to_string(url.size()) + "\n");
         return 0;
+    }
+    // Maximiertes Fenster gegen die Arbeitsflaeche pruefen: erzeugt ein echtes Fenster
+    // derselben Klasse, maximiert es und misst nach. Der Fehler war von aussen nur zu
+    // sehen, wenn die Taskleiste eingeblendet ist - genau darum wird hier gemessen und
+    // nicht geschaut.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-fenster") == 0) {
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        std::string res; int fehler = 0;
+        auto pruef = [&](const char* was, bool ok) {
+            res += std::string(ok ? "OK   " : "FEHL ") + was + "\n"; if (!ok) ++fehler;
+        };
+        WNDCLASSW wc{}; wc.lpfnWndProc = wndProc; wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"LumoraShellTest"; wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        RegisterClassW(&wc);
+        HWND h = CreateWindowExW(0, L"LumoraShellTest", L"Lumora Test", WS_OVERLAPPEDWINDOW,
+                                 100, 100, 900, 600, nullptr, nullptr, wc.hInstance, nullptr);
+        if (!h) { res += "FEHL Testfenster liess sich nicht anlegen\n"; ++fehler; }
+        else {
+            ShowWindow(h, SW_SHOWNOACTIVATE);
+            ShowWindow(h, SW_MAXIMIZE);
+            MSG msg; for (int n = 0; n < 50 && PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE); ++n) DispatchMessageW(&msg);
+            // GEMESSEN WIRD DIE CLIENT-FLAECHE, nicht das Fensterrechteck: der
+            // unsichtbare Rahmen darf ueberstehen, gezeichnet wird nur der Client.
+            RECT fr{}; GetClientRect(h, &fr);
+            MapWindowPoints(h, nullptr, (POINT*)&fr, 2);
+            MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
+            char b[256];
+            sprintf_s(b, "Sichtbar : %ld,%ld - %ld,%ld\nArbeit   : %ld,%ld - %ld,%ld\nMonitor  : %ld,%ld - %ld,%ld\n",
+                      fr.left, fr.top, fr.right, fr.bottom,
+                      mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom,
+                      mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom);
+            res += b;
+            const bool taskleisteVerkleinert =
+                mi.rcWork.bottom != mi.rcMonitor.bottom || mi.rcWork.top != mi.rcMonitor.top ||
+                mi.rcWork.left != mi.rcMonitor.left || mi.rcWork.right != mi.rcMonitor.right;
+            res += std::string("Taskleiste belegt Platz: ") + (taskleisteVerkleinert ? "ja" : "nein (ausgeblendet)") + "\n";
+            pruef("maximiert nicht ueber die Arbeitsflaeche hinaus",
+                  fr.left >= mi.rcWork.left && fr.top >= mi.rcWork.top &&
+                  fr.right <= mi.rcWork.right && fr.bottom <= mi.rcWork.bottom);
+            // Kein Rand: das Fenster soll die Arbeitsflaeche AUSFUELLEN, nicht nur
+            // hineinpassen (sonst waere der Fehler gegen einen Streifen getauscht).
+            pruef("maximiert fuellt die Arbeitsflaeche aus",
+                  (fr.right - fr.left) >= (mi.rcWork.right - mi.rcWork.left) - 2 &&
+                  (fr.bottom - fr.top) >= (mi.rcWork.bottom - mi.rcWork.top) - 2);
+            pruef("unterer Rand nicht unter der Taskleiste", fr.bottom <= mi.rcWork.bottom);
+            DestroyWindow(h);
+        }
+        res = "fenster-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
     }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-datadir") == 0) {
         // Belegt, dass Lumora seinen Datenordner selbst anlegt. Ohne das schlug seit dem
