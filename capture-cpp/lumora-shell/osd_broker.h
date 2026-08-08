@@ -501,7 +501,8 @@ inline int runFpsBroker(const std::wstring& binDir) {
     // [13] = bestaetigte Ziel-PID (0 = Zaehlung aus/Trace-Start fehlgeschlagen).
     luetw::NetTrace net;
     bool netAn = false;
-    uint32_t netPid = 0, netFamTick = 0;
+    uint32_t netPid = 0, netFamTick = 0, diagTick = 0;
+    int diagZeilen = 0;
     std::set<uint32_t> netFam;
 
     // 60-Hz-Schreibschleife: aktivsten Praesentierer der letzten 0,5 s -> FPS ins SHM.
@@ -546,10 +547,13 @@ inline int runFpsBroker(const std::wstring& binDir) {
         if (!wollen && netAn) { net.stop(); netAn = false; netPid = 0; netFam.clear(); mem[13] = 0; mem[9] = mem[10] = mem[11] = mem[12] = 0; }
         if (netAn && wollen) {
             if (wollen != netPid) {   // neue Spielsitzung: ab hier frisch zaehlen
-                netPid = wollen; net.reset(); netFam = { netPid }; netFamTick = 0;
+                netPid = wollen; net.setTarget(netPid); netFamTick = 0; diagZeilen = 0;
             }
-            if ((uint32_t)(now - netFamTick) >= 1000) {   // PID-Familie 1x/s nachziehen (Launcher -> Spielprozess als Kind)
+            // Kinder, die es schon VOR dem Trace-Start gab, per Schnappschuss nachreichen
+            // (ab dann uebernimmt der Prozess-Start-Event-Pfad im Trace - lueckenlos).
+            if ((uint32_t)(now - netFamTick) >= 1000) {
                 netFamTick = now;
+                netFam = net.family();
                 HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
                 if (snap != INVALID_HANDLE_VALUE) {
                     PROCESSENTRY32W pe{ sizeof(pe) };
@@ -559,16 +563,34 @@ inline int runFpsBroker(const std::wstring& binDir) {
                     for (int runde = 0; runde < 4 && neu; ++runde) {
                         neu = false;
                         if (Process32FirstW(snap, &pe)) do {
-                            if (netFam.count(pe.th32ParentProcessID) && !netFam.count(pe.th32ProcessID)) { netFam.insert(pe.th32ProcessID); neu = true; }
+                            if (netFam.count(pe.th32ParentProcessID) && !netFam.count(pe.th32ProcessID)) {
+                                netFam.insert(pe.th32ProcessID); net.addFamily(pe.th32ProcessID); neu = true;
+                            }
                         } while (Process32NextW(snap, &pe));
                     }
                     CloseHandle(snap);
                 }
             }
-            uint64_t in = 0, out = 0; net.bytesFor(netFam, in, out);
+            uint64_t in = 0, out = 0; net.bytesFam(in, out);
             mem[9] = (uint32_t)(in & 0xFFFFFFFF); mem[10] = (uint32_t)(in >> 32);
             mem[11] = (uint32_t)(out & 0xFFFFFFFF); mem[12] = (uint32_t)(out >> 32);
             mem[13] = netPid;
+            // Diagnose-Datei (5-s-Takt): welche Opcodes kommen an, wohin buchen die
+            // Bytes, wer ist in der PID-Familie? Die Antwort auf "es zaehlt fast nichts".
+            if ((uint32_t)(now - diagTick) >= 5000 && diagZeilen < 12) {   // begrenzt: Diagnose, kein Dauerlog
+                diagTick = now; diagZeilen++;
+                PWSTR ad = nullptr; std::wstring dp;
+                if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &ad)) && ad) { dp = ad; CoTaskMemFree(ad); }
+                dp += L"\\lumora\\net-diagnose.txt";
+                FILE* f = nullptr; _wfopen_s(&f, dp.c_str(), L"a");
+                if (f) {
+                    std::string fam; for (uint32_t p2 : netFam) { if (!fam.empty()) fam += ","; fam += std::to_string(p2); }
+                    std::string line = "tick=" + std::to_string(now) + " ziel=" + std::to_string(netPid)
+                        + " familie=[" + fam + "] summe(in=" + std::to_string(in) + ",out=" + std::to_string(out) + ") "
+                        + net.diag() + "\n";
+                    fwrite(line.data(), 1, line.size(), f); fclose(f);
+                }
+            }
         } else if (wollen && !netAn) {
             mem[13] = 0;   // Trace-Start fehlgeschlagen -> App sieht: Zaehlung laeuft NICHT
         }
