@@ -120,6 +120,15 @@ if (-not $node) { throw "node.exe nicht gefunden - fuer den Uebersetzungs-Check 
 & $node "$root\_testlab\i18n-check.js" "$root\index.html" "$root\_testlab\i18n-ignore.txt"
 if ($LASTEXITCODE -ne 0) { throw "Uebersetzungs-Check fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
 
+# 0b) OSD-Rauchtest: baut jedes der sechs Designs mit allen Wertegruppen in einer
+# Sandbox WIRKLICH auf. Ein Syntax-Check reicht hier nicht - er ist auch dann
+# bestanden, wenn eine aufgerufene Funktion gar nicht existiert. Genau das ging in
+# 3.2.6 raus: beim Umbau der Renderer verschwand netSeg(), jeder Renderer rief sie
+# weiter auf, das OSD-Skript brach schon beim Laden ab und das Overlay blieb beim
+# Anwender komplett leer. Die Version musste zurueckgezogen werden.
+& $node "$root\_testlab\osd-smoke.js"
+if ($LASTEXITCODE -ne 0) { throw "OSD-Rauchtest fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
+
 # 1) Shell frisch bauen (cmake PC-unabhaengig suchen: VS2022 BuildTools ODER VS2026 Community -
 # die Entwicklungs-PCs haben unterschiedliche Toolchains; build\ ist jeweils lokal konfiguriert)
 $cmake = @(
