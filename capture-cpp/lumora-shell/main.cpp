@@ -3819,6 +3819,7 @@ static void applyOsdConfig() {
     if (g_osdEditCtrl) g_osdEditCtrl->put_ZoomFactor(z);   // Mausrad-Groesse wirkt live auch im Edit-Fenster
     sendToOsd("osd-config", { {"corner", s.value("osdCorner", "tl")}, {"opacity", s.value("osdOpacity", 0.55)},
                               {"theme", s.value("osdTheme", "bar")}, {"fields", s.value("osdFields", json())},
+                              {"order", s.value("osdOrder", json())},   // freie Gruppen-Reihenfolge
                               {"accent", s.value("osdAccent", "#74e857")} });
 }
 static ComPtr<IDCompositionDevice> g_dcompDev;
