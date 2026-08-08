@@ -565,15 +565,17 @@ body::before {
 .osd-fields { display: flex; flex-direction: column; gap: 12px; }
 .osd-fields-grp .grp { font-size: 11px; letter-spacing: 0.09em; color: #888; text-transform: uppercase; margin-bottom: 5px;
   display: flex; align-items: center; gap: 8px; }
-/* Gruppen-Reihenfolge: kleine Pfeile neben dem Gruppennamen */
-.osd-grp-move { display: inline-flex; gap: 2px; }
-.osd-grp-move button { background: rgba(255,255,255,.05); border: 1px solid var(--border); color: #999;
-  border-radius: 5px; font-size: 9px; line-height: 1; padding: 2px 5px; cursor: pointer; }
-.osd-grp-move button:hover:not(:disabled) { border-color: var(--accent); color: #ddd; }
-.osd-grp-move button:disabled { opacity: .3; cursor: default; }
-/* Werte-Chips sind zieh-bar */
-.osd-chip { cursor: grab; }
+/* Drag & Drop: Gruppen am ⠿-Griff, Chips direkt. Das gezogene Element bleibt an
+   Ort und Stelle sichtbar (abgesenkt), die Liste ordnet beim dragover LIVE um -
+   man sieht das Ergebnis, bevor man loslaesst. */
+.osd-grp-griff { cursor: grab; margin-right: 6px; color: #666; font-size: 13px; user-select: none; }
+.osd-grp-griff:hover { color: var(--accent); }
+.osd-grp-griff:active { cursor: grabbing; }
+.osd-fields-grp { border-radius: 10px; transition: background .12s ease, box-shadow .12s ease, opacity .12s ease; }
+.osd-chip { cursor: grab; transition: transform .12s ease, opacity .12s ease, border-color .12s ease; }
 .osd-chip:active { cursor: grabbing; }
+.osd-dragging { opacity: .35; transform: scale(.97); }
+.osd-fields-grp.osd-dragging { background: rgba(255,255,255,.04); box-shadow: 0 0 0 1px var(--accent) inset; }
 .osd-chips-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .osd-chip {
   background: #1b1b1b; border: 1px solid #333; color: #8f8f8f;
