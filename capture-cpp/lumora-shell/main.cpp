@@ -2075,6 +2075,18 @@ static void showMainWindow() {
     // nach. Sichtbarkeit + Flaeche hier explizit nachziehen (gleicher Fund/Fix wie beim
     // Tuersteher-Fenster).
     if (g_controller) { placeWebView(g_hwnd); g_controller->put_IsVisible(TRUE); }
+    // Geometrie-Beweis ins Log: bei "Fenster ist abgeschnitten" muss die Messung aus
+    // der ECHTEN Sitzung kommen - von aussen (anderer Desktop, gesperrter Bildschirm)
+    // ist sie nicht zuverlaessig zu bekommen.
+    {
+        RECT wr{}, cr{}; GetWindowRect(g_hwnd, &wr); GetClientRect(g_hwnd, &cr);
+        POINT co{ 0, 0 }; ClientToScreen(g_hwnd, &co);
+        MONITORINFO mi{ sizeof(mi) }; GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+        bcLogStream("show-main: zoom=" + std::to_string(IsZoomed(g_hwnd) ? 1 : 0)
+            + " fenster=" + std::to_string(wr.left) + "," + std::to_string(wr.top) + "-" + std::to_string(wr.right) + "," + std::to_string(wr.bottom)
+            + " client=" + std::to_string(co.x) + "," + std::to_string(co.y) + "-" + std::to_string(co.x + cr.right) + "," + std::to_string(co.y + cr.bottom)
+            + " arbeit=" + std::to_string(mi.rcWork.left) + "," + std::to_string(mi.rcWork.top) + "-" + std::to_string(mi.rcWork.right) + "," + std::to_string(mi.rcWork.bottom));
+    }
     // Echtes Nach-vorn-Holen (hebt die Foreground-Sperre per AttachThreadInput auf - sonst blinkt
     // das Fenster nur in der Taskleiste und bleibt ohne Fokus).
     forceForeground(g_hwnd);

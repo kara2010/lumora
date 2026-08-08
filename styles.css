@@ -250,7 +250,8 @@ body::before {
 
 /* Rasteransicht: linke Spiele-Liste ausgeblendet (redundant zum Raster),
    Fußleiste bleibt am unteren Rand. */
-.sidebar.list-hidden .game-list { display: none; }
+.sidebar.list-hidden .game-list { display: none;
+}
 .sidebar.list-hidden .sidebar-footer { margin-top: auto; }
 
 .app-version {
@@ -596,6 +597,7 @@ body::before {
 
 .game-list {
   flex: 1;
+  min-height: 0;   /* Flex-Falle: sonst waechst der Container mit dem Inhalt und scrollt nie */
   overflow-y: auto;
   overflow-x: hidden;   /* siehe .settings-view: overflow-y:auto ohne overflow-x macht die x-Achse
                             per Spec ebenfalls scrollbar - hier zusaetzlich riskant, weil setNavFocus()
@@ -733,6 +735,7 @@ body::before {
                             und setNavFocus() (D-Pad/Tastatur) scrollt hier per scrollIntoView() */
   padding: 8px;
   flex-direction: column;
+  min-height: 0;   /* Flex-Falle: sonst waechst der Container mit dem Inhalt und scrollt nie */
 }
 
 .grid-view::-webkit-scrollbar { width: 8px; }
@@ -1036,6 +1039,7 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
   padding: 10px;
   gap: 24px;
   overflow-y: auto;
+  min-height: 0;   /* Flex-Falle: sonst waechst der Container mit dem Inhalt und scrollt nie */
 }
 
 .game-cover-hero {
@@ -1483,6 +1487,7 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
   padding: 20px 22px;
   position: relative;
   flex-direction: column;
+  min-height: 0;   /* Flex-Falle: sonst waechst der Container mit dem Inhalt und scrollt nie */
 }
 .settings-view .settings-body { max-width: 640px; width: 100%; }
 
@@ -1987,6 +1992,7 @@ body:not(.nav-mode) .cover-cell:hover { border-color: #3a3a3a; }
   flex-direction: column;
   gap: 2px;
   padding-right: 4px;
+  min-height: 0;   /* Flex-Falle: sonst waechst der Container mit dem Inhalt und scrollt nie */
 }
 
 .scan-list::-webkit-scrollbar { width: 4px; }
