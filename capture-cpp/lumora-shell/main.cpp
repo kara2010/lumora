@@ -3770,8 +3770,15 @@ static void osdDataTick() {
                 else sprintf_s(t, m >= 100 ? "%.0f MB" : "%.1f MB", m);
                 return std::string(t);
             };
-            char rate[64];
-            sprintf_s(rate, "\xE2\x86\x93%.1f \xE2\x86\x91%.1f MB/s", rateIn / 1048576.0, rateOut / 1048576.0);
+            // Unter 0,1 MB/s in KB/s anzeigen - sonst steht bei typischem Spiel-Traffic
+            // (Telemetrie, Mehrspieler-Ticks) dauerhaft "0.0" da und wirkt kaputt.
+            auto rateTxt = [](double bps) {
+                char t[24];
+                if (bps >= 104857.0) sprintf_s(t, "%.1f MB/s", bps / 1048576.0);
+                else sprintf_s(t, "%.0f KB/s", bps / 1024.0);
+                return std::string(t);
+            };
+            std::string rate = "\xE2\x86\x93" + rateTxt(rateIn) + " \xE2\x86\x91" + rateTxt(rateOut);
             net = { {"rate", rate}, {"total", mb((double)in + (double)out)} };
         } else { lastAt = 0; rateIn = rateOut = 0; }
         payload["net"] = net;
@@ -6379,6 +6386,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
                       "Broker LumoraOSD-FPS, dort ist das gegeben).\n");
             return 2;
         }
+        net.setTarget(GetCurrentProcessId());
         // Loopback-Uebertragung: ~1 MB in 4-KB-Stuecken
         WSADATA wd; WSAStartup(MAKEWORD(2, 2), &wd);
         SOCKET srv = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -6398,15 +6406,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         rx.join();
         Sleep(600);   // ETW-Puffer leeren lassen (Realtime-Delivery ist gepuffert)
         uint64_t in = 0, out = 0;
-        std::set<uint32_t> me{ GetCurrentProcessId() };
-        net.bytesFor(me, in, out);
+        net.bytesFam(in, out);
         char b[160]; sprintf_s(b, "eigene PID: gesendet=%llu empfangen=%llu (erwartet je >= %zu)\n",
                                (unsigned long long)out, (unsigned long long)in, GESAMT);
         res += b;
         pruef("Senden wird gezaehlt (>= 1 MB)", out >= GESAMT);
         pruef("Empfangen wird gezaehlt (>= 1 MB)", in >= GESAMT);
-        net.reset(); net.bytesFor(me, in, out);
-        pruef("reset() leert die Zaehlung", in == 0 && out == 0);
+        net.setTarget(GetCurrentProcessId()); net.bytesFam(in, out);
+        pruef("setTarget() beginnt eine frische Zaehlung", in == 0 && out == 0);
         closesocket(cli); closesocket(acc); closesocket(srv); WSACleanup();
         net.stop();
         res = "netstat-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
