@@ -3538,6 +3538,36 @@ static void osdDataTick() {
     json payload = { {"gpu", readGpuNative()}, {"cpu", readCpuNative()} };
     // Bei abgelehnter Einrichtung sendet der schnelle FPS-Tick nichts -> hier "—".
     if (loadSettings().value("osdSetupDeclined", false)) payload["fps"] = "\xE2\x80\x94";
+    // Netzwerk-Statistik ins OSD: Rate aus dem Zaehlerstand ableiten (1-s-Fenster -
+    // der 200-ms-Tick selbst waere zu zappelig) und fertige Texte schicken, damit
+    // OSD und Bibliothek dieselbe Formatierung zeigen. null = Gruppe ausblenden.
+    {
+        static uint64_t lastIn = 0, lastOut = 0; static ULONGLONG lastAt = 0;
+        static double rateIn = 0, rateOut = 0;
+        json net = nullptr;
+        json ns = netStatSnapshot();
+        if (!ns.is_null() && ns.value("an", false)) {
+            uint64_t in = (uint64_t)ns.value("inBytes", 0.0), out = (uint64_t)ns.value("outBytes", 0.0);
+            ULONGLONG now = GetTickCount64();
+            if (in < lastIn || out < lastOut) { lastIn = in; lastOut = out; lastAt = now; rateIn = rateOut = 0; }   // neue Sitzung: Zaehler sprang zurueck
+            if (lastAt && now - lastAt >= 1000) {
+                double dt = (now - lastAt) / 1000.0;
+                rateIn = (in - lastIn) / dt; rateOut = (out - lastOut) / dt;
+                lastIn = in; lastOut = out; lastAt = now;
+            } else if (!lastAt) { lastIn = in; lastOut = out; lastAt = now; }
+            auto mb = [](double b) {
+                char t[32];
+                double m = b / 1048576.0;
+                if (m >= 1024) sprintf_s(t, "%.2f GB", m / 1024.0);
+                else sprintf_s(t, m >= 100 ? "%.0f MB" : "%.1f MB", m);
+                return std::string(t);
+            };
+            char rate[64];
+            sprintf_s(rate, "\xE2\x86\x93%.1f \xE2\x86\x91%.1f MB/s", rateIn / 1048576.0, rateOut / 1048576.0);
+            net = { {"rate", rate}, {"total", mb((double)in + (double)out)} };
+        } else { lastAt = 0; rateIn = rateOut = 0; }
+        payload["net"] = net;
+    }
     sendToOsd("osd-data", payload);
 }
 // Schneller FPS/Frametime-Tick (~30 Hz) fuer den lebendigen Frametime-Graphen; die

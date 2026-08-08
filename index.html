@@ -1207,6 +1207,7 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "Summe (Sitzung)": "Total (session)",
   "läuft": "running",
   "wird beim nächsten Spielstart erfasst": "will be recorded from the next game start",
   "Netzwerk-Statistik pro Spiel erfassen": "Record network statistics per game",
@@ -3914,6 +3915,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       gpu: [['load','Last'],['temp','Temp'],['power','Verbrauch'],['clock','Takt'],['vram','VRAM']],
       cpu: [['load','Last'],['temp','Temp'],['clock','Takt'],['power','Verbrauch'],['ram','RAM']],
       fps: [['fps','FPS'],['frametime','Frametime'],['graph','Graph']],
+      net: [['rate','Rate'],['total','Summe (Sitzung)']],
     }
     let osdFieldsState = { gpu: [], cpu: [], fps: [] }
     function renderOsdFields(fields) {
