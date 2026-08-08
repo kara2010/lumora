@@ -17,8 +17,10 @@
 #include <set>
 #include <algorithm>
 #include <cmath>
+#include <tlhelp32.h>
 #include "etw_present.h"
 #include "etw_kernel.h"
+#include "etw_net.h"
 #include "stutter_analyzer.h"
 
 namespace lubroker {
@@ -497,6 +499,15 @@ inline int runFpsBroker(const std::wstring& binDir) {
     });
     if (!ok) { UnmapViewOfFile(mem); CloseHandle(shm); return 1; }   // keine Adminrechte / Session belegt
 
+    // Netzwerk-Statistik (zuschaltbar): App schreibt die Ziel-PID des laufenden Spiels
+    // nach [8]; solange sie != 0 ist, laeuft eine ZWEITE, reine Netz-ETW-Session und
+    // der Broker meldet die Bytes der PID-Familie (Spiel + Kinder) nach [9..12].
+    // [13] = bestaetigte Ziel-PID (0 = Zaehlung aus/Trace-Start fehlgeschlagen).
+    luetw::NetTrace net;
+    bool netAn = false;
+    uint32_t netPid = 0, netFamTick = 0;
+    std::set<uint32_t> netFam;
+
     // 60-Hz-Schreibschleife: aktivsten Praesentierer der letzten 0,5 s -> FPS ins SHM.
     uint32_t startTick = GetTickCount(), lastFreshApp = GetTickCount();
     for (;;) {
@@ -532,7 +543,41 @@ inline int runFpsBroker(const std::wstring& binDir) {
             }
         }
         mem[0] = FPS_MAGIC; mem[1] = now; mem[2] = (uint32_t)outFps; mem[3] = (uint32_t)outFtX100; mem[4] = 0; mem[5] = bestPid;
+
+        // --- Netzwerk-Statistik ---
+        uint32_t wollen = mem[8];
+        if (wollen && !netAn) { netAn = net.start(); netPid = 0; }
+        if (!wollen && netAn) { net.stop(); netAn = false; netPid = 0; netFam.clear(); mem[13] = 0; mem[9] = mem[10] = mem[11] = mem[12] = 0; }
+        if (netAn && wollen) {
+            if (wollen != netPid) {   // neue Spielsitzung: ab hier frisch zaehlen
+                netPid = wollen; net.reset(); netFam = { netPid }; netFamTick = 0;
+            }
+            if ((uint32_t)(now - netFamTick) >= 1000) {   // PID-Familie 1x/s nachziehen (Launcher -> Spielprozess als Kind)
+                netFamTick = now;
+                HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+                if (snap != INVALID_HANDLE_VALUE) {
+                    PROCESSENTRY32W pe{ sizeof(pe) };
+                    // Mehrere Durchgaenge, bis nichts Neues kommt: Kind-von-Kind-Ketten
+                    // (Launcher -> Wrapper -> Spiel) brauchen mehr als einen Blick.
+                    bool neu = true;
+                    for (int runde = 0; runde < 4 && neu; ++runde) {
+                        neu = false;
+                        if (Process32FirstW(snap, &pe)) do {
+                            if (netFam.count(pe.th32ParentProcessID) && !netFam.count(pe.th32ProcessID)) { netFam.insert(pe.th32ProcessID); neu = true; }
+                        } while (Process32NextW(snap, &pe));
+                    }
+                    CloseHandle(snap);
+                }
+            }
+            uint64_t in = 0, out = 0; net.bytesFor(netFam, in, out);
+            mem[9] = (uint32_t)(in & 0xFFFFFFFF); mem[10] = (uint32_t)(in >> 32);
+            mem[11] = (uint32_t)(out & 0xFFFFFFFF); mem[12] = (uint32_t)(out >> 32);
+            mem[13] = netPid;
+        } else if (wollen && !netAn) {
+            mem[13] = 0;   // Trace-Start fehlgeschlagen -> App sieht: Zaehlung laeuft NICHT
+        }
     }
+    if (netAn) net.stop();
     trace.stop();
     UnmapViewOfFile(mem); CloseHandle(shm);
     return 0;

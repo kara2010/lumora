@@ -141,6 +141,10 @@
             <span class="meta-label">Zuletzt gespielt</span>
             <span class="meta-value" id="detailLastPlayed">nie</span>
           </div>
+          <div class="meta-row" id="detailNetRow" style="display:none">
+            <span class="meta-label">Übertragen (Netzwerk)</span>
+            <span class="meta-value" id="detailNet">–</span>
+          </div>
           <div class="meta-row hdr-toggle-row">
             <div class="meta-text">
               <span class="meta-label-main">HDR-Automatik</span>
@@ -281,6 +285,11 @@
               <span class="setting-toggle-label">Beim Schließen in den Infobereich (Tray)</span>
               <label class="switch"><input type="checkbox" id="setTray" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
             </div>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label">Netzwerk-Statistik pro Spiel erfassen</span>
+              <label class="switch"><input type="checkbox" id="setNetStats" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
+            </div>
+            <p class="settings-hint">Zählt während des Spielens die übertragenen Daten des Spielprozesses (Senden und Empfangen, inklusive Kindprozesse). Die Summe steht in der Bibliothek beim jeweiligen Spiel. Beim ersten Einschalten richtet Lumora einmalig einen Hintergrunddienst ein (eine Windows-Sicherheitsabfrage, kein Treiber).</p>
           </div>
           <div class="form-group">
             <label>Updates</label>
@@ -1348,6 +1357,11 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "läuft": "running",
+  "wird beim nächsten Spielstart erfasst": "will be recorded from the next game start",
+  "Netzwerk-Statistik pro Spiel erfassen": "Record network statistics per game",
+  "Zählt während des Spielens die übertragenen Daten des Spielprozesses (Senden und Empfangen, inklusive Kindprozesse). Die Summe steht in der Bibliothek beim jeweiligen Spiel. Beim ersten Einschalten richtet Lumora einmalig einen Hintergrunddienst ein (eine Windows-Sicherheitsabfrage, kein Treiber).": "While you play, counts the data transferred by the game process (send and receive, including child processes). The total is shown in the library for each game. The first time you enable this, Lumora sets up a background service once (one Windows security prompt, no driver).",
+  "Übertragen (Netzwerk)": "Transferred (network)",
   "Mitgeliefert": "Bundled",
   "Eigene Kopie": "Your copy",
   "Importiert": "Imported",
@@ -3031,6 +3045,7 @@ function applyI18n() {
       document.getElementById('detailName').textContent = g.name
       document.getElementById('detailPath').textContent = g.path
       document.getElementById('detailPlaytime').textContent = formatPlaytime(g.playtime)
+      netRowUpdate(null)
       document.getElementById('detailLastPlayed').textContent = formatLastPlayed(g.lastPlayed)
       const hdrOn = g.hdr === true
       document.getElementById('hdrToggle').checked = hdrOn
@@ -4489,6 +4504,58 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // Spielstart pauschal "HDR aus", auch wenn HDR in Windows an war.
     ipcRenderer.invoke('hdr-state').then(st => { if (st) paintHdr(st.enabled, st.capable) }).catch(() => {})
 
+    // --- Netzwerk-Statistik: Bytes menschlich formatieren + verbuchen ------------
+    let netStatsAn = false
+    function formatBytes(n) {
+      if (!n || n <= 0) return null
+      const mb = n / 1048576
+      if (mb < 1024) return (mb >= 100 ? Math.round(mb) : mb.toFixed(1)) + ' MB'
+      return (mb / 1024).toFixed(2) + ' GB'
+    }
+    function netRowText(g, live) {
+      const gesamtIn = (g.netIn || 0) + (live ? live.inBytes : 0)
+      const gesamtOut = (g.netOut || 0) + (live ? live.outBytes : 0)
+      const summe = formatBytes(gesamtIn + gesamtOut)
+      if (!summe) return null
+      let t = summe + ' (\u2193' + (formatBytes(gesamtIn) || '0 MB') + ' \u2191' + (formatBytes(gesamtOut) || '0 MB') + ')'
+      if (live) t += ' \u00b7 ' + window.tr('läuft')
+      return t
+    }
+    function netRowUpdate(live) {
+      const row = document.getElementById('detailNetRow'), val = document.getElementById('detailNet')
+      if (!row || !val || selectedIndex < 0 || !games[selectedIndex]) return
+      const g = games[selectedIndex]
+      const t = netRowText(g, live)
+      // Zeile zeigen, sobald es etwas zu zeigen gibt ODER die Statistik an ist -
+      // sonst wuesste niemand, dass die Funktion existiert und schon zaehlt.
+      row.style.display = (t || netStatsAn) ? '' : 'none'
+      val.textContent = t || window.tr('wird beim nächsten Spielstart erfasst')
+    }
+    // Sitzungssumme kommt beim Spielende aus der Shell (wie play-session)
+    ipcRenderer.on('net-session', (event, { gamePath, inBytes, outBytes }) => {
+      const g = games.find(x => x.path === gamePath)
+      if (!g || !(inBytes > 0 || outBytes > 0)) return
+      g.netIn = (g.netIn || 0) + Math.round(inBytes)
+      g.netOut = (g.netOut || 0) + Math.round(outBytes)
+      saveGames()
+      if (selectedIndex >= 0 && games[selectedIndex] === g) netRowUpdate(null)
+    })
+    // Schalter wurde shell-seitig zurueckgenommen (Einrichtung abgelehnt)
+    ipcRenderer.on('net-stat-off', () => {
+      const e = document.getElementById('setNetStats'); if (e) e.checked = false
+      netStatsAn = false; netRowUpdate(null)
+    })
+    // Live-Anzeige: solange ein Spiel laeuft, die laufende Zaehlung dazurechnen
+    setInterval(async () => {
+      if (!netStatsAn || selectedIndex < 0 || !games[selectedIndex]) return
+      const row = document.getElementById('detailNetRow')
+      if (!row || !row.offsetParent) return   // Detailansicht nicht sichtbar -> nichts abfragen
+      let d = null
+      try { d = await ipcRenderer.invoke('net-stat-read') } catch {}
+      if (d && d.an && d.gamePath === games[selectedIndex].path) netRowUpdate(d)
+      else netRowUpdate(null)
+    }, 2000)
+
     ipcRenderer.on('play-session', (event, { gamePath, durationMs }) => {
       const secs = Math.round(durationMs / 1000)
       if (secs <= 0) return
@@ -4652,6 +4719,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
       document.getElementById('setIbAuto').checked = s.inputBridgeAutoActivate !== false
       { const e = document.getElementById('setKbAuto'); if (e) e.checked = s.kbBridgeAutoActivate !== false }
+      { const e = document.getElementById('setNetStats'); if (e) e.checked = !!s.netStats; netStatsAn = !!s.netStats }
       document.getElementById('setOsdEnabled').checked = !!s.osdEnabled
       document.getElementById('setOsdTheme').value = s.osdTheme || 'bar'
       renderGpuOptions(s.osdGpu || 'auto')
@@ -4738,6 +4806,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         steamGridDbKey: document.getElementById('setSgdbKey').value.trim(),
         inputBridgeAutoActivate: document.getElementById('setIbAuto').checked,
         kbBridgeAutoActivate: (document.getElementById('setKbAuto') || { checked: true }).checked,
+        netStats: (document.getElementById('setNetStats') || { checked: false }).checked,
       })
     }
 

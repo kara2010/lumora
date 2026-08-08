@@ -582,6 +582,9 @@ static void extDetachHandle(ExtSession& s) {
     if (s.hWait) { UnregisterWaitEx(s.hWait, nullptr); s.hWait = nullptr; }
     if (s.hProc) { CloseHandle(s.hProc); s.hProc = nullptr; }
 }
+// Netzwerk-Statistik: beim Spielende die Sitzungssumme melden (Definition weiter
+// unten bei den Broker-Helfern - braucht das FPS-SHM).
+static void netSessionFinish(const std::string& gamePath);
 static void extWatchTick() {
     std::lock_guard<std::mutex> lk(g_launchMx);
     auto running = listRunningExes();
@@ -632,6 +635,7 @@ static void extWatchTick() {
         if (s.hdrOn) { lulaunch::setHDR(false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
         inputBridgeOnEnd(s.gamePath);
         sendToUi("play-session", { {"gamePath", s.gamePath}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
+        netSessionFinish(s.gamePath);
     }
     // Takt dynamisch (wie launchTick): Ende-Verdacht schnell mit 1s bestaetigen (3 leere
     // Scans -> Ende in ~3s statt ~6s, Start der Zaehlung kommt per Exit-Wake sofort).
@@ -696,7 +700,10 @@ static void launchEndSession(lulaunch::LaunchSession& s, bool credit) {
     g_activeLaunchExes.erase(std::remove(g_activeLaunchExes.begin(), g_activeLaunchExes.end(), exeLow), g_activeLaunchExes.end());   // Watcher darf wieder uebernehmen
     if (s.useHdr) { lulaunch::setHDR(false); g_hdrByLauncher = false; sendToUi("hdr-status", false); }
     inputBridgeOnEnd(narrow(s.gamePath));
-    if (credit && s.startTs) sendToUi("play-session", { {"gamePath", narrow(s.gamePath)}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
+    if (credit && s.startTs) {
+        sendToUi("play-session", { {"gamePath", narrow(s.gamePath)}, {"durationMs", (long long)(GetTickCount64() - s.startTs)} });
+        netSessionFinish(narrow(s.gamePath));
+    }
     sendToUi("launch-status", "idle");
     s.done = true;
 }
@@ -2877,6 +2884,95 @@ static json readBrokerFps() {
     if (!g_lastFps.is_null() && GetTickCount64() - g_lastFpsAt < 1500) return g_lastFps;
     return nullptr;
 }
+// === Netzwerk-Statistik (zuschaltbar, Einstellung "netStats") ======================
+// Der elevated FPS-Broker zaehlt per Kernel-ETW die Netz-Bytes des laufenden Spiels
+// (TCP+UDP, Spiel + Kindprozesse). Die Shell meldet ihm die Ziel-PID ueber SHM [8]
+// und liest [9..12] (in/out als 64-bit) sowie [13] (bestaetigte PID, 0 = aus).
+#define TIMER_NETSTAT 120
+static std::string g_netGamePath;      // laufende Zaehlung gilt fuer dieses Spiel
+static ULONGLONG g_netSpawnAt = 0;
+static void shmPoke(ShmMap& m, int idx, uint32_t v) {
+    if (!m.h) return;
+    void* p = MapViewOfFile(m.h, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    if (!p) return;
+    ((uint32_t*)p)[idx] = v; UnmapViewOfFile(p);
+}
+static bool shmPeek16(ShmMap& m, uint32_t out[16]) {
+    if (!m.h) return false;
+    void* p = MapViewOfFile(m.h, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+    if (!p) return false;
+    memcpy(out, p, 64); UnmapViewOfFile(p);
+    return true;
+}
+static bool fpsBrokerAlive() {
+    if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps")) return false;
+    FpsShmFull s{};
+    return shmRead(g_fpsShm, s) && s.magic == FPS_MAGIC && (uint32_t)(GetTickCount() - s.brokerTick) <= 3000;
+}
+// PID zum EXE-Namen (lowercase, ohne Pfad): fuer Steam-/Registry-Starts kennt die
+// Session keine PID - die Zaehlung braucht aber eine.
+static uint32_t netPidByExe(const std::string& exeLow) {
+    if (exeLow.empty()) return 0;
+    uint32_t pid = 0;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    PROCESSENTRY32W pe{ sizeof(pe) };
+    if (Process32FirstW(snap, &pe)) do {
+        std::string n = narrow(pe.szExeFile);
+        for (auto& c : n) c = (char)tolower((unsigned char)c);
+        if (n == exeLow) { pid = pe.th32ProcessID; break; }
+    } while (Process32NextW(snap, &pe));
+    CloseHandle(snap);
+    return pid;
+}
+static json netStatSnapshot() {   // {an, inBytes, outBytes} - an=false, wenn der Broker (noch) nicht zaehlt
+    uint32_t w[16] = {};
+    if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps") || !shmPeek16(g_fpsShm, w)) return nullptr;
+    uint64_t in = ((uint64_t)w[10] << 32) | w[9], out = ((uint64_t)w[12] << 32) | w[11];
+    return { {"an", w[13] != 0}, {"inBytes", (double)in}, {"outBytes", (double)out}, {"gamePath", g_netGamePath} };
+}
+// 1-Hz-Tick (UI-Thread, wie extWatchTick): laeuft ein Spiel und ist die Statistik an,
+// Ziel-PID melden + Broker am Leben halten - auch OHNE eingeschaltetes OSD.
+static void netStatTick() {
+    bool an = loadSettings().value("netStats", false);
+    std::string path, exe; uint32_t pid = 0;
+    if (an) {
+        {
+            std::lock_guard<std::mutex> lk(g_launchMx);
+            for (auto& s : g_launches) if (!s.done && s.started) {
+                path = narrow(s.gamePath); pid = s.pid;
+                exe = narrow(s.exeName); for (auto& c : exe) c = (char)tolower((unsigned char)c);
+                break;
+            }
+        }
+        if (path.empty()) for (auto& [k, es] : g_extSessions) { path = es.gamePath; exe = k; break; }
+    }
+    if (path.empty()) {
+        // Kein Spiel (oder Statistik aus): Zaehlung beim Broker abmelden. Die Sitzungs-
+        // summe hat netSessionFinish beim Spielende bereits gemeldet.
+        if (!g_netGamePath.empty()) { shmPoke(g_fpsShm, 8, 0); g_netGamePath.clear(); }
+        return;
+    }
+    if (!pid) pid = netPidByExe(exe);
+    if (!pid) return;                      // Prozess (noch) nicht auffindbar -> naechster Tick
+    if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps")) return;
+    shmWriteApp(g_fpsShm, 1);              // Heartbeat: Broker lebt, solange gezaehlt wird
+    shmPoke(g_fpsShm, 8, pid);
+    g_netGamePath = path;
+    if (!fpsBrokerAlive() && GetTickCount64() - g_netSpawnAt > 8000) {
+        g_netSpawnAt = GetTickCount64();
+        std::thread([]() { runTask(L"LumoraOSD-FPS"); }).detach();
+    }
+}
+static void netSessionFinish(const std::string& gamePath) {
+    if (g_netGamePath.empty() || g_netGamePath != gamePath) return;
+    json s = netStatSnapshot();
+    if (!s.is_null() && s.value("an", false))
+        sendToUi("net-session", { {"gamePath", gamePath}, {"inBytes", s["inBytes"]}, {"outBytes", s["outBytes"]} });
+    shmPoke(g_fpsShm, 8, 0);
+    g_netGamePath.clear();
+}
+
 // FPS-Quelle waehlen (osdFpsSource, 1:1 main.js): 'rtss' -> RTSS, 'presentmon' ->
 // PresentMon-Broker, 'auto' -> RTSS wenn verfuegbar, sonst Broker. g_fpsUseRtss
 // merkt sich die Wahl fuer osdDataTick (nur dann brokersEnsure).
@@ -3004,6 +3100,44 @@ static bool sensorsNeedSetup() {
     json m = readMahm();
     if (!m.is_null() && m.contains("cpuTemp")) return false;   // Afterburner liefert bereits
     return !pawnioInstalled() || !senseTaskPresent();
+}
+// Netzwerk-Statistik eingeschaltet, aber der Messdienst (FPS-Broker-Aufgabe) wurde nie
+// eingerichtet - z.B. weil das OSD nie benutzt wurde. Dann einmalig registrieren
+// (Muster ensureAnalyzeSetup: EIN Erklaer-Dialog, EIN UAC, kein Treiber).
+static void netEnsureTask() {
+    static std::atomic<bool> laeuft{ false };
+    if (laeuft.exchange(true)) return;
+    std::thread([]() {
+        if (fpsTaskPresent()) { laeuft = false; return; }
+        std::wstring dlg = L"Fuer die Netzwerk-Statistik richtet Lumora einmalig einen Hintergrunddienst ein\n"
+            L"(Windows-Leistungsdaten lesen: Netzwerk-Bytes des Spielprozesses).\n\n"
+            L"Gleich fragt Windows EINMAL nach deiner Bestaetigung (Administratorrechte).\n"
+            L"Es wird KEIN Treiber installiert.";
+        if (MessageBoxW(g_hwnd, dlg.c_str(), L"Netzwerk-Statistik einrichten", MB_OKCANCEL | MB_ICONINFORMATION | MB_SETFOREGROUND) != IDOK) {
+            // Schalter zuruecknehmen - sonst fragt jeder Spielstart erneut
+            json s = loadSettings(); s["netStats"] = false; writeFile(settingsPath(), s.dump(2));
+            sendToUi("net-stat-off", nullptr);
+            laeuft = false; return;
+        }
+        auto q = [](std::wstring s) { size_t p = 0; while ((p = s.find(L'\'', p)) != std::wstring::npos) { s.insert(p, 1, L'\''); p += 2; } return s; };
+        wchar_t exeW[MAX_PATH]; GetModuleFileNameW(nullptr, exeW, MAX_PATH);
+        std::wstring inner =
+            L"$a=New-ScheduledTaskAction -Execute '" + q(exeW) + L"' -Argument '--fps-broker'; "
+            L"$p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive; "
+            L"$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew; "
+            L"Register-ScheduledTask -TaskName 'LumoraOSD-FPS' -Action $a -Principal $p -Settings $s -Force";
+        std::string b64 = b64encode((const uint8_t*)inner.data(), inner.size() * 2);
+        std::wstring b64w = widen(b64);
+        std::wstring elevExe = binDir() + L"\\lumora-elevate.exe";
+        std::wstring outer = (GetFileAttributesW(elevExe.c_str()) != INVALID_FILE_ATTRIBUTES)
+            ? L"Start-Process -FilePath '" + q(elevExe) + L"' -Verb RunAs -WindowStyle Hidden -ArgumentList '--ps-encoded','" + b64w + L"'"
+            : L"Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile -EncodedCommand " + b64w + L"'";
+        runCaptureOutput(L"powershell -NoProfile -Command \"" + outer + L"\"", 20000);
+        bool ok = false;
+        for (int i = 0; i < 30 && !ok; ++i) { if (fpsTaskPresent()) ok = true; else Sleep(1000); }
+        bcLogStream(std::string("netstat: Aufgaben-Einrichtung ") + (ok ? "ok" : "NICHT abgeschlossen"));
+        laeuft = false;
+    }).detach();
 }
 static void ensureOsdSetup() {
     // NICHTS Teures auf dem Aufrufer-Thread (showOsd/UI): frueher liefen die schtask-Checks
@@ -4636,6 +4770,8 @@ static json handleChannel(const std::string& channel, const json& args) {
             if (args[0].contains("minimizeToTray")) { if (args[0].value("minimizeToTray", false)) createTray(); else destroyTray(); }
             // OSD-Einstellung dabei? Overlay-Sichtbarkeit + Konfiguration live nachziehen (wie Electron)
             for (auto& [k, v] : args[0].items()) if (k.rfind("osd", 0) == 0) { syncOsdVisibility(); applyOsdConfig(); break; }
+            // Netzwerk-Statistik frisch eingeschaltet: Messdienst ggf. einmalig einrichten
+            if (args[0].value("netStats", false)) netEnsureTask();
             // Analyse-Einstellungen live nachziehen: Regler wirken sofort (auch in der Vorschau)
             for (auto& [k, v] : args[0].items()) if (k.rfind("analyze", 0) == 0) {
                 g_anSense = loadSettings().value("analyzeSense", 1);
@@ -5215,6 +5351,8 @@ static json handleChannel(const std::string& channel, const json& args) {
         return true;
     }
     if (channel == "kb-bridge-monitor-read") return lubridge::kbMonitor();
+    // Netzwerk-Statistik: Live-Werte der laufenden Zaehlung (UI pollt 1x/s in der Detailansicht)
+    if (channel == "net-stat-read") return netStatSnapshot();
     // Mitschnitt in %APPDATA%\lumora\kb-mitschnitt.txt: erlaubt das Messen WAEHREND
     // des Spielens - die Live-Anzeige taugt dafuer nicht, weil man zum Pruefen den
     // Stick bewegen muesste und damit in Lumora navigiert statt im Spiel zu sein.
@@ -5463,6 +5601,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_TIMER:
         if (w == TIMER_LAUNCH) { launchTick(); return 0; }
         if (w == TIMER_EXTWATCH) { extWatchTick(); return 0; }
+        if (w == TIMER_NETSTAT) { netStatTick(); return 0; }
         if (w == TIMER_VIEWER) { bcViewerTick(); return 0; }
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
         if (w == TIMER_IPWATCH) { bcIpWatchTick(); return 0; }
@@ -6191,6 +6330,59 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
         return fehler ? 1 : 0;
     }
+    // Netzwerk-Statistik Ende-zu-Ende: eigene ETW-Netz-Session starten, sich selbst
+    // ueber eine ECHTE TCP-Verbindung (Loopback) ~1 MB schicken und pruefen, dass die
+    // Zaehlung fuer die eigene PID beides sieht (senden UND empfangen). Braucht
+    // Adminrechte (System-Logger) - ohne wird das ehrlich gemeldet, nicht als Fehler.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-netstat") == 0) {
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string res; int fehler = 0;
+        auto pruef = [&](const char* was, bool ok) {
+            res += std::string(ok ? "OK   " : "FEHL ") + was + "\n"; if (!ok) ++fehler;
+        };
+        luetw::NetTrace net;
+        if (!net.start()) {
+            writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt",
+                      "netstat-Selbsttest: NICHT MOEGLICH\n"
+                      "ETW-System-Logger liess sich nicht starten - der Test braucht\n"
+                      "Administratorrechte (im Betrieb laeuft die Zaehlung im elevated\n"
+                      "Broker LumoraOSD-FPS, dort ist das gegeben).\n");
+            return 2;
+        }
+        // Loopback-Uebertragung: ~1 MB in 4-KB-Stuecken
+        WSADATA wd; WSAStartup(MAKEWORD(2, 2), &wd);
+        SOCKET srv = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in a{}; a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_LOOPBACK); a.sin_port = 0;
+        bind(srv, (sockaddr*)&a, sizeof(a)); listen(srv, 1);
+        int alen = sizeof(a); getsockname(srv, (sockaddr*)&a, &alen);
+        SOCKET cli = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        connect(cli, (sockaddr*)&a, sizeof(a));
+        SOCKET acc = accept(srv, nullptr, nullptr);
+        const size_t STUECK = 4096, GESAMT = 1024 * 1024;
+        std::vector<char> buf(STUECK, 'L');
+        std::thread rx([&]() {   // Empfaenger leert die Leitung, sonst blockt der Sender
+            std::vector<char> r(STUECK); size_t got = 0;
+            while (got < GESAMT) { int n = recv(acc, r.data(), (int)r.size(), 0); if (n <= 0) break; got += n; }
+        });
+        for (size_t sent = 0; sent < GESAMT;) { int n = send(cli, buf.data(), (int)STUECK, 0); if (n <= 0) break; sent += n; }
+        rx.join();
+        Sleep(600);   // ETW-Puffer leeren lassen (Realtime-Delivery ist gepuffert)
+        uint64_t in = 0, out = 0;
+        std::set<uint32_t> me{ GetCurrentProcessId() };
+        net.bytesFor(me, in, out);
+        char b[160]; sprintf_s(b, "eigene PID: gesendet=%llu empfangen=%llu (erwartet je >= %zu)\n",
+                               (unsigned long long)out, (unsigned long long)in, GESAMT);
+        res += b;
+        pruef("Senden wird gezaehlt (>= 1 MB)", out >= GESAMT);
+        pruef("Empfangen wird gezaehlt (>= 1 MB)", in >= GESAMT);
+        net.reset(); net.bytesFor(me, in, out);
+        pruef("reset() leert die Zaehlung", in == 0 && out == 0);
+        closesocket(cli); closesocket(acc); closesocket(srv); WSACleanup();
+        net.stop();
+        res = "netstat-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-kbdinput") == 0) {
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
         std::string res; int fehler = 0;
@@ -6572,6 +6764,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // und per Timer nachreichen, wenn die UI ihre Listener registriert hat.
     for (int i = 1; i < argc; ++i) { std::string a = narrow(argv[i]); if (a.rfind("lumora://", 0) == 0) { g_coldDeepLink = a; SetTimer(hwnd, TIMER_COLDLINK, 2500, nullptr); } }
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
+    SetTimer(hwnd, TIMER_NETSTAT, 1000, nullptr);    // Netzwerk-Statistik: Ziel-PID melden + Broker-Heartbeat (1 Hz, billig ohne Spiel)
     SetTimer(hwnd, TIMER_OSDPRELOAD, 3000, nullptr); // OSD-WebView2 ~3s nach Start vorwaermen (Browser-Prozess laeuft dann schon) -> Oeffnen sofort
     timeBeginPeriod(1);                              // praeziser Hintergrund-Poll (wie Electron/RTSS)
     startHotkeyPollThread();   // Gamepad-/Tastatur-Hotkey-Poll im EIGENEN Thread (125 Hz), entkoppelt vom
