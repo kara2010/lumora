@@ -2460,6 +2460,39 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 /* Eingabe-Bruecke: Warnung, wenn die Ansprechschwelle ueber dem liegt, was der Stick
    auf der Gegenachse ueberhaupt erreicht - dann kann man beim Laufen nicht lenken. */
 .kb-warn { color: #ffb454 !important; opacity: 1 !important; }
+/* Eingabe-Bruecke, Modus ②: Statuszeile ganz oben. Beantwortet auf einen Blick,
+   ob die Bruecke laeuft, mit welchem Profil und wofuer - das war vorher ueber drei
+   Gruppen verstreut. */
+.kb-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px; margin: 0 0 16px; border-radius: 12px;
+  background: rgba(255,255,255,.035); border: 1px solid var(--border); }
+.kb-lampe { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
+  background: rgba(255,255,255,.22); }
+.kb-lampe-an { background: #4fe08a; box-shadow: 0 0 10px rgba(79,224,138,.75); }
+/* Profil-Karte: Name, Herkunft, Spielbezug und Wirkung an EINER Stelle. */
+.kb-karte { margin-top: 10px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid var(--border); background: rgba(255,255,255,.02); }
+.kb-karte-kopf { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-weight: 600; margin-bottom: 10px; }
+.kb-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid transparent; }
+.kb-badge-haus   { background: rgba(120,180,255,.14); border-color: rgba(120,180,255,.35); color: #8ec4ff; }
+.kb-badge-kopie  { background: rgba(255,180,84,.13);  border-color: rgba(255,180,84,.32);  color: #ffb454; }
+.kb-badge-import { background: rgba(190,140,255,.13); border-color: rgba(190,140,255,.32); color: #c79bff; }
+.kb-badge-eigen  { background: rgba(79,224,138,.13);  border-color: rgba(79,224,138,.32);  color: #4fe08a; }
+.kb-badge-still  { background: rgba(255,255,255,.05); border-color: var(--border); color: var(--text-dim); }
+.kb-zeile { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.kb-zeile-lbl { width: 100px; font-size: 12.5px; opacity: .8; flex: 0 0 auto; }
+.kb-zeile select { flex: 1 1 240px; min-width: 0; }
+/* Gegenueberstellung Spiel ↔ Profil. */
+.kb-tab { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.kb-tab-zeile { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  font-size: 13px; border-top: 1px solid var(--border); }
+.kb-tab-zeile:first-child { border-top: 0; }
+.kb-tab-aktiv { background: rgba(120,180,255,.07); }
+.kb-tab-spiel { flex: 1 1 160px; min-width: 0; font-weight: 600; }
+.kb-tab-pfeil { color: var(--text-dim); flex: 0 0 auto; }
+.kb-tab-zeile > span:nth-child(3) { flex: 1 1 160px; min-width: 0; }
 /* Hinweis, dass ein mitgeliefertes Profil seit der eigenen Kopie verbessert wurde. */
 .kb-haus-hinweis { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
   padding: 10px 12px; margin: 0 0 10px; border-radius: 10px; font-size: 12.5px;
