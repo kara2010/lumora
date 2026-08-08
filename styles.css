@@ -563,7 +563,17 @@ body::before {
    Chips über alle Gruppen ausgerichtet. Label als Überschrift (volle Breite). */
 .osd-values-block { display: flex; flex-direction: column; gap: 9px; padding: 6px 0 2px; }
 .osd-fields { display: flex; flex-direction: column; gap: 12px; }
-.osd-fields-grp .grp { font-size: 11px; letter-spacing: 0.09em; color: #888; text-transform: uppercase; margin-bottom: 5px; }
+.osd-fields-grp .grp { font-size: 11px; letter-spacing: 0.09em; color: #888; text-transform: uppercase; margin-bottom: 5px;
+  display: flex; align-items: center; gap: 8px; }
+/* Gruppen-Reihenfolge: kleine Pfeile neben dem Gruppennamen */
+.osd-grp-move { display: inline-flex; gap: 2px; }
+.osd-grp-move button { background: rgba(255,255,255,.05); border: 1px solid var(--border); color: #999;
+  border-radius: 5px; font-size: 9px; line-height: 1; padding: 2px 5px; cursor: pointer; }
+.osd-grp-move button:hover:not(:disabled) { border-color: var(--accent); color: #ddd; }
+.osd-grp-move button:disabled { opacity: .3; cursor: default; }
+/* Werte-Chips sind zieh-bar */
+.osd-chip { cursor: grab; }
+.osd-chip:active { cursor: grabbing; }
 .osd-chips-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .osd-chip {
   background: #1b1b1b; border: 1px solid #333; color: #8f8f8f;
