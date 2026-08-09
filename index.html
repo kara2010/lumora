@@ -143,7 +143,10 @@
           </div>
           <div class="meta-row" id="detailNetRow" style="display:none">
             <span class="meta-label">Übertragen (Netzwerk)</span>
-            <span class="meta-value" id="detailNet">–</span>
+            <span class="meta-value-group">
+              <span class="meta-value" id="detailNet">–</span>
+              <button class="meta-action" id="detailNetReset" style="display:none" onclick="netZaehlerLoeschen()">Zurücksetzen</button>
+            </span>
           </div>
           <div class="meta-row hdr-toggle-row">
             <div class="meta-text">
@@ -290,6 +293,8 @@
               <label class="switch"><input type="checkbox" id="setNetStats" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
             </div>
             <p class="settings-hint">Zählt während des Spielens die übertragenen Daten des Spielprozesses (Senden und Empfangen, inklusive Kindprozesse). Die Summe steht in der Bibliothek beim jeweiligen Spiel. Beim ersten Einschalten richtet Lumora einmalig einen Hintergrunddienst ein (eine Windows-Sicherheitsabfrage, kein Treiber).</p>
+            <p class="settings-hint">Einzelne Zähler löschst du direkt beim Spiel in der Bibliothek.</p>
+            <button class="btn-browse" id="netResetAllBtn" style="align-self:flex-start" onclick="netAlleZaehlerLoeschen()">Alle Netzwerk-Zähler löschen</button>
           </div>
           <div class="form-group">
             <label>Updates</label>
@@ -1222,6 +1227,14 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  // --- Netzwerk-Zaehler loeschen ----------------------------------------------
+  'Zurücksetzen': 'Reset',
+  'Alle löschen': 'Delete all',
+  'Alle Netzwerk-Zähler löschen': 'Delete all network counters',
+  'Einzelne Zähler löschst du direkt beim Spiel in der Bibliothek.': 'Individual counters can be deleted directly at the game in your library.',
+  'Den Netzwerk-Zähler für dieses Spiel auf 0 setzen? Die bisher erfasste Datenmenge geht dabei verloren.': 'Reset the network counter for this game to 0? The data volume recorded so far will be lost.',
+  'Netzwerk-Zähler von {n} Spielen löschen? Die erfassten Datenmengen gehen dabei verloren.': 'Delete the network counters of {n} games? The recorded data volumes will be lost.',
+  'Es sind keine Netzwerk-Zähler gespeichert.': 'No network counters are stored.',
   "der Messzeit": "of the measurement",
   'FPS-Limit (VSync/Limiter)': 'FPS cap (VSync/limiter)', 'GPU drosselt': 'GPU throttling',
   'Grafikspeicher voll': 'VRAM full', 'Nicht eindeutig': 'Inconclusive',
@@ -1939,7 +1952,9 @@ function applyI18n() {
       resolve(mode === 'prompt' ? null : false)
     }
     window.lumoraAlert = (msg) => _lumoraModalShow(msg, { mode: 'alert' })
-    window.lumoraConfirm = (msg) => _lumoraModalShow(msg, { mode: 'confirm' })
+    // opts durchreichen (okText/cancelText): eine Rueckfrage, deren Knopf die Tat
+    // benennt ("Zuruecksetzen"), ist klarer als ein generisches OK.
+    window.lumoraConfirm = (msg, opts) => _lumoraModalShow(msg, Object.assign({ mode: 'confirm' }, opts))
     window.lumoraPrompt = (msg, defaultValue) => _lumoraModalShow(msg, { mode: 'prompt', defaultValue })
 
     // Spiele & Einstellungen aus Dateien laden (kein localStorage → kein langsames
@@ -3672,6 +3687,42 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       // sonst wuesste niemand, dass die Funktion existiert und schon zaehlt.
       row.style.display = (t || netStatsAn) ? '' : 'none'
       val.textContent = t || window.tr('wird beim nächsten Spielstart erfasst')
+      // Loeschen nur anbieten, wenn es auch etwas zu loeschen gibt.
+      const btn = document.getElementById('detailNetReset')
+      if (btn) btn.style.display = t ? '' : 'none'
+    }
+    // Zaehler eines Spiels loeschen. Laeuft das Spiel gerade, setzt die Shell
+    // zusaetzlich den Nullpunkt der laufenden Zaehlung - sonst waere die geloeschte
+    // Menge beim Beenden sofort wieder da.
+    window.netZaehlerLoeschen = async () => {
+      if (selectedIndex < 0 || !games[selectedIndex]) return
+      const g = games[selectedIndex]
+      const ok = await lumoraConfirm(
+        window.tr('Den Netzwerk-Zähler für dieses Spiel auf 0 setzen? Die bisher erfasste Datenmenge geht dabei verloren.'),
+        { okText: window.tr('Zurücksetzen') })
+      if (!ok) return
+      try { await ipcRenderer.invoke('net-stat-reset', { gamePath: g.path }) } catch {}
+      delete g.netIn; delete g.netOut
+      saveGames()
+      netRowUpdate(null)
+    }
+    // Alle Zaehler loeschen (Einstellungen). Zaehlt vorher, wie viele Spiele
+    // betroffen sind - eine Rueckfrage ohne Zahl waere nicht ehrlich.
+    window.netAlleZaehlerLoeschen = async () => {
+      const betroffen = games.filter(g => g.netIn || g.netOut)
+      if (!betroffen.length) {
+        await lumoraAlert(window.tr('Es sind keine Netzwerk-Zähler gespeichert.'))
+        return
+      }
+      const ok = await lumoraConfirm(
+        window.tr('Netzwerk-Zähler von {n} Spielen löschen? Die erfassten Datenmengen gehen dabei verloren.')
+          .replace('{n}', betroffen.length),
+        { okText: window.tr('Alle löschen') })
+      if (!ok) return
+      try { await ipcRenderer.invoke('net-stat-reset', { alle: true }) } catch {}
+      for (const g of games) { delete g.netIn; delete g.netOut }
+      saveGames()
+      netRowUpdate(null)
     }
     // Sitzungssumme kommt beim Spielende aus der Shell (wie play-session)
     ipcRenderer.on('net-session', (event, { gamePath, inBytes, outBytes }) => {
