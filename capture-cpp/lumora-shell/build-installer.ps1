@@ -119,6 +119,9 @@ $node = (Get-Command node -EA SilentlyContinue).Source
 if (-not $node) { throw "node.exe nicht gefunden - fuer den Uebersetzungs-Check benoetigt" }
 & $node "$root\_testlab\i18n-check.js" "$root\index.html" "$root\_testlab\i18n-ignore.txt"
 if ($LASTEXITCODE -ne 0) { throw "Uebersetzungs-Check fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
+# Werkbank-Seite hat ein eigenes (kleines) I18N_EN -> eigene Pruefung, minKeys=5
+& $node "$root\_testlab\i18n-check.js" "$root\analyze-werkbank.html" "$root\_testlab\i18n-ignore.txt" 5
+if ($LASTEXITCODE -ne 0) { throw "Uebersetzungs-Check (Werkbank) fehlgeschlagen - Bau abgebrochen" }
 
 # 0b) OSD-Rauchtest: baut jedes der sechs Designs mit allen Wertegruppen in einer
 # Sandbox WIRKLICH auf. Ein Syntax-Check reicht hier nicht - er ist auch dann
@@ -128,6 +131,19 @@ if ($LASTEXITCODE -ne 0) { throw "Uebersetzungs-Check fehlgeschlagen (s. Liste o
 # Anwender komplett leer. Die Version musste zurueckgezogen werden.
 & $node "$root\_testlab\osd-smoke.js"
 if ($LASTEXITCODE -ne 0) { throw "OSD-Rauchtest fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
+
+# 0c) Statische Abnahme der Oberflaechen-Dateien: Syntax JEDES Skriptblocks, Waisen
+# in der Uebersetzungstabelle, unbekannte Kennungen/Handler. Grund: ein einziger
+# Syntaxfehler beendet den kompletten Skriptblock - und weil dessen LETZTE Zeile den
+# Boot-Schirm ausblendet, haengt Lumora danach fuer immer bei "Wird geladen...".
+# Genau so passiert, als beim Ausbau der Tastatur-Bruecke ein zweizeiliger
+# Uebersetzungseintrag nur zur Haelfte entfernt wurde.
+& $node "$root\_testlab\ui-check.js"
+if ($LASTEXITCODE -ne 0) { throw "ui-Pruefung fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
+
+# 0d) Tote relative Verweise der Website (en/ -> Wurzel): siehe link-check.js.
+& $node "$root\_testlab\link-check.js"
+if ($LASTEXITCODE -ne 0) { throw "Link-Pruefung fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
 
 # 1) Shell frisch bauen (cmake PC-unabhaengig suchen: VS2022 BuildTools ODER VS2026 Community -
 # die Entwicklungs-PCs haben unterschiedliche Toolchains; build\ ist jeweils lokal konfiguriert)
@@ -172,7 +188,7 @@ Copy-Item "$shell\build\Release\lumora_shell.exe" "$stage\lumora-shell.exe"
 # direkt danach auf LumoraReport zu. Fehlt die Datei, wirft die Seite beim Laden und
 # bleibt im Boot-Screen haengen (3.3.0 genau so ausgeliefert). Es ist die gemeinsame
 # Quelle fuer App UND Website - beim Herausloesen aus index.html hier vergessen.
-foreach ($f in "index.html","analyze-report.js","styles.css","player.html","osd.html","analyze-osd.html","doorman.html","icon.ico","icon-64.png") {
+foreach ($f in "index.html","analyze-report.js","werkbank-timeline.js","styles.css","player.html","osd.html","analyze-osd.html","analyze-werkbank.html","doorman.html","icon.ico","icon-64.png") {
   if (Test-Path "$root\$f") { Copy-Item "$root\$f" $stage }
 }
 # UI-Bilder/Assets (Logos etc.), die index.html/styles.css referenzieren
@@ -216,20 +232,26 @@ if (-not (Test-Path "$shell\MicrosoftEdgeWebview2Setup.exe")) {
 }
 Copy-Item "$shell\MicrosoftEdgeWebview2Setup.exe" $bootstrap
 
-# WAECHTER: jede lokale Datei, die index.html per <script src>/<link href> statisch
-# einbindet, MUSS im Paket liegen. Fehlt eine, startet die App gar nicht (weisser
-# Boot-Screen) - so ist 3.3.0 zunaechst rausgegangen, weil analyze-report.js fehlte.
-# Nur echte, statische Verweise pruefen (keine ${...}-JS-Ausdruecke, keine URLs).
-$html = Get-Content "$root\index.html" -Raw
-$refs = [regex]::Matches($html, '(?:src|href)="([^"?]+)"') | ForEach-Object { $_.Groups[1].Value } |
-        Where-Object { $_ -notmatch '^(https?:)?//|^data:|^#|^mailto:|\$\{|''|\+' } |
-        ForEach-Object { ($_ -replace '^\./','') } | Sort-Object -Unique
-$fehlend = @()
-foreach ($r in $refs) { if (-not (Test-Path (Join-Path $stage $r))) { $fehlend += $r } }
-if ($fehlend.Count) {
-  throw "ABBRUCH: index.html verweist auf Datei(en), die NICHT im Paket liegen: $($fehlend -join ', '). In die Staging-Liste aufnehmen (build-installer.ps1)."
+# WAECHTER: jede lokale Datei, die eine AUSGELIEFERTE HTML-Seite per <script src>/
+# <link href> statisch einbindet, MUSS im Paket liegen. Fehlt eine, startet das
+# jeweilige Fenster gar nicht (weisser Boot-Screen) - so ist 3.3.0 zunaechst
+# rausgegangen, weil analyze-report.js fehlte; der Waechter prueft seither, ABER
+# zunaechst nur index.html - fuer die Werkbank-Seite waere dieselbe Luecke wieder
+# offen gewesen. Jetzt: ALLE .html im Staging pruefen.
+# Nur echte, statische Verweise (keine ${...}-JS-Ausdruecke, keine URLs).
+$fehlend = @(); $refGesamt = 0
+foreach ($seite in Get-ChildItem "$stage\*.html") {
+  $html = Get-Content $seite.FullName -Raw
+  $refs = [regex]::Matches($html, '(?:src|href)="([^"?]+)"') | ForEach-Object { $_.Groups[1].Value } |
+          Where-Object { $_ -notmatch '^(https?:)?//|^data:|^#|^mailto:|\$\{|''|\+' } |
+          ForEach-Object { ($_ -replace '^\./','') } | Sort-Object -Unique
+  $refGesamt += $refs.Count
+  foreach ($r in $refs) { if (-not (Test-Path (Join-Path $stage $r))) { $fehlend += "$($seite.Name) -> $r" } }
 }
-Write-Output "Ressourcen-Waechter: alle $($refs.Count) von index.html referenzierten Dateien im Paket."
+if ($fehlend.Count) {
+  throw "ABBRUCH: HTML-Seiten verweisen auf Datei(en), die NICHT im Paket liegen: $($fehlend -join ', '). In die Staging-Liste aufnehmen (build-installer.ps1)."
+}
+Write-Output "Ressourcen-Waechter: alle $refGesamt statischen Verweise aller HTML-Seiten im Paket."
 
 $stageSize = [math]::Round((Get-ChildItem $stage -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1)
 Write-Output "Staging: $stageSize MB"

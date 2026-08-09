@@ -248,6 +248,30 @@ static json pickPathDialog(const wchar_t* title, bool folder, const wchar_t* fil
     return out;
 }
 
+// Speichern-unter-Dialog (Gegenstueck zu pickPathDialog): liefert den gewaehlten
+// Pfad oder "" bei Abbruch. Eigene Funktion statt Parameter an pickPathDialog,
+// weil IFileSaveDialog ein anderes Interface ist (Vorschlagsname, Endung anhaengen).
+static std::wstring saveFileDialog(const wchar_t* title, const wchar_t* filterName,
+                                   const wchar_t* filterSpec, const std::wstring& vorschlag) {
+    ComPtr<IFileSaveDialog> dlg;
+    if (FAILED(CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg)))) return L"";
+    dlg->SetTitle(title);
+    COMDLG_FILTERSPEC fs[2] = { { filterName, filterSpec }, { L"Alle Dateien", L"*.*" } };
+    dlg->SetFileTypes(2, fs);
+    // Vorschlagsname ohne Pfadtrenner (der Profilname kommt aus einer Datei, die
+    // jemand anders geschrieben haben kann - er darf kein Verzeichnis erzwingen)
+    std::wstring v = vorschlag;
+    for (auto& c : v) if (c == L'\\' || c == L'/' || c == L':' || c == L'*' || c == L'?' ||
+                          c == L'"' || c == L'<' || c == L'>' || c == L'|') c = L'_';
+    if (!v.empty()) dlg->SetFileName(v.c_str());
+    if (filterSpec && wcslen(filterSpec) > 1) dlg->SetDefaultExtension(filterSpec + 2);   // "*.x" -> "x"
+    if (FAILED(dlg->Show(g_hwnd))) return L"";
+    ComPtr<IShellItem> item; if (FAILED(dlg->GetResult(&item))) return L"";
+    LPWSTR p = nullptr; if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &p)) || !p) return L"";
+    std::wstring out = p; CoTaskMemFree(p);
+    return out;
+}
+
 // --- Modul: Datei-Icon als data-URL (SHGetFileInfo -> GDI+ -> PNG-Base64) ---
 static std::string b64encode(const uint8_t* d, size_t n) {
     static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -354,6 +378,10 @@ static void inputBridgeOnRunning(const std::string& gamePath) {
     // wirklich angeschlossen ist - sonst entstuende grundlos ein zweites XInput-Geraet.
     if (lubridge::start(prof, "auto", true)) g_bridgeAutoGame = gamePath;
 }
+// --- Tastatur-Modus: dieselben zwei Haken, aber eigene Bedingungen ------------------
+// Zuordnung ueber den EXE-Namen im Profil ("spiel"), nicht ueber eine gameLinks-Tabelle:
+// ein getauschtes Community-Profil bringt seinen Spielbezug selbst mit und wirkt sofort,
+// ohne dass der Nutzer es erst mit einem Bibliothekseintrag verheiraten muss.
 static void inputBridgeOnEnd(const std::string& gamePath) {
     if (!g_bridgeAutoGame.empty() && g_bridgeAutoGame == gamePath) {
         lubridge::stop("spiel-beendet");
@@ -826,19 +854,20 @@ static LRESULT CALLBACK doorWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProcW(h, m, w, l);
 }
 // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen! ####################
-// Fuenf Stellen erzeugen ein WebView2-Fenster nach DEMSELBEN Muster (Environment ->
+// Sechs Stellen erzeugen ein WebView2-Fenster nach DEMSELBEN Muster (Environment ->
 // Controller -> Host-Mappings -> SHIM_JS -> WebMessage-Handler -> Navigate -> sichtbar).
 // Zwischen Gaming-OSD und Analyse-OSD sind rund 34 der ~70 Zeilen woertlich identisch.
 //   createDoormanWindow()      (hier)
 //   createOsdWindow()          - Gaming-OSD, Composition + Click-Through
 //   createAnalyzeOsdWindow()   - Analyse-OSD, Composition + Click-Through
 //   createOsdEditWindow()      - OSD-Editor, normales Fenster
+//   createWerkbankWindow()     - Analyse-Werkbank, normales Fenster (resizable)
 //   wWinMain()                 - Hauptfenster, normaler Controller
 // Real passiert (bitte NICHT wiederholen): 67a44c7 Klick-durch nur im Gaming-OSD
 // gefixt, Analyse-OSD blieb kaputt; db76994 Transparenz/Groesse griffen beim ersten
 // Oeffnen nur in einem der beiden; 64dcbc3 Live-Vorschau nachtraeglich nachgezogen.
 // Zusammenfuehrung ist vorgemerkt (s. ARCHITEKTUR.md) - bis dahin gilt: wer eine
-// dieser Funktionen anfasst, prueft die anderen vier.
+// dieser Funktionen anfasst, prueft die anderen fuenf.
 // ####################################################################################
 static void createDoormanWindow() {
     if (g_doorHwnd) return;
@@ -2717,11 +2746,25 @@ static uint32_t netPidByExe(const std::string& exeLow) {
     CloseHandle(snap);
     return pid;
 }
-static json netStatSnapshot() {   // {an, inBytes, outBytes} - an=false, wenn der Broker (noch) nicht zaehlt
+// Nullpunkt der LAUFENDEN Zaehlung. Der Broker zaehlt je Spielsitzung stur hoch und
+// kennt kein Ruecksetzen; loescht der Nutzer den Zaehler mitten im Spiel, merken wir
+// uns hier den Stand und ziehen ihn ab. Ohne das kaeme die schon geloeschte Menge
+// beim Spielende ueber net-session doch wieder auf dem Konto an.
+static uint64_t g_netNullIn = 0, g_netNullOut = 0;
+static bool netRawRead(uint64_t& in, uint64_t& out, bool& an) {
     uint32_t w[16] = {};
-    if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps") || !shmPeek16(g_fpsShm, w)) return nullptr;
-    uint64_t in = ((uint64_t)w[10] << 32) | w[9], out = ((uint64_t)w[12] << 32) | w[11];
-    return { {"an", w[13] != 0}, {"inBytes", (double)in}, {"outBytes", (double)out}, {"gamePath", g_netGamePath} };
+    if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps") || !shmPeek16(g_fpsShm, w)) return false;
+    in = ((uint64_t)w[10] << 32) | w[9];
+    out = ((uint64_t)w[12] << 32) | w[11];
+    an = w[13] != 0;
+    return true;
+}
+static json netStatSnapshot() {   // {an, inBytes, outBytes} - an=false, wenn der Broker (noch) nicht zaehlt
+    uint64_t in = 0, out = 0; bool an = false;
+    if (!netRawRead(in, out, an)) return nullptr;
+    in = in > g_netNullIn ? in - g_netNullIn : 0;
+    out = out > g_netNullOut ? out - g_netNullOut : 0;
+    return { {"an", an}, {"inBytes", (double)in}, {"outBytes", (double)out}, {"gamePath", g_netGamePath} };
 }
 // 1-Hz-Tick (UI-Thread, wie extWatchTick): laeuft ein Spiel und ist die Statistik an,
 // Ziel-PID melden + Broker am Leben halten - auch OHNE eingeschaltetes OSD.
@@ -2742,7 +2785,7 @@ static void netStatTick() {
     if (path.empty()) {
         // Kein Spiel (oder Statistik aus): Zaehlung beim Broker abmelden. Die Sitzungs-
         // summe hat netSessionFinish beim Spielende bereits gemeldet.
-        if (!g_netGamePath.empty()) { shmPoke(g_fpsShm, 8, 0); g_netGamePath.clear(); }
+        if (!g_netGamePath.empty()) { shmPoke(g_fpsShm, 8, 0); g_netGamePath.clear(); g_netNullIn = g_netNullOut = 0; }
         return;
     }
     if (!pid) pid = netPidByExe(exe);
@@ -2750,7 +2793,8 @@ static void netStatTick() {
     if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps")) return;
     shmWriteApp(g_fpsShm, 1);              // Heartbeat: Broker lebt, solange gezaehlt wird
     shmPoke(g_fpsShm, 8, pid);
-    g_netGamePath = path;
+    // Neues Spiel: der Broker faengt bei 0 an, also muss auch der Nullpunkt weg.
+    if (g_netGamePath != path) { g_netGamePath = path; g_netNullIn = g_netNullOut = 0; }
     if (!fpsBrokerAlive() && GetTickCount64() - g_netSpawnAt > 8000) {
         g_netSpawnAt = GetTickCount64();
         std::thread([]() { runTask(L"LumoraOSD-FPS"); }).detach();
@@ -3684,9 +3728,9 @@ static LRESULT CALLBACK osdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
 // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
-// createOsdEditWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
+// createOsdEditWindow/createWerkbankWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
 // real passierten Faelle stehen ueber createDoormanWindow. Wer hier etwas aendert,
-// prueft die anderen vier.
+// prueft die anderen fuenf.
 static void createOsdWindow() {
     if (g_osdHwnd) return;
     static bool reg = false;
@@ -3827,9 +3871,9 @@ static LRESULT CALLBACK anOsdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
 // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
-// createOsdEditWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
+// createOsdEditWindow/createWerkbankWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
 // real passierten Faelle stehen ueber createDoormanWindow. Wer hier etwas aendert,
-// prueft die anderen vier.
+// prueft die anderen fuenf.
 static void createAnalyzeOsdWindow() {
     if (g_anOsdHwnd) return;
     static bool reg = false;
@@ -4080,9 +4124,9 @@ static LRESULT CALLBACK osdEditWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
 // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
-// createOsdEditWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
+// createOsdEditWindow/createWerkbankWindow + Hauptfenster (wWinMain). Ausfuehrliche Begruendung und die
 // real passierten Faelle stehen ueber createDoormanWindow. Wer hier etwas aendert,
-// prueft die anderen vier.
+// prueft die anderen fuenf.
 static void createOsdEditWindow() {
     if (g_osdEditHwnd) return;
     static bool reg = false;
@@ -4144,6 +4188,96 @@ static void destroyOsdEditWindow() {
     g_osdEditWv = nullptr; g_osdEditCtrl = nullptr;
     if (g_osdEditHwnd) { DestroyWindow(g_osdEditHwnd); g_osdEditHwnd = nullptr; }
     DeleteFileW((dataDir() + L"\\osd-edit-bg.bmp").c_str());   // Schnappschuss nicht liegen lassen
+}
+
+// --- Analyse-Werkbank: eigenstaendiges Auswerte-Fenster (ANALYSE-WERKBANK-PLAN.md) --
+static HWND g_wbHwnd = nullptr;
+static ComPtr<ICoreWebView2Controller> g_wbCtrl;
+static ComPtr<ICoreWebView2> g_wbWv;
+static void sendToWerkbank(const std::string& channel, const json& payload) {
+    if (!g_wbHwnd) return;
+    json m = { {"channel", channel}, {"payload", payload} };
+    PostMessageW(g_wbHwnd, WM_SHELL_OSDMSG, 0, (LPARAM)new std::wstring(widen(m.dump())));
+}
+static LRESULT CALLBACK wbWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_wbWv) g_wbWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
+    case WM_SIZE: if (g_wbCtrl) { RECT rc; GetClientRect(h, &rc); g_wbCtrl->put_Bounds(rc); } return 0;
+    case WM_GETMINMAXINFO: {   // Timeline + Spuren + Panels brauchen Platz
+        auto* mm = (MINMAXINFO*)l; mm->ptMinTrackSize.x = 1100; mm->ptMinTrackSize.y = 700; return 0; }
+    case WM_CLOSE: ShowWindow(h, SW_HIDE); return 0;   // verstecken statt zerstoeren: schneller Wiederauf
+    case WM_DESTROY: return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+// ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
+// Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
+// createOsdEditWindow/createWerkbankWindow + Hauptfenster (wWinMain). Ausfuehrliche
+// Begruendung und die real passierten Faelle stehen ueber createDoormanWindow.
+// Wer hier etwas aendert, prueft die anderen fuenf.
+static void createWerkbankWindow(const std::string& file) {
+    if (g_wbHwnd) {
+        // Fenster lebt schon (WM_CLOSE versteckt nur): zeigen, fokussieren, Lauf pushen.
+        ShowWindow(g_wbHwnd, SW_SHOW);
+        if (IsIconic(g_wbHwnd)) ShowWindow(g_wbHwnd, SW_RESTORE);
+        SetForegroundWindow(g_wbHwnd);
+        if (!file.empty()) sendToWerkbank("wb-open", file);
+        return;
+    }
+    static bool reg = false;
+    if (!reg) {
+        WNDCLASSW wc{}; wc.lpfnWndProc = wbWndProc; wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"LumoraWerkbank"; wc.hbrBackground = CreateSolidBrush(RGB(8, 9, 14));
+        wc.hIcon = LoadIconW(GetModuleHandleW(nullptr), L"IDI_ICON1"); wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        RegisterClassW(&wc); reg = true;
+    }
+    // Mittig auf dem Monitor des Hauptfensters, 1280x800 (Minimum 1100x700 via MINMAXINFO)
+    RECT wa{ 0, 0, 1920, 1080 };
+    { HMONITOR mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY);
+      MONITORINFO mi{ sizeof(mi) }; if (GetMonitorInfoW(mon, &mi)) wa = mi.rcWork; }
+    int w = (std::min)(1280L, wa.right - wa.left), h = (std::min)(800L, wa.bottom - wa.top);
+    g_wbHwnd = CreateWindowExW(0, L"LumoraWerkbank", L"Lumora Analyse-Werkbank",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        wa.left + (wa.right - wa.left - w) / 2, wa.top + (wa.bottom - wa.top - h) / 2, w, h,
+        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!g_wbHwnd) { bcLogStream("werkbank: CreateWindowExW fehlgeschlagen err=" + std::to_string(GetLastError())); return; }
+    SetForegroundWindow(g_wbHwnd);
+    std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
+    std::wstring navFile = widen(file);   // per Wert in den Callback (Query-Parameter beim ersten Navigate)
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [navFile](HRESULT res, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(res) || !env || !g_wbHwnd) { bcLogStream("werkbank: Environment fehlt " + std::to_string(res)); return res; }
+                env->CreateCoreWebView2Controller(g_wbHwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [navFile](HRESULT r2, ICoreWebView2Controller* ctrl) -> HRESULT {
+                            if (FAILED(r2) || !ctrl || !g_wbHwnd) { bcLogStream("werkbank: Controller-Init " + std::to_string(r2)); return r2; }
+                            g_wbCtrl = ctrl; g_wbCtrl->get_CoreWebView2(&g_wbWv);
+                            if (!g_wbWv) return E_NOINTERFACE;
+                            RECT rc; GetClientRect(g_wbHwnd, &rc); g_wbCtrl->put_Bounds(rc);
+                            ComPtr<ICoreWebView2_3> wv3; g_wbWv.As(&wv3);
+                            if (wv3) {
+                                wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                                // data.lumora: die Werkbank laedt Reports (v2 = Megabytes)
+                                // DIREKT per fetch statt ueber den IPC-Umweg.
+                                wv3->SetVirtualHostNameToFolderMapping(L"data.lumora", dataDir().c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                            }
+                            std::wstring shim = SHIM_JS; size_t vp = shim.find(L"%SHELL_VERSION%");
+                            if (vp != std::wstring::npos) shim.replace(vp, 15, widen(shellVersion()));
+                            g_wbWv->AddScriptToExecuteOnDocumentCreated(shim.c_str(), nullptr);
+                            g_wbWv->add_WebMessageReceived(Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                                [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* a) -> HRESULT {
+                                    LPWSTR j = nullptr;
+                                    if (SUCCEEDED(a->get_WebMessageAsJson(&j)) && j) { onWebMessage(j, g_wbHwnd); CoTaskMemFree(j); }
+                                    return S_OK;
+                                }).Get(), nullptr);
+                            std::wstring url = L"https://app.lumora/analyze-werkbank.html";
+                            if (!navFile.empty()) url += L"?file=" + navFile;   // anSafeName-geprueft, keine Sonderzeichen
+                            g_wbWv->Navigate(url.c_str());
+                            return S_OK;
+                        }).Get());
+                return S_OK;
+            }).Get());
 }
 // Fenster auf die gemeldete Panel-Flaeche setzen und den DComp-Visual passend verschieben.
 static void applyOsdWindowGeometry() {
@@ -4856,27 +4990,41 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "analyze-osd-preview" && args.size() >= 1 && args[0].is_boolean()) { analyzeOsdPreview(args[0].get<bool>()); return true; }
     if (channel == "osd-preview" && args.size() >= 1 && args[0].is_boolean()) { osdPreviewMode(args[0].get<bool>()); return true; }
     if (channel == "analyze-list") {   // Verlauf: alle Berichte mit Kopf-Metadaten (neueste zuerst)
+        // Meta-Cache je Datei (Groesse+Schreibzeit als Schluessel): v2-Reports sind
+        // 1-2 MB gross - ohne Cache parste jede Verlaufs-Anzeige alle Dateien komplett
+        // (bei 20 Laeufen spuerbar, bei 100 sekundenlang). Der erste Aufruf nach dem
+        // App-Start zahlt einmal, danach kostet die Liste nichts mehr. Notiz-/Teil-
+        // Aenderungen schreiben die Datei -> Schreibzeit aendert sich -> Neuparse.
+        static std::map<std::wstring, std::pair<uint64_t, json>> metaCache;
         json out = json::array();
         WIN32_FIND_DATAW fd{};
         HANDLE h = FindFirstFileW((analyzeDirW() + L"\\report-*.json").c_str(), &fd);
         if (h != INVALID_HANDLE_VALUE) {
-            std::vector<std::wstring> files;
-            do { files.push_back(fd.cFileName); } while (FindNextFileW(h, &fd));
+            std::vector<std::pair<std::wstring, uint64_t>> files;
+            do {
+                uint64_t stempel = ((uint64_t)fd.ftLastWriteTime.dwHighDateTime << 32 | fd.ftLastWriteTime.dwLowDateTime)
+                                 ^ ((uint64_t)fd.nFileSizeHigh << 32 | fd.nFileSizeLow);
+                files.push_back({ fd.cFileName, stempel });
+            } while (FindNextFileW(h, &fd));
             FindClose(h);
             std::sort(files.rbegin(), files.rend());   // Dateiname traegt den Zeitstempel
-            for (auto& fn : files) {
+            for (auto& [fn, stempel] : files) {
                 if (out.size() >= 100) break;
+                auto it = metaCache.find(fn);
+                if (it != metaCache.end() && it->second.first == stempel) { out.push_back(it->second.second); continue; }
                 json j = json::parse(readFile(analyzeDirW() + L"\\" + fn), nullptr, false);
                 if (!j.is_object()) continue;
-                out.push_back({ {"file", narrow(fn)}, {"wall", j.value("wall", "")}, {"game", j.value("game", "")},
-                                {"durS", j.value("durS", 0.0)}, {"spikes", j.value("spikes", 0)},
-                                {"avgFps", j.value("avgFps", 0.0)}, {"p1LowFps", j.value("p1LowFps", 0.0)},
-                                {"spikesPerMin", j.value("spikesPerMin", 0.0)},
-                                {"verdictKey", j.value("verdictKey", "")}, {"verdictName", j.value("verdictName", "")},
-                                {"note", j.value("note", "")},
-                                // Teil-Angaben mitgeben, damit der Verlauf "geteilt" zeigen
-                                // und den Link/die Ruecknahme anbieten kann.
-                                {"share", j.contains("share") ? j["share"] : json(nullptr)} });
+                json m = { {"file", narrow(fn)}, {"wall", j.value("wall", "")}, {"game", j.value("game", "")},
+                           {"durS", j.value("durS", 0.0)}, {"spikes", j.value("spikes", 0)},
+                           {"avgFps", j.value("avgFps", 0.0)}, {"p1LowFps", j.value("p1LowFps", 0.0)},
+                           {"spikesPerMin", j.value("spikesPerMin", 0.0)},
+                           {"verdictKey", j.value("verdictKey", "")}, {"verdictName", j.value("verdictName", "")},
+                           {"note", j.value("note", "")},
+                           // Teil-Angaben mitgeben, damit der Verlauf "geteilt" zeigen
+                           // und den Link/die Ruecknahme anbieten kann.
+                           {"share", j.contains("share") ? j["share"] : json(nullptr)} };
+                metaCache[fn] = { stempel, m };
+                out.push_back(std::move(m));
             }
         }
         return out;
@@ -4897,6 +5045,20 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "analyze-delete") {
         std::wstring fn = anSafeName(args); if (fn.empty()) return false;
         return DeleteFileW((analyzeDirW() + L"\\" + fn).c_str()) != 0;
+    }
+    // Analyse-Werkbank oeffnen (leeres Argument = ohne vorgewaehlten Lauf). Der
+    // Dateiname laeuft durch anSafeName - er landet als Query-Parameter in einer
+    // Navigate-URL und im wb-open-Push, beides darf nur report-*.json sein.
+    // Kein Slow-Channel -> Handler laeuft auf dem UI-Thread, Fenster direkt erzeugen.
+    if (channel == "analyze-werkbank") {
+        std::string f;
+        if (!args.empty() && args[0].is_string()) {
+            std::wstring fn = anSafeName(args);
+            if (fn.empty() && !std::string(args[0]).empty()) return false;   // uebergeben, aber ungueltig
+            f = narrow(fn);
+        }
+        createWerkbankWindow(f);
+        return true;
     }
     if (channel == "analyze-note" && args.size() >= 2 && args[1].is_string()) {
         std::wstring fn = anSafeName(args); if (fn.empty()) return false;
@@ -4979,6 +5141,9 @@ static json handleChannel(const std::string& channel, const json& args) {
         }
         else if (channel == "osd-edit-theme" && args[0].is_string()) s["osdTheme"] = args[0];
         else if (channel == "osd-edit-fields") s["osdFields"] = args[0];
+        // Gruppen-Reihenfolge auch aus dem Live-Editor: bisher liess sie sich nur in
+        // den Einstellungen aendern, der Editor zeigte sogar stets die Standardfolge.
+        else if (channel == "osd-edit-order" && args[0].is_array()) s["osdOrder"] = args[0];
         writeFile(settingsPath(), s.dump(2));
         applyOsdConfig();
         return true;
@@ -5044,6 +5209,19 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "input-bridge-status") return lubridge::status();
     // Netzwerk-Statistik: Live-Werte der laufenden Zaehlung (UI pollt 1x/s in der Detailansicht)
     if (channel == "net-stat-read") return netStatSnapshot();
+    // Zaehler loeschen. Die gespeicherten Summen liegen bei den Spielen (UI-Seite);
+    // hier faellt nur die LAUFENDE Sitzung an - ohne neuen Nullpunkt wuerde sie beim
+    // Spielende trotzdem noch gebucht. args[0]: {gamePath} oder {alle:true}.
+    if (channel == "net-stat-reset") {
+        const bool alle = args.size() >= 1 && args[0].is_object() && args[0].value("alle", false);
+        const std::string ziel = (args.size() >= 1 && args[0].is_object()) ? args[0].value("gamePath", "") : "";
+        const bool trifftLauf = alle || (!g_netGamePath.empty() && g_netGamePath == ziel);
+        if (trifftLauf) {
+            uint64_t in = 0, out = 0; bool an = false;
+            if (netRawRead(in, out, an)) { g_netNullIn = in; g_netNullOut = out; }
+        }
+        return { {"ok", true}, {"laufendeZaehlungZurueckgesetzt", trifftLauf} };
+    }
     if (channel == "input-bridge-selftest") {
         // Geschlossener Kreis ohne Fremdtools: das virtuelle Pad ueber XInput
         // zuruecklesen - beweist Treiber + Mapping-Ausgabe in einem Rutsch.
@@ -5364,6 +5542,10 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             g_group = nullptr;
         }
         destroyTray();
+        // Werkbank-Fenster mit abraeumen (WM_CLOSE dort versteckt nur)
+        if (g_wbCtrl) g_wbCtrl->Close();
+        g_wbWv = nullptr; g_wbCtrl = nullptr;
+        if (g_wbHwnd) { DestroyWindow(g_wbHwnd); g_wbHwnd = nullptr; }
         saveWindowState(h); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -5661,6 +5843,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // ueber eine ECHTE TCP-Verbindung (Loopback) ~1 MB schicken und pruefen, dass die
     // Zaehlung fuer die eigene PID beides sieht (senden UND empfangen). Braucht
     // Adminrechte (System-Logger) - ohne wird das ehrlich gemeldet, nicht als Fehler.
+    // Belegt, dass die DirectInput-Gegenprobe des Mitschnitts wirklich sieht, was die
+    // Bruecke sendet. Ohne diesen Nachweis waere eine leere di[]-Spalte im Mitschnitt
+    // mehrdeutig: verliert das Spiel die Taste, oder misst die Sonde nur nicht?
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-netstat") == 0) {
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
         std::string res; int fehler = 0;
@@ -5707,6 +5892,77 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         closesocket(cli); closesocket(acc); closesocket(srv); WSACleanup();
         net.stop();
         res = "netstat-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
+    }
+    // Loeschen der Netz-Zaehler: der Broker kennt kein Ruecksetzen und zaehlt je
+    // Spielsitzung stur weiter. Geprueft wird deshalb der Nullpunkt-Abzug - inklusive
+    // des Falls, dass zwischen Loeschen und Spielende NOCH etwas uebertragen wird.
+    // Ohne diesen Test faellt so ein Rechenfehler erst beim Anwender auf, und zwar als
+    // "geloeschte Menge ist nach dem Spiel wieder da".
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-netreset") == 0) {
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string res; int fehler = 0;
+        auto pruef = [&](const char* was, bool ok) {
+            res += std::string(ok ? "OK   " : "FEHL ") + was + "\n"; if (!ok) ++fehler;
+        };
+        if (fpsBrokerAlive()) {
+            writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt",
+                      "netreset-Selbsttest: NICHT MOEGLICH\n"
+                      "Der FPS-Broker laeuft gerade und ueberschreibt den gemeinsamen\n"
+                      "Speicher im Sekundentakt - der Test wuerde seine echten Zaehler\n"
+                      "verfaelschen. Lumora beenden und erneut ausfuehren.\n");
+            return 2;
+        }
+        if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps")) {
+            writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", "netreset-Selbsttest: FEHLER\nFEHL gemeinsamer Speicher liess sich nicht anlegen\n");
+            return 1;
+        }
+        // Bewusst ueber 4 GB: der Zaehler steckt in ZWEI 32-bit-Woertern, ein
+        // vergessenes oberes Wort faellt unterhalb von 4 GB gar nicht auf.
+        const uint64_t IN1 = 5ull * 1024 * 1024 * 1024, OUT1 = 2ull * 1024 * 1024 * 1024;
+        auto roh = [&](uint64_t in, uint64_t out) {
+            shmPoke(g_fpsShm, 9, (uint32_t)(in & 0xFFFFFFFF)); shmPoke(g_fpsShm, 10, (uint32_t)(in >> 32));
+            shmPoke(g_fpsShm, 11, (uint32_t)(out & 0xFFFFFFFF)); shmPoke(g_fpsShm, 12, (uint32_t)(out >> 32));
+            shmPoke(g_fpsShm, 13, 4711);
+        };
+        auto jetzt = [&](const char* feld) { json s = netStatSnapshot(); return s.is_null() ? -1.0 : s.value(feld, -1.0); };
+        g_netGamePath = "C:\\Spiele\\probe.exe";
+        g_netNullIn = g_netNullOut = 0;
+        roh(IN1, OUT1);
+        pruef("Zaehler wird vor dem Loeschen voll angezeigt (auch ueber 4 GB)",
+              jetzt("inBytes") == (double)IN1 && jetzt("outBytes") == (double)OUT1);
+
+        json r1 = handleChannel("net-stat-reset", json::array({ json{{"gamePath", "C:\\Spiele\\anderes.exe"}} }));
+        pruef("fremdes Spiel laesst die laufende Zaehlung in Ruhe",
+              r1.value("laufendeZaehlungZurueckgesetzt", true) == false
+              && jetzt("inBytes") == (double)IN1);
+
+        json r2 = handleChannel("net-stat-reset", json::array({ json{{"gamePath", "C:\\Spiele\\probe.exe"}} }));
+        pruef("Loeschen des laufenden Spiels greift", r2.value("laufendeZaehlungZurueckgesetzt", false));
+        pruef("direkt danach steht der Zaehler auf 0", jetzt("inBytes") == 0.0 && jetzt("outBytes") == 0.0);
+
+        roh(IN1 + 300 * 1024 * 1024, OUT1 + 100 * 1024 * 1024);
+        pruef("weiter uebertragene Daten zaehlen ab dem Nullpunkt",
+              jetzt("inBytes") == (double)(300 * 1024 * 1024) && jetzt("outBytes") == (double)(100 * 1024 * 1024));
+
+        g_netNullIn = g_netNullOut = 0;
+        roh(IN1, OUT1);
+        json r3 = handleChannel("net-stat-reset", json::array({ json{{"alle", true}} }));
+        pruef("\"alle loeschen\" trifft die laufende Zaehlung immer",
+              r3.value("laufendeZaehlungZurueckgesetzt", false) && jetzt("inBytes") == 0.0);
+
+        // Neue Spielsitzung: der Broker faengt bei 0 an - bleibt der alte Nullpunkt
+        // stehen, zaehlte das naechste Spiel erst ab 5 GB. Genau das prueft dieser Fall.
+        g_netGamePath.clear();
+        roh(64 * 1024 * 1024, 8 * 1024 * 1024);
+        g_netNullIn = g_netNullOut = 0;   // wie netStatTick beim Spielwechsel
+        g_netGamePath = "C:\\Spiele\\naechstes.exe";
+        pruef("neues Spiel zaehlt wieder ab 0",
+              jetzt("inBytes") == (double)(64 * 1024 * 1024) && jetzt("outBytes") == (double)(8 * 1024 * 1024));
+
+        shmPoke(g_fpsShm, 13, 0);
+        res = "netreset-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
         return fehler ? 1 : 0;
     }
@@ -5923,7 +6179,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
 
     // ### GESCHWISTER-FENSTER - Aenderungen hier ueberall nachziehen!
     // Gleiches Muster in createDoormanWindow/createOsdWindow/createAnalyzeOsdWindow/
-    // createOsdEditWindow. Ausfuehrliche Begruendung ueber createDoormanWindow.
+    // createOsdEditWindow/createWerkbankWindow. Ausfuehrliche Begruendung ueber createDoormanWindow.
     // WebView2-Umgebung (System-Runtime; UserData separat, stoert die Electron-App nicht).
     std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
     HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,

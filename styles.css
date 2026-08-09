@@ -559,35 +559,88 @@ body::before {
   background: rgba(var(--accent-rgb), 0.14);
 }
 
-/* Werte-Auswahl (welche Sensoren das OSD zeigt) – sauberes 5-Spalten-Gitter,
-   Chips über alle Gruppen ausgerichtet. Label als Überschrift (volle Breite). */
-.osd-values-block { display: flex; flex-direction: column; gap: 9px; padding: 6px 0 2px; }
-.osd-fields { display: flex; flex-direction: column; gap: 12px; }
-.osd-fields-grp .grp { font-size: 11px; letter-spacing: 0.09em; color: #888; text-transform: uppercase; margin-bottom: 5px;
-  display: flex; align-items: center; gap: 8px; }
-/* Drag & Drop: Gruppen am ⠿-Griff, Chips direkt. Das gezogene Element bleibt an
-   Ort und Stelle sichtbar (abgesenkt), die Liste ordnet beim dragover LIVE um -
-   man sieht das Ergebnis, bevor man loslaesst. */
-.osd-grp-griff { cursor: grab; margin-right: 6px; color: #666; font-size: 13px; user-select: none; }
-.osd-grp-griff:hover { color: var(--accent); }
-.osd-grp-griff:active { cursor: grabbing; }
-.osd-fields-grp { border-radius: 10px; transition: background .12s ease, box-shadow .12s ease, opacity .12s ease; }
-.osd-chip { cursor: grab; transition: transform .12s ease, opacity .12s ease, border-color .12s ease; }
-.osd-chip:active { cursor: grabbing; }
-.osd-dragging { opacity: .35; transform: scale(.97); }
-.osd-fields-grp.osd-dragging { background: rgba(255,255,255,.04); box-shadow: 0 0 0 1px var(--accent) inset; }
-.osd-chips-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
-.osd-chip {
-  background: #1b1b1b; border: 1px solid #333; color: #8f8f8f;
-  border-radius: 999px; padding: 4px 4px; font-size: 12px; cursor: pointer;
-  text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+/* ===== OSD-Werte: Layout-Board ==================================================
+   Loest das gewachsene Chip-Gitter ab. Das Board bildet ab, was das Overlay
+   WIRKLICH ist: eine Folge von Gruppen, jede mit ihren Werten in fester
+   Reihenfolge. Zwei getrennte Zonen je Gruppe ("im Overlay" / "ausgeblendet")
+   machen beides ohne Erklaerung sichtbar - was gezeigt wird UND in welcher
+   Reihenfolge. Vorher unterschieden sich an/aus nur durch die Farbe, und dass
+   man ueberhaupt ziehen kann, sah man gar nicht. */
+.osd-board { display: flex; flex-direction: column; gap: 10px; }
+
+/* Hinweiszeile mit Griff-Symbol - die einzige Stelle, die das Ziehen ankuendigt. */
+.osd-board-tip { display: flex; align-items: center; gap: 8px; font-size: 12px;
+  color: var(--text-dim, #8b96a5); padding: 2px 0 2px; }
+.osd-board-tip .grip { color: var(--accent); letter-spacing: -1px; font-size: 14px; }
+
+/* Eine Gruppe = eine Karte mit farbigem Kantenstreifen (Farbe wie im Overlay). */
+.osd-grp {
+  border: 1px solid var(--border); border-radius: 12px;
+  background: rgba(255,255,255,.022);
+  border-left: 3px solid var(--gc, #666);
+  transition: background .14s ease, box-shadow .14s ease, opacity .14s ease, border-color .14s ease;
 }
-.osd-chip:hover { border-color: var(--accent); color: #ccc; }
-.osd-chip.on {
-  border-color: var(--accent); color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.14);
+.osd-grp-kopf { display: flex; align-items: center; gap: 9px; padding: 9px 12px 8px; }
+.osd-grp-punkt { width: 8px; height: 8px; border-radius: 50%; background: var(--gc, #666);
+  box-shadow: 0 0 7px var(--gc, transparent); flex: 0 0 auto; }
+.osd-grp-name { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--gc, #aaa); }
+.osd-grp-zahl { margin-left: auto; font-size: 11px; color: var(--text-dim, #77808c);
+  font-variant-numeric: tabular-nums; }
+
+/* Griff: gross genug, um als Anfasser gelesen zu werden (vorher ein graues ⠿). */
+.osd-griff { cursor: grab; user-select: none; flex: 0 0 auto; color: #5c6773;
+  font-size: 15px; line-height: 1; letter-spacing: -2px; padding: 2px 1px;
+  border-radius: 5px; transition: color .12s ease, background .12s ease; }
+.osd-griff:hover { color: var(--accent); background: rgba(255,255,255,.06); }
+.osd-griff:active { cursor: grabbing; }
+
+.osd-zone { padding: 0 12px 10px; }
+.osd-zone + .osd-zone { border-top: 1px dashed rgba(255,255,255,.07); padding-top: 8px; }
+.osd-zone-lbl { font-size: 10px; letter-spacing: .13em; text-transform: uppercase;
+  color: #6b7480; margin-bottom: 7px; }
+.osd-zone-inhalt { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+/* Die Ausgeblendet-Zone ist Nebensache - eine Zeile statt eines zweiten Blocks:
+   Beschriftung links, Werte daneben. Spart je Gruppe rund 40 px Hoehe, ohne die
+   Trennung "gezeigt / nicht gezeigt" aufzugeben. */
+.osd-zone-aus { display: flex; align-items: baseline; gap: 10px; }
+.osd-zone-aus .osd-zone-lbl { margin: 0; flex: 0 0 auto; padding-top: 5px; }
+.osd-zone-aus .osd-zone-inhalt { flex: 1 1 auto; min-width: 0; }
+
+/* Aktiver Wert: fest, mit sichtbarem Griff + Entfernen-Kreuz. */
+.osd-tok {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(var(--accent-rgb), .10); border: 1px solid rgba(var(--accent-rgb), .42);
+  color: var(--text, #dbe4ef); border-radius: 9px; padding: 5px 8px 5px 6px;
+  font-size: 12.5px; cursor: grab; white-space: nowrap;
+  transition: transform .12s ease, opacity .12s ease, border-color .12s ease, background .12s ease;
 }
+.osd-tok:hover { border-color: var(--accent); background: rgba(var(--accent-rgb), .17); }
+.osd-tok:active { cursor: grabbing; }
+.osd-tok .pkt { color: #6d7784; font-size: 12px; letter-spacing: -2px; line-height: 1; flex: 0 0 auto; }
+.osd-tok:hover .pkt { color: var(--accent); }
+.osd-tok .weg { border: none; background: none; color: #79838f; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 1px; border-radius: 4px; }
+.osd-tok .weg:hover { color: #ff8a8a; background: rgba(255,120,120,.13); }
+
+/* Ausgeblendeter Wert: gestrichelt, klar als "nicht im Overlay" lesbar. */
+.osd-tok-aus {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: transparent; border: 1px dashed rgba(255,255,255,.16);
+  color: #79838f; border-radius: 9px; padding: 5px 9px; font-size: 12.5px;
+  cursor: pointer; white-space: nowrap; transition: all .12s ease;
+}
+.osd-tok-aus:hover { border-color: var(--accent); color: var(--accent);
+  background: rgba(var(--accent-rgb), .07); border-style: solid; }
+.osd-tok-aus .plus { font-size: 13px; line-height: 1; }
+
+/* Leere Zone: sagt, was passiert (die Gruppe faellt im Overlay ganz weg). */
+.osd-leer { font-size: 12px; color: #6b7480; font-style: italic; padding: 4px 2px; }
+
+/* Ziehen: das gezogene Element bleibt sichtbar, wird aber deutlich abgesetzt. */
+.osd-zieht { opacity: .4; border-style: dashed !important; }
+.osd-grp.osd-zieht { background: rgba(var(--accent-rgb), .05);
+  box-shadow: 0 0 0 1px var(--accent) inset; opacity: .55; }
 
 /* Akzentfarben-Auswahl */
 .accent-swatches {
@@ -1261,6 +1314,30 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
 
 .meta-value.success {
   color: #4ade80;
+}
+
+/* Wert plus zugehoerige Aktion (z. B. Netzwerk-Zaehler loeschen) in einer Zeile */
+.meta-value-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meta-action {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color .15s;
+}
+
+.meta-action:hover {
+  color: #e0e0e0;
 }
 
 /* Reichere Detailseite: Beschreibung + Tags */
@@ -2475,6 +2552,46 @@ body.nav-mode .grid-card.nav-focus .grid-cover::after {
 .an-osdlbl { width: 100px; font-size: 12.5px; opacity: .8; flex: 0 0 auto; }
 .an-osdrow input[type=range] { flex: 1; max-width: 260px; }
 .an-osdval { width: 46px; font-size: 12px; opacity: .65; font-variant-numeric: tabular-nums; }
+/* Eingabe-Bruecke: Warnung, wenn die Ansprechschwelle ueber dem liegt, was der Stick
+   auf der Gegenachse ueberhaupt erreicht - dann kann man beim Laufen nicht lenken. */
+.kb-warn { color: #ffb454 !important; opacity: 1 !important; }
+/* Eingabe-Bruecke, Modus ②: Statuszeile ganz oben. Beantwortet auf einen Blick,
+   ob die Bruecke laeuft, mit welchem Profil und wofuer - das war vorher ueber drei
+   Gruppen verstreut. */
+.kb-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px; margin: 0 0 16px; border-radius: 12px;
+  background: rgba(255,255,255,.035); border: 1px solid var(--border); }
+.kb-lampe { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
+  background: rgba(255,255,255,.22); }
+.kb-lampe-an { background: #4fe08a; box-shadow: 0 0 10px rgba(79,224,138,.75); }
+/* Profil-Karte: Name, Herkunft, Spielbezug und Wirkung an EINER Stelle. */
+.kb-karte { margin-top: 10px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid var(--border); background: rgba(255,255,255,.02); }
+.kb-karte-kopf { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-weight: 600; margin-bottom: 10px; }
+.kb-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid transparent; }
+.kb-badge-haus   { background: rgba(120,180,255,.14); border-color: rgba(120,180,255,.35); color: #8ec4ff; }
+.kb-badge-kopie  { background: rgba(255,180,84,.13);  border-color: rgba(255,180,84,.32);  color: #ffb454; }
+.kb-badge-import { background: rgba(190,140,255,.13); border-color: rgba(190,140,255,.32); color: #c79bff; }
+.kb-badge-eigen  { background: rgba(79,224,138,.13);  border-color: rgba(79,224,138,.32);  color: #4fe08a; }
+.kb-badge-still  { background: rgba(255,255,255,.05); border-color: var(--border); color: var(--text-dim); }
+.kb-zeile { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.kb-zeile-lbl { width: 100px; font-size: 12.5px; opacity: .8; flex: 0 0 auto; }
+.kb-zeile select { flex: 1 1 240px; min-width: 0; }
+/* Gegenueberstellung Spiel ↔ Profil. */
+.kb-tab { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.kb-tab-zeile { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  font-size: 13px; border-top: 1px solid var(--border); }
+.kb-tab-zeile:first-child { border-top: 0; }
+.kb-tab-aktiv { background: rgba(120,180,255,.07); }
+.kb-tab-spiel { flex: 1 1 160px; min-width: 0; font-weight: 600; }
+.kb-tab-pfeil { color: var(--text-dim); flex: 0 0 auto; }
+.kb-tab-zeile > span:nth-child(3) { flex: 1 1 160px; min-width: 0; }
+/* Hinweis, dass ein mitgeliefertes Profil seit der eigenen Kopie verbessert wurde. */
+.kb-haus-hinweis { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 10px 12px; margin: 0 0 10px; border-radius: 10px; font-size: 12.5px;
+  background: rgba(255,180,84,.10); border: 1px solid rgba(255,180,84,.28); }
 /* Der Positions-Wahler im Analyse-Reiter nutzt jetzt .osd-corners/.osd-corner aus dem
    Overlay-Reiter (identische Optik, eine Stilquelle) - die frueheren .an-corner-Regeln
    sind damit tot und entfernt. */

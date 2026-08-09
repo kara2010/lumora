@@ -28,12 +28,15 @@ Keine dieser Entscheidungen wuerde ich zurueckdrehen.
 
 ## Vorgemerkt: WebView2-Fenster zusammenfuehren
 
-**Der einzige belegte Strukturfehler.** Fuenf Stellen erzeugen ein WebView2-Fenster
+**Der einzige belegte Strukturfehler.** Sechs Stellen erzeugen ein WebView2-Fenster
 nach demselben Muster; zwischen Gaming-OSD und Analyse-OSD sind ~34 von ~70 Zeilen
-woertlich identisch.
+woertlich identisch. Mit der Analyse-Werkbank (2026-08-04, sechstes Fenster,
+ANALYSE-WERKBANK-PLAN.md) ist der Konsolidierungsdruck bewusst weiter gestiegen -
+die Werkbank ist ein normales resizables Fenster ohne Composition/Click-Through
+und waere beim Zusammenfuehren der einfachste Fall.
 
 Betroffen: `createDoormanWindow`, `createOsdWindow`, `createAnalyzeOsdWindow`,
-`createOsdEditWindow`, Hauptfenster in `wWinMain`.
+`createOsdEditWindow`, `createWerkbankWindow`, Hauptfenster in `wWinMain`.
 
 **Was es real gekostet hat** (nicht theoretisch):
 
@@ -49,16 +52,16 @@ Betroffen: `createDoormanWindow`, `createOsdWindow`, `createAnalyzeOsdWindow`,
 WS_EX_NOREDIRECTIONBITMAP ohne SetLayeredWindowAttributes, der Gamepad-Stub im Shim
 (sonst fliegt der Xbox-Dongle raus), Composition- vs. normaler Controller,
 Click-Through ueber Chromium-Zwischenfenster, Sichtbarkeit vor/nach dem ersten
-ShowWindow. Ein Fehler beim Zusammenfassen trifft alle fuenf Fenster gleichzeitig,
+ShowWindow. Ein Fehler beim Zusammenfassen trifft alle sechs Fenster gleichzeitig,
 und OSD-Overlays lassen sich nicht per Screenshot pruefen - das muss ein Mensch am
 Bildschirm sehen.
 
 **Wann angehen:** Wenn am OSD ohnehin gearbeitet wird - dann ist der Umbau Teil der
 Arbeit statt zusaetzliches Risiko. Aufwand: knapper Tag plus vollstaendige Durchprobe
-aller fuenf Fenster (Gaming-OSD im Spiel, Analyse-OSD waehrend einer Messung, Editor,
-Tuersteher beim Streamen, Hauptfenster).
+aller sechs Fenster (Gaming-OSD im Spiel, Analyse-OSD waehrend einer Messung, Editor,
+Werkbank, Tuersteher beim Streamen, Hauptfenster).
 
-**Bis dahin:** Querverweise stehen an allen fuenf Stellen im Code (Suchbegriff
+**Bis dahin:** Querverweise stehen an allen sechs Stellen im Code (Suchbegriff
 `GESCHWISTER-FENSTER`).
 
 ## Bewusst NICHT aufgeraeumt

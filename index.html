@@ -143,7 +143,10 @@
           </div>
           <div class="meta-row" id="detailNetRow" style="display:none">
             <span class="meta-label">Übertragen (Netzwerk)</span>
-            <span class="meta-value" id="detailNet">–</span>
+            <span class="meta-value-group">
+              <span class="meta-value" id="detailNet">–</span>
+              <button class="meta-action" id="detailNetReset" style="display:none" onclick="netZaehlerLoeschen()">Zurücksetzen</button>
+            </span>
           </div>
           <div class="meta-row hdr-toggle-row">
             <div class="meta-text">
@@ -290,6 +293,8 @@
               <label class="switch"><input type="checkbox" id="setNetStats" onchange="onAppSettingChange()"><span class="switch-slider"></span></label>
             </div>
             <p class="settings-hint">Zählt während des Spielens die übertragenen Daten des Spielprozesses (Senden und Empfangen, inklusive Kindprozesse). Die Summe steht in der Bibliothek beim jeweiligen Spiel. Beim ersten Einschalten richtet Lumora einmalig einen Hintergrunddienst ein (eine Windows-Sicherheitsabfrage, kein Treiber).</p>
+            <p class="settings-hint">Einzelne Zähler löschst du direkt beim Spiel in der Bibliothek.</p>
+            <button class="btn-browse" id="netResetAllBtn" style="align-self:flex-start" onclick="netAlleZaehlerLoeschen()">Alle Netzwerk-Zähler löschen</button>
           </div>
           <div class="form-group">
             <label>Updates</label>
@@ -363,48 +368,12 @@
             <label>Performance-Overlay (OSD)</label>
             <p class="settings-hint">Blendet GPU-/CPU-Auslastung, Temperaturen und FPS über dem Spiel ein – funktioniert über randlos laufenden Spielen.</p>
             <p class="settings-hint" id="osdSourcesInfo" style="display:none"></p>
-            <span class="osd-field-label" style="margin-top:2px">Ein-/ausblenden</span>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Tastatur">⌨️</span>
-              <span class="hotkey-display" id="osdKbHotkeyDisplay">Alt+O</span>
-              <button class="btn-browse" id="osdKbHotkeyBtn" onclick="toggleHotkeyCapture('osd')">Ändern</button>
-              <button class="btn-cancel" onclick="clearHotkey('osd')">Aus</button>
-            </div>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Gamepad">🎮</span>
-              <span class="hotkey-display" id="gpOsdHotkeyDisplay">—</span>
-              <button class="btn-browse" id="gpOsdHotkeyCaptureBtn" onclick="toggleGpHotkeyCapture('osd')">Aufnehmen</button>
-              <button class="btn-cancel" onclick="clearGpHotkey('osd')">Aus</button>
-            </div>
-            <p class="settings-hint" id="gpOsdHotkeyHint" style="display:none"></p>
-            <span class="osd-field-label" style="margin-top:6px">Konfigurationsmodus (Live-Edit direkt am OSD)</span>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Tastatur">⌨️</span>
-              <span class="hotkey-display" id="osdEditHotkeyDisplay">Alt+Shift+O</span>
-              <button class="btn-browse" id="osdEditHotkeyBtn" onclick="toggleHotkeyCapture('osdEdit')">Ändern</button>
-              <button class="btn-cancel" onclick="clearHotkey('osdEdit')">Aus</button>
-            </div>
             <div class="setting-toggle-row">
               <span class="setting-toggle-label">Overlay anzeigen</span>
               <label class="switch"><input type="checkbox" id="setOsdEnabled" onchange="onOsdSettingChange(true)"><span class="switch-slider"></span></label>
             </div>
-            <div class="osd-field">
-              <span class="osd-field-label">Grafikkarte</span>
-              <select id="setOsdGpu" class="sort-select" style="flex:1" onchange="onOsdGpuChange()">
-                <option value="auto">Automatisch (schnellste)</option>
-              </select>
-            </div>
-            <p class="settings-hint" id="osdGpuHint" style="display:none"></p>
-            <div class="setting-toggle-row">
-              <span class="setting-toggle-label">Afterburner-OSD ein-/ausblenden</span>
-            </div>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Tastatur">⌨️</span>
-              <span class="hotkey-display" id="osdAbHotkeyDisplay">Alt+B</span>
-              <button class="btn-browse" id="osdAbHotkeyBtn" onclick="toggleHotkeyCapture('osdAb')">Ändern</button>
-              <button class="btn-cancel" onclick="clearHotkey('osdAb')">Aus</button>
-            </div>
-            <p class="settings-hint">Blendet das OSD von MSI Afterburner aus bzw. wieder ein – derselbe Schalter, den auch Afterburners eigener OSD-Hotkey nutzt. Das Lumora-Panel (eigener Hotkey oben) bleibt davon <b>unabhängig</b>: Afterburner z. B. links, Lumora rechts.</p>
+
+            <h3 class="settings-sec">Darstellung</h3>
             <div class="osd-field">
               <span class="osd-field-label">Design</span>
               <select id="setOsdTheme" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
@@ -414,24 +383,6 @@
                 <option value="neon">Neon</option>
                 <option value="strip">Leiste (horizontal)</option>
                 <option value="tiles">Kacheln (horizontal)</option>
-              </select>
-            </div>
-            <div class="osd-values-block">
-              <span class="osd-field-label">Werte</span>
-              <div id="osdFieldsUi" class="osd-fields"></div>
-              <p class="settings-hint">Alles per Drag & Drop: Werte ziehen, ganze Gruppen am ⠿-Griff packen – die Liste ordnet sich live um, das OSD übernimmt es sofort.</p>
-            </div>
-            <div class="osd-field" id="osdSetupRow" style="display:none">
-              <span class="osd-field-label">Einrichtung</span>
-              <span class="settings-hint" style="flex:1;margin:0">Abgelehnt – FPS und CPU-Sensorwerte fehlen.</span>
-              <button class="btn-browse" onclick="setupOsdNow()">Jetzt einrichten</button>
-            </div>
-            <div class="osd-field">
-              <span class="osd-field-label">FPS-Quelle</span>
-              <select id="setOsdFpsSource" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
-                <option value="auto">Automatisch (RTSS, sonst PresentMon)</option>
-                <option value="rtss">Nur RTSS/Afterburner</option>
-                <option value="presentmon">Nur PresentMon (ohne RTSS)</option>
               </select>
             </div>
             <div class="osd-field">
@@ -454,6 +405,69 @@
                 <button class="osd-corner" data-corner="bl" onclick="setOsdCorner('bl')" title="Unten links">◣</button>
                 <button class="osd-corner" data-corner="br" onclick="setOsdCorner('br')" title="Unten rechts">◢</button>
               </div>
+            </div>
+
+            <h3 class="settings-sec">Werte &amp; Reihenfolge</h3>
+            <p class="settings-hint">Jede Karte ist eine Gruppe im Overlay – in genau dieser Reihenfolge, mit genau diesen Werten.</p>
+            <div class="osd-board-tip">
+              <span class="grip">⠿</span>
+              <span>Zum Umsortieren ziehen: Werte innerhalb ihrer Gruppe, ganze Gruppen am Griff links. Das Overlay übernimmt es sofort.</span>
+            </div>
+            <div id="osdFieldsUi" class="osd-board"></div>
+
+            <h3 class="settings-sec">Tastenkürzel</h3>
+            <span class="osd-field-label" style="margin-top:2px">Ein-/ausblenden</span>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Tastatur">⌨️</span>
+              <span class="hotkey-display" id="osdKbHotkeyDisplay">Alt+O</span>
+              <button class="btn-browse" id="osdKbHotkeyBtn" onclick="toggleHotkeyCapture('osd')">Ändern</button>
+              <button class="btn-cancel" onclick="clearHotkey('osd')">Aus</button>
+            </div>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Gamepad">🎮</span>
+              <span class="hotkey-display" id="gpOsdHotkeyDisplay">—</span>
+              <button class="btn-browse" id="gpOsdHotkeyCaptureBtn" onclick="toggleGpHotkeyCapture('osd')">Aufnehmen</button>
+              <button class="btn-cancel" onclick="clearGpHotkey('osd')">Aus</button>
+            </div>
+            <p class="settings-hint" id="gpOsdHotkeyHint" style="display:none"></p>
+            <span class="osd-field-label" style="margin-top:6px">Konfigurationsmodus (Live-Edit direkt am OSD)</span>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Tastatur">⌨️</span>
+              <span class="hotkey-display" id="osdEditHotkeyDisplay">Alt+Shift+O</span>
+              <button class="btn-browse" id="osdEditHotkeyBtn" onclick="toggleHotkeyCapture('osdEdit')">Ändern</button>
+              <button class="btn-cancel" onclick="clearHotkey('osdEdit')">Aus</button>
+            </div>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label">Afterburner-OSD ein-/ausblenden</span>
+            </div>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Tastatur">⌨️</span>
+              <span class="hotkey-display" id="osdAbHotkeyDisplay">Alt+B</span>
+              <button class="btn-browse" id="osdAbHotkeyBtn" onclick="toggleHotkeyCapture('osdAb')">Ändern</button>
+              <button class="btn-cancel" onclick="clearHotkey('osdAb')">Aus</button>
+            </div>
+            <p class="settings-hint">Blendet das OSD von MSI Afterburner aus bzw. wieder ein – derselbe Schalter, den auch Afterburners eigener OSD-Hotkey nutzt. Das Lumora-Panel (eigener Hotkey oben) bleibt davon <b>unabhängig</b>: Afterburner z. B. links, Lumora rechts.</p>
+
+            <h3 class="settings-sec">Datenquellen</h3>
+            <div class="osd-field">
+              <span class="osd-field-label">Grafikkarte</span>
+              <select id="setOsdGpu" class="sort-select" style="flex:1" onchange="onOsdGpuChange()">
+                <option value="auto">Automatisch (schnellste)</option>
+              </select>
+            </div>
+            <p class="settings-hint" id="osdGpuHint" style="display:none"></p>
+            <div class="osd-field" id="osdSetupRow" style="display:none">
+              <span class="osd-field-label">Einrichtung</span>
+              <span class="settings-hint" style="flex:1;margin:0">Abgelehnt – FPS und CPU-Sensorwerte fehlen.</span>
+              <button class="btn-browse" onclick="setupOsdNow()">Jetzt einrichten</button>
+            </div>
+            <div class="osd-field">
+              <span class="osd-field-label">FPS-Quelle</span>
+              <select id="setOsdFpsSource" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
+                <option value="auto">Automatisch (RTSS, sonst PresentMon)</option>
+                <option value="rtss">Nur RTSS/Afterburner</option>
+                <option value="presentmon">Nur PresentMon (ohne RTSS)</option>
+              </select>
             </div>
           </div>
         </div>
@@ -829,6 +843,11 @@
 
         <!-- ===== EINGABE-BRUECKE ===== -->
         <div class="settings-panel" data-panel="eingabe" hidden>
+          <!-- Der Reiter hat ZWEI eigenstaendige Modi, die in entgegengesetzte
+               Richtungen uebersetzen. Sie teilen sich nichts ausser dem Reiter -
+               eigene Profile, eigene Dateien, eigene Schalter. Deshalb steht hier
+               oben die Landkarte, und darunter kommen die Modi NACHEINANDER, nie
+               ineinander verschachtelt. -->
           <div class="form-group">
             <label>Eingabe-Brücke</label>
             <p class="settings-hint">Verwandelt jedes Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z.&nbsp;B. Knopf = Vollgas) und umgekehrt.</p>
@@ -1208,25 +1227,103 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
-  "Gruppe ziehen": "Drag group",
+  // --- Netzwerk-Zaehler loeschen ----------------------------------------------
+  'Zurücksetzen': 'Reset',
+  'Alle löschen': 'Delete all',
+  'Alle Netzwerk-Zähler löschen': 'Delete all network counters',
+  'Einzelne Zähler löschst du direkt beim Spiel in der Bibliothek.': 'Individual counters can be deleted directly at the game in your library.',
+  'Den Netzwerk-Zähler für dieses Spiel auf 0 setzen? Die bisher erfasste Datenmenge geht dabei verloren.': 'Reset the network counter for this game to 0? The data volume recorded so far will be lost.',
+  'Netzwerk-Zähler von {n} Spielen löschen? Die erfassten Datenmengen gehen dabei verloren.': 'Delete the network counters of {n} games? The recorded data volumes will be lost.',
+  'Es sind keine Netzwerk-Zähler gespeichert.': 'No network counters are stored.',
+  "der Messzeit": "of the measurement",
+  'FPS-Limit (VSync/Limiter)': 'FPS cap (VSync/limiter)', 'GPU drosselt': 'GPU throttling',
+  'Grafikspeicher voll': 'VRAM full', 'Nicht eindeutig': 'Inconclusive',
+  'Überwiegend': 'Mostly', 'der Messzeit': 'of the measured time',
+  'Kein klares Limit erkennbar.': 'No clear limit detected.',
+  'Ermittelt aus GPU-Auslastung, Kernlast und Frametime-Gleichmäßigkeit – eine Einschätzung, keine frame-genaue Messung.': 'Derived from GPU utilisation, per-core load and frame time consistency – an assessment, not a frame-exact measurement.',
+  'Sauberer Lauf – keine Ruckler über der Schwelle. 👍': 'Clean run – no stutters above the threshold. 👍',
+  'Hauptverdächtiger: der Treiber ': 'Main suspect: the driver ',
+  'Hauptverdächtiger: das Programm ': 'Main suspect: the program ',
+  ' – auffällig bei ': ' – conspicuous in ',
+  'Hauptursache: die Grafikkarte drosselt': 'Main cause: the GPU is throttling',
+  'Hauptverdacht: Grafikspeicher lief voll – bei ': 'Main suspicion: VRAM filled up – in ',
+  'Hauptverdacht: Datenträger-Last – bei ': 'Main suspicion: disk load – in ',
+  'Hauptverdacht: Programmstarts im Hintergrund': 'Main suspicion: programs starting in the background',
+  'Kein Systemstörer gefunden – die Ruckler kommen vermutlich aus dem Spiel selbst (z. B. Shader/Nachladen).':
+    'No system-level offender found – the stutters likely come from the game itself (e.g. shaders/streaming).',
+  "Werte & Reihenfolge": "Values & order",
+  "Der Bericht wird auf lumora-streaming.de abgelegt und ist über einen kurzen Link abrufbar. Du kannst ihn jederzeit wieder zurückziehen. Es wird kein Konto angelegt.": "The report is stored on lumora-streaming.de and reachable via a short link. You can withdraw it at any time. No account is created.",
+  "Das Profil gilt für das gewählte Gerät („Alle Geräte\" = jede Quelle wird gemappt, z. B. Lenkrad + separate Pedale).": "The profile applies to the selected device (\"All devices\" = every source is mapped, e.g. wheel + separate pedals).",
+  "Verwandelt jedes Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z. B. Knopf = Vollgas) und umgekehrt.": "Turns any input device (joystick, wheel, flight stick …) into a virtual Xbox gamepad. This lets you control games that only recognise gamepads – including Microsoft Store / Game Pass titles, where Steam Input doesn't work. Great for accessibility too: single buttons can replace axes (e.g. button = full throttle) and vice versa.",
+  "Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber ViGEmBus ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps & Features.": "The first time you activate this, Lumora installs the signed open-source driver ViGEmBus (official source, one Windows security prompt). Removable via Apps & Features.",
+  'Feineinstellung (Deadzone / Kurve / Invertieren) & Liste': 'Fine-tuning (deadzone / curve / invert) & list',
+  'Mehr Cover & Hero über SteamGridDB (optional)': 'More covers & heroes via SteamGridDB (optional)',
+  'Lohnt sich das? & in 2 Minuten einrichten': 'Worth it? Set up in 2 minutes',
+  'Aufnahme & Qualität': 'Capture & quality',
+  'Für schwierige Anschlüsse (Relay & IPv6-Test)': 'For tricky connections (relay & IPv6 test)',
+  'Gruppe beitreten & mitstreamen': 'Join the group & stream along',
+  'Beitreten & mitstreamen': 'Join & stream along',
+  'Jeder Lauf wird gespeichert. Hake zwei Läufe an, um sie zu vergleichen (z. B. vor/nach dem Abschalten eines verdächtigen Programms) – eine Notiz hilft, den Überblick zu behalten.':
+      'Every run is saved. Tick two runs to compare them (e.g. before/after disabling a suspicious program) – a note helps you keep track.',
+  'Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28 ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45 ms).': 'When does a frame count as a stutter? "Normal" only reports noticeable hitches (from ~28 ms), "Sensitive" also small bumps, "Hard stutters only" only clear freezes (from ~45 ms).',
+  "Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam, Microsoft oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.": "Lumora is an unofficial tool and is not affiliated with Valve/Steam, Microsoft or the respective game publishers. Game covers, logos and brand names are the property of their respective owners. Cover images are downloaded from Steam or the Microsoft Store solely to identify installed games and are stored locally.",
+  "— WebRTC-Stack (WHEP) im eigenen Medien-Relay · Paul-Louis Ageneau · MPL 2.0 ·": "— WebRTC stack (WHEP) in our own media relay · Paul-Louis Ageneau · MPL 2.0 ·",
+  "— DTLS-Verschlüsselung (WebRTC-Handshake) im Medien-Relay · Mbed-TLS-Projekt · Apache 2.0 ·": "— DTLS encryption (WebRTC handshake) in the media relay · Mbed TLS project · Apache 2.0 ·",
+  "— Opus-Encoding für den Stream-Ton (WebRTC-tauglich, patentfrei) · Xiph.Org u. a. · BSD-3 ·": "— Opus encoding for the stream audio (WebRTC-capable, patent-free) · Xiph.Org and others · BSD-3 ·",
+  "— signierter Treiber für CPU-Sensorik · namazso · GPL 2.0; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for CPU sensors · namazso · GPL 2.0; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
+  "(AMDFamily17, IntelMSR) — Sensor-Definitionen · namazso · LGPL 2.1 ·": "(AMDFamily17, IntelMSR) — sensor definitions · namazso · LGPL 2.1 ·",
+  "— signierter Treiber für virtuelle Gamepads (Eingabe-Brücke) · Nefarius Software Solutions · BSD-3; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for virtual gamepads (input bridge) · Nefarius Software Solutions · BSD-3; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
+  "Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML), dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten liegen im Installationsordner bei.": "Additionally, Lumora reads — if present — sensor and FPS data from the NVIDIA driver (NVML), the AMD driver (ADL) and MSI Afterburner/RTSS. The license texts of the bundled components are included in the installation folder.",
+  "Ziehen zum Verschieben": "Drag to reorder",
+  "Aus dem Overlay nehmen": "Remove from overlay",
+  "Ins Overlay aufnehmen": "Add to overlay",
+  "Ganze Gruppe verschieben": "Move the whole group",
+  "Im Overlay": "In the overlay",
+  "Nichts ausgewählt – diese Gruppe erscheint im Overlay gar nicht.": "Nothing selected – this group will not appear in the overlay at all.",
+  "Ausgeblendet": "Hidden",
+  "Jede Karte ist eine Gruppe im Overlay – in genau dieser Reihenfolge, mit genau diesen Werten.": "Each card is a group in the overlay – in exactly this order, with exactly these values.",
+  "Zum Umsortieren ziehen: Werte innerhalb ihrer Gruppe, ganze Gruppen am Griff links. Das Overlay übernimmt es sofort.": "Drag to rearrange: values within their group, whole groups by the handle on the left. The overlay applies it immediately.",
+  "Tastenkürzel": "Keyboard shortcuts",
+  "Datenquellen": "Data sources",
+  "Netzwerk": "Network",
   "nach oben": "move up",
-  "nach unten": "move down",
-  "Alles per Drag & Drop: Werte ziehen, ganze Gruppen am ⠿-Griff packen – die Liste ordnet sich live um, das OSD übernimmt es sofort.": "Everything via drag & drop: drag values, grab whole groups by the ⠿ handle – the list reorders live and the OSD applies it immediately.",
   "Summe (Sitzung)": "Total (session)",
   "läuft": "running",
   "wird beim nächsten Spielstart erfasst": "will be recorded from the next game start",
   "Netzwerk-Statistik pro Spiel erfassen": "Record network statistics per game",
   "Zählt während des Spielens die übertragenen Daten des Spielprozesses (Senden und Empfangen, inklusive Kindprozesse). Die Summe steht in der Bibliothek beim jeweiligen Spiel. Beim ersten Einschalten richtet Lumora einmalig einen Hintergrunddienst ein (eine Windows-Sicherheitsabfrage, kein Treiber).": "While you play, counts the data transferred by the game process (send and receive, including child processes). The total is shown in the library for each game. The first time you enable this, Lumora sets up a background service once (one Windows security prompt, no driver).",
   "Übertragen (Netzwerk)": "Transferred (network)",
+  "verdeckt": "hides",
+  "Öffnen": "Open",
+  "für": "for",
+  "Zuordnungen": "mappings",
+  "Loslassen": "Release below",
+  "Modus:": "Mode:",
+  "Profil ": "Profile ",
+  " – nicht verbunden": " – not connected",
+  "Deadzone": "Dead zone",
+  " — nicht belegt (klicken zum Zuweisen)": " — unassigned (click to assign)",
+  " ist bereit – zum Aktivieren neu starten.": " is ready – restart to activate.",
+  "Controller:": "Controller:",
+  "erkannt": "detected",
+  "blockiert": "blocked",
+  "wartet auf": "waiting for",
+  // --- Eingabe-Reiter: Neugliederung in zwei Modi ---
+  "Belegung": "Mapping",
+
+  // --- Eingabe-Bruecke: Tastatur-Modus (Gamepad -> Tastatur) ---
+  "an": "on",
+  "aus": "off",
+  "⏹ Deaktivieren": "⏹ Deactivate",
+
   // --- Bericht teilen (3.3.0) ---
-  "🔗 Als Link teilen": "🔗 Share as a link",
+  "🔬 In der Werkbank öffnen": "🔬 Open in the workbench",
   "Prozess ": "Process ",
   "Hochladen und Link kopieren": "Upload and copy link",
   "Wird hochgeladen …": "Uploading …",
   "Fertig – Link ist in der Zwischenablage:": "Done – the link is in your clipboard:",
   "Den geteilten Link zurückziehen? Er ist danach nicht mehr abrufbar.": "Withdraw the shared link? It will no longer be reachable afterwards.",
   "Bericht als Link teilen": "Share report as a link",
-  "Der Bericht wird auf lumora-streaming.de abgelegt und ist über einen kurzen Link abrufbar. Du kannst ihn jederzeit wieder zurückziehen. Es wird kein Konto angelegt.": "The report is stored on lumora-streaming.de and reachable via a short link. You can withdraw it at any time. No account is created.",
   "Prozessnamen weglassen (werden zu „Prozess A/B/C“ – die Aussage bleibt)": "Omit process names (they become \"Process A/B/C\" – the conclusion stays)",
   "Spielnamen weglassen": "Omit the game name",
   "Das wird gesendet:": "This is what will be sent:",
@@ -1237,7 +1334,6 @@ const I18N_EN = {
   "Keine Verbindung zum Server. Internetverbindung prüfen.": "No connection to the server. Please check your internet connection.",
   "Das Hochladen hat nicht geklappt.": "The upload did not succeed.",
   "geteilt": "shared",
-  "Teilen zurückziehen": "Withdraw sharing",
 
   // Typografische Anfuehrungszeichen: im Englischen gerade statt deutsch
   "„": "\"", "“": "\"",
@@ -1248,7 +1344,6 @@ const I18N_EN = {
   "bis": "to",
   "Zuordnung entfernen": "Remove mapping",
   "Ø FPS": "Avg FPS",
-  "der Messzeit": "of the measurement",
   // --- Spielzeit-Rueckblick: Zuruecksetzen ---
   "Spielzeit zurücksetzen": "Reset playtime",
   "Spielzeit dieses Spiels zurücksetzen": "Reset playtime for this game",
@@ -1265,8 +1360,6 @@ const I18N_EN = {
   "❌ Vermittlungs-Server nicht erreichbar – Internet prüfen (oder die Skript-URL unter „Eigener Vermittlungs-Server\").": "❌ Signaling server unreachable – check your internet (or the script URL under \"Custom signaling server\").",
   "= schon belegt (Quelle darunter). Bei aktivem Pad bewegt sich der Controller live mit.": "= already mapped (source below). With an active pad the controller moves along live.",
   "⚠ Spiele sehen dann zwei Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.": "⚠ Games will then see two controllers (original + virtual pad). If Steam Input is active, disable the original device there, otherwise inputs arrive twice.",
-  "Das Profil gilt für das gewählte Gerät („Alle Geräte\" = jede Quelle wird gemappt, z. B. Lenkrad + separate Pedale).": "The profile applies to the selected device (\"All devices\" = every source is mapped, e.g. wheel + separate pedals).",
-  "Verwandelt jedes Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z. B. Knopf = Vollgas) und umgekehrt.": "Turns any input device (joystick, wheel, flight stick …) into a virtual Xbox gamepad. This lets you control games that only recognise gamepads – including Microsoft Store / Game Pass titles, where Steam Input doesn't work. Great for accessibility too: single buttons can replace axes (e.g. button = full throttle) and vice versa.",
   "Klick auf ein Bauteil des Controllers unten – dann am Gerät den gewünschten Knopf drücken oder die Achse bewegen.": "Click a part of the controller below – then press the desired button or move the axis on your device.",
   "Nur nötig, wenn der Test oben „nicht erreichbar\" meldet. Zugangsdaten kommen vom Relay-Anbieter oder deinem eigenen coturn-Server („turn:\" nicht nötig).": "Only needed if the test above reports \"unreachable\". Credentials come from your relay provider or your own coturn server (\"turn:\" prefix not needed).",
   "Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.": "Buffer: short = low latency, longer = smoother on an unstable connection. Auto-adjust: temporarily lowers the bitrate when viewers (e.g. on mobile data) report poor reception – and raises it again once things are stable.",
@@ -1274,7 +1367,6 @@ const I18N_EN = {
   "Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein. Jeder neue Zuschauer wird dir einzeln zur Freigabe angezeigt (Fenster überm Spiel); ein Ablehnen gilt nur kurz.": "Off by default. When on, only people you explicitly approve can watch your stream – even someone who knows the link or IP can't get in unasked. Each new viewer is shown to you individually for approval (window over the game); a rejection only lasts briefly.",
   "Startet das Spiel (egal ob über Lumora oder direkt), aktiviert sich das verknüpfte Profil automatisch – aber erst, wenn das Spiel wirklich läuft. Beim Beenden geht das virtuelle Pad wieder aus.": "When the game starts (whether via Lumora or directly), the linked profile activates automatically – but only once the game is really running. On exit the virtual pad turns off again.",
   "Zeigt rohe Geräte-Eingaben und (bei aktivem Pad) das Ergebnis am virtuellen Controller.": "Shows raw device inputs and (with an active pad) the result on the virtual controller.",
-  "Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber ViGEmBus ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps & Features.": "The first time you activate this, Lumora installs the signed open-source driver ViGEmBus (official source, one Windows security prompt). Removable via Apps & Features.",
   "★ Stammgäste": "★ Regulars",
   "🚫 Gesperrt": "🚫 Blocked",
   "🔒 Nur freigegebene Zuschauer": "🔒 Approved viewers only",
@@ -1314,7 +1406,6 @@ const I18N_EN = {
   'Profil': 'Profile',
   'Zuordnung': 'Mapping',
   'POV-Hat (Rundblickschalter) → Steuerkreuz': 'POV hat switch → D-pad',
-  'Feineinstellung (Deadzone / Kurve / Invertieren) & Liste': 'Fine-tuning (deadzone / curve / invert) & list',
   // Eingabe-Bruecke: Zuordnungsliste, Controller-Tooltips, Dialoge, Live-Anzeige
   'Linker Stick X': 'Left stick X', 'Linker Stick Y': 'Left stick Y',
   'Rechter Stick X': 'Right stick X', 'Rechter Stick Y': 'Right stick Y',
@@ -1415,9 +1506,7 @@ const I18N_EN = {
   'Hochformat-Cover': 'Portrait cover',
   'Ist die bevorzugte Variante für ein Spiel nicht verfügbar, wird automatisch die andere als Fallback verwendet.': 'If the preferred style is unavailable for a game, the other one is used automatically.',
   'Akzentfarbe': 'Accent color',
-  'Mehr Cover & Hero über SteamGridDB (optional)': 'More covers & heroes via SteamGridDB (optional)',
   'Ohne Key läuft alles (Steam + Microsoft Store).': 'Everything works without a key (Steam + Microsoft Store).',
-  'Lohnt sich das? & in 2 Minuten einrichten': 'Worth it? Set up in 2 minutes',
   'Was es bringt:': 'What it gives you:',
   'So holst du den kostenlosen Key:': 'How to get the free key:',
   'Generate API Key': 'Generate API Key',
@@ -1434,9 +1523,6 @@ const I18N_EN = {
   'Overlay anzeigen': 'Show overlay',
   'Grafikkarte': 'Graphics card',
   'Automatisch (schnellste)': 'Automatic (fastest)',
-  'Anzeige-Art': 'Display mode',
-  'Overlay-Fenster (Standard)': 'Overlay window (default)',
-  'Im Spiel gerendert via RTSS – streambar': 'Rendered in-game via RTSS – streamable',
   'Afterburner-OSD ein-/ausblenden': 'Toggle Afterburner OSD',
   'Design': 'Design',
   'Kompakt': 'Compact',
@@ -1456,7 +1542,6 @@ const I18N_EN = {
   'Größe': 'Size',
   'Deckkraft': 'Opacity',
   'Position': 'Position',
-  'Aufnahme & Qualität': 'Capture & quality',
   'Teilt deinen Bildschirm live ins Internet – Zuschauer öffnen nur einen Link im Browser, ganz ohne Installation. Hardware-Encoding über deine Grafikkarte, Bild geht direkt von deinem PC zum Zuschauer.': 'Shares your screen live over the internet – viewers just open a link in their browser, no install needed. Hardware encoding on your GPU; video goes directly from your PC to the viewer.',
   'Quelle': 'Source',
   'Bildschirm': 'screen',
@@ -1477,8 +1562,6 @@ const I18N_EN = {
   'Bitrate automatisch anpassen': 'Adapt bitrate automatically',
   'Automatisch anpassen': 'Adapt automatically',
   'Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum.': 'Constant bitrate via the GPU encoder – barely slows your game down.',
-  'Puffer & automatische Anpassung erklärt': 'Buffer & automatic adaptation explained',
-  'Für schnelle Spiele 1080p/1440p mit genug Bitrate; 4K ist am anspruchsvollsten. Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.': 'For fast games use 1080p/1440p with enough bitrate; 4K is the most demanding. Buffer: short = low latency, longer = smoother on shaky connections. Adapt automatically: temporarily lowers the bitrate when viewers (e.g. on mobile data) report poor reception – and raises it again once things stabilize.',
   'Stream aus': 'Stream off',
   'Stream starten': 'Start stream',
   'Vorschau lädt…': 'Preview loading…',
@@ -1492,11 +1575,9 @@ const I18N_EN = {
   'Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Eine Gruppe erstellst du mit „Freunde dazuholen" am laufenden Stream.': 'Watch each other in a grid – perfect for playing together on a voice call. Create a group with "Invite friends" on your running stream.',
   'Einer Gruppe beitreten (Code oder Link)': 'Join a group (code or link)',
   '👥 Freunde dazuholen': '👥 Invite friends',
-  'Erstellt eine Gruppe und kopiert den Einladungslink.': 'Creates a group and copies the invite link.',
   '✅ Gruppe erstellt – Einladungslink kopiert! Schick ihn deinen Freunden.': '✅ Group created – invite link copied! Send it to your friends.',
   'ℹ️ Du bist bereits in einer Gruppe – erst die aktuelle verlassen.': 'ℹ️ You are already in a group – leave the current one first.',
   'Auf {name} läuft die Gruppe {code} – gleich beitreten?': 'A group {code} is running on {name} – join now?',
-  'Neue Gruppe': 'New group',
   'Gruppe starten': 'Start group',
   'Beitreten': 'Join',
   '⚠️ Vermittlungs-Server gerade nicht erreichbar – laufende Streams funktionieren weiter, aber neue Mitglieder können momentan nicht beitreten.': '⚠️ Coordination server currently unreachable – running streams keep working, but new members cannot join right now.',
@@ -1516,7 +1597,6 @@ const I18N_EN = {
   'Verbindung': 'Connection',
   'Kann mein Anschluss streamen?': 'Can my connection stream?',
   'Verbindung testen': 'Test connection',
-  'Für schwierige Anschlüsse (Relay & IPv6-Test)': 'For tricky connections (relay & IPv6 test)',
   'Relay-Server': 'Relay server',
   'Nur nötig, wenn der Test oben „nicht erreichbar" meldet. Zugangsdaten kommen vom Relay-Anbieter oder deinem eigenen coturn-Server („turn:" nicht nötig).': 'Only needed if the test above reports "not reachable". Credentials come from your relay provider or your own coturn server ("turn:" prefix not required).',
   'Server': 'Server',
@@ -1540,9 +1620,7 @@ const I18N_EN = {
   'Nativ': 'Native',
   'Qualitätswechsel während des Streams: ': 'Quality switches during the stream: ',
   'Macht aus deinem Stream eine Gruppe: Der Einladungslink wird kopiert – Freunde streamen mit einem Klick mit, alle anderen schauen im Browser zu.': 'Turns your stream into a group: the invite link is copied – friends stream along with one click, everyone else watches in the browser.',
-  'Gruppe beitreten & mitstreamen': 'Join the group & stream along',
   'Mit dem Beitritt geht dein eigener Stream für die Gruppe live. Wähle vorher, was übertragen wird:': 'Joining takes your own stream live for the group. Choose what to share first:',
-  'Beitreten & mitstreamen': 'Join & stream along',
   'Über Lumora': 'About Lumora',
   'kostenlos': 'free',
   'Artwork suchen': 'Find artwork',
@@ -1586,12 +1664,8 @@ const I18N_EN = {
   // --- Ruckler-Analyse (Analyse-Reiter + Analyse-OSD-Berichte) -----------------
   'Analyse': 'Analysis',
   'Ruckler-Analyse': 'Stutter analysis',
-  'Findet heraus, warum dein Spiel ruckelt: Während einer Messung überwacht Lumora Frametimes, Hintergrund­programme, Treiber-Latenzen und deine Grafikkarte – und benennt bei jedem Ruckler die wahrscheinlichen Verursacher. Die Messung kostet praktisch keine Leistung und läuft nur, solange du sie startest.':
-    'Finds out why your game stutters: during a measurement, Lumora watches frametimes, background programs, driver latencies and your GPU – and names the likely culprits for every stutter. Measuring costs practically no performance and only runs while you start it.',
   'Tipp: Messung im Spiel per Hotkey starten, ein paar Minuten spielen (gern bis Ruckler auftreten), dann per Hotkey beenden – der Bericht erscheint hier.':
     'Tip: start the measurement in-game via hotkey, play a few minutes (ideally until stutters occur), then stop via hotkey – the report appears here.',
-  'Jeder Lauf wird gespeichert. Hake zwei Läufe an, um sie zu vergleichen (z. B. vor/nach dem Abschalten eines verdächtigen Programms) – eine Notiz hilft, den Überblick zu behalten.':
-    'Every run is saved. Tick two runs to compare them (e.g. before/after disabling a suspicious program) – a note helps you keep track.',
   '▶ Messung starten': '▶ Start measurement',
   '⏹ Messung beenden': '⏹ Stop measurement',
   '🛠 Analyse einmalig einrichten': '🛠 Set up analysis (one time)',
@@ -1599,14 +1673,8 @@ const I18N_EN = {
   'Empfindlichkeit': 'Sensitivity',
   'Flaschenhals': 'Bottleneck',
   'GPU-Limit': 'GPU limit', 'CPU-Limit': 'CPU limit', 'Einzelkern-Limit': 'Single-core limit',
-  'FPS-Limit (VSync/Limiter)': 'FPS cap (VSync/limiter)', 'GPU drosselt': 'GPU throttling',
-  'Grafikspeicher voll': 'VRAM full', 'Nicht eindeutig': 'Inconclusive',
-  'Überwiegend': 'Mostly', 'der Messzeit': 'of the measured time',
-  'Kein klares Limit erkennbar.': 'No clear limit detected.',
-  'Ermittelt aus GPU-Auslastung, Kernlast und Frametime-Gleichmäßigkeit – eine Einschätzung, keine frame-genaue Messung.': 'Derived from GPU utilisation, per-core load and frame time consistency – an assessment, not a frame-exact measurement.',
   'Findet heraus, warum dein Spiel ruckelt: Während einer Messung überwacht Lumora Frametimes, Hintergrundprogramme, Treiber-Latenzen und deine Grafikkarte – und benennt bei jedem Ruckler die wahrscheinlichen Verursacher. Die Messung kostet praktisch keine Leistung und läuft nur, solange du sie startest.': 'Finds out why your game stutters: during a measurement Lumora watches frame times, background programs, driver latencies and your graphics card – and names the likely culprits for every stutter. The measurement costs practically no performance and only runs while you start it.',
   'Normal': 'Normal',
-  'Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28 ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45 ms).': 'When does a frame count as a stutter? "Normal" only reports noticeable hitches (from ~28 ms), "Sensitive" also small bumps, "Hard stutters only" only clear freezes (from ~45 ms).',
   'Empfindlich': 'Sensitive',
   'Nur harte Ruckler': 'Hard stutters only',
   'Anzeige im Spiel': 'In-game display',
@@ -1625,17 +1693,7 @@ const I18N_EN = {
   'Vergleich': 'Comparison',
   'Verlauf': 'History',
   'Noch keine Messungen.': 'No measurements yet.',
-  'Sauberer Lauf – keine Ruckler über der Schwelle. 👍': 'Clean run – no stutters above the threshold. 👍',
-  'Hauptverdächtiger: der Treiber ': 'Main suspect: the driver ',
-  'Hauptverdächtiger: das Programm ': 'Main suspect: the program ',
-  ' – auffällig bei ': ' – conspicuous in ',
   'Rucklern': 'stutters',
-  'Hauptursache: die Grafikkarte drosselt': 'Main cause: the GPU is throttling',
-  'Hauptverdacht: Grafikspeicher lief voll – bei ': 'Main suspicion: VRAM filled up – in ',
-  'Hauptverdacht: Datenträger-Last – bei ': 'Main suspicion: disk load – in ',
-  'Hauptverdacht: Programmstarts im Hintergrund': 'Main suspicion: programs starting in the background',
-  'Kein Systemstörer gefunden – die Ruckler kommen vermutlich aus dem Spiel selbst (z. B. Shader/Nachladen).':
-    'No system-level offender found – the stutters likely come from the game itself (e.g. shaders/streaming).',
   'Treiber': 'Driver', 'Programm': 'Program', 'GPU-Drosselung': 'GPU throttling', 'Grafikspeicher': 'VRAM',
   'Datenträger': 'Disk', 'Programmstart': 'Program start', 'Spielintern': 'Game-internal',
   'Dauer': 'Duration', 'Ø FPS': 'Avg FPS', '1%-Low': '1% low', 'Median ': 'median ',
@@ -1678,7 +1736,6 @@ const I18N_EN = {
   'H.264 (maximale Kompatibilität)': 'H.264 (maximum compatibility)',
   'Zugriffsschutz': 'Access protection',
   'Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein.': 'Off by default. When on, only people you explicitly approve can see your stream – even someone who knows the link or IP cannot get in uninvited.',
-  'Aktuell gilt: Wer den Raumcode-Link hat, kommt hinein – wer nur die rohe IP kennt, wird abgewiesen. Das gezielte Freigeben einzelner Zuschauer folgt als Nächstes.': 'For now: whoever has the room-code link gets in – anyone who only knows the raw IP is rejected. Approving individual viewers is coming next.',
   '⏳ Öffentlicher Link wird vorbereitet…': '⏳ Preparing public link…',
   '  ·  ⏳ Router wird geprüft…': '  ·  ⏳ Checking router…',
   '  ·  🌐 über IPv6 erreichbar (Zuschauer braucht IPv6, z. B. Mobilfunk)': '  ·  🌐 reachable via IPv6 (viewer needs IPv6, e.g. mobile data)',
@@ -1738,7 +1795,6 @@ const I18N_EN = {
   // GPU-Auswahl
   'Mehrere Grafikkarten erkannt. „Automatisch" nimmt die dedizierte (schnelle) Karte – falls die Anzeige nicht stimmt, hier fest einstellen.': 'Multiple graphics cards detected. "Automatic" picks the dedicated (fast) card – if the reading is wrong, set it manually here.',
   // Scan-Dialog
-  'Noch keine Spiele gefunden': 'No games found yet',
   'Wird hinzugefügt...': 'Adding...',
   'Willkommen! Deine installierten Spiele werden gesucht – das kann einen Moment dauern…': 'Welcome! Searching for your installed games – this may take a moment…',
   'Steam, Epic, GOG, Ubisoft, Xbox, EA, Rockstar, Battle.net, Amazon, Riot und Ordner werden gescannt…': 'Scanning Steam, Epic, GOG, Ubisoft, Xbox, EA, Rockstar, Battle.net, Amazon, Riot and folders…',
@@ -1786,7 +1842,6 @@ const I18N_EN = {
   "Lumora sieht deine Steam-Daten nie": "Lumora never sees your Steam data",
   "Oben rechts aufs Profil →": "Top right on your profile →",
   "→ Reiter": "→ tab",
-  "„Im Spiel\" zeichnet die Werte direkt in den Spiel-Frame – sichtbar in Aufnahmen und Streams und auch im exklusiven Vollbild. Benötigt laufendes RTSS bzw. MSI Afterburner (sonst automatisch Overlay-Fenster). Vereinfachte Designs (Kompakt/Minimal/Balken); Position folgt der Ecken-Wahl unten. Tipp: Wirkt eine große Fläche hinter den Anzeigen störend, in RTSS die Option „Bildschirmfüllung\" (Fill) abschalten.": "\"In-game\" draws the values straight into the game frame – visible in recordings and streams and even in exclusive fullscreen. Requires RTSS or MSI Afterburner running (otherwise an overlay window is used automatically). Simplified designs (Compact/Minimal/Bars); position follows the corner choice below. Tip: if a large area behind the readouts is distracting, turn off the \"Fill\" (Bildschirmfüllung) option in RTSS.",
   "Blendet das OSD von MSI Afterburner aus bzw. wieder ein – derselbe Schalter, den auch Afterburners eigener OSD-Hotkey nutzt. Das Lumora-Panel (eigener Hotkey oben) bleibt davon": "Shows or hides the MSI Afterburner OSD – the same switch that Afterburner's own OSD hotkey uses. The Lumora panel (its own hotkey above) stays",
   "unabhängig": "independent",
   ": Afterburner z. B. links, Lumora rechts.": ": Afterburner on the left, Lumora on the right, for example.",
@@ -1796,16 +1851,6 @@ const I18N_EN = {
   "Ganzer": "Whole",
   "oder gezielt ein": "or a specific",
   "– dann landet nur dieses Fenster im Stream (auch im Vollbild). Läuft das Spiel noch nicht, erst starten, dann ↻.": "– then only this window ends up in the stream (in fullscreen too). If the game is not running yet, start it first, then ↻.",
-  "Der Link nutzt deine öffentliche IP, aber deine FritzBox lässt Lumora den Port nicht selbst öffnen. Zwei Wege:": "The link uses your public IP, but your FritzBox will not let Lumora open the port itself. Two options:",
-  "In der FritzBox": "In the FritzBox,",
-  "Heimnetz → Netzwerk → [dieser PC] → Bearbeiten": "Home Network → Network → [this PC] → Edit,",
-  "das Häkchen": "tick the checkbox",
-  "„Selbstständige Portfreigaben für dieses Gerät erlauben\"": "\"Allow independent port sharing for this device\"",
-  "setzen — dann öffnet Lumora den Port künftig automatisch.": "— then Lumora will open the port automatically from now on.",
-  "Oder dauerhaft manuell:": "Or permanently by hand:",
-  "Internet → Freigaben → Portfreigaben": "Internet → Permit Access → Port Sharing",
-  ", Port": ", port",
-  "auf diesen PC.": "to this PC.",
   "Freunde mit Lumora brauchen nur den": "Friends with Lumora only need the",
   "· der": "· the",
   "ist für Zuschauer im Browser (auch iPhone).": "is for viewers in the browser (iPhone too).",
@@ -1815,29 +1860,21 @@ const I18N_EN = {
   ". Beim Start wird das": ". On start, the",
   "(dein laufendes Spiel) freigegeben.": "(your running game) is shared.",
   "Stellt den Link bewusst über IPv6 aus – zum gezielten Testen des IPv6-Direktwegs (z. B. Player vom Handy über Mobilfunk). Für den Normalbetrieb aus.": "Deliberately serves the link over IPv6 – for specifically testing the direct IPv6 path (e.g. a player on a phone over mobile data). Off for normal use.",
-  "Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam, Microsoft oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.": "Lumora is an unofficial tool and is not affiliated with Valve/Steam, Microsoft or the respective game publishers. Game covers, logos and brand names are the property of their respective owners. Cover images are downloaded from Steam or the Microsoft Store solely to identify installed games and are stored locally.",
   "Lumora ist Open Source.": "Lumora is open source.",
   "Der komplette Quellcode ist frei verfügbar unter der GNU AGPL v3:": "The complete source code is freely available under the GNU AGPL v3:",
   "— entwickelt und gepflegt von Karsten Radermacher. Der Name „Lumora\" und das Logo sind nicht Teil der Lizenz.": "— developed and maintained by Karsten Radermacher. The “Lumora” name and logo are not part of the license.",
   "Lumora steht auf den Schultern großartiger Open-Source-Projekte.": "Lumora stands on the shoulders of great open-source projects.",
   "Eingesetzte Komponenten und ihre Urheber:": "Components used and their authors:",
-  "— WebRTC-Stack (WHEP) im eigenen Medien-Relay · Paul-Louis Ageneau · MPL 2.0 ·": "— WebRTC stack (WHEP) in our own media relay · Paul-Louis Ageneau · MPL 2.0 ·",
   "— ICE/STUN/TURN (Verbindungsaufbau durch NAT/Router) im Medien-Relay · Paul-Louis Ageneau · MIT ·": "— ICE/STUN/TURN (connection setup through NAT/router) in the media relay · Paul-Louis Ageneau · MIT ·",
   "— Verschlüsselung der Medienströme (SRTP) im Medien-Relay · Cisco Systems · BSD-3 ·": "— encryption of the media streams (SRTP) in the media relay · Cisco Systems · BSD-3 ·",
-  "— DTLS-Verschlüsselung (WebRTC-Handshake) im Medien-Relay · Mbed-TLS-Projekt · Apache 2.0 ·": "— DTLS encryption (WebRTC handshake) in the media relay · Mbed TLS project · Apache 2.0 ·",
   "— SCTP-Transport (WebRTC-Datenkanäle) im Medien-Relay · sctplab · BSD-3 ·": "— SCTP transport (WebRTC data channels) in the media relay · sctplab · BSD-3 ·",
-  "— Opus-Encoding für den Stream-Ton (WebRTC-tauglich, patentfrei) · Xiph.Org u. a. · BSD-3 ·": "— Opus encoding for the stream audio (WebRTC-capable, patent-free) · Xiph.Org and others · BSD-3 ·",
   "— JSON-Verarbeitung (Einstellungen, IPC, APIs) · Niels Lohmann · MIT ·": "— JSON handling (settings, IPC, APIs) · Niels Lohmann · MIT ·",
   "— Ansteuerung des virtuellen Xbox-Controllers für die Eingabe-Brücke · Benjamin Höglinger-Stelzer · MIT ·": "— drives the virtual Xbox controller for the input bridge · Benjamin Höglinger-Stelzer · MIT ·",
   "— NVENC-API-Header (NVIDIA-Hardware-Encoding) · FFmpeg-Projekt · MIT ·": "— NVENC API headers (NVIDIA hardware encoding) · FFmpeg project · MIT ·",
   "— AMD-Hardware-Encoding-API (Radeon-GPUs) · AMD · MIT ·": "— AMD hardware encoding API (Radeon GPUs) · AMD · MIT ·",
   "— Intel-oneVPL-Dispatcher für QuickSync-Hardware-Encoding · Intel Corporation · MIT ·": "— Intel oneVPL dispatcher for QuickSync hardware encoding · Intel Corporation · MIT ·",
   "— Rendering der Benutzeroberfläche (Chromium-basiert, Windows-Systemkomponente) · Microsoft · BSD (Loader) ·": "— renders the user interface (Chromium-based, Windows system component) · Microsoft · BSD (loader) ·",
-  "— signierter Treiber für CPU-Sensorik · namazso · GPL 2.0; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for CPU sensors · namazso · GPL 2.0; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
-  "(AMDFamily17, IntelMSR) — Sensor-Definitionen · namazso · LGPL 2.1 ·": "(AMDFamily17, IntelMSR) — sensor definitions · namazso · LGPL 2.1 ·",
-  "— signierter Treiber für virtuelle Gamepads (Eingabe-Brücke) · Nefarius Software Solutions · BSD-3; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for virtual gamepads (input bridge) · Nefarius Software Solutions · BSD-3; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
   "— optionale Community-Artworks (eigener API-Key) ·": "— optional community artwork (your own API key) ·",
-  "Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML), dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten liegen im Installationsordner bei.": "Additionally, Lumora reads — if present — sensor and FPS data from the NVIDIA driver (NVML), the AMD driver (ADL) and MSI Afterburner/RTSS. The license texts of the bundled components are included in the installation folder.",
 }
 function lumoraLangEffective() {
   try {
@@ -1915,7 +1952,9 @@ function applyI18n() {
       resolve(mode === 'prompt' ? null : false)
     }
     window.lumoraAlert = (msg) => _lumoraModalShow(msg, { mode: 'alert' })
-    window.lumoraConfirm = (msg) => _lumoraModalShow(msg, { mode: 'confirm' })
+    // opts durchreichen (okText/cancelText): eine Rueckfrage, deren Knopf die Tat
+    // benennt ("Zuruecksetzen"), ist klarer als ein generisches OK.
+    window.lumoraConfirm = (msg, opts) => _lumoraModalShow(msg, Object.assign({ mode: 'confirm' }, opts))
     window.lumoraPrompt = (msg, defaultValue) => _lumoraModalShow(msg, { mode: 'prompt', defaultValue })
 
     // Spiele & Einstellungen aus Dateien laden (kein localStorage → kein langsames
@@ -3342,6 +3381,7 @@ async function anShowReport(file) {
     // Teilen-Knopf vorerst entfernt (Feature deaktiviert). anShare/anShareSend + das
     // #shareOverlay + die analyze-share-IPC bleiben schlummernd im Code, damit sich die
     // Funktion spaeter durch Wiedereinsetzen dieser einen Zeile reaktivieren laesst.
+    + '<button class="btn-primary" onclick="anWerkbank(\'' + anEsc(file) + '\')">' + window.tr('🔬 In der Werkbank öffnen') + '</button>'
     + '</div>'
   // Sofort UND per rAF zeichnen: rAF allein feuert nicht, solange das Fenster nichts
   // komponiert (minimiert/verdeckt) - der Bericht stuende dann ohne Kurve da.
@@ -3440,6 +3480,13 @@ function anShareClean(r, opts) {
   delete o.note                                                  // eigene Notizen bleiben privat
   delete o.pid
   if (o.context) { delete o.context.game; }                      // dort steckt der Pfad nochmal
+  // Datenmodell v2 (Werkbank): volle Serien + Spuren + Namens-Tabellen sind fuer den
+  // GETEILTEN Bericht tabu - megabytegross (Serverlimit 256 KB) und names enthaelt
+  // ALLE gesehenen Prozessnamen, nicht nur die Verdaechtigen. Geteilt wird das
+  // v1-Subset (ftSeries reicht der Berichtsseite).
+  delete o.ftFull
+  delete o.tracks
+  delete o.names
   const anonym = {}
   let lauf = 0
   const deckname = (n) => {
@@ -3511,6 +3558,9 @@ async function anUnshare(file) {
   anRefreshHistory()
 }
 
+// Analyse-Werkbank: eigenes Auswerte-Fenster (zoombare Timeline, Spuren, Vergleich).
+// Die Shell prueft den Dateinamen (anSafeName) und oeffnet/fokussiert das Fenster.
+function anWerkbank(file) { ipcRenderer.invoke('analyze-werkbank', file || '') }
 async function anExport(file) {
   const r = await ipcRenderer.invoke('analyze-get', file)
   if (!r) return
@@ -3637,6 +3687,42 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       // sonst wuesste niemand, dass die Funktion existiert und schon zaehlt.
       row.style.display = (t || netStatsAn) ? '' : 'none'
       val.textContent = t || window.tr('wird beim nächsten Spielstart erfasst')
+      // Loeschen nur anbieten, wenn es auch etwas zu loeschen gibt.
+      const btn = document.getElementById('detailNetReset')
+      if (btn) btn.style.display = t ? '' : 'none'
+    }
+    // Zaehler eines Spiels loeschen. Laeuft das Spiel gerade, setzt die Shell
+    // zusaetzlich den Nullpunkt der laufenden Zaehlung - sonst waere die geloeschte
+    // Menge beim Beenden sofort wieder da.
+    window.netZaehlerLoeschen = async () => {
+      if (selectedIndex < 0 || !games[selectedIndex]) return
+      const g = games[selectedIndex]
+      const ok = await lumoraConfirm(
+        window.tr('Den Netzwerk-Zähler für dieses Spiel auf 0 setzen? Die bisher erfasste Datenmenge geht dabei verloren.'),
+        { okText: window.tr('Zurücksetzen') })
+      if (!ok) return
+      try { await ipcRenderer.invoke('net-stat-reset', { gamePath: g.path }) } catch {}
+      delete g.netIn; delete g.netOut
+      saveGames()
+      netRowUpdate(null)
+    }
+    // Alle Zaehler loeschen (Einstellungen). Zaehlt vorher, wie viele Spiele
+    // betroffen sind - eine Rueckfrage ohne Zahl waere nicht ehrlich.
+    window.netAlleZaehlerLoeschen = async () => {
+      const betroffen = games.filter(g => g.netIn || g.netOut)
+      if (!betroffen.length) {
+        await lumoraAlert(window.tr('Es sind keine Netzwerk-Zähler gespeichert.'))
+        return
+      }
+      const ok = await lumoraConfirm(
+        window.tr('Netzwerk-Zähler von {n} Spielen löschen? Die erfassten Datenmengen gehen dabei verloren.')
+          .replace('{n}', betroffen.length),
+        { okText: window.tr('Alle löschen') })
+      if (!ok) return
+      try { await ipcRenderer.invoke('net-stat-reset', { alle: true }) } catch {}
+      for (const g of games) { delete g.netIn; delete g.netOut }
+      saveGames()
+      netRowUpdate(null)
     }
     // Sitzungssumme kommt beim Spielende aus der Shell (wie play-session)
     ipcRenderer.on('net-session', (event, { gamePath, inBytes, outBytes }) => {
@@ -3922,10 +4008,16 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       fps: [['fps','FPS'],['frametime','Frametime'],['graph','Graph']],
       net: [['rate','Rate'],['total','Summe (Sitzung)']],
     }
+    // Gruppenfarben wie im Overlay (GPU gruen, CPU orange, FPS blau) - NET bekommt
+    // eine eigene, damit sich die vier Karten im Board klar unterscheiden.
+    const OSD_GRP_META = {
+      gpu: ['GPU', '#74e857'], cpu: ['CPU', '#ff8a1e'],
+      fps: ['FPS', '#4bd6ff'], net: ['Netzwerk', '#c79bff'],
+    }
     let osdFieldsState = { gpu: [], cpu: [], fps: [], net: [] }
-    // Freie Reihenfolge, komplett per Drag & Drop: Werte-Chips innerhalb ihrer Gruppe,
-    // ganze Gruppen am ⠿-Griff. Waehrend des Ziehens ordnet die Liste LIVE um (das
-    // Element weicht unter dem Zeiger aus) - erst das Loslassen speichert.
+    // Reihenfolge frei per Drag & Drop: Werte innerhalb ihrer Gruppe, ganze Gruppen
+    // am Griff. Waehrend des Ziehens ordnet das Board LIVE um (das Element weicht
+    // unter dem Zeiger aus) - erst das Loslassen speichert.
     let osdOrderState = ['gpu', 'cpu', 'fps', 'net']
     function osdCatOrder() {
       const std = Object.keys(OSD_FIELD_DEFS)
@@ -3945,43 +4037,61 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const box = document.getElementById('osdFieldsUi')
       box.innerHTML = osdCatOrder().map(cat => {
         const defs = OSD_FIELD_DEFS[cat]
-        const lblOf = f => { const d = defs.find(x => x[0] === f); return d ? d[1] : f }
-        const aktiv = osdFieldsState[cat].filter(f => defs.some(d => d[0] === f))
-        const chips = aktiv.concat(defs.map(d => d[0]).filter(f => !aktiv.includes(f)))
-        return `<div class="osd-fields-grp" data-cat="${cat}">`
-          + `<div class="grp"><span class="osd-grp-griff" draggable="true" title="${window.tr('Gruppe ziehen')}">⠿</span>${cat.toUpperCase()}</div>`
-          + `<div class="osd-chips-grid" data-cat="${cat}">`
-          + chips.map(f =>
-              `<button type="button" draggable="true" class="osd-chip${osdFieldsState[cat].includes(f) ? ' on' : ''}" data-cat="${cat}" data-f="${f}" onclick="toggleOsdField('${cat}','${f}')">${window.tr(lblOf(f))}</button>`
-            ).join('')
+        const [titel, farbe] = OSD_GRP_META[cat] || [cat.toUpperCase(), '#888']
+        const lblOf = f => { const d = defs.find(x => x[0] === f); return window.tr(d ? d[1] : f) }
+        const an = osdFieldsState[cat].filter(f => defs.some(d => d[0] === f))
+        const aus = defs.map(d => d[0]).filter(f => !an.includes(f))
+        const tok = f => `<span class="osd-tok" draggable="true" data-cat="${cat}" data-f="${f}"`
+          + ` title="${window.tr('Ziehen zum Verschieben')}">`
+          + `<span class="pkt">⠿</span>${anEsc(lblOf(f))}`
+          + `<button type="button" class="weg" title="${window.tr('Aus dem Overlay nehmen')}"`
+          + ` onclick="toggleOsdField('${cat}','${f}')">×</button></span>`
+        const tokAus = f => `<button type="button" class="osd-tok-aus" data-cat="${cat}" data-f="${f}"`
+          + ` title="${window.tr('Ins Overlay aufnehmen')}" onclick="toggleOsdField('${cat}','${f}')">`
+          + `<span class="plus">+</span>${anEsc(lblOf(f))}</button>`
+        return `<div class="osd-grp" data-cat="${cat}" style="--gc:${farbe}">`
+          + `<div class="osd-grp-kopf">`
+          + `<span class="osd-griff" draggable="true" title="${window.tr('Ganze Gruppe verschieben')}">⠿</span>`
+          + `<span class="osd-grp-punkt"></span>`
+          + `<span class="osd-grp-name">${anEsc(window.tr(titel))}</span>`
+          + `<span class="osd-grp-zahl">${an.length} / ${defs.length}</span>`
+          + `</div>`
+          + `<div class="osd-zone"><div class="osd-zone-lbl">${window.tr('Im Overlay')}</div>`
+          + `<div class="osd-zone-inhalt" data-cat="${cat}">`
+          + (an.length ? an.map(tok).join('')
+                       : `<span class="osd-leer">${window.tr('Nichts ausgewählt – diese Gruppe erscheint im Overlay gar nicht.')}</span>`)
           + `</div></div>`
+          + (aus.length
+              ? `<div class="osd-zone osd-zone-aus"><div class="osd-zone-lbl">${window.tr('Ausgeblendet')}</div>`
+                + `<div class="osd-zone-inhalt">${aus.map(tokAus).join('')}</div></div>`
+              : '')
+          + `</div>`
       }).join('')
       osdDndWire(box)
     }
     // --- Drag & Drop (live umordnend) --------------------------------------------
-    // Ein Regelwerk fuer beides: Chips wandern innerhalb ihres Gitters, Gruppen
-    // innerhalb der Liste. Beim dragover wird das gezogene Element sofort an die
+    // Ein Regelwerk fuer beides: Werte wandern innerhalb ihrer Zone, Gruppen
+    // innerhalb des Boards. Beim dragover wird das gezogene Element sofort an die
     // Zielposition gesetzt (vor/nach dem Element unter dem Zeiger, je nach
     // Zeigerposition) - so sieht man das Ergebnis, BEVOR man loslaesst.
-    let osdDrag = null   // { el, art: 'chip'|'grp' }
+    let osdDrag = null   // { el, art: 'tok'|'grp' }
     function osdDndWire(box) {
-      box.querySelectorAll('.osd-chip').forEach(el => {
+      box.querySelectorAll('.osd-tok').forEach(el => {
         el.addEventListener('dragstart', e => {
-          osdDrag = { el, art: 'chip' }
+          osdDrag = { el, art: 'tok' }
           e.dataTransfer.effectAllowed = 'move'
-          // Standard-Geisterbild vom Element selbst; leicht verzoegert stylen, sonst
-          // uebernimmt das Geisterbild schon die abgesenkte Optik
-          setTimeout(() => el.classList.add('osd-dragging'), 0)
+          // Verzoegert stylen, sonst uebernimmt das Geisterbild schon die Zieh-Optik
+          setTimeout(() => el.classList.add('osd-zieht'), 0)
         })
         el.addEventListener('dragend', () => osdDropFertig())
       })
-      box.querySelectorAll('.osd-grp-griff').forEach(griff => {
-        const grp = griff.closest('.osd-fields-grp')
+      box.querySelectorAll('.osd-griff').forEach(griff => {
+        const grp = griff.closest('.osd-grp')
         griff.addEventListener('dragstart', e => {
           osdDrag = { el: grp, art: 'grp' }
           e.dataTransfer.effectAllowed = 'move'
-          e.dataTransfer.setDragImage(grp, 20, 12)   // die GANZE Gruppe als Geisterbild
-          setTimeout(() => grp.classList.add('osd-dragging'), 0)
+          e.dataTransfer.setDragImage(grp, 24, 16)   // die GANZE Karte als Geisterbild
+          setTimeout(() => grp.classList.add('osd-zieht'), 0)
         })
         griff.addEventListener('dragend', () => osdDropFertig())
       })
@@ -3989,16 +4099,16 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         if (!osdDrag) return
         e.preventDefault()
         e.dataTransfer.dropEffect = 'move'
-        if (osdDrag.art === 'chip') {
-          const grid = e.target.closest('.osd-chips-grid')
-          if (!grid || grid.dataset.cat !== osdDrag.el.dataset.cat) return   // nur die eigene Gruppe
-          const ueber = e.target.closest('.osd-chip')
+        if (osdDrag.art === 'tok') {
+          const zone = e.target.closest('.osd-zone-inhalt')
+          if (!zone || zone.dataset.cat !== osdDrag.el.dataset.cat) return   // nur die eigene Gruppe
+          const ueber = e.target.closest('.osd-tok')
           if (!ueber || ueber === osdDrag.el) return
           const r = ueber.getBoundingClientRect()
           const nach = e.clientX > r.left + r.width / 2
-          grid.insertBefore(osdDrag.el, nach ? ueber.nextSibling : ueber)
+          zone.insertBefore(osdDrag.el, nach ? ueber.nextSibling : ueber)
         } else {
-          const ueber = e.target.closest('.osd-fields-grp')
+          const ueber = e.target.closest('.osd-grp')
           if (!ueber || ueber === osdDrag.el) return
           const r = ueber.getBoundingClientRect()
           const nach = e.clientY > r.top + r.height / 2
@@ -4009,14 +4119,13 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function osdDropFertig() {
       if (!osdDrag) return
-      osdDrag.el.classList.remove('osd-dragging')
+      osdDrag.el.classList.remove('osd-zieht')
       const box = document.getElementById('osdFieldsUi')
       // Endstand direkt aus dem DOM ablesen - die Ansicht IST das Ergebnis
-      osdOrderState = [...box.querySelectorAll('.osd-fields-grp')].map(g => g.dataset.cat)
-      for (const grid of box.querySelectorAll('.osd-chips-grid')) {
-        const cat = grid.dataset.cat
-        const alle = [...grid.querySelectorAll('.osd-chip')].map(x => x.dataset.f)
-        osdFieldsState[cat] = alle.filter(f => osdFieldsState[cat].includes(f))
+      osdOrderState = [...box.querySelectorAll('.osd-grp')].map(g => g.dataset.cat)
+      for (const zone of box.querySelectorAll('.osd-zone-inhalt[data-cat]')) {
+        const cat = zone.dataset.cat
+        osdFieldsState[cat] = [...zone.querySelectorAll('.osd-tok')].map(x => x.dataset.f)
       }
       osdDrag = null
       onOsdSettingChange()
@@ -4025,8 +4134,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const arr = osdFieldsState[cat], i = arr.indexOf(f)
       if (i >= 0) arr.splice(i, 1)
       else arr.push(f)   // ans Ende - die Reihenfolge bestimmt der Nutzer, nicht die Definition
-      const btn = document.querySelector(`.osd-chip[data-cat="${cat}"][data-f="${f}"]`)
-      if (btn) btn.classList.toggle('on', arr.includes(f))
+      renderOsdFields(osdFieldsState, osdOrderState)   // Zonen neu aufteilen (an <-> aus)
       onOsdSettingChange()
     }
 
