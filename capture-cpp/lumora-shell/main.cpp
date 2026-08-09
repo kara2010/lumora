@@ -2746,11 +2746,25 @@ static uint32_t netPidByExe(const std::string& exeLow) {
     CloseHandle(snap);
     return pid;
 }
-static json netStatSnapshot() {   // {an, inBytes, outBytes} - an=false, wenn der Broker (noch) nicht zaehlt
+// Nullpunkt der LAUFENDEN Zaehlung. Der Broker zaehlt je Spielsitzung stur hoch und
+// kennt kein Ruecksetzen; loescht der Nutzer den Zaehler mitten im Spiel, merken wir
+// uns hier den Stand und ziehen ihn ab. Ohne das kaeme die schon geloeschte Menge
+// beim Spielende ueber net-session doch wieder auf dem Konto an.
+static uint64_t g_netNullIn = 0, g_netNullOut = 0;
+static bool netRawRead(uint64_t& in, uint64_t& out, bool& an) {
     uint32_t w[16] = {};
-    if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps") || !shmPeek16(g_fpsShm, w)) return nullptr;
-    uint64_t in = ((uint64_t)w[10] << 32) | w[9], out = ((uint64_t)w[12] << 32) | w[11];
-    return { {"an", w[13] != 0}, {"inBytes", (double)in}, {"outBytes", (double)out}, {"gamePath", g_netGamePath} };
+    if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps") || !shmPeek16(g_fpsShm, w)) return false;
+    in = ((uint64_t)w[10] << 32) | w[9];
+    out = ((uint64_t)w[12] << 32) | w[11];
+    an = w[13] != 0;
+    return true;
+}
+static json netStatSnapshot() {   // {an, inBytes, outBytes} - an=false, wenn der Broker (noch) nicht zaehlt
+    uint64_t in = 0, out = 0; bool an = false;
+    if (!netRawRead(in, out, an)) return nullptr;
+    in = in > g_netNullIn ? in - g_netNullIn : 0;
+    out = out > g_netNullOut ? out - g_netNullOut : 0;
+    return { {"an", an}, {"inBytes", (double)in}, {"outBytes", (double)out}, {"gamePath", g_netGamePath} };
 }
 // 1-Hz-Tick (UI-Thread, wie extWatchTick): laeuft ein Spiel und ist die Statistik an,
 // Ziel-PID melden + Broker am Leben halten - auch OHNE eingeschaltetes OSD.
@@ -2771,7 +2785,7 @@ static void netStatTick() {
     if (path.empty()) {
         // Kein Spiel (oder Statistik aus): Zaehlung beim Broker abmelden. Die Sitzungs-
         // summe hat netSessionFinish beim Spielende bereits gemeldet.
-        if (!g_netGamePath.empty()) { shmPoke(g_fpsShm, 8, 0); g_netGamePath.clear(); }
+        if (!g_netGamePath.empty()) { shmPoke(g_fpsShm, 8, 0); g_netGamePath.clear(); g_netNullIn = g_netNullOut = 0; }
         return;
     }
     if (!pid) pid = netPidByExe(exe);
@@ -2779,7 +2793,8 @@ static void netStatTick() {
     if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps")) return;
     shmWriteApp(g_fpsShm, 1);              // Heartbeat: Broker lebt, solange gezaehlt wird
     shmPoke(g_fpsShm, 8, pid);
-    g_netGamePath = path;
+    // Neues Spiel: der Broker faengt bei 0 an, also muss auch der Nullpunkt weg.
+    if (g_netGamePath != path) { g_netGamePath = path; g_netNullIn = g_netNullOut = 0; }
     if (!fpsBrokerAlive() && GetTickCount64() - g_netSpawnAt > 8000) {
         g_netSpawnAt = GetTickCount64();
         std::thread([]() { runTask(L"LumoraOSD-FPS"); }).detach();
@@ -5194,6 +5209,19 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "input-bridge-status") return lubridge::status();
     // Netzwerk-Statistik: Live-Werte der laufenden Zaehlung (UI pollt 1x/s in der Detailansicht)
     if (channel == "net-stat-read") return netStatSnapshot();
+    // Zaehler loeschen. Die gespeicherten Summen liegen bei den Spielen (UI-Seite);
+    // hier faellt nur die LAUFENDE Sitzung an - ohne neuen Nullpunkt wuerde sie beim
+    // Spielende trotzdem noch gebucht. args[0]: {gamePath} oder {alle:true}.
+    if (channel == "net-stat-reset") {
+        const bool alle = args.size() >= 1 && args[0].is_object() && args[0].value("alle", false);
+        const std::string ziel = (args.size() >= 1 && args[0].is_object()) ? args[0].value("gamePath", "") : "";
+        const bool trifftLauf = alle || (!g_netGamePath.empty() && g_netGamePath == ziel);
+        if (trifftLauf) {
+            uint64_t in = 0, out = 0; bool an = false;
+            if (netRawRead(in, out, an)) { g_netNullIn = in; g_netNullOut = out; }
+        }
+        return { {"ok", true}, {"laufendeZaehlungZurueckgesetzt", trifftLauf} };
+    }
     if (channel == "input-bridge-selftest") {
         // Geschlossener Kreis ohne Fremdtools: das virtuelle Pad ueber XInput
         // zuruecklesen - beweist Treiber + Mapping-Ausgabe in einem Rutsch.
@@ -5864,6 +5892,77 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         closesocket(cli); closesocket(acc); closesocket(srv); WSACleanup();
         net.stop();
         res = "netstat-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
+    }
+    // Loeschen der Netz-Zaehler: der Broker kennt kein Ruecksetzen und zaehlt je
+    // Spielsitzung stur weiter. Geprueft wird deshalb der Nullpunkt-Abzug - inklusive
+    // des Falls, dass zwischen Loeschen und Spielende NOCH etwas uebertragen wird.
+    // Ohne diesen Test faellt so ein Rechenfehler erst beim Anwender auf, und zwar als
+    // "geloeschte Menge ist nach dem Spiel wieder da".
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-netreset") == 0) {
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string res; int fehler = 0;
+        auto pruef = [&](const char* was, bool ok) {
+            res += std::string(ok ? "OK   " : "FEHL ") + was + "\n"; if (!ok) ++fehler;
+        };
+        if (fpsBrokerAlive()) {
+            writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt",
+                      "netreset-Selbsttest: NICHT MOEGLICH\n"
+                      "Der FPS-Broker laeuft gerade und ueberschreibt den gemeinsamen\n"
+                      "Speicher im Sekundentakt - der Test wuerde seine echten Zaehler\n"
+                      "verfaelschen. Lumora beenden und erneut ausfuehren.\n");
+            return 2;
+        }
+        if (!shmOpen(g_fpsShm, "Local\\LumoraOSDFps")) {
+            writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", "netreset-Selbsttest: FEHLER\nFEHL gemeinsamer Speicher liess sich nicht anlegen\n");
+            return 1;
+        }
+        // Bewusst ueber 4 GB: der Zaehler steckt in ZWEI 32-bit-Woertern, ein
+        // vergessenes oberes Wort faellt unterhalb von 4 GB gar nicht auf.
+        const uint64_t IN1 = 5ull * 1024 * 1024 * 1024, OUT1 = 2ull * 1024 * 1024 * 1024;
+        auto roh = [&](uint64_t in, uint64_t out) {
+            shmPoke(g_fpsShm, 9, (uint32_t)(in & 0xFFFFFFFF)); shmPoke(g_fpsShm, 10, (uint32_t)(in >> 32));
+            shmPoke(g_fpsShm, 11, (uint32_t)(out & 0xFFFFFFFF)); shmPoke(g_fpsShm, 12, (uint32_t)(out >> 32));
+            shmPoke(g_fpsShm, 13, 4711);
+        };
+        auto jetzt = [&](const char* feld) { json s = netStatSnapshot(); return s.is_null() ? -1.0 : s.value(feld, -1.0); };
+        g_netGamePath = "C:\\Spiele\\probe.exe";
+        g_netNullIn = g_netNullOut = 0;
+        roh(IN1, OUT1);
+        pruef("Zaehler wird vor dem Loeschen voll angezeigt (auch ueber 4 GB)",
+              jetzt("inBytes") == (double)IN1 && jetzt("outBytes") == (double)OUT1);
+
+        json r1 = handleChannel("net-stat-reset", json::array({ json{{"gamePath", "C:\\Spiele\\anderes.exe"}} }));
+        pruef("fremdes Spiel laesst die laufende Zaehlung in Ruhe",
+              r1.value("laufendeZaehlungZurueckgesetzt", true) == false
+              && jetzt("inBytes") == (double)IN1);
+
+        json r2 = handleChannel("net-stat-reset", json::array({ json{{"gamePath", "C:\\Spiele\\probe.exe"}} }));
+        pruef("Loeschen des laufenden Spiels greift", r2.value("laufendeZaehlungZurueckgesetzt", false));
+        pruef("direkt danach steht der Zaehler auf 0", jetzt("inBytes") == 0.0 && jetzt("outBytes") == 0.0);
+
+        roh(IN1 + 300 * 1024 * 1024, OUT1 + 100 * 1024 * 1024);
+        pruef("weiter uebertragene Daten zaehlen ab dem Nullpunkt",
+              jetzt("inBytes") == (double)(300 * 1024 * 1024) && jetzt("outBytes") == (double)(100 * 1024 * 1024));
+
+        g_netNullIn = g_netNullOut = 0;
+        roh(IN1, OUT1);
+        json r3 = handleChannel("net-stat-reset", json::array({ json{{"alle", true}} }));
+        pruef("\"alle loeschen\" trifft die laufende Zaehlung immer",
+              r3.value("laufendeZaehlungZurueckgesetzt", false) && jetzt("inBytes") == 0.0);
+
+        // Neue Spielsitzung: der Broker faengt bei 0 an - bleibt der alte Nullpunkt
+        // stehen, zaehlte das naechste Spiel erst ab 5 GB. Genau das prueft dieser Fall.
+        g_netGamePath.clear();
+        roh(64 * 1024 * 1024, 8 * 1024 * 1024);
+        g_netNullIn = g_netNullOut = 0;   // wie netStatTick beim Spielwechsel
+        g_netGamePath = "C:\\Spiele\\naechstes.exe";
+        pruef("neues Spiel zaehlt wieder ab 0",
+              jetzt("inBytes") == (double)(64 * 1024 * 1024) && jetzt("outBytes") == (double)(8 * 1024 * 1024));
+
+        shmPoke(g_fpsShm, 13, 0);
+        res = "netreset-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
         writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
         return fehler ? 1 : 0;
     }

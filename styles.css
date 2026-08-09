@@ -1316,6 +1316,30 @@ body:not(.nav-mode) .game-item:hover .game-item-fav { opacity: 1; }
   color: #4ade80;
 }
 
+/* Wert plus zugehoerige Aktion (z. B. Netzwerk-Zaehler loeschen) in einer Zeile */
+.meta-value-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meta-action {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color .15s;
+}
+
+.meta-action:hover {
+  color: #e0e0e0;
+}
+
 /* Reichere Detailseite: Beschreibung + Tags */
 .detail-info {
   background: rgba(20,20,20,0.6);
