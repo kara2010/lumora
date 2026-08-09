@@ -515,6 +515,41 @@ static void inputBridgeOnRunning(const std::string& gamePath) {
 // Kein busInstalled()-Vorbehalt (der Modus braucht keinen Treiber) und kein
 // requireDevice (das Xbox-Pad IST die Quelle - fehlt es, bleibt der Poll folgenlos).
 static std::string g_kbAutoGame;
+// DirectInput-Gegenprobe fuer den Mitschnitt: liest die Tastatur ueber DIESELBE
+// Schnittstelle, die GTA2 benutzt, und meldet die gedrueckten Pfeiltasten als
+// DIK-Codes. HINTERGRUND + NICHT-EXKLUSIV, damit das Lesen dem Spiel nichts
+// wegnimmt und auch laeuft, waehrend das Spiel vorn ist.
+// Rueckgabe: "200,203" (oben+links), "" (nichts) oder "?" (Geraet nicht lesbar).
+static std::string kbDiSonde() {
+    static IDirectInput8W* di = nullptr;
+    static IDirectInputDevice8W* kb = nullptr;
+    static bool versucht = false;
+    if (!versucht) {
+        versucht = true;
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (SUCCEEDED(DirectInput8Create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION,
+                                         IID_IDirectInput8W, (void**)&di, nullptr)) && di) {
+            if (SUCCEEDED(di->CreateDevice(GUID_SysKeyboard, &kb, nullptr)) && kb) {
+                HWND h = CreateWindowExW(0, L"STATIC", L"lumora-di-sonde", 0, 0, 0, 1, 1,
+                                         HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+                if (FAILED(kb->SetDataFormat(&c_dfDIKeyboard)) ||
+                    FAILED(kb->SetCooperativeLevel(h, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE))) {
+                    kb->Release(); kb = nullptr;
+                }
+            }
+        }
+    }
+    if (!kb) return "?";
+    BYTE st[256];
+    kb->Acquire();   // nach Fokuswechseln geht das Geraet verloren - jedes Mal neu holen
+    if (FAILED(kb->GetDeviceState(sizeof(st), st))) return "?";
+    static const std::pair<int, const char*> PFEILE[] = {
+        { 200, "200" }, { 208, "208" }, { 203, "203" }, { 205, "205" }, { 29, "29" } };
+    std::string s;
+    for (auto& [code, name] : PFEILE)
+        if (st[code] & 0x80) { if (!s.empty()) s += ","; s += name; }
+    return s;
+}
 static json kbProfileForExe(const std::string& gamePath) {
     std::string base = gamePath;
     size_t sl = base.find_last_of("\\/");
@@ -5404,6 +5439,7 @@ static json handleChannel(const std::string& channel, const json& args) {
     }
     if (channel == "kb-bridge-trace") {
         bool an = args.size() >= 1 && args[0].is_boolean() && args[0].get<bool>();
+        if (an) lubridge::g_kbDiSonde = kbDiSonde;   // Gegenprobe am Spiel-Ende der Kette
         lubridge::kbSetTrace(an, dataDir() + L"\\kb-mitschnitt.txt");
         return json{ {"an", an}, {"pfad", narrow(dataDir() + L"\\kb-mitschnitt.txt")} };
     }
@@ -6375,6 +6411,38 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // ueber eine ECHTE TCP-Verbindung (Loopback) ~1 MB schicken und pruefen, dass die
     // Zaehlung fuer die eigene PID beides sieht (senden UND empfangen). Braucht
     // Adminrechte (System-Logger) - ohne wird das ehrlich gemeldet, nicht als Fehler.
+    // Belegt, dass die DirectInput-Gegenprobe des Mitschnitts wirklich sieht, was die
+    // Bruecke sendet. Ohne diesen Nachweis waere eine leere di[]-Spalte im Mitschnitt
+    // mehrdeutig: verliert das Spiel die Taste, oder misst die Sonde nur nicht?
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-disonde") == 0) {
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string res; int fehler = 0;
+        auto pruef = [&](const char* was, bool ok) {
+            res += std::string(ok ? "OK   " : "FEHL ") + was + "\n"; if (!ok) ++fehler;
+        };
+        if (!GetForegroundWindow()) {
+            writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt",
+                      "disonde-Selbsttest: NICHT MOEGLICH\nKein Vordergrundfenster - SendInput hat kein Ziel.\n");
+            return 2;
+        }
+        auto lies = [&]() { Sleep(60); return kbDiSonde(); };
+        res += "Ausgangslage: di[" + lies() + "]\n";
+        pruef("Sonde antwortet ueberhaupt", kbDiSonde() != "?");
+        lubridge::kbSendScancode(0x48, true, true);
+        std::string a = lies(); res += "nach Pfeil oben:        di[" + a + "]\n";
+        pruef("Sonde sieht Pfeil oben (200)", a.find("200") != std::string::npos);
+        lubridge::kbSendScancode(0x4B, true, true);
+        std::string b = lies(); res += "nach zusaetzlich links: di[" + b + "]\n";
+        pruef("Sonde sieht BEIDE gleichzeitig (200+203)",
+              b.find("200") != std::string::npos && b.find("203") != std::string::npos);
+        lubridge::kbSendScancode(0x4B, true, false);
+        lubridge::kbSendScancode(0x48, true, false);
+        std::string c = lies(); res += "nach Loslassen:         di[" + c + "]\n";
+        pruef("Sonde sieht nichts mehr", c.empty());
+        res = "disonde-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-netstat") == 0) {
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
         std::string res; int fehler = 0;
