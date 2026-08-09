@@ -15,6 +15,8 @@
 #include <hidpi.h>
 #pragma comment(lib, "hid.lib")
 #pragma comment(lib, "setupapi.lib")
+#include <Xinput.h>
+#pragma comment(lib, "xinput9_1_0.lib")   // Selbsttest liest das virtuelle Pad zurueck
 #include "ViGEm/Client.h"
 #include "json.hpp"
 #include <thread>

@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -58,6 +59,37 @@ struct CpuBucket {
     uint32_t topPid[8] = {}; uint32_t topUs[8] = {};
     uint32_t totalUs = 0;           // Summe aller Nicht-Idle-Laufzeit (alle Kerne)
     uint16_t coreBusyPct[64] = {};  // je Kern 0..100 (fuer Single-Core-Limit-Anzeige)
+};
+
+// ---- Session-Spuren (Datenmodell v2, ANALYSE-WERKBANK-PLAN.md) --------------------
+// Die Ringe oben halten ~10 s Historie - fuer die Werkbank-Timeline braucht es die
+// GANZE Session. Feste 250-ms-Buckets, Index k deckt [k*0.25, (k+1)*0.25) auf der
+// Session-Zeitbasis (Luecken werden als Leer-Buckets gefuellt -> Index IST das
+// Zeitraster, die UI braucht keine t-Spalte je Bucket).
+// Threading: jede Spur hat genau EINEN Schreiber (cpu/dpc/disk/proc: Kernel-ETW-
+// Consumer, gpu: Sensor-Thread, limits: Broker-Schleife); gelesen wird erst NACH
+// stop() im Report-Writer. Vektoren sind auf 4 h vorreserviert - ist die Kapazitaet
+// erreicht, ENDET die Spur (full) statt im Schreiber-Thread zu reallozieren. Der
+// CSwitch-Callback selbst bleibt unangetastet (Overhead-Garantie): die CPU-Spur
+// speist sich aus closeBucket, das ohnehin nur alle 50 ms laeuft.
+constexpr uint32_t TRACK_MAX = 57600;   // 4 h * 4 Buckets/s
+constexpr double   TRACK_DT  = 0.25;
+struct CpuTrackB  { uint32_t totalUs = 0; uint16_t maxCorePct = 0; uint8_t maxCore = 0; uint32_t topPid = 0, topUs = 0; };
+struct GpuTrackB  { int32_t clockMHz = -1; int16_t loadPct = -1; int32_t vramMB = -1; uint8_t throttle = 0; };
+struct DpcTrackB  { uint32_t maxUs = 0; int32_t maxDrv = -1; uint32_t count = 0; };
+struct DiskTrackB { uint32_t kb = 0; uint16_t maxLat10 = 0; };   // Latenz in 0,1-ms-Schritten
+struct ProcEvent  { double t; uint32_t pid; uint8_t start; };
+template <typename B>
+struct SessionTrack {
+    std::vector<B> v; B cur{}; double t0 = 0; bool full = false;
+    void reserve() { v.reserve(TRACK_MAX); }
+    // Buckets bis t schliessen; danach gehoert t in den (frischen) cur-Bucket.
+    void roll(double t) {
+        while (t >= t0 + TRACK_DT) {
+            if (v.size() < TRACK_MAX) v.push_back(cur); else full = true;
+            cur = B{}; t0 += TRACK_DT;
+        }
+    }
 };
 
 // Fester Ring: ein Schreiber, Index atomar, Leser kopiert rueckwaerts.
@@ -123,6 +155,12 @@ public:
     void start(const Config& cfg) {
         cfg_ = cfg;
         stop_ = false;
+        // v2-Spuren: Kapazitaet VOR dem ersten Event reservieren - die Schreiber-Threads
+        // (ETW/Sensor) duerfen nie eine Reallokation ausloesen (s. SessionTrack-Kommentar).
+        trkCpu_.reserve(); trkGpu_.reserve(); trkDpc_.reserve(); trkDisk_.reserve();
+        procEv_.reserve(4096); limitsSeries_.reserve(14400);
+        SYSTEM_INFO si{}; GetSystemInfo(&si);
+        nCores_ = si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1;
         worker_ = std::thread([this]() {
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
             workerLoop();
@@ -182,10 +220,32 @@ public:
             }
         }
     }
-    void pushDpcIsr(double t, double durUs, int driverIdx, bool isr) { dpcs_.push({ t, (float)durUs, driverIdx, (uint8_t)(isr ? 1 : 0) }); }
-    void pushDisk(double t, uint32_t bytes, double latMs) { disks_.push({ t, bytes, (float)latMs }); }
-    void pushProc(double t, uint32_t pid, bool start) { procs_.push({ t, pid, (uint8_t)(start ? 1 : 0) }); }
-    void pushSensor(const SensorSample& s) { sensors_.push(s); }
+    void pushDpcIsr(double t, double durUs, int driverIdx, bool isr) {
+        dpcs_.push({ t, (float)durUs, driverIdx, (uint8_t)(isr ? 1 : 0) });
+        trkDpc_.roll(t);
+        auto& c = trkDpc_.cur; ++c.count;
+        if ((uint32_t)durUs > c.maxUs) { c.maxUs = (uint32_t)durUs; c.maxDrv = driverIdx; }
+    }
+    void pushDisk(double t, uint32_t bytes, double latMs) {
+        disks_.push({ t, bytes, (float)latMs });
+        trkDisk_.roll(t);
+        auto& c = trkDisk_.cur; c.kb += bytes / 1024;
+        uint32_t l10 = (uint32_t)(latMs * 10); if (l10 > 65535) l10 = 65535;
+        if ((uint16_t)l10 > c.maxLat10) c.maxLat10 = (uint16_t)l10;
+    }
+    void pushProc(double t, uint32_t pid, bool start) {
+        procs_.push({ t, pid, (uint8_t)(start ? 1 : 0) });
+        if (procEv_.size() < procEv_.capacity()) procEv_.push_back({ t, pid, (uint8_t)(start ? 1 : 0) });
+    }
+    void pushSensor(const SensorSample& s) {
+        sensors_.push(s);
+        trkGpu_.roll(s.t);
+        auto& c = trkGpu_.cur;
+        if (s.gpuClockMHz > 0) c.clockMHz = s.gpuClockMHz;                     // letzter Wert
+        if (s.gpuLoadPct > c.loadPct) c.loadPct = (int16_t)s.gpuLoadPct;      // Maximum
+        if (s.vramMB > c.vramMB) c.vramMB = (int32_t)s.vramMB;
+        if (s.throttleKnown && (s.throttleMask & ~0x1ull)) c.throttle = 1;    // Bit 0x1 = GpuIdle
+    }
     // CSwitch-Aggregation (heissester Pfad! nur Integer, keine Allokation):
     void onCSwitch(double t, uint32_t cpu, uint32_t /*oldTid*/, uint32_t newTid, uint32_t newPid) {
         if (cpu >= 64) return;
@@ -296,6 +356,8 @@ public:
         Limit l = classifyLimit();
         lastLimit_ = l;
         limitCount_[(int)l]++; limitTotal_++;
+        // Session-Spur (v2): Sekundenserie der Klassifikation (Index = Sekunde).
+        if (limitsSeries_.size() < limitsSeries_.capacity()) limitsSeries_.push_back((uint8_t)l);
     }
     Limit lastLimit() const { return lastLimit_; }
     uint32_t limitCount(Limit l) const { return limitCount_[(int)l]; }
@@ -314,6 +376,98 @@ public:
         return cnt;
     }
     uint64_t frameCount() const { return frameCount_; }
+
+    // ---- Datenmodell v2: Emitter fuer den Report-Writer (NUR nach stop() rufen -
+    // liest die wachsenden Vektoren, die waehrend der Messung Schreiber-Threads
+    // gehoeren). Liefert die Felder ftFull/tracks/names OHNE fuehrendes Komma.
+    std::string v2Json() const {
+        std::string o; o.reserve(allFt_.size() * 5 + trkCpu_.v.size() * 40 + 4096);
+        char b[96];
+        // ftFull: Frametimes in 10-us-Einheiten; Zeitachse kumulativ rekonstruierbar
+        // (x[0]=t0, x[i]=x[i-1]+q[i]/100000). Quantisierungsdrift ziehen sync-Punkte
+        // [index, t] alle 512 Frames gerade.
+        o += "\"ftFull\":{\"t0\":";
+        sprintf_s(b, "%.4f", allFtT_.empty() ? 0.0 : allFtT_[0]); o += b;
+        o += ",\"q\":[";
+        for (size_t i = 0; i < allFt_.size(); ++i) {
+            uint32_t q = (uint32_t)(allFt_[i] * 100.0f + 0.5f);
+            sprintf_s(b, "%s%u", i ? "," : "", q); o += b;
+        }
+        o += "],\"sync\":[";
+        { bool first = true;
+          for (size_t i = 0; i < allFtT_.size(); i += 512) {
+              sprintf_s(b, "%s[%zu,%.4f]", first ? "" : ",", i, allFtT_[i]); o += b; first = false;
+          } }
+        o += "]},";
+        // tracks: feste 250-ms-Buckets, Index = Zeitraster ab Session-Beginn.
+        // Der letzte (angefangene) cur-Bucket wird mit emittiert; Spuren duerfen
+        // unterschiedlich lang sein (verschiedene letzte Ereignisse).
+        auto emitCpu = [&](const CpuTrackB& c, bool first) {
+            // totalPct normiert auf alle Kerne; topPct auf EINEN Kern (kann >100 sein
+            // = Prozess nutzt mehrere Kerne)
+            uint32_t totalPct = (uint32_t)(c.totalUs * 100.0 / (nCores_ * 250000.0) + 0.5);
+            if (totalPct > 100) totalPct = 100;
+            uint32_t topPct = c.topUs / 500;   // us in 50-ms-Fenster -> % eines Kerns
+            sprintf_s(b, "%s[%u,%u,%u,%u,%u]", first ? "" : ",", totalPct, c.maxCorePct, c.maxCore, c.topPid, topPct);
+            o += b;
+        };
+        o += "\"tracks\":{\"hz\":4,\"cpu\":[";
+        for (size_t i = 0; i < trkCpu_.v.size(); ++i) emitCpu(trkCpu_.v[i], i == 0);
+        emitCpu(trkCpu_.cur, trkCpu_.v.empty());
+        o += "],\"gpu\":[";
+        auto emitGpu = [&](const GpuTrackB& g, bool first) {
+            sprintf_s(b, "%s[%d,%d,%d,%u]", first ? "" : ",", g.clockMHz, (int)g.loadPct, g.vramMB, (unsigned)g.throttle); o += b;
+        };
+        for (size_t i = 0; i < trkGpu_.v.size(); ++i) emitGpu(trkGpu_.v[i], i == 0);
+        emitGpu(trkGpu_.cur, trkGpu_.v.empty());
+        o += "],\"dpc\":[";
+        auto emitDpc = [&](const DpcTrackB& d, bool first) {
+            sprintf_s(b, "%s[%u,%d,%u]", first ? "" : ",", d.maxUs, d.maxDrv, d.count); o += b;
+        };
+        for (size_t i = 0; i < trkDpc_.v.size(); ++i) emitDpc(trkDpc_.v[i], i == 0);
+        emitDpc(trkDpc_.cur, trkDpc_.v.empty());
+        o += "],\"disk\":[";
+        auto emitDisk = [&](const DiskTrackB& d, bool first) {
+            sprintf_s(b, "%s[%u,%u]", first ? "" : ",", d.kb, (unsigned)d.maxLat10); o += b;
+        };
+        for (size_t i = 0; i < trkDisk_.v.size(); ++i) emitDisk(trkDisk_.v[i], i == 0);
+        emitDisk(trkDisk_.cur, trkDisk_.v.empty());
+        o += "],\"procEvents\":[";
+        for (size_t i = 0; i < procEv_.size(); ++i) {
+            sprintf_s(b, "%s[%.3f,%u,%u]", i ? "," : "", procEv_[i].t, procEv_[i].pid, (unsigned)procEv_[i].start); o += b;
+        }
+        o += "],\"limits\":[";
+        for (size_t i = 0; i < limitsSeries_.size(); ++i) { sprintf_s(b, "%s%u", i ? "," : "", (unsigned)limitsSeries_[i]); o += b; }
+        o += "],\"truncated\":";
+        o += (trkCpu_.full || trkGpu_.full || trkDpc_.full || trkDisk_.full) ? "true" : "false";
+        o += "},";
+        // names: einmalige Aufloesung aller in den Spuren vorkommenden PIDs/Treiber
+        // (waehrend der Messung wird bewusst NIE aufgeloest - Overhead).
+        o += "\"names\":{\"procs\":{";
+        {   std::map<uint32_t, std::string> pn;
+            auto sammel = [&](uint32_t pid) {
+                if (pid && !pn.count(pid)) pn[pid] = cfg_.pidName ? cfg_.pidName(pid) : "";
+            };
+            for (const auto& c : trkCpu_.v) sammel(c.topPid);
+            sammel(trkCpu_.cur.topPid);
+            for (const auto& p : procEv_) sammel(p.pid);
+            bool first = true;
+            for (const auto& [pid, nm] : pn) {
+                sprintf_s(b, "%s\"%u\":\"", first ? "" : ",", pid); o += b; o += jsonEsc(nm) + "\""; first = false;
+            }
+        }
+        o += "},\"drivers\":{";
+        {   std::map<int32_t, std::string> dn;
+            for (const auto& d : trkDpc_.v) if (d.maxDrv >= 0 && !dn.count(d.maxDrv)) dn[d.maxDrv] = cfg_.driverName ? cfg_.driverName(d.maxDrv) : "";
+            if (trkDpc_.cur.maxDrv >= 0 && !dn.count(trkDpc_.cur.maxDrv)) dn[trkDpc_.cur.maxDrv] = cfg_.driverName ? cfg_.driverName(trkDpc_.cur.maxDrv) : "";
+            bool first = true;
+            for (const auto& [idx, nm] : dn) {
+                sprintf_s(b, "%s\"%d\":\"", first ? "" : ",", idx); o += b; o += jsonEsc(nm) + "\""; first = false;
+            }
+        }
+        o += "}}";
+        return o;
+    }
 
     // Selbstcheck mit synthetischen Daten (fuer --analyze-dump): Spike + Taeter muessen erkannt werden.
     static bool selfCheck(std::string& msg);
@@ -352,6 +506,13 @@ private:
             b.topPid[k] = hashPid_[bi]; b.topUs[k] = bu; hashUs_[bi] = 0;
         }
         cpu_.push(b);
+        // Session-Spur (v2): den geschlossenen 50-ms-Bucket in den laufenden
+        // 250-ms-Bucket falten. Laeuft im selben (ETW-)Thread wie der Rest von
+        // closeBucket - alle 50 ms, weit ausserhalb des heissen CSwitch-Pfads.
+        trkCpu_.roll(b.t);
+        auto& tc = trkCpu_.cur; tc.totalUs += b.totalUs;
+        for (int c = 0; c < 64; ++c) if (b.coreBusyPct[c] > tc.maxCorePct) { tc.maxCorePct = b.coreBusyPct[c]; tc.maxCore = (uint8_t)c; }
+        if (b.topUs[0] > tc.topUs) { tc.topUs = b.topUs[0]; tc.topPid = b.topPid[0]; }
         memset(hashPid_, 0, sizeof(hashPid_)); memset(hashUs_, 0, sizeof(hashUs_));
         memset(coreUs_, 0, sizeof(coreUs_)); busyUs_ = 0; bucketT0_ = t;
     }
@@ -387,6 +548,14 @@ private:
     Limit lastLimit_ = Limit::Unknown;
     uint32_t limitCount_[8] = {}, limitTotal_ = 0;   // Verteilung ueber die Session
     std::vector<double> allFtT_; std::vector<float> allFt_;   // Gesamtserie (Report)
+    // v2-Session-Spuren (je genau EIN Schreiber-Thread, Leser erst nach stop())
+    SessionTrack<CpuTrackB>  trkCpu_;    // ETW-Thread (via closeBucket)
+    SessionTrack<GpuTrackB>  trkGpu_;    // Sensor-Thread
+    SessionTrack<DpcTrackB>  trkDpc_;    // ETW-Thread
+    SessionTrack<DiskTrackB> trkDisk_;   // ETW-Thread
+    std::vector<ProcEvent>   procEv_;    // ETW-Thread
+    std::vector<uint8_t>     limitsSeries_;   // Broker-Schleife (sampleLimit)
+    uint32_t nCores_ = 1;
     // Spike-Uebergabe an den Worker
     std::atomic<uint32_t> pendingSpike_{ 0 };
     double pendingT_ = 0, pendingFt_ = 0, pendingMed_ = 0;
@@ -557,8 +726,30 @@ inline bool StutterAnalyzer::selfCheck(std::string& msg) {
     if (!called) { msg = "Selbstcheck: KEIN Befund ausgeloest"; return false; }
     bool proc = false, drv = false;
     for (auto& s : got.suspects) { if (s.kind == "process" && s.name == "stoerer.exe") proc = true; if (s.kind == "driver") drv = true; }
+    // v2-Emitter pruefen: (1) ftFull-Rekonstruktion x[i]=x[i-1]+q[i]/1e5 darf gegen die
+    // echten Zeitstempel nur um die Quantisierung (10 us/Frame, hier 180 Frames) driften,
+    // (2) die Spuren muessen den Stoerer (pid 200) und den 1,5-ms-DPC enthalten.
+    {
+        double drift = 0, x = a.allFtT_.empty() ? 0 : a.allFtT_[0];
+        for (size_t i = 1; i < a.allFt_.size(); ++i) {
+            uint32_t q = (uint32_t)(a.allFt_[i] * 100.0f + 0.5f);
+            x += q / 100000.0;
+            double d = x - a.allFtT_[i]; if (d < 0) d = -d; if (d > drift) drift = d;
+        }
+        if (drift > 0.002) { msg = "Selbstcheck: ftFull-Drift " + std::to_string(drift * 1000) + " ms > 2 ms"; return false; }
+        std::string v2 = a.v2Json();
+        bool hatStoerer = v2.find("\"200\":\"stoerer.exe\"") != std::string::npos;
+        bool hatDpc = v2.find("[1500,0,1]") != std::string::npos;   // maxUs=1500, drv=0, count=1
+        bool klammern = std::count(v2.begin(), v2.end(), '[') == std::count(v2.begin(), v2.end(), ']')
+                     && std::count(v2.begin(), v2.end(), '{') == std::count(v2.begin(), v2.end(), '}');
+        if (!hatStoerer || !hatDpc || !klammern) {
+            msg = std::string("Selbstcheck v2: ") + (hatStoerer ? "" : "[STOERER FEHLT in names] ")
+                + (hatDpc ? "" : "[DPC-BUCKET FEHLT] ") + (klammern ? "" : "[KLAMMERN UNBALANCIERT]");
+            return false;
+        }
+    }
     msg = "Selbstcheck: Befund ft=" + std::to_string((int)got.ftMs) + "ms, Verdaechtige=" + std::to_string(got.suspects.size())
-        + (proc ? " [Prozess ok]" : " [PROZESS FEHLT]") + (drv ? " [Treiber ok]" : " [TREIBER FEHLT]");
+        + (proc ? " [Prozess ok]" : " [PROZESS FEHLT]") + (drv ? " [Treiber ok]" : " [TREIBER FEHLT]") + " [v2 ok]";
     return proc && drv;
 }
 

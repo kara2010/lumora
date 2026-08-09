@@ -128,6 +128,45 @@ for (const design of DESIGNS) {
     }
   }
 }
+
+// --- Live-Edit-Leiste: baut sie auf, und zwar in der GESPEICHERTEN Reihenfolge ----
+// Eigener Abschnitt, weil renderEditbar frueher gar nicht ausgefuehrt wurde: sie
+// nutzt andere Funktionen (orderList, ebDndWire) als die Panel-Renderer, und ein
+// Fehler dort faellt beim reinen Panel-Test nicht auf.
+// Bewusst NICHT alle Werte aktiv (graph/total fehlen): nur so entstehen beide
+// Zustaende - feste Marke UND gestrichelte, ausgeblendete.
+const TEIL_FELDER = {
+  gpu: ['load', 'temp', 'power', 'clock', 'vram'],
+  cpu: ['temp', 'load', 'clock'],
+  fps: ['fps', 'frametime'],
+  net: ['rate'],
+};
+for (const reihenfolge of [['gpu','cpu','fps','net'], ['net','fps','cpu','gpu']]) {
+  try {
+    vm.runInContext(
+      'applyConfig(' + JSON.stringify({ theme: 'bar', fields: TEIL_FELDER, order: reihenfolge }) + ');'
+      + 'setEdit(true); renderEditbar(true);', ctx, { timeout: 10000 });
+    const leiste = ctx.document.getElementById('ebFields').innerHTML;
+    const folge = [...leiste.matchAll(/class="eb-frow" data-cat="(\w+)"/g)].map(m => m[1]);
+    const fehlt = [];
+    if (!/eb-griff/.test(leiste)) fehlt.push('Gruppen-Griff');
+    if (!/eb-chip[ "]/.test(leiste)) fehlt.push('aktive Marke');
+    if (!/eb-chip-aus/.test(leiste)) fehlt.push('ausgeblendete Marke');
+    if (!/eb-grp/.test(leiste)) fehlt.push('Gruppenname');
+    if (!leiste || leiste.length < 20) {
+      console.log('FEHL Editor-Leiste [' + reihenfolge.join(',') + ']: leer'); fehler++;
+    } else if (folge.join(',') !== reihenfolge.join(',')) {
+      console.log('FEHL Editor-Leiste: Reihenfolge ' + folge.join(',') + ' statt ' + reihenfolge.join(',')); fehler++;
+    } else if (fehlt.length) {
+      console.log('FEHL Editor-Leiste: es fehlt ' + fehlt.join(' + ')); fehler++;
+    } else {
+      console.log('OK   Editor-Leiste [' + reihenfolge.join(',') + ']  (' + leiste.length + ' Zeichen)');
+    }
+  } catch (e) {
+    console.log('FEHL Editor-Leiste [' + reihenfolge.join(',') + ']: ' + e.message); fehler++;
+  }
+}
+
 console.log('');
 if (fehler) { console.log('osd-Rauchtest: FEHLER (' + fehler + ')'); process.exit(1); }
-console.log('osd-Rauchtest: ok - alle Designs bauen ihr Panel auf, NET-Gruppe erscheint.');
+console.log('osd-Rauchtest: ok - Designs UND Live-Edit-Leiste bauen auf, Reihenfolge stimmt.');
