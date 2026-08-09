@@ -1222,6 +1222,22 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "der Messzeit": "of the measurement",
+  'FPS-Limit (VSync/Limiter)': 'FPS cap (VSync/limiter)', 'GPU drosselt': 'GPU throttling',
+  'Grafikspeicher voll': 'VRAM full', 'Nicht eindeutig': 'Inconclusive',
+  'Überwiegend': 'Mostly', 'der Messzeit': 'of the measured time',
+  'Kein klares Limit erkennbar.': 'No clear limit detected.',
+  'Ermittelt aus GPU-Auslastung, Kernlast und Frametime-Gleichmäßigkeit – eine Einschätzung, keine frame-genaue Messung.': 'Derived from GPU utilisation, per-core load and frame time consistency – an assessment, not a frame-exact measurement.',
+  'Sauberer Lauf – keine Ruckler über der Schwelle. 👍': 'Clean run – no stutters above the threshold. 👍',
+  'Hauptverdächtiger: der Treiber ': 'Main suspect: the driver ',
+  'Hauptverdächtiger: das Programm ': 'Main suspect: the program ',
+  ' – auffällig bei ': ' – conspicuous in ',
+  'Hauptursache: die Grafikkarte drosselt': 'Main cause: the GPU is throttling',
+  'Hauptverdacht: Grafikspeicher lief voll – bei ': 'Main suspicion: VRAM filled up – in ',
+  'Hauptverdacht: Datenträger-Last – bei ': 'Main suspicion: disk load – in ',
+  'Hauptverdacht: Programmstarts im Hintergrund': 'Main suspicion: programs starting in the background',
+  'Kein Systemstörer gefunden – die Ruckler kommen vermutlich aus dem Spiel selbst (z. B. Shader/Nachladen).':
+    'No system-level offender found – the stutters likely come from the game itself (e.g. shaders/streaming).',
   "Werte & Reihenfolge": "Values & order",
   "Der Bericht wird auf lumora-streaming.de abgelegt und ist über einen kurzen Link abrufbar. Du kannst ihn jederzeit wieder zurückziehen. Es wird kein Konto angelegt.": "The report is stored on lumora-streaming.de and reachable via a short link. You can withdraw it at any time. No account is created.",
   "Das Profil gilt für das gewählte Gerät („Alle Geräte\" = jede Quelle wird gemappt, z. B. Lenkrad + separate Pedale).": "The profile applies to the selected device (\"All devices\" = every source is mapped, e.g. wheel + separate pedals).",
@@ -1235,6 +1251,7 @@ const I18N_EN = {
   'Gruppe beitreten & mitstreamen': 'Join the group & stream along',
   'Beitreten & mitstreamen': 'Join & stream along',
   'Jeder Lauf wird gespeichert. Hake zwei Läufe an, um sie zu vergleichen (z. B. vor/nach dem Abschalten eines verdächtigen Programms) – eine Notiz hilft, den Überblick zu behalten.':
+      'Every run is saved. Tick two runs to compare them (e.g. before/after disabling a suspicious program) – a note helps you keep track.',
   'Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28 ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45 ms).': 'When does a frame count as a stutter? "Normal" only reports noticeable hitches (from ~28 ms), "Sensitive" also small bumps, "Hard stutters only" only clear freezes (from ~45 ms).',
   "Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam, Microsoft oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.": "Lumora is an unofficial tool and is not affiliated with Valve/Steam, Microsoft or the respective game publishers. Game covers, logos and brand names are the property of their respective owners. Cover images are downloaded from Steam or the Microsoft Store solely to identify installed games and are stored locally.",
   "— WebRTC-Stack (WHEP) im eigenen Medien-Relay · Paul-Louis Ageneau · MPL 2.0 ·": "— WebRTC stack (WHEP) in our own media relay · Paul-Louis Ageneau · MPL 2.0 ·",
@@ -1634,10 +1651,8 @@ const I18N_EN = {
   // --- Ruckler-Analyse (Analyse-Reiter + Analyse-OSD-Berichte) -----------------
   'Analyse': 'Analysis',
   'Ruckler-Analyse': 'Stutter analysis',
-    'Finds out why your game stutters: during a measurement, Lumora watches frametimes, background programs, driver latencies and your GPU – and names the likely culprits for every stutter. Measuring costs practically no performance and only runs while you start it.',
   'Tipp: Messung im Spiel per Hotkey starten, ein paar Minuten spielen (gern bis Ruckler auftreten), dann per Hotkey beenden – der Bericht erscheint hier.':
     'Tip: start the measurement in-game via hotkey, play a few minutes (ideally until stutters occur), then stop via hotkey – the report appears here.',
-    'Every run is saved. Tick two runs to compare them (e.g. before/after disabling a suspicious program) – a note helps you keep track.',
   '▶ Messung starten': '▶ Start measurement',
   '⏹ Messung beenden': '⏹ Stop measurement',
   '🛠 Analyse einmalig einrichten': '🛠 Set up analysis (one time)',
@@ -1666,7 +1681,6 @@ const I18N_EN = {
   'Verlauf': 'History',
   'Noch keine Messungen.': 'No measurements yet.',
   'Rucklern': 'stutters',
-    'No system-level offender found – the stutters likely come from the game itself (e.g. shaders/streaming).',
   'Treiber': 'Driver', 'Programm': 'Program', 'GPU-Drosselung': 'GPU throttling', 'Grafikspeicher': 'VRAM',
   'Datenträger': 'Disk', 'Programmstart': 'Program start', 'Spielintern': 'Game-internal',
   'Dauer': 'Duration', 'Ø FPS': 'Avg FPS', '1%-Low': '1% low', 'Median ': 'median ',
@@ -6341,10 +6355,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       // 3) Navigation nur im Vordergrund und nicht, während die Kombi aktiv ist
       //    (damit der Toggle-Moment nicht zusätzlich navigiert).
       if (comboDown || !document.hasFocus()) return
-      // Tastatur-Modus aktiv? Dann gehoert das Pad dem Spiel, nicht Lumoras Menue.
-      // Sonst navigiert derselbe Stick, der gerade Pfeiltasten senden soll, nebenbei
-      // durch die Oberflaeche - man kann die Bruecke dann gar nicht beobachten.
-      if (kbAktiv) return
 
       // dn() blendet die Hotkey-Knöpfe hier aus – ihre Einzelaktion hat 2c) schon
       // beim Loslassen erledigt, gpTap/gpEdge halten deren Flanke sauber auf „aus".

@@ -126,6 +126,15 @@ if ($LASTEXITCODE -ne 0) { throw "Uebersetzungs-Check (Werkbank) fehlgeschlagen 
 & $node "$root\_testlab\osd-smoke.js"
 if ($LASTEXITCODE -ne 0) { throw "OSD-Rauchtest fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
 
+# 0c) Statische Abnahme der Oberflaechen-Dateien: Syntax JEDES Skriptblocks, Waisen
+# in der Uebersetzungstabelle, unbekannte Kennungen/Handler. Grund: ein einziger
+# Syntaxfehler beendet den kompletten Skriptblock - und weil dessen LETZTE Zeile den
+# Boot-Schirm ausblendet, haengt Lumora danach fuer immer bei "Wird geladen...".
+# Genau so passiert, als beim Ausbau der Tastatur-Bruecke ein zweizeiliger
+# Uebersetzungseintrag nur zur Haelfte entfernt wurde.
+& $node "$root\_testlab\ui-check.js"
+if ($LASTEXITCODE -ne 0) { throw "ui-Pruefung fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
+
 # 1) Shell frisch bauen (cmake PC-unabhaengig suchen: VS2022 BuildTools ODER VS2026 Community -
 # die Entwicklungs-PCs haben unterschiedliche Toolchains; build\ ist jeweils lokal konfiguriert)
 $cmake = @(
