@@ -854,6 +854,13 @@ inline json g_kbMonData = json::object();
 // AENDERUNGEN (Kanten), sonst waere die Datei in Sekunden unlesbar gross.
 inline std::atomic<bool> g_kbTrace{ false };
 inline std::wstring g_kbTracePath;
+// GEGENPROBE AM ANDEREN ENDE: was wir senden, ist die eine Haelfte - entscheidend
+// ist, was bei DirectInput ankommt, denn GENAU DA liest GTA2 (gta2.exe importiert
+// DirectInputCreate und keine der Win32-Tasten-APIs). Diese Sonde wird von main.cpp
+// gesetzt (dort liegt dinput.h) und liefert die gerade gedrueckten DIK-Codes der
+// Pfeiltasten. Steht im Mitschnitt beides nebeneinander, ist die Frage "verliert
+// jemand die zweite Taste?" ohne Raten zu beantworten.
+inline std::function<std::string()> g_kbDiSonde;
 inline void kbTraceZeile(const std::string& s) {
     if (g_kbTracePath.empty()) return;
     FILE* f = nullptr; _wfopen_s(&f, g_kbTracePath.c_str(), L"a");
@@ -930,8 +937,13 @@ inline void kbThreadProc() {
                 for (size_t i = 0; i < g_kbEngine.prof.maps.size(); ++i)
                     if (g_kbEngine.down[i]) { if (!q.empty()) q += "+"; q += g_kbEngine.prof.maps[i].quelle; }
                 for (auto& [k, n] : g_kbEngine.held) if (n > 0) { if (!t.empty()) t += "+"; char b[8]; sprintf_s(b, "%u", k & 0xFF); t += b; }
+                // Gegenprobe: was sieht DirectInput JETZT? Bewusst Teil des Vergleichs-
+                // schluessels - so wird auch eine Zeile geschrieben, wenn WIR die Taste
+                // weiter halten, DirectInput sie aber verloren hat. Genau dieser Fall
+                // waere die Erklaerung fuer "vorwaerts geht, lenken dabei nicht".
+                std::string di = g_kbDiSonde ? g_kbDiSonde() : std::string("-");
                 std::string zustand = (pad ? "pad " : "KEIN-PAD ") + std::string(erlaubt ? "fokus-ok " : "fokus-blockiert ")
-                                    + "q[" + q + "] t[" + t + "]";
+                                    + "q[" + q + "] t[" + t + "] di[" + di + "]";
                 if (zustand != letzterZustand) {
                     letzterZustand = zustand;
                     char b[192];
@@ -1029,7 +1041,9 @@ inline void kbSetTrace(bool on, const std::wstring& pfad) {
         g_kbTracePath = pfad;
         DeleteFileW(pfad.c_str());                     // frisch beginnen
         kbTraceZeile("# Lumora Tastatur-Bruecke - Mitschnitt");
-        kbTraceZeile("# Spalten: Zeit  Stick-X  Stick-Y  RT  Pad/Fokus  q[erkannte Quellen]  t[gedrueckte Scancodes]");
+        kbTraceZeile("# Spalten: Zeit  Stick-X  Stick-Y  RT  Pad/Fokus  q[erkannte Quellen]  t[gedrueckte Scancodes]  di[was DirectInput sieht]");
+        kbTraceZeile("# di = DIK-Codes der Pfeiltasten, wie das Spiel sie liest: 200=oben 208=unten 203=links 205=rechts.");
+        kbTraceZeile("# Steht in t[] eine Taste, in di[] aber nicht, geht sie zwischen uns und dem Spiel verloren.");
         kbTraceZeile("# Aufgezeichnet wird NUR bei Aenderungen.");
     }
     g_kbTrace = on;
