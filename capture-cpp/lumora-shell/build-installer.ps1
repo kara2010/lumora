@@ -7,19 +7,25 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path.TrimEnd('\')
 $shell = "$root\capture-cpp\lumora-shell"
 $stage = "$shell\stage"
-# ACHTUNG 3.2.6 wurde ZURUECKGEZOGEN (2026-08-08): das OSD war damit kaputt. Feed,
-# Website und GitHub-Release stehen wieder auf 3.2.5; der 3.2.6-Code bleibt hier im
-# Repo, ist aber NICHT veroeffentlicht. Vor einer erneuten Veroeffentlichung muss der
-# OSD-Fehler gefunden und behoben sein - dann mit NEUER Nummer (3.2.7) ausliefern:
-# wer 3.2.6 schon gezogen hatte, bekaeme eine gleich hohe Nummer nie als Update
-# angeboten (der Updater vergleicht nur die Versionsnummer, s. RELEASE.md 12).
-$version = "3.2.5"   # 3.2.5: A-Taste startete keine Spiele mehr, wenn sie in einem Gamepad-Hotkey
+# 3.2.6 wurde am 2026-08-08 ZURUECKGEZOGEN (OSD blieb leer). Ursache gefunden und
+# behoben: beim Renderer-Umbau war netSeg() verschwunden, jeder Renderer rief sie
+# weiter auf, das OSD-Skript brach schon beim Laden ab. Dagegen steht jetzt der
+# osd-Rauchtest als Bau-Sperre (Schritt 0b). Die Nummer 3.2.6 bleibt verbrannt -
+# wer sie gezogen hatte, bekaeme dieselbe Nummer nie erneut als Update angeboten
+# (der Updater vergleicht nur die Versionsnummer, s. RELEASE.md 12).
+$version = "3.2.7"   # 3.2.7: Analyse-Werkbank - Messlaeufe als zoombare Zeitleiste mit
+                     #        synchronisierten Spuren, Beweis-Panel je Ruckler, Lauf-Browser und
+                     #        Vergleich zweier Laeufe als Overlay. Netzwerk-Statistik pro Spiel
+                     #        (zuschaltbar) inkl. NET-Gruppe im OSD und jederzeit loeschbaren
+                     #        Zaehlern. OSD-Werte per Drag & Drop sortierbar, Werte-Board in den
+                     #        Einstellungen und im Live-Editor neu gestaltet. Hauptfenster wird
+                     #        maximiert nicht mehr von der Taskleiste abgeschnitten, Bibliothek
+                     #        und Einstellungen scrollen wieder bis zum Ende. Enthaelt alles aus
+                     #        der zurueckgezogenen 3.2.6 plus deren OSD-Korrektur.
+$prev_3_2_5 = ""  # 3.2.5: A-Taste startete keine Spiele mehr, wenn sie in einem Gamepad-Hotkey
                      #        steckte (galt auch fuer B/X/Y/Start); Installer raeumt eine tote
                      #        Electron-Verknuepfung auf, die die Taskleisten-Identitaet ueberlagerte;
                      #        robusteres Laden von Bibliothek/Einstellungen beim Start.
-# 3.2.6 (zurueckgezogen): Taskleisten-/Scroll-Fix, Netzwerk-Statistik pro Spiel inkl.
-#        NET-Gruppe im OSD, OSD-Werte per Drag & Drop sortierbar. Verdacht fuer den
-#        OSD-Ausfall: die Umbauten in osd.html (netSeg/orderList) - noch nicht belegt.
 $prev_3_1_1 = ""  # 3.1.1: OSD-Vorschau in den Einstellungen wirkt jetzt wirklich - sie lief bis
                      #        zur letzten Zeile und wurde dort verworfen (osdEnsureVisible pruefte
                      #        nur osdEnabled, nicht die Vorschau) - und greift jetzt bei JEDER

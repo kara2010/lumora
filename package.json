@@ -1,9 +1,9 @@
-{
+﻿{
   "name": "lumora",
-  "version": "3.2.5",
+  "version": "3.2.7",
   "license": "AGPL-3.0-only",
   "author": "Karsten Radermacher",
-  "description": "Lumora – Game Launcher mit automatischem HDR",
+  "description": "Lumora â€“ Game Launcher mit automatischem HDR",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
