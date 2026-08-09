@@ -195,22 +195,43 @@
   .eb-corner:hover { border-color: rgba(79,142,247,.7); color: #fff; background: rgba(79,142,247,.14); }
   .eb-corner.on { border-color: #4f8ef7; color: #fff; background: rgba(79,142,247,.32);
     box-shadow: 0 0 8px rgba(79,142,247,.45), inset 0 0 4px rgba(79,142,247,.35); }
-  /* Wert-Chips: Pillen mit Akzent-Glow im aktiven Zustand */
-  .eb-fields { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
-  .eb-frow { display: flex; align-items: center; gap: 6px; }
-  /* Gruppen in den OSD-Farben (GPU gruen, CPU orange, FPS weiss) mit Farbpunkt - stellt die
-     visuelle Verbindung zum Panel her */
-  .eb-grp { min-width: 40px; font-size: 10px; font-weight: 700; letter-spacing: .12em; display: flex; align-items: center; gap: 5px; }
+  /* Werte-Zeilen: dieselbe Formensprache wie das Board in den Einstellungen
+     (Farbpunkt je Gruppe, feste Marke = im Overlay, gestrichelt = ausgeblendet,
+     sichtbare Griffe), aber auf EINE Zeile je Gruppe verdichtet - ueber dem Spiel
+     ist Hoehe knapp. Gezogen wird genauso: Marken innerhalb ihrer Zeile, ganze
+     Gruppen am Griff links. */
+  .eb-fields { display: flex; flex-direction: column; gap: 5px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+  .eb-frow { display: flex; align-items: center; gap: 7px; padding: 3px 5px; border-radius: 8px;
+    border-left: 2px solid var(--gc, #666);
+    transition: background .12s ease, opacity .12s ease, box-shadow .12s ease; }
+  .eb-frow:hover { background: rgba(255,255,255,.03); }
+  .eb-griff { cursor: grab; color: #626b7d; font-size: 12px; line-height: 1; letter-spacing: -2px;
+    user-select: none; padding: 2px 1px; border-radius: 4px; transition: color .12s, background .12s; }
+  .eb-griff:hover { color: #dfe4ee; background: rgba(255,255,255,.07); }
+  .eb-griff:active { cursor: grabbing; }
+  .eb-grp { min-width: 46px; font-size: 10px; font-weight: 700; letter-spacing: .12em;
+    display: flex; align-items: center; gap: 5px; color: var(--gc, #e8eaf2); }
   .eb-grp::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px currentColor; }
-  .eb-frow:nth-child(1) .eb-grp { color: var(--nv); }
-  .eb-frow:nth-child(2) .eb-grp { color: var(--amd); }
-  .eb-frow:nth-child(3) .eb-grp { color: #e8eaf2; }
-  .eb-chip { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); color: #a8aebe;
-    border-radius: 999px; padding: 3px 11px; font-size: 11px; cursor: pointer;
-    transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
-  .eb-chip:hover { border-color: rgba(79,142,247,.7); color: #eef1f8; background: rgba(79,142,247,.10); }
-  .eb-chip.on { background: linear-gradient(180deg, rgba(95,155,249,.42), rgba(63,126,232,.26)); border-color: #4f8ef7; color: #fff;
-    box-shadow: 0 0 8px rgba(79,142,247,.4), inset 0 1px 0 rgba(255,255,255,.18); }
+  .eb-toks { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
+  /* Aktive Marke: gefuellt, mit Griffpunkten - zieh-bar und als "wird gezeigt" lesbar */
+  .eb-chip { display: inline-flex; align-items: center; gap: 5px;
+    background: linear-gradient(180deg, rgba(95,155,249,.42), rgba(63,126,232,.26));
+    border: 1px solid #4f8ef7; color: #fff; border-radius: 8px; padding: 3px 9px 3px 6px;
+    font-size: 11px; cursor: grab; white-space: nowrap;
+    box-shadow: 0 0 8px rgba(79,142,247,.4), inset 0 1px 0 rgba(255,255,255,.18);
+    transition: background .15s, border-color .15s, color .15s, box-shadow .15s, opacity .12s; }
+  .eb-chip:active { cursor: grabbing; }
+  .eb-chip .pkt { color: rgba(255,255,255,.55); font-size: 11px; letter-spacing: -2px; line-height: 1; }
+  .eb-chip:hover .pkt { color: #fff; }
+  /* Ausgeblendete Marke: gestrichelt, ein Klick holt sie zurueck */
+  .eb-chip-aus { display: inline-flex; align-items: center; gap: 4px;
+    background: transparent; border: 1px dashed rgba(255,255,255,.20); color: #8f97a8;
+    border-radius: 8px; padding: 3px 9px; font-size: 11px; cursor: pointer; white-space: nowrap;
+    transition: background .15s, border-color .15s, color .15s; }
+  .eb-chip-aus:hover { border-color: rgba(79,142,247,.75); border-style: solid; color: #eef1f8; background: rgba(79,142,247,.10); }
+  .eb-leer { font-size: 10.5px; color: #6f7688; font-style: italic; }
+  .eb-zieht { opacity: .4; border-style: dashed !important; }
+  .eb-frow.eb-zieht { background: rgba(79,142,247,.06); box-shadow: 0 0 0 1px #4f8ef7 inset; opacity: .6; }
   .eb-hint { color: #6f7688; font-size: 11px; text-align: center; padding-top: 2px; }
   .eb-hint b { color: #9aa2b5; font-weight: 600; }
   /* Fertig: Akzent-Verlauf mit sanftem Lift */
@@ -268,6 +289,11 @@
     fps: [['fps','FPS'],['frametime','ms'],['graph','Graph']],
     net: [['rate','Rate'],['total','Summe']],
   };
+  // Gruppenfarben identisch zum Board in den Einstellungen - dieselbe Zuordnung,
+  // egal wo man konfiguriert. Frueher haingen die Farben an der ZEILENPOSITION
+  // (:nth-child), womit die Netzwerk-Gruppe gar keine bekam und jede Umsortierung
+  // die Farben mitwanderte.
+  const EB_FARBE = { gpu: '#74e857', cpu: '#ff8a1e', fps: '#4bd6ff', net: '#c79bff' };
   let data = { gpu: null, cpu: null, fps: null, frametime: null, api: null, net: null };
 
   const panel = document.getElementById('panel');
@@ -597,10 +623,86 @@
     const ebc = document.getElementById('ebCorners');
     ebc.classList.toggle('horiz', horiz);
     ebc.innerHTML = posSet.map(([c, sym, ti]) => `<button class="eb-corner${c === curActive ? ' on' : ''}" data-corner="${c}" title="${ti}">${sym}</button>`).join('');
-    document.getElementById('ebFields').innerHTML = Object.keys(EB_FLD).map(cat =>
-      `<div class="eb-frow"><span class="eb-grp">${cat.toUpperCase()}</span>` +
-      EB_FLD[cat].map(([f, lbl]) => `<button class="eb-chip${(cfg.fields[cat] || []).includes(f) ? ' on' : ''}" data-cat="${cat}" data-f="${f}">${lbl}</button>`).join('') +
-      `</div>`).join('');
+    // Reihenfolge wie im Panel (orderList) - vorher stand hier stur die
+    // Definitionsfolge, der Editor zeigte also eine ANDERE Reihenfolge als das OSD.
+    const box = document.getElementById('ebFields');
+    box.innerHTML = orderList().filter(cat => EB_FLD[cat]).map(cat => {
+      const defs = EB_FLD[cat];
+      const lblOf = f => { const d = defs.find(x => x[0] === f); return d ? d[1] : f; };
+      const an = (cfg.fields[cat] || []).filter(f => defs.some(d => d[0] === f));
+      const aus = defs.map(d => d[0]).filter(f => !an.includes(f));
+      const farbe = EB_FARBE[cat] || '#e8eaf2';
+      return `<div class="eb-frow" data-cat="${cat}" style="--gc:${farbe}">`
+        + `<span class="eb-griff" draggable="true" title="Ganze Gruppe verschieben">⠿</span>`
+        + `<span class="eb-grp">${cat.toUpperCase()}</span>`
+        + `<span class="eb-toks" data-cat="${cat}">`
+        + (an.length
+            ? an.map(f => `<button class="eb-chip" draggable="true" data-cat="${cat}" data-f="${f}" title="Ziehen zum Verschieben, Klick blendet aus">`
+                + `<span class="pkt">⠿</span>${lblOf(f)}</button>`).join('')
+            : `<span class="eb-leer">nichts im Overlay</span>`)
+        + aus.map(f => `<button class="eb-chip-aus" data-cat="${cat}" data-f="${f}" title="Ins Overlay aufnehmen">+ ${lblOf(f)}</button>`).join('')
+        + `</span></div>`;
+    }).join('');
+    ebDndWire(box);
+  }
+  // --- Ziehen im Live-Editor: gleiche Regeln wie im Einstellungs-Board ----------
+  // Marken innerhalb ihrer Zeile, ganze Zeilen am Griff. Beim dragover ordnet die
+  // Leiste LIVE um; erst das Loslassen schickt den neuen Stand an die Shell.
+  let ebDrag = null;
+  function ebDndWire(box) {
+    box.querySelectorAll('.eb-chip').forEach(el => {
+      el.addEventListener('dragstart', e => {
+        ebDrag = { el, art: 'tok' }; e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => el.classList.add('eb-zieht'), 0);
+      });
+      el.addEventListener('dragend', () => ebDropFertig());
+    });
+    box.querySelectorAll('.eb-griff').forEach(griff => {
+      const row = griff.closest('.eb-frow');
+      griff.addEventListener('dragstart', e => {
+        ebDrag = { el: row, art: 'grp' }; e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setDragImage(row, 20, 12);
+        setTimeout(() => row.classList.add('eb-zieht'), 0);
+      });
+      griff.addEventListener('dragend', () => ebDropFertig());
+    });
+    box.addEventListener('dragover', e => {
+      if (!ebDrag) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      if (ebDrag.art === 'tok') {
+        const zone = e.target.closest('.eb-toks');
+        if (!zone || zone.dataset.cat !== ebDrag.el.dataset.cat) return;   // nur die eigene Gruppe
+        const ueber = e.target.closest('.eb-chip');
+        if (!ueber || ueber === ebDrag.el) return;
+        const r = ueber.getBoundingClientRect();
+        zone.insertBefore(ebDrag.el, e.clientX > r.left + r.width / 2 ? ueber.nextSibling : ueber);
+      } else {
+        const ueber = e.target.closest('.eb-frow');
+        if (!ueber || ueber === ebDrag.el) return;
+        const r = ueber.getBoundingClientRect();
+        ebDrag.el.parentNode.insertBefore(ebDrag.el, e.clientY > r.top + r.height / 2 ? ueber.nextSibling : ueber);
+      }
+    });
+    box.addEventListener('drop', e => e.preventDefault());
+  }
+  function ebDropFertig() {
+    if (!ebDrag) return;
+    ebDrag.el.classList.remove('eb-zieht');
+    const box = document.getElementById('ebFields');
+    if (ebDrag.art === 'grp') {
+      const ord = [...box.querySelectorAll('.eb-frow')].map(r => r.dataset.cat);
+      cfg.order = ord;
+      if (ipcRenderer) ipcRenderer.invoke('osd-edit-order', ord);
+    } else {
+      const nf = Object.assign({}, cfg.fields);
+      for (const zone of box.querySelectorAll('.eb-toks')) {
+        const cat = zone.dataset.cat;
+        nf[cat] = [...zone.querySelectorAll('.eb-chip')].map(x => x.dataset.f);
+      }
+      cfg.fields = nf;
+      if (ipcRenderer) ipcRenderer.invoke('osd-edit-fields', nf);
+    }
+    ebDrag = null;
   }
   function ebStepTheme(dir) {
     const i = EB_THEMES.findIndex(t => t[0] === cfg.theme);
@@ -615,13 +717,17 @@
     if (ipcRenderer) ipcRenderer.invoke('osd-edit-opacity', v);
   });
   document.getElementById('ebFields').addEventListener('click', (e) => {
-    const chip = e.target.closest('.eb-chip'); if (!chip) return;
+    const chip = e.target.closest('.eb-chip, .eb-chip-aus'); if (!chip) return;
     const cat = chip.dataset.cat, f = chip.dataset.f;
     const arr = (cfg.fields[cat] || []).slice();
     const idx = arr.indexOf(f);
     if (idx >= 0) arr.splice(idx, 1);
-    else { arr.push(f); const ord = EB_FLD[cat].map(d => d[0]); arr.sort((a, b) => ord.indexOf(a) - ord.indexOf(b)); }
+    else arr.push(f);   // ans ENDE - frueher wurde hier auf die Definitionsreihenfolge
+                        // zurueckgeworfen, was jede selbst gesetzte Anordnung zerstoerte,
+                        // sobald man im Editor einen Wert an- oder abschaltete.
     const nf = Object.assign({}, cfg.fields, { [cat]: arr });
+    cfg.fields = nf;
+    renderEditbar(false);   // Marke wandert sofort zwischen "im Overlay" und "ausgeblendet"
     if (ipcRenderer) ipcRenderer.invoke('osd-edit-fields', nf);
   });
   document.getElementById('ebCorners').addEventListener('click', (e) => {

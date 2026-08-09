@@ -5305,6 +5305,9 @@ static json handleChannel(const std::string& channel, const json& args) {
         }
         else if (channel == "osd-edit-theme" && args[0].is_string()) s["osdTheme"] = args[0];
         else if (channel == "osd-edit-fields") s["osdFields"] = args[0];
+        // Gruppen-Reihenfolge auch aus dem Live-Editor: bisher liess sie sich nur in
+        // den Einstellungen aendern, der Editor zeigte sogar stets die Standardfolge.
+        else if (channel == "osd-edit-order" && args[0].is_array()) s["osdOrder"] = args[0];
         writeFile(settingsPath(), s.dump(2));
         applyOsdConfig();
         return true;
