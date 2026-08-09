@@ -845,25 +845,6 @@
                ineinander verschachtelt. -->
           <div class="form-group">
             <label>Eingabe-Brücke</label>
-            <p class="settings-hint">Lumora übersetzt Eingaben in beide Richtungen – je nachdem, was dein Spiel versteht. Beide Modi sind unabhängig voneinander und können auch gleichzeitig laufen.</p>
-            <!-- minmax(0,1fr): eine nackte 1fr-Spalte hat min-width:auto und waechst auf
-                 min-content - der laengste unumbrechbare Text machte den ganzen Reiter
-                 breiter als das Fenster und schob die Reiterleiste seitlich weg
-                 ("Bibliothek" war angeschnitten). Gleiche Falle wie in der Werkbank. -->
-            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin:10px 0 4px">
-              <div style="padding:10px 12px;border:1px solid var(--border);border-radius:10px">
-                <div style="font-weight:600;margin-bottom:4px">① Gerät → Xbox-Gamepad</div>
-                <div class="settings-hint" style="margin:0">Für neue Spiele, die nur Gamepads kennen. Dein Lenkrad, Joystick oder Flightstick erscheint als Xbox-Controller.</div>
-              </div>
-              <div style="padding:10px 12px;border:1px solid var(--border);border-radius:10px">
-                <div style="font-weight:600;margin-bottom:4px">② Gamepad → Tastatur</div>
-                <div class="settings-hint" style="margin:0">Für alte Spiele, die noch keine Gamepads kannten. Dein Controller drückt die Tasten (GTA2, alte Shooter, Emulatoren).</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-group" style="border-top:2px solid var(--border);padding-top:18px;margin-top:8px">
-            <label style="font-size:15px">① Gerät → Xbox-Gamepad</label>
             <p class="settings-hint">Verwandelt jedes Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z.&nbsp;B. Knopf = Vollgas) und umgekehrt.</p>
             <p class="settings-hint">⚠ Spiele sehen dann zwei Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.</p>
             <div class="setting-toggle-row">
@@ -955,132 +936,6 @@
               <button class="btn-browse" onclick="ibLinkGame()">Verknüpfen</button>
             </div>
             <div id="ibLinkList" style="margin-top:8px"></div>
-          </div>
-
-          <!-- ===== Modus ②: Gamepad -> Tastatur ===================================
-               Steht bewusst KOMPLETT nach Modus ①: eigene Profile (kb-profiles.json),
-               eigene Schalter, kein Treiber, kein Quellgeraet. Beides ineinander zu
-               schachteln war der Fehler des ersten Wurfs. -->
-          <div class="form-group" style="border-top:2px solid var(--border);padding-top:18px;margin-top:24px">
-            <label style="font-size:15px">② Gamepad → Tastatur</label>
-            <p class="settings-hint">Für Klassiker, die noch gar keine Gamepads kannten (GTA2, alte Shooter, Emulator-Frontends). Lumora drückt für dich die Tasten. Kein Treiber nötig – nur ein Xbox-Controller und ein Profil.</p>
-            <p class="settings-hint">Tasten werden nur gesendet, solange das Spiel im Vordergrund ist – nie in andere Fenster.</p>
-          </div>
-
-          <!-- Statuszeile: beantwortet ohne Suchen "laeuft die Bruecke gerade, mit
-               welchem Profil, fuer welches Spiel". Das war vorher ueber drei Stellen
-               verstreut und darum nirgends beantwortet. -->
-          <div class="kb-status" id="kbStatusKarte">
-            <span class="kb-lampe" id="kbLampe"></span>
-            <div style="flex:1 1 220px;min-width:0">
-              <div id="kbStatusLabel" style="font-weight:600">Tastatur-Modus: aus</div>
-              <div class="settings-hint" id="kbStatusDetail" style="margin:2px 0 0">–</div>
-            </div>
-            <button class="btn-primary" id="kbToggleBtn" onclick="kbToggle()">▶ Aktivieren</button>
-          </div>
-
-          <div class="form-group">
-            <label>Schritt 1 · Profil</label>
-            <p class="settings-hint">Ein Profil hält fest, welcher Controller-Knopf welche Taste drückt – und für welches Spiel das gilt.</p>
-            <div class="path-row">
-              <select id="kbProfileSel" class="sort-select" style="flex:1" onchange="kbSelectProfile(this.value)"></select>
-              <button class="btn-browse" onclick="kbNeuesProfil()" title="Leeres Profil anlegen">✚ Neu</button>
-              <button class="btn-browse" onclick="kbImport()" title="Profil aus Datei laden">📂 Importieren</button>
-              <button class="btn-browse" onclick="kbExport()" title="Profil als Datei sichern">💾 Exportieren</button>
-              <button class="btn-browse" onclick="kbDeleteProfile()" title="Profil löschen">✕</button>
-            </div>
-
-            <div class="kb-karte" id="kbKarte">
-              <div class="kb-karte-kopf">
-                <span id="kbKarteName">–</span>
-                <span class="kb-badge" id="kbKarteHerkunft"></span>
-                <span class="kb-badge kb-badge-still" id="kbKarteAnzahl"></span>
-              </div>
-              <div class="kb-zeile">
-                <span class="kb-zeile-lbl">Gilt für</span>
-                <select id="kbSpielSel" class="sort-select" onchange="kbSpielSetzen(this.value)"></select>
-              </div>
-              <p class="settings-hint" id="kbKarteWirkung" style="margin:6px 0 0">–</p>
-              <p class="settings-hint" id="kbKarteNotiz" style="margin:6px 0 0"></p>
-            </div>
-            <div id="kbHausHinweis" class="kb-haus-hinweis" style="display:none">
-              <span id="kbHausText"></span>
-              <button class="btn-secondary" onclick="kbHausUebernehmen()">Verbesserte Werte übernehmen</button>
-            </div>
-            <p class="settings-hint">Profile sind einzelne Dateien – so lassen sie sich mit anderen tauschen, ganz ohne Konto.</p>
-          </div>
-
-          <div class="form-group">
-            <label>Schritt 2 · Belegung</label>
-            <p class="settings-hint">Der Assistent fragt der Reihe nach: „Drücke die Tastatur-Taste für …" – und legt sie auf den passenden Controller-Knopf. Jeder Schritt ist überspringbar.</p>
-            <div class="path-row">
-              <button class="btn-browse" onclick="kbAssistStart()">✨ Belegung Schritt für Schritt zuweisen</button>
-            </div>
-            <div id="kbAssistBox" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:10px">
-              <div id="kbAssistText" style="font-size:14px;margin-bottom:8px"></div>
-              <div class="path-row">
-                <button class="btn-browse" onclick="kbAssistSkip()">Überspringen</button>
-                <button class="btn-cancel" onclick="kbAssistStop()">Abbrechen</button>
-              </div>
-            </div>
-            <div id="kbMapList" style="margin-top:10px"></div>
-          </div>
-
-          <!-- Die Frage "welches Profil greift bei welchem Spiel?" beantwortet keine
-               Einzelansicht - sie braucht die Gegenueberstellung aller Spiele. -->
-          <div class="form-group">
-            <label>Schritt 3 · Welches Profil greift wo?</label>
-            <div class="setting-toggle-row">
-              <span class="setting-toggle-label">Bei passenden Spielen automatisch aktivieren</span>
-              <label class="switch"><input type="checkbox" id="setKbAuto"><span class="switch-slider"></span></label>
-            </div>
-            <p class="settings-hint">Springt beim Start des zugeordneten Spiels von selbst an – und geht beim Beenden wieder aus. Schaltest du von Hand ab, bleibt es für dieses Spiel aus, bis du es beendest.</p>
-            <div id="kbZuordnung" style="margin-top:10px"></div>
-          </div>
-
-          <div class="form-group">
-            <label>Schritt 4 · Empfindlichkeit</label>
-            <p class="settings-hint">Jeder Controller ist anders: Bei vollem Ausschlag in eine Richtung erreicht die andere Achse oft nur einen Bruchteil. Liegt die Ansprechschwelle darüber, fällt beim Lenken das Gas weg (oder umgekehrt). Bewege den Stick – der Punkt zeigt, was ankommt, die Ringe zeigen die Schwellen.</p>
-            <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
-              <canvas id="kbStickCv" width="180" height="180" style="width:180px;height:180px;flex:0 0 auto;background:rgba(255,255,255,.02);border-radius:12px"></canvas>
-              <div style="flex:1 1 260px;min-width:0">
-                <div class="an-osdrow">
-                  <span class="an-osdlbl">Ruhezone</span>
-                  <input type="range" id="kbRuhe" min="2" max="45" step="1" oninput="kbEmpfindlichkeit()">
-                  <span id="kbRuheVal" class="mono">–</span>
-                </div>
-                <p class="settings-hint" style="margin:2px 0 8px">Darunter gilt der Stick als losgelassen (gegen Zittern und Drift).</p>
-                <div class="an-osdrow">
-                  <span class="an-osdlbl">Ansprechen</span>
-                  <input type="range" id="kbAn" min="5" max="60" step="1" oninput="kbEmpfindlichkeit()">
-                  <span id="kbAnVal" class="mono">–</span>
-                </div>
-                <p class="settings-hint" style="margin:2px 0 8px">Ab hier zählt eine Richtung als gedrückt. Niedriger = feineres Lenken.</p>
-                <div class="an-osdrow">
-                  <span class="an-osdlbl">Loslassen</span>
-                  <input type="range" id="kbAus" min="2" max="55" step="1" oninput="kbEmpfindlichkeit()">
-                  <span id="kbAusVal" class="mono">–</span>
-                </div>
-                <p class="settings-hint" style="margin:2px 0 0">Muss unter „Ansprechen" liegen. Der Abstand verhindert Flattern am Übergang.</p>
-                <p class="settings-hint" id="kbHuelle" style="margin:10px 0 6px">–</p>
-                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <button class="btn-secondary" onclick="kbHuelleUebernehmen()">Werte aus Messung übernehmen</button>
-                  <button class="btn-secondary" onclick="kbHuelleReset()">Messung neu starten</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>Schritt 5 · Prüfen &amp; messen</label>
-            <p class="settings-hint">Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Solange der Tastatur-Modus läuft, steuert der Stick nicht mehr Lumoras Menü – du kannst also gefahrlos ausprobieren.</p>
-            <div id="kbMonitor" class="settings-hint" style="font-family:monospace;white-space:pre-wrap;min-height:48px">–</div>
-            <p class="settings-hint" style="margin-top:12px">Klemmt etwas erst im Spiel? Dann Mitschnitt einschalten, kurz spielen und die Datei zur Auswertung weitergeben – sie hält fest, was der Controller wirklich gemeldet hat.</p>
-            <div class="path-row">
-              <button class="btn-browse" id="kbTraceBtn" onclick="kbTraceToggle()">⏺ Mitschnitt starten</button>
-              <button class="btn-browse" onclick="kbTraceOeffnen()">📂 Ordner öffnen</button>
-            </div>
-            <p class="settings-hint" id="kbTraceInfo" style="margin-top:6px"></p>
           </div>
         </div>
 
@@ -1367,6 +1222,28 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "Werte & Reihenfolge": "Values & order",
+  "Der Bericht wird auf lumora-streaming.de abgelegt und ist über einen kurzen Link abrufbar. Du kannst ihn jederzeit wieder zurückziehen. Es wird kein Konto angelegt.": "The report is stored on lumora-streaming.de and reachable via a short link. You can withdraw it at any time. No account is created.",
+  "Das Profil gilt für das gewählte Gerät („Alle Geräte\" = jede Quelle wird gemappt, z. B. Lenkrad + separate Pedale).": "The profile applies to the selected device (\"All devices\" = every source is mapped, e.g. wheel + separate pedals).",
+  "Verwandelt jedes Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z. B. Knopf = Vollgas) und umgekehrt.": "Turns any input device (joystick, wheel, flight stick …) into a virtual Xbox gamepad. This lets you control games that only recognise gamepads – including Microsoft Store / Game Pass titles, where Steam Input doesn't work. Great for accessibility too: single buttons can replace axes (e.g. button = full throttle) and vice versa.",
+  "Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber ViGEmBus ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps & Features.": "The first time you activate this, Lumora installs the signed open-source driver ViGEmBus (official source, one Windows security prompt). Removable via Apps & Features.",
+  'Feineinstellung (Deadzone / Kurve / Invertieren) & Liste': 'Fine-tuning (deadzone / curve / invert) & list',
+  'Mehr Cover & Hero über SteamGridDB (optional)': 'More covers & heroes via SteamGridDB (optional)',
+  'Lohnt sich das? & in 2 Minuten einrichten': 'Worth it? Set up in 2 minutes',
+  'Aufnahme & Qualität': 'Capture & quality',
+  'Für schwierige Anschlüsse (Relay & IPv6-Test)': 'For tricky connections (relay & IPv6 test)',
+  'Gruppe beitreten & mitstreamen': 'Join the group & stream along',
+  'Beitreten & mitstreamen': 'Join & stream along',
+  'Jeder Lauf wird gespeichert. Hake zwei Läufe an, um sie zu vergleichen (z. B. vor/nach dem Abschalten eines verdächtigen Programms) – eine Notiz hilft, den Überblick zu behalten.':
+  'Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28 ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45 ms).': 'When does a frame count as a stutter? "Normal" only reports noticeable hitches (from ~28 ms), "Sensitive" also small bumps, "Hard stutters only" only clear freezes (from ~45 ms).',
+  "Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam, Microsoft oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.": "Lumora is an unofficial tool and is not affiliated with Valve/Steam, Microsoft or the respective game publishers. Game covers, logos and brand names are the property of their respective owners. Cover images are downloaded from Steam or the Microsoft Store solely to identify installed games and are stored locally.",
+  "— WebRTC-Stack (WHEP) im eigenen Medien-Relay · Paul-Louis Ageneau · MPL 2.0 ·": "— WebRTC stack (WHEP) in our own media relay · Paul-Louis Ageneau · MPL 2.0 ·",
+  "— DTLS-Verschlüsselung (WebRTC-Handshake) im Medien-Relay · Mbed-TLS-Projekt · Apache 2.0 ·": "— DTLS encryption (WebRTC handshake) in the media relay · Mbed TLS project · Apache 2.0 ·",
+  "— Opus-Encoding für den Stream-Ton (WebRTC-tauglich, patentfrei) · Xiph.Org u. a. · BSD-3 ·": "— Opus encoding for the stream audio (WebRTC-capable, patent-free) · Xiph.Org and others · BSD-3 ·",
+  "— signierter Treiber für CPU-Sensorik · namazso · GPL 2.0; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for CPU sensors · namazso · GPL 2.0; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
+  "(AMDFamily17, IntelMSR) — Sensor-Definitionen · namazso · LGPL 2.1 ·": "(AMDFamily17, IntelMSR) — sensor definitions · namazso · LGPL 2.1 ·",
+  "— signierter Treiber für virtuelle Gamepads (Eingabe-Brücke) · Nefarius Software Solutions · BSD-3; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for virtual gamepads (input bridge) · Nefarius Software Solutions · BSD-3; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
+  "Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML), dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten liegen im Installationsordner bei.": "Additionally, Lumora reads — if present — sensor and FPS data from the NVIDIA driver (NVML), the AMD driver (ADL) and MSI Afterburner/RTSS. The license texts of the bundled components are included in the installation folder.",
   "Ziehen zum Verschieben": "Drag to reorder",
   "Aus dem Overlay nehmen": "Remove from overlay",
   "Ins Overlay aufnehmen": "Add to overlay",
@@ -1374,166 +1251,42 @@ const I18N_EN = {
   "Im Overlay": "In the overlay",
   "Nichts ausgewählt – diese Gruppe erscheint im Overlay gar nicht.": "Nothing selected – this group will not appear in the overlay at all.",
   "Ausgeblendet": "Hidden",
-  "Werte & Reihenfolge": "Values & order",
   "Jede Karte ist eine Gruppe im Overlay – in genau dieser Reihenfolge, mit genau diesen Werten.": "Each card is a group in the overlay – in exactly this order, with exactly these values.",
   "Zum Umsortieren ziehen: Werte innerhalb ihrer Gruppe, ganze Gruppen am Griff links. Das Overlay übernimmt es sofort.": "Drag to rearrange: values within their group, whole groups by the handle on the left. The overlay applies it immediately.",
   "Tastenkürzel": "Keyboard shortcuts",
   "Datenquellen": "Data sources",
   "Netzwerk": "Network",
-  "Gruppe ziehen": "Drag group",
   "nach oben": "move up",
-  "nach unten": "move down",
-  "Alles per Drag & Drop: Werte ziehen, ganze Gruppen am ⠿-Griff packen – die Liste ordnet sich live um, das OSD übernimmt es sofort.": "Everything via drag & drop: drag values, grab whole groups by the ⠿ handle – the list reorders live and the OSD applies it immediately.",
   "Summe (Sitzung)": "Total (session)",
   "läuft": "running",
   "wird beim nächsten Spielstart erfasst": "will be recorded from the next game start",
   "Netzwerk-Statistik pro Spiel erfassen": "Record network statistics per game",
   "Zählt während des Spielens die übertragenen Daten des Spielprozesses (Senden und Empfangen, inklusive Kindprozesse). Die Summe steht in der Bibliothek beim jeweiligen Spiel. Beim ersten Einschalten richtet Lumora einmalig einen Hintergrunddienst ein (eine Windows-Sicherheitsabfrage, kein Treiber).": "While you play, counts the data transferred by the game process (send and receive, including child processes). The total is shown in the library for each game. The first time you enable this, Lumora sets up a background service once (one Windows security prompt, no driver).",
   "Übertragen (Netzwerk)": "Transferred (network)",
-  "Mitgeliefert": "Bundled",
-  "Eigene Kopie": "Your copy",
-  "Importiert": "Imported",
-  "Selbst angelegt": "Created by you",
-  "Jedes Spiel im Vordergrund": "Any game in the foreground",
-  "nicht in der Bibliothek": "not in your library",
-  "Ohne Spielbezug startet dieses Profil nie von selbst – nur von Hand über den Schalter oben.": "Without a game assigned, this profile never starts on its own – only by hand via the switch above.",
-  "Greift NICHT:": "NOT in effect:",
-  "für dieses Spiel gewinnt": "for this game the winner is",
-  "Eigene Profile schlagen mitgelieferte.": "Your own profiles beat bundled ones.",
-  "Startet automatisch, sobald dieses Spiel im Vordergrund ist.": "Starts automatically as soon as this game is in the foreground.",
   "verdeckt": "hides",
   "Öffnen": "Open",
-  "Noch kein Spiel aus deiner Bibliothek hat ein Profil. Wähle oben unter „Gilt für\" ein Spiel aus.": "No game in your library has a profile yet. Pick one above under \"Applies to\".",
-  "Ohne Spiel aus deiner Bibliothek:": "Not tied to a game in your library:",
-  "kein Spielbezug": "no game assigned",
-  "Neues Profil": "New profile",
-  "Profil ohne Namen": "Unnamed profile",
   "für": "for",
-  "jedes Spiel im Vordergrund": "any game in the foreground",
-  "Bereit:": "Ready:",
-  "startet mit": "starts with",
-  "nur von Hand": "by hand only",
-  "Kein Profil ausgewählt.": "No profile selected.",
-  "Schritt 1 · Profil": "Step 1 · Profile",
-  "Schritt 2 · Belegung": "Step 2 · Mapping",
-  "Schritt 3 · Welches Profil greift wo?": "Step 3 · Which profile applies where?",
-  "Schritt 4 · Empfindlichkeit": "Step 4 · Sensitivity",
-  "Schritt 5 · Prüfen & messen": "Step 5 · Check & measure",
-  "Ein Profil hält fest, welcher Controller-Knopf welche Taste drückt – und für welches Spiel das gilt.": "A profile records which controller button presses which key – and which game that applies to.",
-  "✚ Neu": "✚ New",
-  "Leeres Profil anlegen": "Create an empty profile",
-  "Profil löschen": "Delete profile",
-  "Springt beim Start des zugeordneten Spiels von selbst an – und geht beim Beenden wieder aus. Schaltest du von Hand ab, bleibt es für dieses Spiel aus, bis du es beendest.": "Starts by itself when the assigned game launches – and stops when it quits. If you switch it off by hand, it stays off for that game until you quit it.",
-  "Noch nicht gemessen: Stick einmal ganz nach oben halten und dabei voll nach links und rechts drehen, dann dasselbe zur Seite.": "Not measured yet: hold the stick fully up while turning it all the way left and right, then do the same sideways.",
-  "Zu hoch:": "Too high:",
-  "Dein Stick erreicht auf der Gegenachse nur": "On the opposite axis your stick only reaches",
-  "Bei \"Ansprechen\"": "With \"Trigger at\" set to",
-  "kannst du beim Laufen nicht lenken.": "you cannot steer while moving.",
-  "Gemessen: Gegenachse erreicht": "Measured: opposite axis reaches",
-  "\"Ansprechen\" liegt mit": "\"Trigger at\" sits at",
-  "darunter, beides geht gleichzeitig.": "below that, so both work at once.",
-  "Das mitgelieferte Profil": "The bundled profile",
-  "wurde seit deiner Kopie verbessert": "has been improved since you copied it",
   "Zuordnungen": "mappings",
-  "Werte aus Messung übernehmen": "Apply measured values",
-  "Messung neu starten": "Restart measurement",
-  "Verbesserte Werte übernehmen": "Apply improved values",
-  "Jeder Controller ist anders: Bei vollem Ausschlag in eine Richtung erreicht die andere Achse oft nur einen Bruchteil. Liegt die Ansprechschwelle darüber, fällt beim Lenken das Gas weg (oder umgekehrt). Bewege den Stick – der Punkt zeigt, was ankommt, die Ringe zeigen die Schwellen.": "Every controller is different: at full deflection in one direction, the other axis often only reaches a fraction of its range. If the trigger threshold sits above that, steering cancels the throttle (or the other way round). Move the stick – the dot shows what gets through, the guides show the thresholds.",
-  "Ruhezone": "Rest zone",
-  "Darunter gilt der Stick als losgelassen (gegen Zittern und Drift).": "Below this the stick counts as released (guards against jitter and drift).",
-  "Ansprechen": "Trigger at",
-  "Ab hier zählt eine Richtung als gedrückt. Niedriger = feineres Lenken.": "From here on a direction counts as pressed. Lower = finer steering.",
   "Loslassen": "Release below",
-  "Muss unter „Ansprechen\" liegen. Der Abstand verhindert Flattern am Übergang.": "Must stay below \"Trigger at\". The gap prevents chatter at the crossover.",
   "Modus:": "Mode:",
-  "an – Tasten werden gesendet": "on – keys are being sent",
-  "aus – nur Anzeige, es wird nichts gesendet": "off – display only, nothing is sent",
-  "kein Pad": "no pad",
   "Profil ": "Profile ",
   " – nicht verbunden": " – not connected",
   "Deadzone": "Dead zone",
   " — nicht belegt (klicken zum Zuweisen)": " — unassigned (click to assign)",
   " ist bereit – zum Aktivieren neu starten.": " is ready – restart to activate.",
-  "Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Solange der Tastatur-Modus läuft, steuert der Stick nicht mehr Lumoras Menü – du kannst also gefahrlos ausprobieren.": "Shows what the bridge currently reads from the controller and which keys it presses. While keyboard mode is running, the stick no longer controls Lumora's menu – so you can try things out safely.",
-  "Klemmt etwas erst im Spiel? Dann Mitschnitt einschalten, kurz spielen und die Datei zur Auswertung weitergeben – sie hält fest, was der Controller wirklich gemeldet hat.": "Something only goes wrong inside the game? Turn on recording, play briefly, then pass the file on for analysis – it captures what the controller actually reported.",
-  "Solange der Tastatur-Modus läuft, steuert der Stick nicht mehr Lumoras Menü – du kannst also gefahrlos ausprobieren.": "While keyboard mode is running, the stick no longer controls Lumora's menu – so you can try things out safely.",
-  "⏺ Mitschnitt starten": "⏺ Start recording",
-  "⏹ Mitschnitt beenden": "⏹ Stop recording",
-  "📂 Ordner öffnen": "📂 Open folder",
-  "Läuft. Jetzt das Spiel starten und ein paar Bewegungen machen, danach hier beenden.": "Running. Now start the game, move around a little, then stop it here.",
-  "Gespeichert:": "Saved:",
-  "Live-Prüfung": "Live check",
-  "Zeigt, was die Brücke gerade vom Controller liest und welche Tasten sie daraus drückt. Damit lässt sich sofort sehen, ob eine Bewegung ankommt – bewege den Stick und beobachte die Zeile.": "Shows what the bridge currently reads from the controller and which keys it presses. Move the stick and watch the line to see instantly whether a movement registers.",
-  "Tastatur-Modus ist aus – zum Prüfen aktivieren.": "Keyboard mode is off – activate it to run the check.",
   "Controller:": "Controller:",
   "erkannt": "detected",
-  "KEINER GEFUNDEN": "NONE FOUND",
-  "Vordergrund:": "Foreground:",
-  "Tasten gehen durch": "keys are getting through",
   "blockiert": "blocked",
   "wartet auf": "waiting for",
-  "Erkannt:": "Detected:",
-  "Tasten gedrückt:": "Keys pressed:",
-  "Bei passenden Spielen automatisch aktivieren": "Activate automatically for matching games",
-  "Trägt das Profil einen Spielnamen, springt es beim Start dieses Spiels von selbst an – und geht beim Beenden wieder aus. Schaltest du hier von Hand ab, bleibt es für dieses Spiel aus, bis du es beendest.": "If the profile names a game, it starts by itself when that game launches – and switches off when it ends. If you turn it off by hand, it stays off for that game until you quit it.",
   // --- Eingabe-Reiter: Neugliederung in zwei Modi ---
-  "Lumora übersetzt Eingaben in beide Richtungen – je nachdem, was dein Spiel versteht. Beide Modi sind unabhängig voneinander und können auch gleichzeitig laufen.": "Lumora translates input in both directions – depending on what your game understands. The two modes are independent and can run at the same time.",
-  "① Gerät → Xbox-Gamepad": "① Device → Xbox gamepad",
-  "② Gamepad → Tastatur": "② Gamepad → keyboard",
-  "Für neue Spiele, die nur Gamepads kennen. Dein Lenkrad, Joystick oder Flightstick erscheint als Xbox-Controller.": "For modern games that only accept gamepads. Your wheel, joystick or flight stick shows up as an Xbox controller.",
-  "Für alte Spiele, die noch keine Gamepads kannten. Dein Controller drückt die Tasten (GTA2, alte Shooter, Emulatoren).": "For older games that never knew gamepads. Your controller presses the keys (GTA2, old shooters, emulators).",
-  "Für Klassiker, die noch gar keine Gamepads kannten (GTA2, alte Shooter, Emulator-Frontends). Lumora drückt für dich die Tasten. Kein Treiber nötig – nur ein Xbox-Controller und ein Profil.": "For classics that never knew gamepads (GTA2, old shooters, emulator front-ends). Lumora presses the keys for you. No driver needed – just an Xbox controller and a profile.",
-  "Profile sind einzelne Dateien – so lassen sie sich mit anderen tauschen, ganz ohne Konto.": "Profiles are individual files – easy to share with others, no account required.",
   "Belegung": "Mapping",
-  "Der Assistent fragt der Reihe nach: „Drücke die Tastatur-Taste für …\" – und legt sie auf den passenden Controller-Knopf. Jeder Schritt ist überspringbar.": "The wizard asks step by step: \"Press the keyboard key for …\" – and maps it to the matching controller button. Every step can be skipped.",
-  "Trägt das Profil einen Spielnamen, aktiviert es sich beim Start dieses Spiels von selbst – und geht beim Beenden wieder aus.": "If the profile names a game, it activates itself when that game starts – and switches off again when it ends.",
-  "Mitgelieferte Profile lassen sich nicht löschen.": "Bundled profiles cannot be deleted.",
-  "(eigene Kopie)": "(your copy)",
 
   // --- Eingabe-Bruecke: Tastatur-Modus (Gamepad -> Tastatur) ---
-  "Scancode": "Scancode",
-  "Noch kein Profil – importieren oder zuweisen": "No profile yet – import or assign one",
-  "Gilt für": "Applies to",
-  "Gilt für jedes Spiel im Vordergrund": "Applies to whichever game is in the foreground",
-  "Profil löschen?": "Delete profile?",
-  "Profil gespeichert:": "Profile saved:",
-  "Profil konnte nicht gelesen werden.": "The profile could not be read.",
-  "Profil importiert:": "Profile imported:",
-  "Kein Profil mit Zuordnungen gewählt.": "No profile with assignments selected.",
-  "Tastatur-Modus konnte nicht starten.": "Keyboard mode could not start.",
-  "Tastatur-Modus:": "Keyboard mode:",
   "an": "on",
   "aus": "off",
-  "Neues Tastatur-Profil": "New keyboard profile",
-  "Belegung fertig.": "Mapping complete.",
-  "Drücke die Tastatur-Taste für:": "Press the keyboard key for:",
-  "wird belegt auf": "will be mapped to",
-  "🕹 Gamepad → Tastatur (für alte Spiele)": "🕹 Gamepad → keyboard (for older games)",
-  "Die Gegenrichtung: Dein Xbox-Controller steuert Klassiker, die noch gar keine Gamepads kannten (GTA2, alte Shooter, Emulator-Frontends). Lumora drückt für dich die Tasten. Kein Treiber nötig.": "The other direction: your Xbox controller drives classics that never knew gamepads (GTA2, old shooters, emulator front-ends). Lumora presses the keys for you. No driver needed.",
-  "📂 Importieren": "📂 Import",
-  "💾 Exportieren": "💾 Export",
-  "Tastatur-Modus: aus": "Keyboard mode: off",
-  "Tasten werden nur gesendet, solange das Spiel im Vordergrund ist – nie in andere Fenster.": "Keys are only sent while the game is in the foreground – never into other windows.",
-  "Überspringen": "Skip",
-  "✨ Belegung Schritt für Schritt zuweisen": "✨ Assign the mapping step by step",
-  "Profil aus Datei laden": "Load profile from file",
-  "Profil als Datei sichern": "Save profile to file",
   "⏹ Deaktivieren": "⏹ Deactivate",
-  "Vorwärts / Gas": "Forward / accelerate",
-  "Rückwärts / Bremse": "Reverse / brake",
-  "Nach links": "Turn left",
-  "Nach rechts": "Turn right",
-  "Angriff / Feuer": "Attack / fire",
-  "Springen / Handbremse": "Jump / handbrake",
-  "Aktion / Ein- und Aussteigen": "Action / enter and exit",
-  "Nächste Waffe": "Next weapon",
-  "Vorherige Waffe": "Previous weapon",
-  "Sonderfunktion 1": "Special 1",
-  "Sonderfunktion 2": "Special 2",
-  "Pause / Menü": "Pause / menu",
 
   // --- Bericht teilen (3.3.0) ---
-  "🔗 Als Link teilen": "🔗 Share as a link",
   "🔬 In der Werkbank öffnen": "🔬 Open in the workbench",
   "Prozess ": "Process ",
   "Hochladen und Link kopieren": "Upload and copy link",
@@ -1541,7 +1294,6 @@ const I18N_EN = {
   "Fertig – Link ist in der Zwischenablage:": "Done – the link is in your clipboard:",
   "Den geteilten Link zurückziehen? Er ist danach nicht mehr abrufbar.": "Withdraw the shared link? It will no longer be reachable afterwards.",
   "Bericht als Link teilen": "Share report as a link",
-  "Der Bericht wird auf lumora-streaming.de abgelegt und ist über einen kurzen Link abrufbar. Du kannst ihn jederzeit wieder zurückziehen. Es wird kein Konto angelegt.": "The report is stored on lumora-streaming.de and reachable via a short link. You can withdraw it at any time. No account is created.",
   "Prozessnamen weglassen (werden zu „Prozess A/B/C“ – die Aussage bleibt)": "Omit process names (they become \"Process A/B/C\" – the conclusion stays)",
   "Spielnamen weglassen": "Omit the game name",
   "Das wird gesendet:": "This is what will be sent:",
@@ -1552,7 +1304,6 @@ const I18N_EN = {
   "Keine Verbindung zum Server. Internetverbindung prüfen.": "No connection to the server. Please check your internet connection.",
   "Das Hochladen hat nicht geklappt.": "The upload did not succeed.",
   "geteilt": "shared",
-  "Teilen zurückziehen": "Withdraw sharing",
 
   // Typografische Anfuehrungszeichen: im Englischen gerade statt deutsch
   "„": "\"", "“": "\"",
@@ -1563,7 +1314,6 @@ const I18N_EN = {
   "bis": "to",
   "Zuordnung entfernen": "Remove mapping",
   "Ø FPS": "Avg FPS",
-  "der Messzeit": "of the measurement",
   // --- Spielzeit-Rueckblick: Zuruecksetzen ---
   "Spielzeit zurücksetzen": "Reset playtime",
   "Spielzeit dieses Spiels zurücksetzen": "Reset playtime for this game",
@@ -1580,8 +1330,6 @@ const I18N_EN = {
   "❌ Vermittlungs-Server nicht erreichbar – Internet prüfen (oder die Skript-URL unter „Eigener Vermittlungs-Server\").": "❌ Signaling server unreachable – check your internet (or the script URL under \"Custom signaling server\").",
   "= schon belegt (Quelle darunter). Bei aktivem Pad bewegt sich der Controller live mit.": "= already mapped (source below). With an active pad the controller moves along live.",
   "⚠ Spiele sehen dann zwei Controller (Original + virtuelles Pad). Falls Steam Input aktiv ist, dort das Originalgerät deaktivieren, sonst kommen Eingaben doppelt an.": "⚠ Games will then see two controllers (original + virtual pad). If Steam Input is active, disable the original device there, otherwise inputs arrive twice.",
-  "Das Profil gilt für das gewählte Gerät („Alle Geräte\" = jede Quelle wird gemappt, z. B. Lenkrad + separate Pedale).": "The profile applies to the selected device (\"All devices\" = every source is mapped, e.g. wheel + separate pedals).",
-  "Verwandelt jedes Eingabegerät (Joystick, Lenkrad, Flightstick …) in ein virtuelles Xbox-Gamepad. Damit lassen sich auch Spiele steuern, die nur Gamepads kennen – inklusive Microsoft-Store-/Game-Pass-Titeln, wo Steam Input nicht greift. Auch für Barrierefreiheit: einzelne Knöpfe können Achsen ersetzen (z. B. Knopf = Vollgas) und umgekehrt.": "Turns any input device (joystick, wheel, flight stick …) into a virtual Xbox gamepad. This lets you control games that only recognise gamepads – including Microsoft Store / Game Pass titles, where Steam Input doesn't work. Great for accessibility too: single buttons can replace axes (e.g. button = full throttle) and vice versa.",
   "Klick auf ein Bauteil des Controllers unten – dann am Gerät den gewünschten Knopf drücken oder die Achse bewegen.": "Click a part of the controller below – then press the desired button or move the axis on your device.",
   "Nur nötig, wenn der Test oben „nicht erreichbar\" meldet. Zugangsdaten kommen vom Relay-Anbieter oder deinem eigenen coturn-Server („turn:\" nicht nötig).": "Only needed if the test above reports \"unreachable\". Credentials come from your relay provider or your own coturn server (\"turn:\" prefix not needed).",
   "Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.": "Buffer: short = low latency, longer = smoother on an unstable connection. Auto-adjust: temporarily lowers the bitrate when viewers (e.g. on mobile data) report poor reception – and raises it again once things are stable.",
@@ -1589,7 +1337,6 @@ const I18N_EN = {
   "Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein. Jeder neue Zuschauer wird dir einzeln zur Freigabe angezeigt (Fenster überm Spiel); ein Ablehnen gilt nur kurz.": "Off by default. When on, only people you explicitly approve can watch your stream – even someone who knows the link or IP can't get in unasked. Each new viewer is shown to you individually for approval (window over the game); a rejection only lasts briefly.",
   "Startet das Spiel (egal ob über Lumora oder direkt), aktiviert sich das verknüpfte Profil automatisch – aber erst, wenn das Spiel wirklich läuft. Beim Beenden geht das virtuelle Pad wieder aus.": "When the game starts (whether via Lumora or directly), the linked profile activates automatically – but only once the game is really running. On exit the virtual pad turns off again.",
   "Zeigt rohe Geräte-Eingaben und (bei aktivem Pad) das Ergebnis am virtuellen Controller.": "Shows raw device inputs and (with an active pad) the result on the virtual controller.",
-  "Beim ersten Aktivieren richtet Lumora den signierten Open-Source-Treiber ViGEmBus ein (offizielle Quelle, eine Windows-Sicherheitsabfrage). Deinstallierbar über Apps & Features.": "The first time you activate this, Lumora installs the signed open-source driver ViGEmBus (official source, one Windows security prompt). Removable via Apps & Features.",
   "★ Stammgäste": "★ Regulars",
   "🚫 Gesperrt": "🚫 Blocked",
   "🔒 Nur freigegebene Zuschauer": "🔒 Approved viewers only",
@@ -1629,7 +1376,6 @@ const I18N_EN = {
   'Profil': 'Profile',
   'Zuordnung': 'Mapping',
   'POV-Hat (Rundblickschalter) → Steuerkreuz': 'POV hat switch → D-pad',
-  'Feineinstellung (Deadzone / Kurve / Invertieren) & Liste': 'Fine-tuning (deadzone / curve / invert) & list',
   // Eingabe-Bruecke: Zuordnungsliste, Controller-Tooltips, Dialoge, Live-Anzeige
   'Linker Stick X': 'Left stick X', 'Linker Stick Y': 'Left stick Y',
   'Rechter Stick X': 'Right stick X', 'Rechter Stick Y': 'Right stick Y',
@@ -1730,9 +1476,7 @@ const I18N_EN = {
   'Hochformat-Cover': 'Portrait cover',
   'Ist die bevorzugte Variante für ein Spiel nicht verfügbar, wird automatisch die andere als Fallback verwendet.': 'If the preferred style is unavailable for a game, the other one is used automatically.',
   'Akzentfarbe': 'Accent color',
-  'Mehr Cover & Hero über SteamGridDB (optional)': 'More covers & heroes via SteamGridDB (optional)',
   'Ohne Key läuft alles (Steam + Microsoft Store).': 'Everything works without a key (Steam + Microsoft Store).',
-  'Lohnt sich das? & in 2 Minuten einrichten': 'Worth it? Set up in 2 minutes',
   'Was es bringt:': 'What it gives you:',
   'So holst du den kostenlosen Key:': 'How to get the free key:',
   'Generate API Key': 'Generate API Key',
@@ -1749,9 +1493,6 @@ const I18N_EN = {
   'Overlay anzeigen': 'Show overlay',
   'Grafikkarte': 'Graphics card',
   'Automatisch (schnellste)': 'Automatic (fastest)',
-  'Anzeige-Art': 'Display mode',
-  'Overlay-Fenster (Standard)': 'Overlay window (default)',
-  'Im Spiel gerendert via RTSS – streambar': 'Rendered in-game via RTSS – streamable',
   'Afterburner-OSD ein-/ausblenden': 'Toggle Afterburner OSD',
   'Design': 'Design',
   'Kompakt': 'Compact',
@@ -1771,7 +1512,6 @@ const I18N_EN = {
   'Größe': 'Size',
   'Deckkraft': 'Opacity',
   'Position': 'Position',
-  'Aufnahme & Qualität': 'Capture & quality',
   'Teilt deinen Bildschirm live ins Internet – Zuschauer öffnen nur einen Link im Browser, ganz ohne Installation. Hardware-Encoding über deine Grafikkarte, Bild geht direkt von deinem PC zum Zuschauer.': 'Shares your screen live over the internet – viewers just open a link in their browser, no install needed. Hardware encoding on your GPU; video goes directly from your PC to the viewer.',
   'Quelle': 'Source',
   'Bildschirm': 'screen',
@@ -1792,8 +1532,6 @@ const I18N_EN = {
   'Bitrate automatisch anpassen': 'Adapt bitrate automatically',
   'Automatisch anpassen': 'Adapt automatically',
   'Konstante Bitrate über den GPU-Encoder – bremst das Spiel kaum.': 'Constant bitrate via the GPU encoder – barely slows your game down.',
-  'Puffer & automatische Anpassung erklärt': 'Buffer & automatic adaptation explained',
-  'Für schnelle Spiele 1080p/1440p mit genug Bitrate; 4K ist am anspruchsvollsten. Puffer: kurz = wenig Verzögerung, länger = ruhiger bei schwankender Leitung. Automatisch anpassen: senkt die Bitrate vorübergehend, wenn Zuschauer (z. B. über Mobilfunk) schlechten Empfang melden – und hebt sie wieder an, sobald es stabil läuft.': 'For fast games use 1080p/1440p with enough bitrate; 4K is the most demanding. Buffer: short = low latency, longer = smoother on shaky connections. Adapt automatically: temporarily lowers the bitrate when viewers (e.g. on mobile data) report poor reception – and raises it again once things stabilize.',
   'Stream aus': 'Stream off',
   'Stream starten': 'Start stream',
   'Vorschau lädt…': 'Preview loading…',
@@ -1807,11 +1545,9 @@ const I18N_EN = {
   'Seht euch gegenseitig im Grid – ideal fürs gemeinsame Zocken im Discord-Call. Eine Gruppe erstellst du mit „Freunde dazuholen" am laufenden Stream.': 'Watch each other in a grid – perfect for playing together on a voice call. Create a group with "Invite friends" on your running stream.',
   'Einer Gruppe beitreten (Code oder Link)': 'Join a group (code or link)',
   '👥 Freunde dazuholen': '👥 Invite friends',
-  'Erstellt eine Gruppe und kopiert den Einladungslink.': 'Creates a group and copies the invite link.',
   '✅ Gruppe erstellt – Einladungslink kopiert! Schick ihn deinen Freunden.': '✅ Group created – invite link copied! Send it to your friends.',
   'ℹ️ Du bist bereits in einer Gruppe – erst die aktuelle verlassen.': 'ℹ️ You are already in a group – leave the current one first.',
   'Auf {name} läuft die Gruppe {code} – gleich beitreten?': 'A group {code} is running on {name} – join now?',
-  'Neue Gruppe': 'New group',
   'Gruppe starten': 'Start group',
   'Beitreten': 'Join',
   '⚠️ Vermittlungs-Server gerade nicht erreichbar – laufende Streams funktionieren weiter, aber neue Mitglieder können momentan nicht beitreten.': '⚠️ Coordination server currently unreachable – running streams keep working, but new members cannot join right now.',
@@ -1831,7 +1567,6 @@ const I18N_EN = {
   'Verbindung': 'Connection',
   'Kann mein Anschluss streamen?': 'Can my connection stream?',
   'Verbindung testen': 'Test connection',
-  'Für schwierige Anschlüsse (Relay & IPv6-Test)': 'For tricky connections (relay & IPv6 test)',
   'Relay-Server': 'Relay server',
   'Nur nötig, wenn der Test oben „nicht erreichbar" meldet. Zugangsdaten kommen vom Relay-Anbieter oder deinem eigenen coturn-Server („turn:" nicht nötig).': 'Only needed if the test above reports "not reachable". Credentials come from your relay provider or your own coturn server ("turn:" prefix not required).',
   'Server': 'Server',
@@ -1855,9 +1590,7 @@ const I18N_EN = {
   'Nativ': 'Native',
   'Qualitätswechsel während des Streams: ': 'Quality switches during the stream: ',
   'Macht aus deinem Stream eine Gruppe: Der Einladungslink wird kopiert – Freunde streamen mit einem Klick mit, alle anderen schauen im Browser zu.': 'Turns your stream into a group: the invite link is copied – friends stream along with one click, everyone else watches in the browser.',
-  'Gruppe beitreten & mitstreamen': 'Join the group & stream along',
   'Mit dem Beitritt geht dein eigener Stream für die Gruppe live. Wähle vorher, was übertragen wird:': 'Joining takes your own stream live for the group. Choose what to share first:',
-  'Beitreten & mitstreamen': 'Join & stream along',
   'Über Lumora': 'About Lumora',
   'kostenlos': 'free',
   'Artwork suchen': 'Find artwork',
@@ -1901,11 +1634,9 @@ const I18N_EN = {
   // --- Ruckler-Analyse (Analyse-Reiter + Analyse-OSD-Berichte) -----------------
   'Analyse': 'Analysis',
   'Ruckler-Analyse': 'Stutter analysis',
-  'Findet heraus, warum dein Spiel ruckelt: Während einer Messung überwacht Lumora Frametimes, Hintergrund­programme, Treiber-Latenzen und deine Grafikkarte – und benennt bei jedem Ruckler die wahrscheinlichen Verursacher. Die Messung kostet praktisch keine Leistung und läuft nur, solange du sie startest.':
     'Finds out why your game stutters: during a measurement, Lumora watches frametimes, background programs, driver latencies and your GPU – and names the likely culprits for every stutter. Measuring costs practically no performance and only runs while you start it.',
   'Tipp: Messung im Spiel per Hotkey starten, ein paar Minuten spielen (gern bis Ruckler auftreten), dann per Hotkey beenden – der Bericht erscheint hier.':
     'Tip: start the measurement in-game via hotkey, play a few minutes (ideally until stutters occur), then stop via hotkey – the report appears here.',
-  'Jeder Lauf wird gespeichert. Hake zwei Läufe an, um sie zu vergleichen (z. B. vor/nach dem Abschalten eines verdächtigen Programms) – eine Notiz hilft, den Überblick zu behalten.':
     'Every run is saved. Tick two runs to compare them (e.g. before/after disabling a suspicious program) – a note helps you keep track.',
   '▶ Messung starten': '▶ Start measurement',
   '⏹ Messung beenden': '⏹ Stop measurement',
@@ -1914,14 +1645,8 @@ const I18N_EN = {
   'Empfindlichkeit': 'Sensitivity',
   'Flaschenhals': 'Bottleneck',
   'GPU-Limit': 'GPU limit', 'CPU-Limit': 'CPU limit', 'Einzelkern-Limit': 'Single-core limit',
-  'FPS-Limit (VSync/Limiter)': 'FPS cap (VSync/limiter)', 'GPU drosselt': 'GPU throttling',
-  'Grafikspeicher voll': 'VRAM full', 'Nicht eindeutig': 'Inconclusive',
-  'Überwiegend': 'Mostly', 'der Messzeit': 'of the measured time',
-  'Kein klares Limit erkennbar.': 'No clear limit detected.',
-  'Ermittelt aus GPU-Auslastung, Kernlast und Frametime-Gleichmäßigkeit – eine Einschätzung, keine frame-genaue Messung.': 'Derived from GPU utilisation, per-core load and frame time consistency – an assessment, not a frame-exact measurement.',
   'Findet heraus, warum dein Spiel ruckelt: Während einer Messung überwacht Lumora Frametimes, Hintergrundprogramme, Treiber-Latenzen und deine Grafikkarte – und benennt bei jedem Ruckler die wahrscheinlichen Verursacher. Die Messung kostet praktisch keine Leistung und läuft nur, solange du sie startest.': 'Finds out why your game stutters: during a measurement Lumora watches frame times, background programs, driver latencies and your graphics card – and names the likely culprits for every stutter. The measurement costs practically no performance and only runs while you start it.',
   'Normal': 'Normal',
-  'Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28 ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45 ms).': 'When does a frame count as a stutter? "Normal" only reports noticeable hitches (from ~28 ms), "Sensitive" also small bumps, "Hard stutters only" only clear freezes (from ~45 ms).',
   'Empfindlich': 'Sensitive',
   'Nur harte Ruckler': 'Hard stutters only',
   'Anzeige im Spiel': 'In-game display',
@@ -1940,16 +1665,7 @@ const I18N_EN = {
   'Vergleich': 'Comparison',
   'Verlauf': 'History',
   'Noch keine Messungen.': 'No measurements yet.',
-  'Sauberer Lauf – keine Ruckler über der Schwelle. 👍': 'Clean run – no stutters above the threshold. 👍',
-  'Hauptverdächtiger: der Treiber ': 'Main suspect: the driver ',
-  'Hauptverdächtiger: das Programm ': 'Main suspect: the program ',
-  ' – auffällig bei ': ' – conspicuous in ',
   'Rucklern': 'stutters',
-  'Hauptursache: die Grafikkarte drosselt': 'Main cause: the GPU is throttling',
-  'Hauptverdacht: Grafikspeicher lief voll – bei ': 'Main suspicion: VRAM filled up – in ',
-  'Hauptverdacht: Datenträger-Last – bei ': 'Main suspicion: disk load – in ',
-  'Hauptverdacht: Programmstarts im Hintergrund': 'Main suspicion: programs starting in the background',
-  'Kein Systemstörer gefunden – die Ruckler kommen vermutlich aus dem Spiel selbst (z. B. Shader/Nachladen).':
     'No system-level offender found – the stutters likely come from the game itself (e.g. shaders/streaming).',
   'Treiber': 'Driver', 'Programm': 'Program', 'GPU-Drosselung': 'GPU throttling', 'Grafikspeicher': 'VRAM',
   'Datenträger': 'Disk', 'Programmstart': 'Program start', 'Spielintern': 'Game-internal',
@@ -1993,7 +1709,6 @@ const I18N_EN = {
   'H.264 (maximale Kompatibilität)': 'H.264 (maximum compatibility)',
   'Zugriffsschutz': 'Access protection',
   'Standard aus. Ist er an, sieht deinen Stream nur, wen du ausdrücklich freigibst – auch wer den Link oder die IP kennt, kommt nicht ungefragt hinein.': 'Off by default. When on, only people you explicitly approve can see your stream – even someone who knows the link or IP cannot get in uninvited.',
-  'Aktuell gilt: Wer den Raumcode-Link hat, kommt hinein – wer nur die rohe IP kennt, wird abgewiesen. Das gezielte Freigeben einzelner Zuschauer folgt als Nächstes.': 'For now: whoever has the room-code link gets in – anyone who only knows the raw IP is rejected. Approving individual viewers is coming next.',
   '⏳ Öffentlicher Link wird vorbereitet…': '⏳ Preparing public link…',
   '  ·  ⏳ Router wird geprüft…': '  ·  ⏳ Checking router…',
   '  ·  🌐 über IPv6 erreichbar (Zuschauer braucht IPv6, z. B. Mobilfunk)': '  ·  🌐 reachable via IPv6 (viewer needs IPv6, e.g. mobile data)',
@@ -2053,7 +1768,6 @@ const I18N_EN = {
   // GPU-Auswahl
   'Mehrere Grafikkarten erkannt. „Automatisch" nimmt die dedizierte (schnelle) Karte – falls die Anzeige nicht stimmt, hier fest einstellen.': 'Multiple graphics cards detected. "Automatic" picks the dedicated (fast) card – if the reading is wrong, set it manually here.',
   // Scan-Dialog
-  'Noch keine Spiele gefunden': 'No games found yet',
   'Wird hinzugefügt...': 'Adding...',
   'Willkommen! Deine installierten Spiele werden gesucht – das kann einen Moment dauern…': 'Welcome! Searching for your installed games – this may take a moment…',
   'Steam, Epic, GOG, Ubisoft, Xbox, EA, Rockstar, Battle.net, Amazon, Riot und Ordner werden gescannt…': 'Scanning Steam, Epic, GOG, Ubisoft, Xbox, EA, Rockstar, Battle.net, Amazon, Riot and folders…',
@@ -2101,7 +1815,6 @@ const I18N_EN = {
   "Lumora sieht deine Steam-Daten nie": "Lumora never sees your Steam data",
   "Oben rechts aufs Profil →": "Top right on your profile →",
   "→ Reiter": "→ tab",
-  "„Im Spiel\" zeichnet die Werte direkt in den Spiel-Frame – sichtbar in Aufnahmen und Streams und auch im exklusiven Vollbild. Benötigt laufendes RTSS bzw. MSI Afterburner (sonst automatisch Overlay-Fenster). Vereinfachte Designs (Kompakt/Minimal/Balken); Position folgt der Ecken-Wahl unten. Tipp: Wirkt eine große Fläche hinter den Anzeigen störend, in RTSS die Option „Bildschirmfüllung\" (Fill) abschalten.": "\"In-game\" draws the values straight into the game frame – visible in recordings and streams and even in exclusive fullscreen. Requires RTSS or MSI Afterburner running (otherwise an overlay window is used automatically). Simplified designs (Compact/Minimal/Bars); position follows the corner choice below. Tip: if a large area behind the readouts is distracting, turn off the \"Fill\" (Bildschirmfüllung) option in RTSS.",
   "Blendet das OSD von MSI Afterburner aus bzw. wieder ein – derselbe Schalter, den auch Afterburners eigener OSD-Hotkey nutzt. Das Lumora-Panel (eigener Hotkey oben) bleibt davon": "Shows or hides the MSI Afterburner OSD – the same switch that Afterburner's own OSD hotkey uses. The Lumora panel (its own hotkey above) stays",
   "unabhängig": "independent",
   ": Afterburner z. B. links, Lumora rechts.": ": Afterburner on the left, Lumora on the right, for example.",
@@ -2111,16 +1824,6 @@ const I18N_EN = {
   "Ganzer": "Whole",
   "oder gezielt ein": "or a specific",
   "– dann landet nur dieses Fenster im Stream (auch im Vollbild). Läuft das Spiel noch nicht, erst starten, dann ↻.": "– then only this window ends up in the stream (in fullscreen too). If the game is not running yet, start it first, then ↻.",
-  "Der Link nutzt deine öffentliche IP, aber deine FritzBox lässt Lumora den Port nicht selbst öffnen. Zwei Wege:": "The link uses your public IP, but your FritzBox will not let Lumora open the port itself. Two options:",
-  "In der FritzBox": "In the FritzBox,",
-  "Heimnetz → Netzwerk → [dieser PC] → Bearbeiten": "Home Network → Network → [this PC] → Edit,",
-  "das Häkchen": "tick the checkbox",
-  "„Selbstständige Portfreigaben für dieses Gerät erlauben\"": "\"Allow independent port sharing for this device\"",
-  "setzen — dann öffnet Lumora den Port künftig automatisch.": "— then Lumora will open the port automatically from now on.",
-  "Oder dauerhaft manuell:": "Or permanently by hand:",
-  "Internet → Freigaben → Portfreigaben": "Internet → Permit Access → Port Sharing",
-  ", Port": ", port",
-  "auf diesen PC.": "to this PC.",
   "Freunde mit Lumora brauchen nur den": "Friends with Lumora only need the",
   "· der": "· the",
   "ist für Zuschauer im Browser (auch iPhone).": "is for viewers in the browser (iPhone too).",
@@ -2130,29 +1833,21 @@ const I18N_EN = {
   ". Beim Start wird das": ". On start, the",
   "(dein laufendes Spiel) freigegeben.": "(your running game) is shared.",
   "Stellt den Link bewusst über IPv6 aus – zum gezielten Testen des IPv6-Direktwegs (z. B. Player vom Handy über Mobilfunk). Für den Normalbetrieb aus.": "Deliberately serves the link over IPv6 – for specifically testing the direct IPv6 path (e.g. a player on a phone over mobile data). Off for normal use.",
-  "Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam, Microsoft oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.": "Lumora is an unofficial tool and is not affiliated with Valve/Steam, Microsoft or the respective game publishers. Game covers, logos and brand names are the property of their respective owners. Cover images are downloaded from Steam or the Microsoft Store solely to identify installed games and are stored locally.",
   "Lumora ist Open Source.": "Lumora is open source.",
   "Der komplette Quellcode ist frei verfügbar unter der GNU AGPL v3:": "The complete source code is freely available under the GNU AGPL v3:",
   "— entwickelt und gepflegt von Karsten Radermacher. Der Name „Lumora\" und das Logo sind nicht Teil der Lizenz.": "— developed and maintained by Karsten Radermacher. The “Lumora” name and logo are not part of the license.",
   "Lumora steht auf den Schultern großartiger Open-Source-Projekte.": "Lumora stands on the shoulders of great open-source projects.",
   "Eingesetzte Komponenten und ihre Urheber:": "Components used and their authors:",
-  "— WebRTC-Stack (WHEP) im eigenen Medien-Relay · Paul-Louis Ageneau · MPL 2.0 ·": "— WebRTC stack (WHEP) in our own media relay · Paul-Louis Ageneau · MPL 2.0 ·",
   "— ICE/STUN/TURN (Verbindungsaufbau durch NAT/Router) im Medien-Relay · Paul-Louis Ageneau · MIT ·": "— ICE/STUN/TURN (connection setup through NAT/router) in the media relay · Paul-Louis Ageneau · MIT ·",
   "— Verschlüsselung der Medienströme (SRTP) im Medien-Relay · Cisco Systems · BSD-3 ·": "— encryption of the media streams (SRTP) in the media relay · Cisco Systems · BSD-3 ·",
-  "— DTLS-Verschlüsselung (WebRTC-Handshake) im Medien-Relay · Mbed-TLS-Projekt · Apache 2.0 ·": "— DTLS encryption (WebRTC handshake) in the media relay · Mbed TLS project · Apache 2.0 ·",
   "— SCTP-Transport (WebRTC-Datenkanäle) im Medien-Relay · sctplab · BSD-3 ·": "— SCTP transport (WebRTC data channels) in the media relay · sctplab · BSD-3 ·",
-  "— Opus-Encoding für den Stream-Ton (WebRTC-tauglich, patentfrei) · Xiph.Org u. a. · BSD-3 ·": "— Opus encoding for the stream audio (WebRTC-capable, patent-free) · Xiph.Org and others · BSD-3 ·",
   "— JSON-Verarbeitung (Einstellungen, IPC, APIs) · Niels Lohmann · MIT ·": "— JSON handling (settings, IPC, APIs) · Niels Lohmann · MIT ·",
   "— Ansteuerung des virtuellen Xbox-Controllers für die Eingabe-Brücke · Benjamin Höglinger-Stelzer · MIT ·": "— drives the virtual Xbox controller for the input bridge · Benjamin Höglinger-Stelzer · MIT ·",
   "— NVENC-API-Header (NVIDIA-Hardware-Encoding) · FFmpeg-Projekt · MIT ·": "— NVENC API headers (NVIDIA hardware encoding) · FFmpeg project · MIT ·",
   "— AMD-Hardware-Encoding-API (Radeon-GPUs) · AMD · MIT ·": "— AMD hardware encoding API (Radeon GPUs) · AMD · MIT ·",
   "— Intel-oneVPL-Dispatcher für QuickSync-Hardware-Encoding · Intel Corporation · MIT ·": "— Intel oneVPL dispatcher for QuickSync hardware encoding · Intel Corporation · MIT ·",
   "— Rendering der Benutzeroberfläche (Chromium-basiert, Windows-Systemkomponente) · Microsoft · BSD (Loader) ·": "— renders the user interface (Chromium-based, Windows system component) · Microsoft · BSD (loader) ·",
-  "— signierter Treiber für CPU-Sensorik · namazso · GPL 2.0; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for CPU sensors · namazso · GPL 2.0; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
-  "(AMDFamily17, IntelMSR) — Sensor-Definitionen · namazso · LGPL 2.1 ·": "(AMDFamily17, IntelMSR) — sensor definitions · namazso · LGPL 2.1 ·",
-  "— signierter Treiber für virtuelle Gamepads (Eingabe-Brücke) · Nefarius Software Solutions · BSD-3; wird bei Bedarf von der offiziellen Quelle installiert und ist jederzeit über „Apps & Features\" entfernbar ·": "— signed driver for virtual gamepads (input bridge) · Nefarius Software Solutions · BSD-3; installed from the official source when needed and removable any time via \"Apps & Features\" ·",
   "— optionale Community-Artworks (eigener API-Key) ·": "— optional community artwork (your own API key) ·",
-  "Zusätzlich liest Lumora — sofern vorhanden — Sensor- und FPS-Daten aus dem NVIDIA-Treiber (NVML), dem AMD-Treiber (ADL) sowie MSI Afterburner/RTSS. Die Lizenztexte der gebündelten Komponenten liegen im Installationsordner bei.": "Additionally, Lumora reads — if present — sensor and FPS data from the NVIDIA driver (NVML), the AMD driver (ADL) and MSI Afterburner/RTSS. The license texts of the bundled components are included in the installation folder.",
 }
 function lumoraLangEffective() {
   try {
@@ -3205,600 +2900,6 @@ function ibSave() {
   ipcRenderer.invoke('input-bridge-save-profiles', ibProfiles)
   const p = ibProf(); if (p) ipcRenderer.invoke('input-bridge-set-profile', p)   // Regler wirken sofort
 }
-// ===== Tastatur-Modus: Gamepad -> Tastatur (EINGABEBRUECKE-PROFILE-PLAN.md) =====
-// Eigener Zustand neben der ViGEm-Bruecke: andere Datei (kb-profiles.json), andere
-// IPC-Kanaele, kein Treiber. Profile sind Dateien (.lumoraprofil) - Austausch laeuft
-// ueber den normalen Datei-Dialog, ohne Konto und ohne Server.
-let kbProfiles = null, kbCurrent = null, kbAktiv = false
-// Reihenfolge des Assistenten: die haeufigsten Aktionen zuerst, damit man nach den
-// ersten Schritten schon fahren kann und den Rest ueberspringen darf.
-const KB_ASSIST = [
-  { quelle: 'LY-', frage: 'Vorwärts / Gas' },
-  { quelle: 'LY+', frage: 'Rückwärts / Bremse' },
-  { quelle: 'LX-', frage: 'Nach links' },
-  { quelle: 'LX+', frage: 'Nach rechts' },
-  { quelle: 'RT',  frage: 'Angriff / Feuer' },
-  { quelle: 'A',   frage: 'Springen / Handbremse' },
-  { quelle: 'B',   frage: 'Aktion / Ein- und Aussteigen' },
-  { quelle: 'X',   frage: 'Nächste Waffe' },
-  { quelle: 'Y',   frage: 'Vorherige Waffe' },
-  { quelle: 'LB',  frage: 'Sonderfunktion 1' },
-  { quelle: 'RB',  frage: 'Sonderfunktion 2' },
-  { quelle: 'START', frage: 'Pause / Menü' },
-]
-// Anzeigenamen der Quellen (nur Darstellung - gespeichert wird der Kurzcode)
-const KB_QUELLE_NAMEN = {
-  'LY-': 'Linker Stick ▲', 'LY+': 'Linker Stick ▼', 'LX-': 'Linker Stick ◀', 'LX+': 'Linker Stick ▶',
-  'RY-': 'Rechter Stick ▲', 'RY+': 'Rechter Stick ▼', 'RX-': 'Rechter Stick ◀', 'RX+': 'Rechter Stick ▶',
-  'LT': 'Linker Trigger', 'RT': 'Rechter Trigger', 'A': 'A', 'B': 'B', 'X': 'X', 'Y': 'Y',
-  'LB': 'LB (Schulter links)', 'RB': 'RB (Schulter rechts)', 'BACK': 'Back / View', 'START': 'Start / Menü',
-  'LS': 'Linker Stick (Klick)', 'RS': 'Rechter Stick (Klick)',
-  'DU': 'Steuerkreuz ▲', 'DD': 'Steuerkreuz ▼', 'DL': 'Steuerkreuz ◀', 'DR': 'Steuerkreuz ▶',
-}
-// Scancode -> Anzeigename. Die Tabelle deckt die Tasten ab, die Spiele real belegen;
-// alles andere wird als "Scancode NN" gezeigt statt zu raten.
-const KB_SCAN_NAMEN = {
-  1:'Esc', 14:'Rücktaste', 15:'Tab', 28:'Eingabe', 29:'Strg links', 42:'Umschalt links',
-  54:'Umschalt rechts', 56:'Alt links', 57:'Leertaste', 58:'Feststell',
-  59:'F1', 60:'F2', 61:'F3', 62:'F4', 63:'F5', 64:'F6', 65:'F7', 66:'F8', 67:'F9', 68:'F10', 87:'F11', 88:'F12',
-  2:'1', 3:'2', 4:'3', 5:'4', 6:'5', 7:'6', 8:'7', 9:'8', 10:'9', 11:'0',
-  16:'Q', 17:'W', 18:'E', 19:'R', 20:'T', 21:'Z', 22:'U', 23:'I', 24:'O', 25:'P',
-  30:'A', 31:'S', 32:'D', 33:'F', 34:'G', 35:'H', 36:'J', 37:'K', 38:'L',
-  44:'Y', 45:'X', 46:'C', 47:'V', 48:'B', 49:'N', 50:'M',
-  71:'Num 7', 72:'Num 8', 73:'Num 9', 75:'Num 4', 76:'Num 5', 77:'Num 6', 79:'Num 1', 80:'Num 2', 81:'Num 3', 82:'Num 0',
-}
-function kbTastenName(sc, ext) {
-  if (ext) {   // E0-Praefix: dieselben Zahlen bedeuten andere Tasten
-    const e = { 72:'Pfeil ▲', 80:'Pfeil ▼', 75:'Pfeil ◀', 77:'Pfeil ▶',
-                71:'Pos1', 79:'Ende', 73:'Bild ▲', 81:'Bild ▼', 82:'Einfg', 83:'Entf',
-                28:'Num-Eingabe', 29:'Strg rechts', 56:'Alt Gr' }
-    return e[sc] || (window.tr('Scancode') + ' E0+' + sc)
-  }
-  return KB_SCAN_NAMEN[sc] || (window.tr('Scancode') + ' ' + sc)
-}
-function kbProf() { return (kbProfiles && kbCurrent && kbProfiles[kbCurrent]) || null }
-function kbSave() { if (kbProfiles) ipcRenderer.invoke('kb-save-profiles', kbProfiles) }
-// Haus-Profile (mitgeliefert, Schluessel "haus:…") werden nie ueberschrieben: wer eines
-// aendert, bekommt automatisch eine eigene Kopie. Sonst waere die Aenderung beim
-// Speichern still verloren, weil die Shell Haus-Schluessel nicht in die Nutzerdatei
-// schreibt - genau die Art stiller Datenverlust, die niemand bemerkt.
-function kbEigeneKopie() {
-  const p = kbProf()
-  if (!p || !kbCurrent.startsWith('haus:')) return p
-  const id = 'kb' + Date.now().toString(36)
-  const kopie = JSON.parse(JSON.stringify(p))
-  delete kopie.haus
-  // Herkunft merken: eine Kopie friert den Stand von heute ein und bekommt spaetere
-  // Korrekturen am mitgelieferten Profil NIE mit. Genau daran ist das GTA2-Lenken
-  // haengengeblieben - die verbesserten Schwellen lagen im Haus-Profil, gespielt
-  // wurde aber mit der alten Kopie. Mit der Herkunft kann die App das erkennen.
-  kopie.stammtVon = kbCurrent
-  kopie.name = (p.name || kbCurrent) + ' ' + window.tr('(eigene Kopie)')
-  kbProfiles[id] = kopie
-  kbCurrent = id
-  kbRenderProfiles()
-  return kopie
-}
-async function kbOpen() {
-  kbProfiles = await ipcRenderer.invoke('kb-get-profiles') || {}
-  const ids = Object.keys(kbProfiles)
-  if (!kbCurrent || !kbProfiles[kbCurrent]) kbCurrent = ids[0] || null
-  kbRenderProfiles(); kbRenderMap(); kbRefreshStatus()
-  kbEmpfLaden(); kbStickZeichnen(); kbHausAbgleich(); kbHuelleReset()
-  kbMonitorStart()
-}
-// Live-Pruefung: fragt den Zustand aus der Shell ab, solange der Reiter offen ist.
-// Bewusst Abholen statt Push - 10 Aufrufe/s sind guenstiger als ein Dauerstrom, und
-// beim Verlassen des Reiters hoert es garantiert auf (kein Leerlauf im Hintergrund).
-let kbMonTimer = null
-function kbMonitorStart() {
-  if (kbMonTimer) return
-  ipcRenderer.invoke('kb-bridge-monitor', true, kbProf() || null)
-  kbMonTimer = setInterval(async () => {
-    const el = document.getElementById('kbMonitor')
-    if (!el || !el.offsetParent) { kbMonitorStop(); return }   // Reiter zu -> aufhoeren
-    const d = await ipcRenderer.invoke('kb-bridge-monitor-read')
-    if (!d || typeof d !== 'object') return
-    kbStickWerte = { lx: d.lx || 0, ly: d.ly || 0, rt: d.rt || 0, pad: !!d.pad }
-    if (d.pad) kbHuelleProbe(d.lx || 0, d.ly || 0)
-    kbStickZeichnen(); kbHuelleZeigen()
-    const f = (v) => (v >= 0 ? ' ' : '') + (v || 0).toFixed(2)
-    const z = []
-    z.push(window.tr('Controller:') + ' ' + (d.pad ? window.tr('erkannt') : window.tr('KEINER GEFUNDEN')))
-    z.push(window.tr('Modus:') + ' ' + (kbAktiv ? window.tr('an – Tasten werden gesendet') : window.tr('aus – nur Anzeige, es wird nichts gesendet')))
-    if (kbAktiv) z.push(window.tr('Vordergrund:') + ' ' + (d.fokus ? window.tr('Tasten gehen durch') : window.tr('blockiert') + (d.spiel ? ' (' + window.tr('wartet auf') + ' ' + d.spiel + ')' : '')))
-    z.push('Stick  X=' + f(d.lx) + '   Y=' + f(d.ly) + '   RT=' + f(d.rt))
-    z.push(window.tr('Erkannt:') + ' ' + ((d.quellen && d.quellen.length) ? d.quellen.join(' + ') : '–'))
-    z.push(window.tr('Tasten gedrückt:') + ' ' + ((d.tasten && d.tasten.length) ? d.tasten.map(kbTastenName).join(' + ') : '–'))
-    el.textContent = z.join('\n')
-  }, 100)
-}
-// --- Was schafft DIESER Stick wirklich? ------------------------------------------
-// Ein Stick erreicht bei vollem Ausschlag nach oben seitlich nicht annaehernd 1.0 -
-// bei diesem Pad real nur 0.08..0.38. Liegt die Ansprechschwelle darueber, kann man
-// beim Laufen nicht lenken: genau der gemeldete Fehler. Statt zu schaetzen misst
-// Lumora die Huelle mit, waehrend man den Stick bewegt.
-let kbHuelle = { xBeiY: 0, yBeiX: 0, proben: 0 }
-function kbHuelleProbe(lx, ly) {
-  const ax = Math.abs(lx), ay = Math.abs(ly)
-  if (ay >= 0.85) { kbHuelle.xBeiY = Math.max(kbHuelle.xBeiY, ax); kbHuelle.proben++ }
-  if (ax >= 0.85) { kbHuelle.yBeiX = Math.max(kbHuelle.yBeiX, ay); kbHuelle.proben++ }
-}
-function kbHuelleReset() { kbHuelle = { xBeiY: 0, yBeiX: 0, proben: 0 }; kbHuelleZeigen() }
-function kbHuelleZeigen() {
-  const el = document.getElementById('kbHuelle'); if (!el) return
-  const w = kbEmpfWerte()
-  const m = Math.min(kbHuelle.xBeiY || 9, kbHuelle.yBeiX || 9)
-  if (kbHuelle.proben < 5 || m > 8) {
-    el.className = 'settings-hint'
-    el.textContent = window.tr('Noch nicht gemessen: Stick einmal ganz nach oben halten und dabei voll nach links und rechts drehen, dann dasselbe zur Seite.')
-    return
-  }
-  const p = (v) => Math.round(v * 100) + '%'
-  if (w.an >= m) {
-    el.className = 'settings-hint kb-warn'
-    el.textContent = window.tr('Zu hoch:') + ' ' + window.tr('Dein Stick erreicht auf der Gegenachse nur') + ' ' + p(m) + '. '
-      + window.tr('Bei "Ansprechen"') + ' ' + p(w.an) + ' ' + window.tr('kannst du beim Laufen nicht lenken.')
-  } else {
-    el.className = 'settings-hint'
-    el.textContent = window.tr('Gemessen: Gegenachse erreicht') + ' ' + p(m) + ' — '
-      + window.tr('"Ansprechen" liegt mit') + ' ' + p(w.an) + ' ' + window.tr('darunter, beides geht gleichzeitig.')
-  }
-}
-// Vorschlag aus der Messung: klar unter der Huelle bleiben (60 %), Loslassen mit
-// deutlichem Abstand darunter (55 % davon) gegen Flattern am Uebergang.
-function kbHuelleUebernehmen() {
-  const m = Math.min(kbHuelle.xBeiY || 0, kbHuelle.yBeiX || 0)
-  if (kbHuelle.proben < 5 || m <= 0) return
-  const an = Math.max(0.05, Math.min(0.60, m * 0.6))
-  const aus = Math.max(0.02, an * 0.55)
-  const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = Math.round(v * 100) }
-  set('kbAn', an); set('kbAus', aus)
-  kbEmpfindlichkeit()
-}
-// --- Kopie vs. mitgeliefertes Profil ---------------------------------------------
-// Eine eigene Kopie bekommt Korrekturen am Haus-Profil nicht mit. Das still zu
-// lassen hat gekostet: gespielt wurde monatelang mit veralteten Schwellen.
-function kbHausAbgleich() {
-  const box = document.getElementById('kbHausHinweis'); if (!box) return
-  const p = kbProf()
-  const h = p && p.stammtVon ? kbProfiles[p.stammtVon] : null
-  if (!h) { box.style.display = 'none'; return }
-  const anders = []
-  for (const t of (h.tasten || [])) {
-    if (t.schwelle === undefined) continue
-    const e = (p.tasten || []).find(x => x.quelle === t.quelle)
-    if (!e) { anders.push(t.quelle); continue }
-    if (e.schwelle !== t.schwelle || e.loesen !== t.loesen) anders.push(t.quelle)
-  }
-  if (!anders.length) { box.style.display = 'none'; return }
-  box.style.display = ''
-  const txt = document.getElementById('kbHausText')
-  if (txt) txt.textContent = window.tr('Das mitgelieferte Profil') + ' „' + (h.name || p.stammtVon) + '" '
-    + window.tr('wurde seit deiner Kopie verbessert') + ' (' + anders.length + ' ' + window.tr('Zuordnungen') + ').'
-}
-function kbHausUebernehmen() {
-  const p = kbEigeneKopie(); if (!p || !p.stammtVon) return
-  const h = kbProfiles[p.stammtVon]; if (!h) return
-  for (const t of (h.tasten || [])) {
-    const e = (p.tasten || []).find(x => x.quelle === t.quelle)
-    if (!e) { p.tasten.push(JSON.parse(JSON.stringify(t))); continue }
-    if (t.schwelle !== undefined) { e.schwelle = t.schwelle; e.loesen = t.loesen }
-  }
-  if (h.ruhe !== undefined) p.ruhe = h.ruhe
-  kbSave(); kbEmpfLaden(); kbRenderMap(); kbHausAbgleich()
-  if (kbAktiv) ipcRenderer.invoke('kb-bridge-start', p)
-}
-
-// --- Empfindlichkeit: Regler + Live-Bild des Sticks ------------------------------
-// Die Werte gehoeren ins PROFIL (nicht global): jeder Controller erreicht bei vollem
-// Ausschlag in einer Richtung auf der anderen Achse andere Maximalwerte - real
-// gemessen nur 0.08..0.38. Ein fester Wert kann das nicht treffen.
-let kbStickWerte = { lx: 0, ly: 0, rt: 0, pad: false }
-function kbEmpfWerte() {
-  const p = kbProf()
-  const erste = p && (p.tasten || []).find(t => t.schwelle !== undefined && /^L[XY]/.test(t.quelle))
-  return {
-    ruhe: (p && p.ruhe !== undefined) ? p.ruhe : 0.18,
-    an:   erste ? erste.schwelle : 0.13,
-    aus:  erste ? erste.loesen   : 0.07,
-  }
-}
-function kbEmpfLaden() {
-  const w = kbEmpfWerte()
-  const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = Math.round(v * 100) }
-  set('kbRuhe', w.ruhe); set('kbAn', w.an); set('kbAus', w.aus)
-  kbEmpfAnzeige(w)
-}
-function kbEmpfAnzeige(w) {
-  const t = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = Math.round(v * 100) + '%' }
-  t('kbRuheVal', w.ruhe); t('kbAnVal', w.an); t('kbAusVal', w.aus)
-}
-function kbEmpfindlichkeit() {
-  const p = kbEigeneKopie(); if (!p) return
-  const g = (id) => (parseInt((document.getElementById(id) || {}).value, 10) || 0) / 100
-  let ruhe = g('kbRuhe'), an = g('kbAn'), aus = g('kbAus')
-  // Reihenfolge erzwingen: loslassen < ansprechen. Sonst flattert die Taste - genau
-  // der Fehler, der das Fahren unbrauchbar gemacht hat.
-  if (aus >= an) { aus = Math.max(0.02, an - 0.03); const e = document.getElementById('kbAus'); if (e) e.value = Math.round(aus * 100) }
-  p.ruhe = ruhe
-  // Ab jetzt sind es EIGENE Werte: Lumora zieht dieses Profil nicht mehr still auf
-  // den Stand des mitgelieferten Profils nach.
-  p.eigeneWerte = true
-  for (const t of (p.tasten || [])) {
-    if (t.schwelle === undefined || !/^L[XY]/.test(t.quelle)) continue
-    t.schwelle = an; t.loesen = aus
-  }
-  kbEmpfAnzeige({ ruhe, an, aus })
-  kbHuelleZeigen(); kbHausAbgleich()
-  kbSave()
-  if (kbMonTimer && !kbAktiv) ipcRenderer.invoke('kb-bridge-monitor', true, p)   // Beobachter mit neuen Werten
-  if (kbAktiv) ipcRenderer.invoke('kb-bridge-start', p)   // sofort wirksam
-}
-// Live-Bild: Stick-Position, Zonen-Ringe, ausloesende Richtungen. Zeigt unmittelbar,
-// warum eine Bewegung (nicht) ankommt.
-function kbStickZeichnen() {
-  const cv = document.getElementById('kbStickCv'); if (!cv) return
-  const dpr = window.devicePixelRatio || 1
-  const S = 180
-  if (cv.width !== Math.round(S * dpr)) { cv.width = Math.round(S * dpr); cv.height = Math.round(S * dpr) }
-  const c = cv.getContext('2d')
-  c.setTransform(dpr, 0, 0, dpr, 0, 0)
-  c.clearRect(0, 0, S, S)
-  const w = kbEmpfWerte(), M = S / 2, R = S / 2 - 12
-  const lx = kbStickWerte.lx, ly = kbStickWerte.ly
-  const r = Math.sqrt(lx * lx + ly * ly)
-  // Aussenkreis
-  c.strokeStyle = 'rgba(255,255,255,.14)'; c.lineWidth = 1
-  c.beginPath(); c.arc(M, M, R, 0, 6.2832); c.stroke()
-  // Ruhezone
-  c.fillStyle = 'rgba(255,255,255,.05)'
-  c.beginPath(); c.arc(M, M, R * w.ruhe, 0, 6.2832); c.fill()
-  // Schwellen als Achsen-Baender (so wirken sie wirklich: pro Achse, nicht radial)
-  const band = (v, farbe) => {
-    c.strokeStyle = farbe; c.lineWidth = 1; c.setLineDash([3, 3])
-    for (const s of [-1, 1]) {
-      c.beginPath(); c.moveTo(M + s * R * v, M - R); c.lineTo(M + s * R * v, M + R); c.stroke()
-      c.beginPath(); c.moveTo(M - R, M + s * R * v); c.lineTo(M + R, M + s * R * v); c.stroke()
-    }
-    c.setLineDash([])
-  }
-  band(w.aus, 'rgba(255,200,60,.35)')
-  band(w.an, 'rgba(80,220,140,.55)')
-  // Achsenkreuz
-  c.strokeStyle = 'rgba(255,255,255,.10)'
-  c.beginPath(); c.moveTo(M, M - R); c.lineTo(M, M + R); c.moveTo(M - R, M); c.lineTo(M + R, M); c.stroke()
-  // Welche Richtungen loesen aus? (gleiche Regel wie in der Bruecke)
-  const aktiv = []
-  if (r >= w.ruhe) {
-    if (-lx >= w.an) aktiv.push('◀'); if (lx >= w.an) aktiv.push('▶')
-    if (ly >= w.an) aktiv.push('▲'); if (-ly >= w.an) aktiv.push('▼')
-  }
-  // Stick-Punkt (Y nach oben = positiv, Bildschirm-Y ist umgekehrt)
-  const px = M + lx * R, py = M - ly * R
-  c.strokeStyle = 'rgba(120,200,255,.45)'; c.lineWidth = 1.5
-  c.beginPath(); c.moveTo(M, M); c.lineTo(px, py); c.stroke()
-  c.fillStyle = aktiv.length ? '#4fe08a' : (kbStickWerte.pad ? '#7ab6ff' : '#555')
-  c.shadowColor = c.fillStyle; c.shadowBlur = aktiv.length ? 12 : 4
-  c.beginPath(); c.arc(px, py, 6, 0, 6.2832); c.fill()
-  c.shadowBlur = 0
-  // Ausloesende Richtungen als Text
-  c.font = '13px Consolas, monospace'; c.textAlign = 'center'
-  c.fillStyle = aktiv.length ? '#4fe08a' : 'rgba(255,255,255,.28)'
-  c.fillText(aktiv.length ? aktiv.join(' ') : (kbStickWerte.pad ? '–' : window.tr('kein Pad')), M, S - 2)
-}
-
-let kbTraceAn = false
-async function kbTraceToggle() {
-  const r = await ipcRenderer.invoke("kb-bridge-trace", !kbTraceAn)
-  kbTraceAn = !!(r && r.an)
-  const b = document.getElementById("kbTraceBtn"), i = document.getElementById("kbTraceInfo")
-  if (b) b.textContent = kbTraceAn ? window.tr("⏹ Mitschnitt beenden") : window.tr("⏺ Mitschnitt starten")
-  if (i) i.textContent = kbTraceAn
-    ? window.tr("Läuft. Jetzt das Spiel starten und ein paar Bewegungen machen, danach hier beenden.")
-    : (r && r.pfad ? window.tr("Gespeichert:") + " " + r.pfad : "")
-}
-function kbTraceOeffnen() { ipcRenderer.invoke("open-data-folder") }
-function kbMonitorStop() {
-  if (kbMonTimer) { clearInterval(kbMonTimer); kbMonTimer = null }
-  ipcRenderer.invoke('kb-bridge-monitor', false)
-}
-// --- Profil-Karte, Spielzuordnung, Uebersicht ------------------------------------
-// Kern der Ueberarbeitung: die Frage "welches Profil greift bei welchem Spiel" liess
-// sich vorher nirgends beantworten. Der Spielbezug stand nur als roher exe-Name in
-// einer Hinweiszeile, war nicht aenderbar, und bei zwei Profilen fuer dasselbe Spiel
-// war voellig offen, welches gewinnt.
-function kbHerkunft(id, p) {
-  if (String(id).indexOf('haus:') === 0) return { text: window.tr('Mitgeliefert'), klasse: 'kb-badge-haus' }
-  if (p && p.stammtVon) return { text: window.tr('Eigene Kopie'), klasse: 'kb-badge-kopie' }
-  if (p && p.autor && p.autor !== 'Lumora') return { text: window.tr('Importiert'), klasse: 'kb-badge-import' }
-  return { text: window.tr('Selbst angelegt'), klasse: 'kb-badge-eigen' }
-}
-function kbExeName(pfad) {
-  const s = String(pfad || '')
-  const i = Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/'))
-  return (i >= 0 ? s.slice(i + 1) : s).toLowerCase()
-}
-// Welches Profil gewinnt fuer eine exe? Gleiche Reihenfolge wie in der Shell:
-// eigene Profile schlagen mitgelieferte (sonst spielt man mit dem falschen).
-function kbProfilFuerExe(exe) {
-  if (!exe || !kbProfiles) return null
-  const ids = Object.keys(kbProfiles)
-  const treffer = ids.filter(id => kbExeName(kbProfiles[id].spiel) === exe)
-  if (!treffer.length) return null
-  const eigene = treffer.filter(id => id.indexOf('haus:') !== 0)
-  return { id: (eigene[0] || treffer[0]), alle: treffer }
-}
-function kbRenderSpielWahl() {
-  const sel = document.getElementById('kbSpielSel'); if (!sel) return
-  const p = kbProf()
-  const jetzt = p ? kbExeName(p.spiel) : ''
-  // Aus der Bibliothek waehlen statt exe-Namen tippen - niemand kennt die auswendig.
-  const eintraege = (typeof games !== 'undefined' && Array.isArray(games) ? games : [])
-    .map(g => ({ exe: kbExeName(g.path), name: g.name }))
-    .filter(g => g.exe)
-  const gesehen = new Set()
-  let opts = '<option value="">' + window.tr('Jedes Spiel im Vordergrund') + '</option>'
-  for (const g of eintraege) {
-    if (gesehen.has(g.exe)) continue
-    gesehen.add(g.exe)
-    opts += '<option value="' + anEsc(g.exe) + '"' + (g.exe === jetzt ? ' selected' : '') + '>'
-          + anEsc(g.name) + ' (' + anEsc(g.exe) + ')</option>'
-  }
-  // Ein getauschtes Profil kann ein Spiel nennen, das hier gar nicht installiert ist -
-  // das darf beim Speichern nicht still verlorengehen.
-  if (jetzt && !gesehen.has(jetzt))
-    opts += '<option value="' + anEsc(jetzt) + '" selected>' + anEsc(jetzt) + ' — '
-          + window.tr('nicht in der Bibliothek') + '</option>'
-  sel.innerHTML = opts
-}
-function kbSpielSetzen(exe) {
-  const p = kbEigeneKopie(); if (!p) return
-  p.spiel = exe || ''
-  kbSave()
-  kbRenderProfiles(); kbRenderZuordnung()
-}
-function kbRenderKarte() {
-  const p = kbProf()
-  const setz = (id, txt) => { const e = document.getElementById(id); if (e) e.textContent = txt }
-  const karte = document.getElementById('kbKarte')
-  if (!p) { if (karte) karte.style.display = 'none'; return }
-  if (karte) karte.style.display = ''
-  const h = kbHerkunft(kbCurrent, p)
-  setz('kbKarteName', p.name || kbCurrent)
-  const hb = document.getElementById('kbKarteHerkunft')
-  if (hb) { hb.textContent = h.text; hb.className = 'kb-badge ' + h.klasse }
-  const n = (p.tasten || []).length
-  setz('kbKarteAnzahl', n + ' ' + window.tr(n === 1 ? 'Zuordnung' : 'Zuordnungen'))
-  setz('kbKarteNotiz', p.notiz || '')
-  // Klartext statt Rätselraten: greift dieses Profil ueberhaupt, oder wird es von
-  // einem anderen verdeckt?
-  const w = document.getElementById('kbKarteWirkung')
-  if (w) {
-    const exe = kbExeName(p.spiel)
-    if (!exe) {
-      w.className = 'settings-hint'
-      w.textContent = window.tr('Ohne Spielbezug startet dieses Profil nie von selbst – nur von Hand über den Schalter oben.')
-    } else {
-      const g = kbProfilFuerExe(exe)
-      if (g && g.id !== kbCurrent) {
-        w.className = 'settings-hint kb-warn'
-        w.textContent = window.tr('Greift NICHT:') + ' ' + window.tr('für dieses Spiel gewinnt') + ' „'
-          + (kbProfiles[g.id].name || g.id) + '". ' + window.tr('Eigene Profile schlagen mitgelieferte.')
-      } else {
-        w.className = 'settings-hint'
-        w.textContent = window.tr('Startet automatisch, sobald dieses Spiel im Vordergrund ist.')
-      }
-    }
-  }
-  kbRenderSpielWahl()
-}
-// Gegenueberstellung Bibliothek ↔ Profile. Erst hier sieht man Luecken (Spiel ohne
-// Profil) und Dopplungen (zwei Profile, eines davon wirkungslos).
-function kbRenderZuordnung() {
-  const box = document.getElementById('kbZuordnung'); if (!box || !kbProfiles) return
-  const zeilen = []
-  const benutzt = new Set()
-  const lib = (typeof games !== 'undefined' && Array.isArray(games) ? games : [])
-  for (const g of lib) {
-    const exe = kbExeName(g.path); if (!exe) continue
-    const t = kbProfilFuerExe(exe)
-    if (!t) continue
-    t.alle.forEach(id => benutzt.add(id))
-    const verdeckt = t.alle.length > 1
-      ? t.alle.filter(id => id !== t.id).map(id => kbProfiles[id].name || id)
-      : []
-    zeilen.push({ spiel: g.name, exe, profil: kbProfiles[t.id].name || t.id, id: t.id, verdeckt })
-  }
-  // Profile, deren Spiel hier nicht installiert ist - sonst wundert man sich, wo sie
-  // geblieben sind.
-  const ohne = Object.keys(kbProfiles).filter(id => !benutzt.has(id))
-  let html = ''
-  if (zeilen.length) {
-    html += '<div class="kb-tab">'
-      + zeilen.map(z =>
-          '<div class="kb-tab-zeile' + (z.id === kbCurrent ? ' kb-tab-aktiv' : '') + '">'
-          + '<span class="kb-tab-spiel">' + anEsc(z.spiel) + '</span>'
-          + '<span class="kb-tab-pfeil">→</span>'
-          + '<span>' + anEsc(z.profil)
-          + (z.verdeckt.length ? ' <span class="kb-warn">· ' + window.tr('verdeckt') + ' '
-              + anEsc(z.verdeckt.join(', ')) + '</span>' : '')
-          + '</span>'
-          + '<button class="btn-browse" onclick="kbSelectProfile(' + JSON.stringify(z.id).replace(/"/g, '&quot;') + ')">'
-          + window.tr('Öffnen') + '</button>'
-          + '</div>').join('')
-      + '</div>'
-  } else {
-    html += '<p class="settings-hint">' + window.tr('Noch kein Spiel aus deiner Bibliothek hat ein Profil. Wähle oben unter „Gilt für" ein Spiel aus.') + '</p>'
-  }
-  if (ohne.length) {
-    html += '<p class="settings-hint" style="margin-top:10px">' + window.tr('Ohne Spiel aus deiner Bibliothek:') + ' '
-      + ohne.map(id => anEsc(kbProfiles[id].name || id)
-          + (kbProfiles[id].spiel ? ' (' + anEsc(kbExeName(kbProfiles[id].spiel)) + ')' : ' – ' + window.tr('kein Spielbezug'))).join(' · ')
-      + '</p>'
-  }
-  box.innerHTML = html
-}
-function kbNeuesProfil() {
-  const id = 'kb' + Date.now().toString(36)
-  kbProfiles[id] = { name: window.tr('Neues Profil'), spiel: '', tasten: [] }
-  kbCurrent = id
-  kbSave(); kbRenderProfiles(); kbRenderMap(); kbRenderZuordnung()
-}
-
-function kbRenderProfiles() {
-  const sel = document.getElementById('kbProfileSel'); if (!sel || !kbProfiles) return
-  const ids = Object.keys(kbProfiles)
-  sel.innerHTML = ids.length
-    ? ids.map(id => `<option value="${anEsc(id)}" ${id === kbCurrent ? 'selected' : ''}>${anEsc(kbProfiles[id].name || id)}</option>`).join('')
-    : `<option value="">${window.tr('Noch kein Profil – importieren oder zuweisen')}</option>`
-  kbRenderKarte(); kbRenderZuordnung()
-}
-function kbSelectProfile(id) {
-  setTimeout(() => { kbEmpfLaden(); kbHausAbgleich(); kbHuelleReset(); if (kbMonTimer && !kbAktiv) ipcRenderer.invoke('kb-bridge-monitor', true, kbProf() || null) }, 0)   // Regler + Beobachter nachziehen
-  if (kbProfiles && kbProfiles[id]) { kbCurrent = id; kbRenderProfiles(); kbRenderMap() } }
-function kbRenderMap() {
-  const box = document.getElementById('kbMapList'); if (!box) return
-  const p = kbProf()
-  if (!p || !Array.isArray(p.tasten) || !p.tasten.length) { box.innerHTML = ''; return }
-  box.innerHTML = '<div style="display:grid;grid-template-columns:1fr auto 1fr auto;gap:6px 10px;align-items:center;font-size:13px">'
-    + p.tasten.map((t, i) =>
-        `<span>${anEsc(KB_QUELLE_NAMEN[t.quelle] || t.quelle)}</span>`
-      + `<span style="color:var(--text-dim)">→</span>`
-      + `<span><b>${anEsc(kbTastenName(t.scancode, !!t.ext))}</b>${t.aktion ? ' <span style="color:var(--text-dim)">· ' + anEsc(t.aktion) + '</span>' : ''}</span>`
-      + `<button class="btn-cancel" onclick="kbDeleteMap(${i})" title="${window.tr('Zuordnung entfernen')}">✕</button>`
-      ).join('')
-    + '</div>'
-}
-function kbDeleteMap(i) {
-  const p = kbEigeneKopie(); if (!p) return
-  p.tasten.splice(i, 1); kbSave(); kbRenderMap()
-  if (kbAktiv) ipcRenderer.invoke('kb-bridge-start', p)   // Aenderung sofort wirksam
-}
-async function kbDeleteProfile() {
-  const p = kbProf(); if (!p) return
-  // Haus-Profile liegen im Programmordner - "Loeschen" wuerde sie beim naechsten
-  // Start wieder einlesen. Ehrlich sagen statt so tun, als haette es geklappt.
-  if (kbCurrent.startsWith('haus:')) { showToast(window.tr('Mitgelieferte Profile lassen sich nicht löschen.')); return }
-  if (!await lumoraConfirm(window.tr('Profil löschen?') + '\n\n' + (p.name || kbCurrent))) return
-  delete kbProfiles[kbCurrent]
-  kbCurrent = Object.keys(kbProfiles)[0] || null
-  kbSave(); kbRenderProfiles(); kbRenderMap()
-}
-// --- Export/Import: EINE Datei je Profil, damit sie sich direkt verschicken laesst
-async function kbExport() {
-  const p = kbProf(); if (!p) return
-  const datei = { lumoraProfil: 1, name: p.name || kbCurrent, spiel: p.spiel || '', modus: 'tastatur',
-                  autor: p.autor || '', notiz: p.notiz || '', tasten: p.tasten || [] }
-  const r = await ipcRenderer.invoke('kb-export-profile', datei)
-  if (r && r.ok) showToast(window.tr('Profil gespeichert:') + ' ' + r.datei)
-}
-async function kbImport() {
-  const r = await ipcRenderer.invoke('kb-import-profile')
-  if (!r || !r.ok) { if (r && r.error) showToast(window.tr('Profil konnte nicht gelesen werden.')); return }
-  const id = 'kb' + Date.now().toString(36)
-  kbProfiles[id] = r.profil
-  kbCurrent = id; kbSave(); kbRenderProfiles(); kbRenderMap()
-  showToast(window.tr('Profil importiert:') + ' ' + (r.profil.name || id))
-}
-// --- Aktivieren/Deaktivieren
-async function kbToggle() {
-  if (kbAktiv) { await ipcRenderer.invoke('kb-bridge-stop'); kbAktiv = false; kbRefreshStatus(); return }
-  const p = kbProf()
-  if (!p || !Array.isArray(p.tasten) || !p.tasten.length) { showToast(window.tr('Kein Profil mit Zuordnungen gewählt.')); return }
-  const r = await ipcRenderer.invoke('kb-bridge-start', p)
-  kbAktiv = !!(r && r.ok)
-  if (!kbAktiv) showToast(window.tr('Tastatur-Modus konnte nicht starten.'))
-  kbRefreshStatus()
-}
-async function kbRefreshStatus() {
-  const s = await ipcRenderer.invoke('kb-bridge-status') || {}
-  kbAktiv = !!s.active
-  const lbl = document.getElementById('kbStatusLabel'), btn = document.getElementById('kbToggleBtn')
-  if (lbl) lbl.textContent = window.tr('Tastatur-Modus:') + ' ' + (kbAktiv ? window.tr('an') : window.tr('aus'))
-  if (btn) btn.textContent = kbAktiv ? window.tr('⏹ Deaktivieren') : window.tr('▶ Aktivieren')
-  const lampe = document.getElementById('kbLampe')
-  if (lampe) lampe.className = 'kb-lampe' + (kbAktiv ? ' kb-lampe-an' : '')
-  // Detailzeile beantwortet die zwei Fragen, die man sonst nirgends beantwortet bekam:
-  // WELCHES Profil laeuft gerade, und wofuer gilt es?
-  const det = document.getElementById('kbStatusDetail')
-  if (det) {
-    if (kbAktiv) {
-      det.textContent = (s.name || window.tr('Profil ohne Namen'))
-        + ' · ' + (s.spiel ? window.tr('für') + ' ' + s.spiel : window.tr('jedes Spiel im Vordergrund'))
-    } else {
-      const p = kbProf()
-      det.textContent = p
-        ? window.tr('Bereit:') + ' ' + (p.name || kbCurrent)
-          + (p.spiel ? ' · ' + window.tr('startet mit') + ' ' + kbExeName(p.spiel) : ' · ' + window.tr('nur von Hand'))
-        : window.tr('Kein Profil ausgewählt.')
-    }
-  }
-}
-// --- Mapping-Assistent: "Druecke die Taste fuer X" statt Formular ---------------
-// Der Nutzer drueckt eine echte TASTATUR-Taste; wir lesen ihren Scancode aus dem
-// KeyboardEvent (event.code -> Scancode-Tabelle). Die Gamepad-Quelle gibt der
-// Assistent vor - genau umgekehrt zum ViGEm-Assistenten, wo das Ziel feststeht.
-let kbAssistIdx = -1
-const KB_CODE_ZU_SCAN = {
-  Escape:[1,0], Digit1:[2,0], Digit2:[3,0], Digit3:[4,0], Digit4:[5,0], Digit5:[6,0], Digit6:[7,0],
-  Digit7:[8,0], Digit8:[9,0], Digit9:[10,0], Digit0:[11,0], Backspace:[14,0], Tab:[15,0],
-  KeyQ:[16,0], KeyW:[17,0], KeyE:[18,0], KeyR:[19,0], KeyT:[20,0], KeyY:[21,0], KeyU:[22,0],
-  KeyI:[23,0], KeyO:[24,0], KeyP:[25,0], Enter:[28,0], ControlLeft:[29,0],
-  KeyA:[30,0], KeyS:[31,0], KeyD:[32,0], KeyF:[33,0], KeyG:[34,0], KeyH:[35,0], KeyJ:[36,0], KeyK:[37,0], KeyL:[38,0],
-  ShiftLeft:[42,0], KeyZ:[44,0], KeyX:[45,0], KeyC:[46,0], KeyV:[47,0], KeyB:[48,0], KeyN:[49,0], KeyM:[50,0],
-  ShiftRight:[54,0], AltLeft:[56,0], Space:[57,0], CapsLock:[58,0],
-  F1:[59,0], F2:[60,0], F3:[61,0], F4:[62,0], F5:[63,0], F6:[64,0], F7:[65,0], F8:[66,0], F9:[67,0], F10:[68,0], F11:[87,0], F12:[88,0],
-  Numpad7:[71,0], Numpad8:[72,0], Numpad9:[73,0], Numpad4:[75,0], Numpad5:[76,0], Numpad6:[77,0],
-  Numpad1:[79,0], Numpad2:[80,0], Numpad3:[81,0], Numpad0:[82,0],
-  ArrowUp:[72,1], ArrowDown:[80,1], ArrowLeft:[75,1], ArrowRight:[77,1],
-  Home:[71,1], End:[79,1], PageUp:[73,1], PageDown:[81,1], Insert:[82,1], Delete:[83,1],
-  NumpadEnter:[28,1], ControlRight:[29,1], AltRight:[56,1],
-}
-function kbAssistStart() {
-  if (!kbProf()) {   // ohne Profil: eines anlegen, sonst laeuft der Assistent ins Leere
-    const id = 'kb' + Date.now().toString(36)
-    kbProfiles = kbProfiles || {}
-    kbProfiles[id] = { name: window.tr('Neues Tastatur-Profil'), spiel: '', tasten: [] }
-    kbCurrent = id; kbRenderProfiles()
-  }
-  kbAssistIdx = 0
-  document.getElementById('kbAssistBox').style.display = 'block'
-  addEventListener('keydown', kbAssistKey, true)
-  kbAssistZeig()
-}
-function kbAssistZeig() {
-  const t = document.getElementById('kbAssistText')
-  if (kbAssistIdx >= KB_ASSIST.length) { kbAssistStop(); showToast(window.tr('Belegung fertig.')); return }
-  const s = KB_ASSIST[kbAssistIdx]
-  t.innerHTML = window.tr('Drücke die Tastatur-Taste für:') + ' <b>' + anEsc(window.tr(s.frage)) + '</b>'
-    + '<div style="color:var(--text-dim);margin-top:4px">' + window.tr('wird belegt auf') + ' '
-    + anEsc(KB_QUELLE_NAMEN[s.quelle] || s.quelle) + ' · ' + (kbAssistIdx + 1) + '/' + KB_ASSIST.length + '</div>'
-}
-function kbAssistKey(e) {
-  if (kbAssistIdx < 0) return
-  e.preventDefault(); e.stopPropagation()
-  if (e.key === 'Escape') { kbAssistStop(); return }
-  const m = KB_CODE_ZU_SCAN[e.code]
-  if (!m) return                                    // unbekannte Taste: einfach ignorieren
-  const s = KB_ASSIST[kbAssistIdx], p = kbEigeneKopie()
-  p.tasten = (p.tasten || []).filter(x => x.quelle !== s.quelle)   // Quelle neu belegen
-  const eintrag = { quelle: s.quelle, scancode: m[0], ext: !!m[1], aktion: window.tr(s.frage) }
-  if (/^(L|R)(X|Y)[-+]$/.test(s.quelle) || s.quelle === 'LT' || s.quelle === 'RT') {
-    eintrag.schwelle = 0.40; eintrag.loesen = 0.25   // Analogquelle -> Hysterese mitgeben
-  }
-  p.tasten.push(eintrag)
-  kbAssistIdx++; kbSave(); kbRenderMap(); kbAssistZeig()
-}
-function kbAssistSkip() { kbAssistIdx++; kbAssistZeig() }
-function kbAssistStop() {
-  kbAssistIdx = -1
-  removeEventListener('keydown', kbAssistKey, true)
-  const b = document.getElementById('kbAssistBox'); if (b) b.style.display = 'none'
-  if (kbAktiv) { const p = kbProf(); if (p) ipcRenderer.invoke('kb-bridge-start', p) }
-}
-ipcRenderer.on('kb-bridge-active', () => kbRefreshStatus())
-
 async function ibOpen() {   // beim Oeffnen des Tabs: alles frisch laden
   ibProfiles = await ipcRenderer.invoke('input-bridge-get-profiles') || { profiles: {}, gameLinks: {}, defaultProfile: null }
   if (!ibProfiles.profiles) ibProfiles.profiles = {}
@@ -3806,7 +2907,6 @@ async function ibOpen() {   // beim Oeffnen des Tabs: alles frisch laden
   const ids = Object.keys(ibProfiles.profiles)
   if (!ibCurrent || !ibProfiles.profiles[ibCurrent]) ibCurrent = ids[0] || null
   ibRenderProfiles(); ibRenderMap(); ibRenderLinks(); ibRefreshDevices(); ibRefreshStatus()
-  kbOpen()   // Tastatur-Modus teilt sich den Reiter, hat aber eigenen Zustand
 }
 function ibRenderProfiles() {
   const sel = document.getElementById('ibProfileSel')
@@ -4746,7 +3846,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setTray').checked = !!s.minimizeToTray
       document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
       document.getElementById('setIbAuto').checked = s.inputBridgeAutoActivate !== false
-      { const e = document.getElementById('setKbAuto'); if (e) e.checked = s.kbBridgeAutoActivate !== false }
       { const e = document.getElementById('setNetStats'); if (e) e.checked = !!s.netStats; netStatsAn = !!s.netStats }
       document.getElementById('setOsdEnabled').checked = !!s.osdEnabled
       document.getElementById('setOsdTheme').value = s.osdTheme || 'bar'
@@ -4833,7 +3932,6 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         minimizeToTray: document.getElementById('setTray').checked,
         steamGridDbKey: document.getElementById('setSgdbKey').value.trim(),
         inputBridgeAutoActivate: document.getElementById('setIbAuto').checked,
-        kbBridgeAutoActivate: (document.getElementById('setKbAuto') || { checked: true }).checked,
         netStats: (document.getElementById('setNetStats') || { checked: false }).checked,
       })
     }
