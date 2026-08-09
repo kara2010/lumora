@@ -363,48 +363,12 @@
             <label>Performance-Overlay (OSD)</label>
             <p class="settings-hint">Blendet GPU-/CPU-Auslastung, Temperaturen und FPS über dem Spiel ein – funktioniert über randlos laufenden Spielen.</p>
             <p class="settings-hint" id="osdSourcesInfo" style="display:none"></p>
-            <span class="osd-field-label" style="margin-top:2px">Ein-/ausblenden</span>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Tastatur">⌨️</span>
-              <span class="hotkey-display" id="osdKbHotkeyDisplay">Alt+O</span>
-              <button class="btn-browse" id="osdKbHotkeyBtn" onclick="toggleHotkeyCapture('osd')">Ändern</button>
-              <button class="btn-cancel" onclick="clearHotkey('osd')">Aus</button>
-            </div>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Gamepad">🎮</span>
-              <span class="hotkey-display" id="gpOsdHotkeyDisplay">—</span>
-              <button class="btn-browse" id="gpOsdHotkeyCaptureBtn" onclick="toggleGpHotkeyCapture('osd')">Aufnehmen</button>
-              <button class="btn-cancel" onclick="clearGpHotkey('osd')">Aus</button>
-            </div>
-            <p class="settings-hint" id="gpOsdHotkeyHint" style="display:none"></p>
-            <span class="osd-field-label" style="margin-top:6px">Konfigurationsmodus (Live-Edit direkt am OSD)</span>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Tastatur">⌨️</span>
-              <span class="hotkey-display" id="osdEditHotkeyDisplay">Alt+Shift+O</span>
-              <button class="btn-browse" id="osdEditHotkeyBtn" onclick="toggleHotkeyCapture('osdEdit')">Ändern</button>
-              <button class="btn-cancel" onclick="clearHotkey('osdEdit')">Aus</button>
-            </div>
             <div class="setting-toggle-row">
               <span class="setting-toggle-label">Overlay anzeigen</span>
               <label class="switch"><input type="checkbox" id="setOsdEnabled" onchange="onOsdSettingChange(true)"><span class="switch-slider"></span></label>
             </div>
-            <div class="osd-field">
-              <span class="osd-field-label">Grafikkarte</span>
-              <select id="setOsdGpu" class="sort-select" style="flex:1" onchange="onOsdGpuChange()">
-                <option value="auto">Automatisch (schnellste)</option>
-              </select>
-            </div>
-            <p class="settings-hint" id="osdGpuHint" style="display:none"></p>
-            <div class="setting-toggle-row">
-              <span class="setting-toggle-label">Afterburner-OSD ein-/ausblenden</span>
-            </div>
-            <div class="hotkey-row">
-              <span class="hotkey-kind" title="Tastatur">⌨️</span>
-              <span class="hotkey-display" id="osdAbHotkeyDisplay">Alt+B</span>
-              <button class="btn-browse" id="osdAbHotkeyBtn" onclick="toggleHotkeyCapture('osdAb')">Ändern</button>
-              <button class="btn-cancel" onclick="clearHotkey('osdAb')">Aus</button>
-            </div>
-            <p class="settings-hint">Blendet das OSD von MSI Afterburner aus bzw. wieder ein – derselbe Schalter, den auch Afterburners eigener OSD-Hotkey nutzt. Das Lumora-Panel (eigener Hotkey oben) bleibt davon <b>unabhängig</b>: Afterburner z. B. links, Lumora rechts.</p>
+
+            <h3 class="settings-sec">Darstellung</h3>
             <div class="osd-field">
               <span class="osd-field-label">Design</span>
               <select id="setOsdTheme" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
@@ -414,24 +378,6 @@
                 <option value="neon">Neon</option>
                 <option value="strip">Leiste (horizontal)</option>
                 <option value="tiles">Kacheln (horizontal)</option>
-              </select>
-            </div>
-            <div class="osd-values-block">
-              <span class="osd-field-label">Werte</span>
-              <div id="osdFieldsUi" class="osd-fields"></div>
-              <p class="settings-hint">Alles per Drag & Drop: Werte ziehen, ganze Gruppen am ⠿-Griff packen – die Liste ordnet sich live um, das OSD übernimmt es sofort.</p>
-            </div>
-            <div class="osd-field" id="osdSetupRow" style="display:none">
-              <span class="osd-field-label">Einrichtung</span>
-              <span class="settings-hint" style="flex:1;margin:0">Abgelehnt – FPS und CPU-Sensorwerte fehlen.</span>
-              <button class="btn-browse" onclick="setupOsdNow()">Jetzt einrichten</button>
-            </div>
-            <div class="osd-field">
-              <span class="osd-field-label">FPS-Quelle</span>
-              <select id="setOsdFpsSource" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
-                <option value="auto">Automatisch (RTSS, sonst PresentMon)</option>
-                <option value="rtss">Nur RTSS/Afterburner</option>
-                <option value="presentmon">Nur PresentMon (ohne RTSS)</option>
               </select>
             </div>
             <div class="osd-field">
@@ -454,6 +400,69 @@
                 <button class="osd-corner" data-corner="bl" onclick="setOsdCorner('bl')" title="Unten links">◣</button>
                 <button class="osd-corner" data-corner="br" onclick="setOsdCorner('br')" title="Unten rechts">◢</button>
               </div>
+            </div>
+
+            <h3 class="settings-sec">Werte &amp; Reihenfolge</h3>
+            <p class="settings-hint">Jede Karte ist eine Gruppe im Overlay – in genau dieser Reihenfolge, mit genau diesen Werten.</p>
+            <div class="osd-board-tip">
+              <span class="grip">⠿</span>
+              <span>Zum Umsortieren ziehen: Werte innerhalb ihrer Gruppe, ganze Gruppen am Griff links. Das Overlay übernimmt es sofort.</span>
+            </div>
+            <div id="osdFieldsUi" class="osd-board"></div>
+
+            <h3 class="settings-sec">Tastenkürzel</h3>
+            <span class="osd-field-label" style="margin-top:2px">Ein-/ausblenden</span>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Tastatur">⌨️</span>
+              <span class="hotkey-display" id="osdKbHotkeyDisplay">Alt+O</span>
+              <button class="btn-browse" id="osdKbHotkeyBtn" onclick="toggleHotkeyCapture('osd')">Ändern</button>
+              <button class="btn-cancel" onclick="clearHotkey('osd')">Aus</button>
+            </div>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Gamepad">🎮</span>
+              <span class="hotkey-display" id="gpOsdHotkeyDisplay">—</span>
+              <button class="btn-browse" id="gpOsdHotkeyCaptureBtn" onclick="toggleGpHotkeyCapture('osd')">Aufnehmen</button>
+              <button class="btn-cancel" onclick="clearGpHotkey('osd')">Aus</button>
+            </div>
+            <p class="settings-hint" id="gpOsdHotkeyHint" style="display:none"></p>
+            <span class="osd-field-label" style="margin-top:6px">Konfigurationsmodus (Live-Edit direkt am OSD)</span>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Tastatur">⌨️</span>
+              <span class="hotkey-display" id="osdEditHotkeyDisplay">Alt+Shift+O</span>
+              <button class="btn-browse" id="osdEditHotkeyBtn" onclick="toggleHotkeyCapture('osdEdit')">Ändern</button>
+              <button class="btn-cancel" onclick="clearHotkey('osdEdit')">Aus</button>
+            </div>
+            <div class="setting-toggle-row">
+              <span class="setting-toggle-label">Afterburner-OSD ein-/ausblenden</span>
+            </div>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Tastatur">⌨️</span>
+              <span class="hotkey-display" id="osdAbHotkeyDisplay">Alt+B</span>
+              <button class="btn-browse" id="osdAbHotkeyBtn" onclick="toggleHotkeyCapture('osdAb')">Ändern</button>
+              <button class="btn-cancel" onclick="clearHotkey('osdAb')">Aus</button>
+            </div>
+            <p class="settings-hint">Blendet das OSD von MSI Afterburner aus bzw. wieder ein – derselbe Schalter, den auch Afterburners eigener OSD-Hotkey nutzt. Das Lumora-Panel (eigener Hotkey oben) bleibt davon <b>unabhängig</b>: Afterburner z. B. links, Lumora rechts.</p>
+
+            <h3 class="settings-sec">Datenquellen</h3>
+            <div class="osd-field">
+              <span class="osd-field-label">Grafikkarte</span>
+              <select id="setOsdGpu" class="sort-select" style="flex:1" onchange="onOsdGpuChange()">
+                <option value="auto">Automatisch (schnellste)</option>
+              </select>
+            </div>
+            <p class="settings-hint" id="osdGpuHint" style="display:none"></p>
+            <div class="osd-field" id="osdSetupRow" style="display:none">
+              <span class="osd-field-label">Einrichtung</span>
+              <span class="settings-hint" style="flex:1;margin:0">Abgelehnt – FPS und CPU-Sensorwerte fehlen.</span>
+              <button class="btn-browse" onclick="setupOsdNow()">Jetzt einrichten</button>
+            </div>
+            <div class="osd-field">
+              <span class="osd-field-label">FPS-Quelle</span>
+              <select id="setOsdFpsSource" class="sort-select" style="flex:1" onchange="onOsdSettingChange()">
+                <option value="auto">Automatisch (RTSS, sonst PresentMon)</option>
+                <option value="rtss">Nur RTSS/Afterburner</option>
+                <option value="presentmon">Nur PresentMon (ohne RTSS)</option>
+              </select>
             </div>
           </div>
         </div>
@@ -1358,6 +1367,19 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  "Ziehen zum Verschieben": "Drag to reorder",
+  "Aus dem Overlay nehmen": "Remove from overlay",
+  "Ins Overlay aufnehmen": "Add to overlay",
+  "Ganze Gruppe verschieben": "Move the whole group",
+  "Im Overlay": "In the overlay",
+  "Nichts ausgewählt – diese Gruppe erscheint im Overlay gar nicht.": "Nothing selected – this group will not appear in the overlay at all.",
+  "Ausgeblendet": "Hidden",
+  "Werte & Reihenfolge": "Values & order",
+  "Jede Karte ist eine Gruppe im Overlay – in genau dieser Reihenfolge, mit genau diesen Werten.": "Each card is a group in the overlay – in exactly this order, with exactly these values.",
+  "Zum Umsortieren ziehen: Werte innerhalb ihrer Gruppe, ganze Gruppen am Griff links. Das Overlay übernimmt es sofort.": "Drag to rearrange: values within their group, whole groups by the handle on the left. The overlay applies it immediately.",
+  "Tastenkürzel": "Keyboard shortcuts",
+  "Datenquellen": "Data sources",
+  "Netzwerk": "Network",
   "Gruppe ziehen": "Drag group",
   "nach oben": "move up",
   "nach unten": "move down",
@@ -4823,10 +4845,16 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       fps: [['fps','FPS'],['frametime','Frametime'],['graph','Graph']],
       net: [['rate','Rate'],['total','Summe (Sitzung)']],
     }
+    // Gruppenfarben wie im Overlay (GPU gruen, CPU orange, FPS blau) - NET bekommt
+    // eine eigene, damit sich die vier Karten im Board klar unterscheiden.
+    const OSD_GRP_META = {
+      gpu: ['GPU', '#74e857'], cpu: ['CPU', '#ff8a1e'],
+      fps: ['FPS', '#4bd6ff'], net: ['Netzwerk', '#c79bff'],
+    }
     let osdFieldsState = { gpu: [], cpu: [], fps: [], net: [] }
-    // Freie Reihenfolge, komplett per Drag & Drop: Werte-Chips innerhalb ihrer Gruppe,
-    // ganze Gruppen am ⠿-Griff. Waehrend des Ziehens ordnet die Liste LIVE um (das
-    // Element weicht unter dem Zeiger aus) - erst das Loslassen speichert.
+    // Reihenfolge frei per Drag & Drop: Werte innerhalb ihrer Gruppe, ganze Gruppen
+    // am Griff. Waehrend des Ziehens ordnet das Board LIVE um (das Element weicht
+    // unter dem Zeiger aus) - erst das Loslassen speichert.
     let osdOrderState = ['gpu', 'cpu', 'fps', 'net']
     function osdCatOrder() {
       const std = Object.keys(OSD_FIELD_DEFS)
@@ -4846,43 +4874,61 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const box = document.getElementById('osdFieldsUi')
       box.innerHTML = osdCatOrder().map(cat => {
         const defs = OSD_FIELD_DEFS[cat]
-        const lblOf = f => { const d = defs.find(x => x[0] === f); return d ? d[1] : f }
-        const aktiv = osdFieldsState[cat].filter(f => defs.some(d => d[0] === f))
-        const chips = aktiv.concat(defs.map(d => d[0]).filter(f => !aktiv.includes(f)))
-        return `<div class="osd-fields-grp" data-cat="${cat}">`
-          + `<div class="grp"><span class="osd-grp-griff" draggable="true" title="${window.tr('Gruppe ziehen')}">⠿</span>${cat.toUpperCase()}</div>`
-          + `<div class="osd-chips-grid" data-cat="${cat}">`
-          + chips.map(f =>
-              `<button type="button" draggable="true" class="osd-chip${osdFieldsState[cat].includes(f) ? ' on' : ''}" data-cat="${cat}" data-f="${f}" onclick="toggleOsdField('${cat}','${f}')">${window.tr(lblOf(f))}</button>`
-            ).join('')
+        const [titel, farbe] = OSD_GRP_META[cat] || [cat.toUpperCase(), '#888']
+        const lblOf = f => { const d = defs.find(x => x[0] === f); return window.tr(d ? d[1] : f) }
+        const an = osdFieldsState[cat].filter(f => defs.some(d => d[0] === f))
+        const aus = defs.map(d => d[0]).filter(f => !an.includes(f))
+        const tok = f => `<span class="osd-tok" draggable="true" data-cat="${cat}" data-f="${f}"`
+          + ` title="${window.tr('Ziehen zum Verschieben')}">`
+          + `<span class="pkt">⠿</span>${anEsc(lblOf(f))}`
+          + `<button type="button" class="weg" title="${window.tr('Aus dem Overlay nehmen')}"`
+          + ` onclick="toggleOsdField('${cat}','${f}')">×</button></span>`
+        const tokAus = f => `<button type="button" class="osd-tok-aus" data-cat="${cat}" data-f="${f}"`
+          + ` title="${window.tr('Ins Overlay aufnehmen')}" onclick="toggleOsdField('${cat}','${f}')">`
+          + `<span class="plus">+</span>${anEsc(lblOf(f))}</button>`
+        return `<div class="osd-grp" data-cat="${cat}" style="--gc:${farbe}">`
+          + `<div class="osd-grp-kopf">`
+          + `<span class="osd-griff" draggable="true" title="${window.tr('Ganze Gruppe verschieben')}">⠿</span>`
+          + `<span class="osd-grp-punkt"></span>`
+          + `<span class="osd-grp-name">${anEsc(window.tr(titel))}</span>`
+          + `<span class="osd-grp-zahl">${an.length} / ${defs.length}</span>`
+          + `</div>`
+          + `<div class="osd-zone"><div class="osd-zone-lbl">${window.tr('Im Overlay')}</div>`
+          + `<div class="osd-zone-inhalt" data-cat="${cat}">`
+          + (an.length ? an.map(tok).join('')
+                       : `<span class="osd-leer">${window.tr('Nichts ausgewählt – diese Gruppe erscheint im Overlay gar nicht.')}</span>`)
           + `</div></div>`
+          + (aus.length
+              ? `<div class="osd-zone osd-zone-aus"><div class="osd-zone-lbl">${window.tr('Ausgeblendet')}</div>`
+                + `<div class="osd-zone-inhalt">${aus.map(tokAus).join('')}</div></div>`
+              : '')
+          + `</div>`
       }).join('')
       osdDndWire(box)
     }
     // --- Drag & Drop (live umordnend) --------------------------------------------
-    // Ein Regelwerk fuer beides: Chips wandern innerhalb ihres Gitters, Gruppen
-    // innerhalb der Liste. Beim dragover wird das gezogene Element sofort an die
+    // Ein Regelwerk fuer beides: Werte wandern innerhalb ihrer Zone, Gruppen
+    // innerhalb des Boards. Beim dragover wird das gezogene Element sofort an die
     // Zielposition gesetzt (vor/nach dem Element unter dem Zeiger, je nach
     // Zeigerposition) - so sieht man das Ergebnis, BEVOR man loslaesst.
-    let osdDrag = null   // { el, art: 'chip'|'grp' }
+    let osdDrag = null   // { el, art: 'tok'|'grp' }
     function osdDndWire(box) {
-      box.querySelectorAll('.osd-chip').forEach(el => {
+      box.querySelectorAll('.osd-tok').forEach(el => {
         el.addEventListener('dragstart', e => {
-          osdDrag = { el, art: 'chip' }
+          osdDrag = { el, art: 'tok' }
           e.dataTransfer.effectAllowed = 'move'
-          // Standard-Geisterbild vom Element selbst; leicht verzoegert stylen, sonst
-          // uebernimmt das Geisterbild schon die abgesenkte Optik
-          setTimeout(() => el.classList.add('osd-dragging'), 0)
+          // Verzoegert stylen, sonst uebernimmt das Geisterbild schon die Zieh-Optik
+          setTimeout(() => el.classList.add('osd-zieht'), 0)
         })
         el.addEventListener('dragend', () => osdDropFertig())
       })
-      box.querySelectorAll('.osd-grp-griff').forEach(griff => {
-        const grp = griff.closest('.osd-fields-grp')
+      box.querySelectorAll('.osd-griff').forEach(griff => {
+        const grp = griff.closest('.osd-grp')
         griff.addEventListener('dragstart', e => {
           osdDrag = { el: grp, art: 'grp' }
           e.dataTransfer.effectAllowed = 'move'
-          e.dataTransfer.setDragImage(grp, 20, 12)   // die GANZE Gruppe als Geisterbild
-          setTimeout(() => grp.classList.add('osd-dragging'), 0)
+          e.dataTransfer.setDragImage(grp, 24, 16)   // die GANZE Karte als Geisterbild
+          setTimeout(() => grp.classList.add('osd-zieht'), 0)
         })
         griff.addEventListener('dragend', () => osdDropFertig())
       })
@@ -4890,16 +4936,16 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         if (!osdDrag) return
         e.preventDefault()
         e.dataTransfer.dropEffect = 'move'
-        if (osdDrag.art === 'chip') {
-          const grid = e.target.closest('.osd-chips-grid')
-          if (!grid || grid.dataset.cat !== osdDrag.el.dataset.cat) return   // nur die eigene Gruppe
-          const ueber = e.target.closest('.osd-chip')
+        if (osdDrag.art === 'tok') {
+          const zone = e.target.closest('.osd-zone-inhalt')
+          if (!zone || zone.dataset.cat !== osdDrag.el.dataset.cat) return   // nur die eigene Gruppe
+          const ueber = e.target.closest('.osd-tok')
           if (!ueber || ueber === osdDrag.el) return
           const r = ueber.getBoundingClientRect()
           const nach = e.clientX > r.left + r.width / 2
-          grid.insertBefore(osdDrag.el, nach ? ueber.nextSibling : ueber)
+          zone.insertBefore(osdDrag.el, nach ? ueber.nextSibling : ueber)
         } else {
-          const ueber = e.target.closest('.osd-fields-grp')
+          const ueber = e.target.closest('.osd-grp')
           if (!ueber || ueber === osdDrag.el) return
           const r = ueber.getBoundingClientRect()
           const nach = e.clientY > r.top + r.height / 2
@@ -4910,14 +4956,13 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     }
     function osdDropFertig() {
       if (!osdDrag) return
-      osdDrag.el.classList.remove('osd-dragging')
+      osdDrag.el.classList.remove('osd-zieht')
       const box = document.getElementById('osdFieldsUi')
       // Endstand direkt aus dem DOM ablesen - die Ansicht IST das Ergebnis
-      osdOrderState = [...box.querySelectorAll('.osd-fields-grp')].map(g => g.dataset.cat)
-      for (const grid of box.querySelectorAll('.osd-chips-grid')) {
-        const cat = grid.dataset.cat
-        const alle = [...grid.querySelectorAll('.osd-chip')].map(x => x.dataset.f)
-        osdFieldsState[cat] = alle.filter(f => osdFieldsState[cat].includes(f))
+      osdOrderState = [...box.querySelectorAll('.osd-grp')].map(g => g.dataset.cat)
+      for (const zone of box.querySelectorAll('.osd-zone-inhalt[data-cat]')) {
+        const cat = zone.dataset.cat
+        osdFieldsState[cat] = [...zone.querySelectorAll('.osd-tok')].map(x => x.dataset.f)
       }
       osdDrag = null
       onOsdSettingChange()
@@ -4926,8 +4971,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       const arr = osdFieldsState[cat], i = arr.indexOf(f)
       if (i >= 0) arr.splice(i, 1)
       else arr.push(f)   // ans Ende - die Reihenfolge bestimmt der Nutzer, nicht die Definition
-      const btn = document.querySelector(`.osd-chip[data-cat="${cat}"][data-f="${f}"]`)
-      if (btn) btn.classList.toggle('on', arr.includes(f))
+      renderOsdFields(osdFieldsState, osdOrderState)   // Zonen neu aufteilen (an <-> aus)
       onOsdSettingChange()
     }
 
