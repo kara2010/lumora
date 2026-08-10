@@ -463,6 +463,27 @@ static void extWatchTick() {
     SetTimer(g_hwnd, TIMER_EXTWATCH, suspectEnd ? 1000 : 2000, nullptr);
 }
 
+// --- "Spielt gerade etwas?" fuer die UI ------------------------------------------------
+// Die Stream-Vorschau soll waehrend des Spielens pausieren. document.hidden reicht dafuer
+// nicht: beim Vollbild-Spiel ist das Lumora-Fenster nur VERDECKT, nicht versteckt - die
+// Vorschau lief so eine komplette Sitzung als lokaler AV1-Zuschauer weiter (18,5 GB) und
+// hielt nebenbei den zweiten Encoder am Leben. Quelle ist dieselbe Sitzungs-Erkennung,
+// die auch HDR und Netzstatistik steuert (eigener Start ODER Fremdstart).
+static bool istSpielAktiv() {
+    {
+        std::lock_guard<std::mutex> lk(g_launchMx);
+        for (auto& s : g_launches) if (!s.done && s.started) return true;
+    }
+    return !g_extSessions.empty();
+}
+static int g_spielAktivGemeldet = -1;   // -1 = noch nie gemeldet -> erster Tick sendet immer
+static void spielAktivPush() {
+    const bool an = istSpielAktiv();
+    if ((int)an == g_spielAktivGemeldet) return;
+    g_spielAktivGemeldet = an;
+    sendToUi("game-running", an);
+}
+
 // --- Event-getriebene Ende-Erkennung: Prozess-Exit weckt den UI-Thread sofort ---------
 // Threadpool-Wait auf das SYNCHRONIZE-Handle des Spielprozesses. Beim Exit wird nur eine
 // Message gepostet (threadsicher); die eigentliche Pruefung laeuft im UI-Thread ueber die
@@ -5209,6 +5230,9 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "input-bridge-status") return lubridge::status();
     // Netzwerk-Statistik: Live-Werte der laufenden Zaehlung (UI pollt 1x/s in der Detailansicht)
     if (channel == "net-stat-read") return netStatSnapshot();
+    // Startabfrage der UI: laeuft gerade ein Spiel? (Push "game-running" kommt nur bei
+    // AENDERUNG - eine frisch geladene UI wuerde einen schon laufenden Zustand verpassen.)
+    if (channel == "game-running-read") return istSpielAktiv();
     // Zaehler loeschen. Die gespeicherten Summen liegen bei den Spielen (UI-Seite);
     // hier faellt nur die LAUFENDE Sitzung an - ohne neuen Nullpunkt wuerde sie beim
     // Spielende trotzdem noch gebucht. args[0]: {gamePath} oder {alle:true}.
@@ -5328,7 +5352,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_SHELL_LAUNCHWAKE:
         // Spielprozess ist beendet (Exit-Wait): sofort pruefen statt aufs Polling-Raster
         // zu warten - HDR/Session-Ende folgen dadurch in ~1-3s statt ~6-12s.
-        launchTick(); extWatchTick();
+        launchTick(); extWatchTick(); spielAktivPush();
         return 0;
     case WM_DEVICECHANGE:
         // Geraeteaenderung (Controller ein-/ausgeschaltet, Dongle-Ereignis): Probe-Durchlaeufe
@@ -5421,8 +5445,8 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_TIMER:
-        if (w == TIMER_LAUNCH) { launchTick(); return 0; }
-        if (w == TIMER_EXTWATCH) { extWatchTick(); return 0; }
+        if (w == TIMER_LAUNCH) { launchTick(); spielAktivPush(); return 0; }
+        if (w == TIMER_EXTWATCH) { extWatchTick(); spielAktivPush(); return 0; }
         if (w == TIMER_NETSTAT) { netStatTick(); return 0; }
         if (w == TIMER_VIEWER) { bcViewerTick(); return 0; }
         if (w == TIMER_ADAPT) { bcAdaptTick(); return 0; }
