@@ -1565,6 +1565,7 @@ const I18N_EN = {
   'Stream aus': 'Stream off',
   'Stream starten': 'Start stream',
   'Vorschau lädt…': 'Preview loading…',
+  'Vorschau pausiert, solange ein Spiel läuft – der Stream läuft normal weiter.': 'Preview paused while a game is running – the stream itself continues normally.',
   'Kopieren': 'Copy',
   'Teilen': 'Share',
   'E-Mail': 'E-mail',
@@ -5138,13 +5139,29 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       if (video) video.srcObject = null
       if (wait) wait.style.display = 'flex'
     }
-    // Vorschau nur, wenn Stream laeuft, Stream-Tab offen UND das Fenster sichtbar ist
-    // (minimiert/verdeckt beim Spielen -> Vorschau aus, spart die Decode-Last).
+    // Vorschau nur, wenn Stream laeuft, Stream-Tab offen, Fenster sichtbar UND kein Spiel
+    // laeuft. document.hidden allein reichte nicht: beim Vollbild-Spiel ist das Fenster
+    // nur VERDECKT, nicht versteckt - die Vorschau lief so eine komplette Sitzung als
+    // lokaler AV1-Zuschauer weiter (18,5 GB) und hielt den zweiten Encoder am Leben.
+    // Den Spielzustand meldet die Shell ("game-running", Quelle: dieselbe Sitzungs-
+    // Erkennung wie fuer HDR und Netzstatistik).
+    let spielLaeuft = false
     function refreshStreamPreview() {
-      if (_streamActive && settingsTab === 'stream' && !document.hidden) startStreamPreview()
-      else stopStreamPreview()
+      if (_streamActive && settingsTab === 'stream' && !document.hidden && !spielLaeuft) startStreamPreview()
+      else {
+        stopStreamPreview()
+        // Pausen-Grund benennen: ein dauerhaftes "Vorschau laedt..." saehe nach Fehler aus.
+        const wait = document.getElementById('streamPreviewWait')
+        if (wait) wait.textContent = (spielLaeuft && _streamActive)
+          ? window.tr('Vorschau pausiert, solange ein Spiel läuft – der Stream läuft normal weiter.')
+          : window.tr('Vorschau lädt…')
+      }
     }
     document.addEventListener('visibilitychange', refreshStreamPreview)
+    ipcRenderer.on('game-running', (event, an) => { spielLaeuft = !!an; refreshStreamPreview() })
+    // Beim UI-Start den aktuellen Zustand holen: der Push kommt nur bei Aenderung -
+    // eine neu geladene Oberflaeche wuesste sonst nichts von einem laufenden Spiel.
+    ipcRenderer.invoke('game-running-read').then(an => { spielLaeuft = !!an; refreshStreamPreview() }).catch(() => {})
     // OSD-Einrichtung (FPS-Dienst + PawnIO-CPU-Sensorik) nach frueherer Ablehnung
     // erneut anstossen: Erklaer-Dialog + ein UAC, nur fuer das, was wirklich fehlt.
     async function setupOsdNow() {
