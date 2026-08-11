@@ -5323,7 +5323,10 @@ static const int GRIP_TOP = 3;  // oben schmaler (darueber beginnt die Drag-Titl
 static std::wstring windowStatePath() { return dataDir() + L"\\window-state.json"; }
 // In DIP-Koordinaten speichern (wie Electron) - sonst laufen die Werte bei DPI-Skalierung
 // zwischen Shell und Electron-App auseinander (gleiche Datei, Parallelbetrieb).
-static void saveWindowState(HWND h) {
+// grund: Ausloeser fuer die Log-Zeile. Der Vollbild-Zustand ging ERNEUT verloren, und
+// window-state.json war tagelang unangetastet - ob die Speicherpfade ueberhaupt laufen,
+// war aus dem Log nicht zu beantworten. Jede Speicherung hinterlaesst jetzt eine Spur.
+static void saveWindowState(HWND h, const char* grund) {
     WINDOWPLACEMENT wp{ sizeof(wp) };
     if (!GetWindowPlacement(h, &wp)) return;
     RECT& r = wp.rcNormalPosition;
@@ -5333,13 +5336,25 @@ static void saveWindowState(HWND h) {
     // ein maximiert-und-dann-minimiert abgelegtes Fenster wurde deshalb als "nicht maximiert"
     // gespeichert und kam nach dem Neustart als normales Fenster hoch (User-Befund).
     // Windows haelt die Wiederherstellungs-Absicht dafuer in WPF_RESTORETOMAXIMIZED bereit.
+    // (Verstecktes Fenster ist UNKRITISCH: gemessen behaelt es showCmd=SW_SHOWMAXIMIZED
+    // und IsZoomed - s. Selbsttest --test-fensterzustand.)
     bool maximized = wp.showCmd == SW_SHOWMAXIMIZED
                   || (wp.showCmd == SW_SHOWMINIMIZED && (wp.flags & WPF_RESTORETOMAXIMIZED) != 0);
     json s = { {"x", MulDiv(r.left, 96, dpi)}, {"y", MulDiv(r.top, 96, dpi)},
                {"width", MulDiv(r.right - r.left, 96, dpi)}, {"height", MulDiv(r.bottom - r.top, 96, dpi)},
                {"maximized", maximized} };
-    writeFile(windowStatePath(), s.dump(2));
+    bool ok = writeFile(windowStatePath(), s.dump(2));
+    bcLogStream(std::string("fensterzustand gespeichert (") + grund + "): max=" + (maximized ? "1" : "0")
+        + " showCmd=" + std::to_string(wp.showCmd) + " sichtbar=" + (IsWindowVisible(h) ? "1" : "0")
+        + (ok ? "" : " SCHREIBFEHLER"));
 }
+// Speichern bei jeder ZUSTANDSAENDERUNG (entprellt), nicht erst beim Beenden. Der alte
+// Ansatz hing komplett an WM_CLOSE/WM_ENDSESSION - lief keiner dieser Pfade (App nur im
+// Tray versteckt, Prozess beim Ausschalten ohne Meldung beendet), blieb die Datei auf
+// einem tagealten Stand und der Vollbild-Zustand ging beim naechsten Start verloren.
+// So wie Electron es hielt: die Datei traegt immer den letzten wirklichen Zustand.
+#define TIMER_WINSTATE 121
+static void queueWindowStateSave() { SetTimer(g_hwnd, TIMER_WINSTATE, 800, nullptr); }
 static void placeWebView(HWND h) {
     if (!g_controller) return;
     RECT rc; GetClientRect(h, &rc);
@@ -5428,6 +5443,14 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if (w == SIZE_MAXIMIZED) sendToUi("window-maximized", nullptr);
             else if (w == SIZE_RESTORED) sendToUi("window-unmaximized", nullptr);
         }
+        // Maximieren/Wiederherstellen sofort (entprellt) festhalten - nur bei sichtbarem
+        // Fenster: das programmatische SW_HIDE/SW_SHOW des Tray-Wegs soll keine
+        // Schreibvorgaenge ausloesen, eine echte Zustandsaenderung ist das nicht.
+        if ((w == SIZE_MAXIMIZED || w == SIZE_RESTORED) && IsWindowVisible(h)) queueWindowStateSave();
+        return 0;
+    case WM_EXITSIZEMOVE:
+        // Ende von Ziehen/Groessenaendern per Maus: neue Lage/Groesse festhalten.
+        queueWindowStateSave();
         return 0;
     case WM_SETFOCUS:
         // Fenster-Fokus IMMER ins WebView2 weiterreichen: Chromium liefert Gamepad-Input
@@ -5445,6 +5468,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_TIMER:
+        if (w == TIMER_WINSTATE) { KillTimer(h, TIMER_WINSTATE); saveWindowState(h, "aenderung"); return 0; }
         if (w == TIMER_LAUNCH) { launchTick(); spielAktivPush(); return 0; }
         if (w == TIMER_EXTWATCH) { extWatchTick(); spielAktivPush(); return 0; }
         if (w == TIMER_NETSTAT) { netStatTick(); return 0; }
@@ -5544,12 +5568,12 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         // Schliessen-Pfad zu durchlaufen. Genau das liess die Fenstergroesse/-position nach
         // einem echten Neustart verloren gehen (saveWindowState() hing bisher AUSSCHLIESSLICH
         // an WM_CLOSE). Hier sofort sichern, bevor Windows den Prozess beendet.
-        saveWindowState(h);
+        saveWindowState(h, "queryendsession");
         return TRUE;   // Beenden zulassen
     case WM_ENDSESSION:
         // Zur Sicherheit erneut sichern (falls die Sitzung erst hier tatsaechlich endet) -
         // schreibt nur dieselbe Datei neu, kein Risiko.
-        if (w) saveWindowState(h);
+        if (w) saveWindowState(h, "endsession");
         return 0;
     case WM_CLOSE:
         if (loadSettings().value("minimizeToTray", false) && !g_quitting) { ShowWindow(h, SW_HIDE); return 0; }   // in den Infobereich statt beenden
@@ -5570,7 +5594,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (g_wbCtrl) g_wbCtrl->Close();
         g_wbWv = nullptr; g_wbCtrl = nullptr;
         if (g_wbHwnd) { DestroyWindow(g_wbHwnd); g_wbHwnd = nullptr; }
-        saveWindowState(h); DestroyWindow(h); return 0;
+        saveWindowState(h, "beenden"); DestroyWindow(h); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -5816,6 +5840,42 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // derselben Klasse, maximiert es und misst nach. Der Fehler war von aussen nur zu
     // sehen, wenn die Taskleiste eingeblendet ist - genau darum wird hier gemessen und
     // nicht geschaut.
+    // Fakten zum Fensterzustands-Speichern: was liefert GetWindowPlacement fuer ein
+    // maximiertes Fenster in den Zustaenden sichtbar / versteckt (Tray!) / minimiert?
+    // Anlass: window-state.json blieb tagelang unangetastet und der Vollbild-Zustand
+    // ging nach einem PC-Neustart verloren - bevor hier irgendetwas "gefixt" wird,
+    // muss das Verhalten der API einmal schwarz auf weiss vorliegen.
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-fensterzustand") == 0) {
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        std::string res;
+        WNDCLASSW wc{}; wc.lpfnWndProc = DefWindowProcW; wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"LumoraZustandTest";
+        RegisterClassW(&wc);
+        HWND h = CreateWindowExW(0, L"LumoraZustandTest", L"Zustand", WS_OVERLAPPEDWINDOW,
+                                 100, 100, 900, 600, nullptr, nullptr, wc.hInstance, nullptr);
+        auto zeile = [&](const char* zustand) {
+            WINDOWPLACEMENT wp{ sizeof(wp) }; GetWindowPlacement(h, &wp);
+            char b[240];
+            sprintf_s(b, "%-28s showCmd=%u flags=0x%X zoomed=%d iconic=%d sichtbar=%d normalRect=%ld,%ld %ldx%ld\n",
+                      zustand, wp.showCmd, wp.flags, IsZoomed(h) ? 1 : 0, IsIconic(h) ? 1 : 0,
+                      IsWindowVisible(h) ? 1 : 0, wp.rcNormalPosition.left, wp.rcNormalPosition.top,
+                      wp.rcNormalPosition.right - wp.rcNormalPosition.left, wp.rcNormalPosition.bottom - wp.rcNormalPosition.top);
+            res += b;
+        };
+        auto pumpe = [&]() { MSG m; for (int n = 0; n < 50 && PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE); ++n) DispatchMessageW(&m); };
+        ShowWindow(h, SW_SHOWNOACTIVATE); pumpe(); zeile("normal sichtbar");
+        ShowWindow(h, SW_MAXIMIZE); pumpe(); zeile("maximiert sichtbar");
+        ShowWindow(h, SW_HIDE); pumpe(); zeile("maximiert -> VERSTECKT");
+        ShowWindow(h, SW_SHOW); pumpe(); zeile("wieder gezeigt");
+        ShowWindow(h, SW_MINIMIZE); pumpe(); zeile("maximiert -> minimiert");
+        ShowWindow(h, SW_RESTORE); pumpe();
+        ShowWindow(h, SW_MINIMIZE); pumpe(); ShowWindow(h, SW_HIDE); pumpe(); zeile("minimiert -> VERSTECKT");
+        DestroyWindow(h);
+        res = "fensterzustand-Messung:\n(SW_SHOWNORMAL=1 SW_SHOWMINIMIZED=2 SW_SHOWMAXIMIZED=3 / WPF_RESTORETOMAXIMIZED=0x2)\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-fenster") == 0) {
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -6128,8 +6188,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     wc.hbrBackground = CreateSolidBrush(RGB(15, 15, 15));   // #0f0f0f wie Electron (auch Farbe der Resize-Randstreifen)
     RegisterClassW(&wc);
     // Fensterzustand wie Electron aus window-state.json (Position nur, wenn noch auf einem Monitor sichtbar)
-    json st = json::parse(readFile(windowStatePath()), nullptr, false);
+    std::string stRoh = readFile(windowStatePath());
+    json st = json::parse(stRoh, nullptr, false);
     if (!st.is_object()) st = json::object();
+    // Diagnose: WAS wurde geladen? Der Vollbild-Zustand ging trotz korrekt aussehender
+    // Datei verloren - ob die Datei zum Startzeitpunkt lesbar war und was drinstand,
+    // liess sich hinterher nicht mehr feststellen. Eine Zeile je Start klaert das.
+    bcLogStream("fensterzustand geladen: " + std::string(stRoh.empty() ? "DATEI FEHLT/UNLESBAR"
+        : (!json::parse(stRoh, nullptr, false).is_object() ? "NICHT PARSEBAR (" + std::to_string(stRoh.size()) + " Bytes)"
+        : "max=" + std::to_string((int)st.value("maximized", false))
+          + " " + std::to_string(st.value("width", 900)) + "x" + std::to_string(st.value("height", 600))
+          + "@" + std::to_string(st.value("x", -1)) + "," + std::to_string(st.value("y", -1)))));
     UINT sdpi = GetDpiForSystem(); if (!sdpi) sdpi = 96;   // DIP -> physisch (Electron-kompatible Datei)
     int wwidth = MulDiv(st.value("width", 900), sdpi, 96), wheight = MulDiv(st.value("height", 600), sdpi, 96);
     int wx = CW_USEDEFAULT, wy = CW_USEDEFAULT;
