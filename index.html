@@ -1229,6 +1229,8 @@
 const I18N_EN = {
   // --- Netzwerk-Zaehler loeschen ----------------------------------------------
   'Zurücksetzen': 'Reset',
+  'In der Werkbank öffnen': 'Open in the workbench',
+  'Zusammenfassung': 'Summary',
   'Alle löschen': 'Delete all',
   'Alle Netzwerk-Zähler löschen': 'Delete all network counters',
   'Einzelne Zähler löschst du direkt beim Spiel in der Bibliothek.': 'Individual counters can be deleted directly at the game in your library.',
@@ -3353,30 +3355,18 @@ async function anShowReport(file) {
   const box = document.getElementById('anReportBox'), el = document.getElementById('anReport')
   box.style.display = ''
   const col = anVerdictColor(r.verdictKey)
-  let aggHtml = ''
-  if (r.aggregate && r.aggregate.length) {
-    const mxH = Math.max(...r.aggregate.map(a => a.hits))
-    aggHtml = '<div class="an-agg">' + r.aggregate.map(a =>
-      '<div class="an-aggrow"><span class="n">' + anEsc(window.tr(AN_KIND[a.kind] || a.kind)) + (a.name ? ': ' + anEsc(a.name) : '') + '</span>'
-      + '<span class="bar"><i style="width:' + Math.round(a.hits / mxH * 100) + '%"></i></span><span class="h">' + a.hits + '×</span></div>').join('') + '</div>'
-  }
-  let spikesHtml = ''
-  if (r.findings && r.findings.length) {
-    spikesHtml = '<details class="an-spikes"><summary>' + window.tr('Alle Ruckler im Detail') + ' (' + r.findings.length + ')</summary>'
-      + r.findings.map(f => '<div class="an-spike"><b>#' + f.id + '</b> · ' + f.ftMs.toFixed(0) + ' ms · '
-        + f.suspects.map(s => anEsc(window.tr(AN_KIND[s.kind] || s.kind)) + (s.name ? ' ' + anEsc(s.name) : '') + ' <i>(' + anEsc(s.evidence) + ')</i>').join(' · ')
-        + '</div>').join('') + '</details>'
-  }
   const meta = r.context || {}
   const metaTxt = [meta.resolution, meta.hdr ? 'HDR' : '', meta.streaming ? window.tr('Streaming aktiv') : '', anEsc(r.gpu || ''), r.gpuDriver ? 'Treiber ' + anEsc(r.gpuDriver) : '']
     .filter(Boolean).join(' · ')
+  // KURZzusammenfassung (Nutzer-Entscheid 12.08.): der ausfuehrliche Bericht (Kurve,
+  // Verdaechtigen-Balken, Einzel-Ruckler) lebt komplett in der Werkbank - der Reiter
+  // zeigt nur Urteil, Kennzahlen und Flaschenhals. Der Text-Export (anExport) baut
+  // seinen vollen Inhalt selbst aus dem Report, ihm fehlt dadurch nichts.
   el.innerHTML =
     '<div class="an-hero" style="border-color:' + col + '55"><div class="an-hero-dot" style="background:' + col + '"></div>'
     + '<div class="an-hero-txt">' + anVerdict(r) + '<div class="an-hero-meta">' + anEsc(r.wall || '') + (metaTxt ? ' · ' + metaTxt : '') + '</div></div></div>'
     + anStatTiles(r)
-    + '<canvas id="anChart" class="an-chart"></canvas>'
     + anLimitSection(r)
-    + aggHtml + spikesHtml
     + '<div class="an-actions">'
     + '<button class="btn-browse" onclick="anExport(\'' + anEsc(file) + '\')">' + window.tr('Als Text kopieren') + '</button>'
     // Teilen-Knopf vorerst entfernt (Feature deaktiviert). anShare/anShareSend + das
@@ -3384,11 +3374,6 @@ async function anShowReport(file) {
     // Funktion spaeter durch Wiedereinsetzen dieser einen Zeile reaktivieren laesst.
     + '<button class="btn-primary" onclick="anWerkbank(\'' + anEsc(file) + '\')">' + window.tr('🔬 In der Werkbank öffnen') + '</button>'
     + '</div>'
-  // Sofort UND per rAF zeichnen: rAF allein feuert nicht, solange das Fenster nichts
-  // komponiert (minimiert/verdeckt) - der Bericht stuende dann ohne Kurve da.
-  const anZeichnen = () => { const cv = document.getElementById('anChart'); if (cv) anDrawChart(cv, r.ftSeries, r.findings) }
-  anZeichnen()
-  requestAnimationFrame(anZeichnen)
   // NUR den Einstellungs-Scrollbereich bewegen - scrollIntoView scrollte auch die
   // Eltern-Container und schob damit die Reiterleiste (#detailNav) aus dem Bild.
   const sv = document.getElementById('settingsView')
@@ -3400,17 +3385,20 @@ async function anRefreshHistory() {
   if (!el) return
   if (!anHist.length) { el.innerHTML = '<p class="settings-hint">' + window.tr('Noch keine Messungen.') + '</p>'; return }
   anSel = anSel.filter(f => anHist.some(h => h.file === f))
+  // Klick auf die ZEILE oeffnet die Werkbank (Nutzer-Entscheid 12.08.: sie ist DER Ort
+  // fuer Berichte). Bedienelemente in der Zeile (Haken, Notiz, Loeschen) stoppen die
+  // Weitergabe, sonst risse jeder Notiz-Klick das Auswerte-Fenster auf.
   el.innerHTML = anHist.map(h => {
     const col = anVerdictColor(h.verdictKey)
-    return '<div class="an-histrow">'
-      + '<input type="checkbox" ' + (anSel.includes(h.file) ? 'checked' : '') + ' onchange="anSelToggle(\'' + anEsc(h.file) + '\', this.checked)" title="' + window.tr('Für Vergleich auswählen') + '">'
+    return '<div class="an-histrow" style="cursor:pointer" onclick="anWerkbank(\'' + anEsc(h.file) + '\')" title="' + window.tr('In der Werkbank öffnen') + '">'
+      + '<input type="checkbox" ' + (anSel.includes(h.file) ? 'checked' : '') + ' onclick="event.stopPropagation()" onchange="anSelToggle(\'' + anEsc(h.file) + '\', this.checked)" title="' + window.tr('Für Vergleich auswählen') + '">'
       + '<span class="dot" style="background:' + col + '"></span>'
       + '<span class="an-hgame">' + anEsc(h.game || '–') + '</span>'
       + '<span class="an-hmeta">' + anEsc((h.wall || '').replace('T', ' ')) + ' · ' + Math.round((h.durS || 0) / 60) + ' min · ' + (h.avgFps || 0).toFixed(0) + ' fps · ' + (h.spikesPerMin || 0).toFixed(1) + ' R/min</span>'
-      + '<input class="an-note" placeholder="' + window.tr('Notiz…') + '" value="' + anEsc(h.note || '') + '" onchange="anNote(\'' + anEsc(h.file) + '\', this.value)">'
-      + '<button class="btn-browse" onclick="anShowReport(\'' + anEsc(h.file) + '\')">' + window.tr('Anzeigen') + '</button>'
+      + '<input class="an-note" placeholder="' + window.tr('Notiz…') + '" value="' + anEsc(h.note || '') + '" onclick="event.stopPropagation()" onchange="anNote(\'' + anEsc(h.file) + '\', this.value)">'
+      + '<button class="btn-browse" onclick="event.stopPropagation(); anShowReport(\'' + anEsc(h.file) + '\')">' + window.tr('Zusammenfassung') + '</button>'
       // Teilen-Verlaufsknoepfe (Link kopieren / zurueckziehen) vorerst entfernt - Feature deaktiviert.
-      + '<button class="btn-cancel" onclick="anDelete(\'' + anEsc(h.file) + '\')">✕</button>'
+      + '<button class="btn-cancel" onclick="event.stopPropagation(); anDelete(\'' + anEsc(h.file) + '\')">✕</button>'
       + '</div>'
   }).join('')
   anRenderCompare()

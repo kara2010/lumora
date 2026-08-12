@@ -26,9 +26,37 @@
      verschluckte den Rest, und keine flex-shrink-Regel IM Kopf konnte das je fixen. */
   #app { display: grid; grid-template-rows: 66px 1fr; grid-template-columns: minmax(0, 1fr); height: 100%; }
 
-  /* Kopfzeile: Baseline-Reihe, grosse duenne Zahlen, Mikrolabels */
+  /* Kopfzeile: Baseline-Reihe, grosse duenne Zahlen, Mikrolabels.
+     Zugleich TITELZEILE des rahmenlosen Fensters: app-region:drag macht sie ziehbar
+     (Doppelklick maximiert), alles Anklickbare darin ist explizit no-drag. */
   #kopf { display: flex; align-items: baseline; gap: 20px; padding: 18px 24px 0;
-    border-bottom: 1px solid var(--line); }
+    border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
+  #kopf button, #kopf [data-nodrag] { -webkit-app-region: no-drag; }
+  #fensterKnoepfe { display: flex; gap: 2px; align-self: flex-start; margin: -12px -14px 0 0; }
+  #fensterKnoepfe button { background: none; border: none; color: var(--dim); cursor: pointer;
+    font: 13px/1 'Segoe UI Symbol', Consolas, monospace; padding: 8px 13px; }
+  #fensterKnoepfe button:hover { color: var(--hell); background: rgba(255,255,255,.05); }
+  #fensterKnoepfe button.zu:hover { color: #fff; background: var(--bad); }
+  #hilfeKnopf { background: none; border: 1px solid var(--line); color: var(--dim); cursor: pointer;
+    font: 11px/1 Consolas, monospace; padding: 5px 10px; align-self: center; letter-spacing: .1em; }
+  #hilfeKnopf:hover { color: var(--phos); border-color: var(--phos); }
+
+  /* Erklaer-Overlay "Was sehe ich hier?": gleiche Labor-Aesthetik, nur Haarlinien */
+  #hilfe { display: none; position: fixed; inset: 0; background: rgba(5,7,10,.92); z-index: 50;
+    align-items: center; justify-content: center; }
+  #hilfe.an { display: flex; }
+  #hilfeBox { max-width: 720px; max-height: 84vh; overflow-y: auto; border: 1px solid var(--line);
+    background: var(--bg); padding: 26px 30px; }
+  #hilfeBox::-webkit-scrollbar { width: 6px; } #hilfeBox::-webkit-scrollbar-thumb { background: #1a222c; }
+  #hilfeBox h2 { font: 600 11px/1 Consolas, monospace; letter-spacing: .34em; text-transform: uppercase;
+    color: var(--phos); margin-bottom: 16px; }
+  #hilfeBox h4 { font-size: 12.5px; color: var(--hell); margin: 16px 0 4px; }
+  #hilfeBox p { font-size: 12.5px; line-height: 1.6; color: var(--text); }
+  #hilfeBox .dimm { color: var(--dim); }
+  #hilfeBox .schl { text-align: right; margin-top: 18px; }
+  #hilfeBox .schl button { background: none; border: 1px solid var(--line); color: var(--text);
+    cursor: pointer; font: 11px Consolas, monospace; padding: 7px 16px; letter-spacing: .1em; }
+  #hilfeBox .schl button:hover { color: var(--phos); border-color: var(--phos); }
   #kopf .marke { font: 600 10px/1 Consolas, monospace; letter-spacing: .42em;
     text-transform: uppercase; color: var(--phos); white-space: nowrap; }
   #laufName { font-size: 13px; color: var(--hell); font-weight: 500; white-space: nowrap;
@@ -141,6 +169,25 @@
     <span class="kopfstat"><b id="kLow" class="mono">–</b><span>1%-Low</span></span>
     <span class="kopfstat"><b id="kMed" class="mono">–</b><span data-i18n>Median</span></span>
     <span class="kopfstat"><b id="kSpk" class="mono">–</b><span data-i18n>Ruckler</span></span>
+    <button id="hilfeKnopf" onclick="hilfeAn(true)" title="Was sehe ich hier?">? <span data-i18n>Hilfe</span></button>
+    <div id="fensterKnoepfe">
+      <button onclick="wbCtl('min')" title="Minimieren">─</button>
+      <button id="wbMaxBtn" onclick="wbCtl('max')" title="Maximieren/Wiederherstellen">❐</button>
+      <button class="zu" onclick="wbCtl('close')" title="Schließen">✕</button>
+    </div>
+  </div>
+  <div id="hilfe" onclick="if (event.target === this) hilfeAn(false)">
+    <div id="hilfeBox">
+      <h2 data-i18n>Was sehe ich hier?</h2>
+      <p data-i18n>Die große Kurve zeigt die Frametime: wie lange jedes einzelne Bild gebraucht hat. Niedrig und ruhig = flüssiges Spiel. Jede Spitze ist ein Moment, in dem ein Bild zu lange gedauert hat – genau das nimmst du als Ruckler wahr. Ab etwa 28 ms wird eine Spitze spürbar, ab 45 ms deutlich. Die Farbe der Kurve folgt dem Schweregrad: grün = flüssig, bernstein = zäh, rot = Ruckler.</p>
+      <h4 data-i18n>Die Spuren darunter</h4>
+      <p data-i18n>Unter der Kurve läuft mit, was dein System zur selben Zeit getan hat – zeitlich exakt ausgerichtet. CPU: Gesamtlast des Prozessors (dauerhaft hoch = CPU-Limit). GPU: Auslastung/Takt der Grafikkarte (Einbrüche beim Ruckler = Drosselung oder Wartezeit). DPC/ISR: wie lange Treiber den Prozessor blockiert haben – der häufigste unsichtbare Ruckler-Verursacher. Datenträger: Lese-/Schreiblast, typisch beim Nachladen von Spieldaten.</p>
+      <h4 data-i18n>So findest du die Ursache</h4>
+      <p data-i18n>Klicke eine rote Spitze an: rechts öffnet sich das Beweis-Panel und nennt in Klartext, was in den 200 Millisekunden um diesen Ruckler auffällig war – ein Programm, ein Treiber, die Grafikkarte oder der Datenträger. Steht dort nichts, kam der Ruckler sehr wahrscheinlich aus dem Spiel selbst (z. B. Shader-Aufbau oder Nachladen) – das ist kein Messfehler, sondern ein ehrliches Ergebnis.</p>
+      <h4 data-i18n>Bedienung</h4>
+      <p data-i18n>Mausrad zoomt auf den Zeiger, Ziehen verschiebt den Ausschnitt, Doppelklick zeigt wieder alles. Links wählst du frühere Läufe; „Vergleichen" legt einen zweiten Lauf als violette Kurve darüber – ideal vor/nach einer Änderung am System.</p>
+      <div class="schl"><button onclick="hilfeAn(false)" data-i18n>Verstanden</button></div>
+    </div>
   </div>
   <div id="haupt">
     <div id="links">
@@ -220,6 +267,44 @@
     'Grafikspeicher': 'Video memory',
     'Programmstart': 'Program start',
     'Spielintern': 'Game-internal',
+    // Kopfzeile / Fenster / Hilfe
+    'Hilfe': 'Help',
+    'Was sehe ich hier?': 'What am I looking at?',
+    'Minimieren': 'Minimize',
+    'Maximieren/Wiederherstellen': 'Maximize/restore',
+    'Die große Kurve zeigt die Frametime: wie lange jedes einzelne Bild gebraucht hat. Niedrig und ruhig = flüssiges Spiel. Jede Spitze ist ein Moment, in dem ein Bild zu lange gedauert hat – genau das nimmst du als Ruckler wahr. Ab etwa 28 ms wird eine Spitze spürbar, ab 45 ms deutlich. Die Farbe der Kurve folgt dem Schweregrad: grün = flüssig, bernstein = zäh, rot = Ruckler.':
+      'The big curve shows the frame time: how long each individual frame took. Low and calm = smooth gameplay. Every spike is a moment where one frame took too long – that is exactly what you perceive as a stutter. From about 28 ms a spike becomes noticeable, from 45 ms clearly so. The colour of the curve follows the severity: green = smooth, amber = sluggish, red = stutter.',
+    'Die Spuren darunter': 'The tracks below',
+    'Unter der Kurve läuft mit, was dein System zur selben Zeit getan hat – zeitlich exakt ausgerichtet. CPU: Gesamtlast des Prozessors (dauerhaft hoch = CPU-Limit). GPU: Auslastung/Takt der Grafikkarte (Einbrüche beim Ruckler = Drosselung oder Wartezeit). DPC/ISR: wie lange Treiber den Prozessor blockiert haben – der häufigste unsichtbare Ruckler-Verursacher. Datenträger: Lese-/Schreiblast, typisch beim Nachladen von Spieldaten.':
+      'Below the curve runs what your system was doing at the same moment – aligned exactly in time. CPU: overall processor load (permanently high = CPU limit). GPU: graphics card utilisation/clock (dips at a stutter = throttling or waiting). DPC/ISR: how long drivers blocked the processor – the most common invisible cause of stutters. Disk: read/write load, typical when the game streams in data.',
+    'So findest du die Ursache': 'How to find the cause',
+    'Klicke eine rote Spitze an: rechts öffnet sich das Beweis-Panel und nennt in Klartext, was in den 200 Millisekunden um diesen Ruckler auffällig war – ein Programm, ein Treiber, die Grafikkarte oder der Datenträger. Steht dort nichts, kam der Ruckler sehr wahrscheinlich aus dem Spiel selbst (z. B. Shader-Aufbau oder Nachladen) – das ist kein Messfehler, sondern ein ehrliches Ergebnis.':
+      'Click a red spike: the evidence panel opens on the right and states in plain language what was unusual in the 200 milliseconds around this stutter – a program, a driver, the graphics card or the disk. If nothing is listed, the stutter most likely came from the game itself (e.g. shader building or streaming) – that is not a measurement error but an honest result.',
+    'Bedienung': 'Controls',
+    'Mausrad zoomt auf den Zeiger, Ziehen verschiebt den Ausschnitt, Doppelklick zeigt wieder alles. Links wählst du frühere Läufe; „Vergleichen" legt einen zweiten Lauf als violette Kurve darüber – ideal vor/nach einer Änderung am System.':
+      'The mouse wheel zooms onto the pointer, dragging pans the view, double-click shows everything again. On the left you pick earlier runs; "Compare" overlays a second run as a violet curve – ideal before/after a change to your system.',
+    'Verstanden': 'Got it',
+    // Klartext-Saetze im Beweis-Panel (je Verdaechtigen-Art)
+    'hat den Prozessor genau in diesem Moment ungewöhnlich lange blockiert – das Spiel musste auf ihn warten.':
+      'blocked the processor unusually long at exactly this moment – the game had to wait for it.',
+    'war genau in diesem Moment ungewöhnlich aktiv und hat dem Spiel Rechenzeit weggenommen.':
+      'was unusually active at exactly this moment and took processing time away from the game.',
+    'Die Grafikkarte hat in diesem Moment ihren Takt gesenkt (Drosselung) – meist wegen Temperatur- oder Leistungslimit.':
+      'The graphics card lowered its clock at this moment (throttling) – usually due to a temperature or power limit.',
+    'Der Grafikspeicher lief voll – Windows musste Daten auslagern, das kostet genau solche Aussetzer.':
+      'Video memory ran full – Windows had to page data out, which costs exactly this kind of hitch.',
+    'Der Datenträger war in diesem Moment stark beschäftigt – typisch, wenn das Spiel Daten nachlädt.':
+      'The disk was heavily busy at this moment – typical when the game streams in data.',
+    'ist genau in diesem Moment gestartet – Programmstarts ziehen kurz spürbar Leistung.':
+      'started at exactly this moment – program launches briefly draw noticeable performance.',
+    'Im System war in diesem Moment nichts Auffälliges – der Ruckler kam sehr wahrscheinlich aus dem Spiel selbst (z. B. Shader-Aufbau oder Nachladen).':
+      'Nothing unusual was happening in the system at this moment – the stutter most likely came from the game itself (e.g. shader building or streaming).',
+    'Messwerte:': 'Measured:',
+    'Was hier auffällig war:': 'What stood out here:',
+    'Durchschnittliche Bilder pro Sekunde über den ganzen Lauf.': 'Average frames per second across the whole run.',
+    'Das schlechteste 1 % der Momente – so fühlt sich der Lauf in seinen schwächsten Sekunden an.': 'The worst 1% of moments – how the run feels in its weakest seconds.',
+    'Mittlere Dauer eines Bildes. 16,7 ms entsprechen 60 FPS.': 'Median duration of one frame. 16.7 ms equals 60 FPS.',
+    'Anzahl der erkannten Ruckler, daneben Ruckler pro Minute.': 'Number of detected stutters, next to it stutters per minute.',
   }
   let LANG = 'de'
   try { LANG = (localStorage.getItem('lumoraLang') || 'de') } catch (e) {}
@@ -227,6 +312,39 @@
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = tr(el.textContent) })
   document.querySelectorAll('[title]').forEach((el) => { el.title = tr(el.title) })
   LumoraReport.setTranslator(tr)
+
+  // --- Fensterknoepfe (rahmenloses Fenster) + Hilfe-Overlay ----------------------
+  function wbCtl(was) { ipcRenderer.invoke('wb-ctl', was) }
+  ipcRenderer.on('wb-maximized', () => { document.getElementById('wbMaxBtn').textContent = '❐' })
+  ipcRenderer.on('wb-unmaximized', () => { document.getElementById('wbMaxBtn').textContent = '□' })
+  function hilfeAn(on) {
+    document.getElementById('hilfe').classList.toggle('an', !!on)
+    if (!on) { try { localStorage.setItem('wbHilfeGesehen', '1') } catch (e) {} }
+  }
+  // Beim allerersten Oeffnen der Werkbank die Erklaerung von selbst zeigen - genau
+  // einmal. Wer sie kennt, wird nie wieder unterbrochen (Knopf "? Hilfe" bleibt).
+  try { if (!localStorage.getItem('wbHilfeGesehen')) hilfeAn(true) } catch (e) {}
+  // Kennzahlen-Tooltips in Klartext (title wird oben schon uebersetzt - hier nach
+  // der Uebersetzung setzen, also selbst durch tr()):
+  document.getElementById('kAvg').parentElement.title = tr('Durchschnittliche Bilder pro Sekunde über den ganzen Lauf.')
+  document.getElementById('kLow').parentElement.title = tr('Das schlechteste 1 % der Momente – so fühlt sich der Lauf in seinen schwächsten Sekunden an.')
+  document.getElementById('kMed').parentElement.title = tr('Mittlere Dauer eines Bildes. 16,7 ms entsprechen 60 FPS.')
+  document.getElementById('kSpk').parentElement.title = tr('Anzahl der erkannten Ruckler, daneben Ruckler pro Minute.')
+
+  // Klartext-Satz je Verdaechtigen-Art: macht aus "DPC max 1.2ms" einen Satz, den
+  // auch ein Nicht-Techniker versteht. Die technische Evidenz bleibt darunter stehen.
+  function klartextSatz(su) {
+    const n = su.name || ''
+    switch (su.kind) {
+      case 'driver': return tr('Treiber') + ' „' + n + '" ' + tr('hat den Prozessor genau in diesem Moment ungewöhnlich lange blockiert – das Spiel musste auf ihn warten.')
+      case 'process': return '„' + n + '" ' + tr('war genau in diesem Moment ungewöhnlich aktiv und hat dem Spiel Rechenzeit weggenommen.')
+      case 'gpu-throttle': return tr('Die Grafikkarte hat in diesem Moment ihren Takt gesenkt (Drosselung) – meist wegen Temperatur- oder Leistungslimit.')
+      case 'vram': return tr('Der Grafikspeicher lief voll – Windows musste Daten auslagern, das kostet genau solche Aussetzer.')
+      case 'disk': return tr('Der Datenträger war in diesem Moment stark beschäftigt – typisch, wenn das Spiel Daten nachlädt.')
+      case 'proc-start': return '„' + n + '" ' + tr('ist genau in diesem Moment gestartet – Programmstarts ziehen kurz spürbar Leistung.')
+      default: return ''
+    }
+  }
 
   // --- Berichtsdaten -------------------------------------------------------------
   let bericht = null      // geparstes Report-JSON (v1 oder v2)
@@ -350,12 +468,17 @@
       + '<div class="bp-ft">' + f.ftMs.toFixed(0) + ' ms · ' + tr('Median davor') + ' ' + f.medianMs.toFixed(1) + ' ms'
       + ' · ' + Math.round(f.ftMs / Math.max(0.1, f.medianMs)) + '×</div>'
     const sus = f.suspects || []
-    if (!sus.length) html += '<div class="verd"><div class="vev">' + tr('Keine Systemursache im Messfenster – vermutlich spielintern.') + '</div></div>'
+    if (sus.length) html += '<div class="vev" style="padding:2px 0 6px;color:var(--dim)">' + tr('Was hier auffällig war:') + '</div>'
+    else html += '<div class="verd"><div class="vev" style="font-family:\'Segoe UI\',sans-serif;font-size:12px">'
+      + esc(tr('Im System war in diesem Moment nichts Auffälliges – der Ruckler kam sehr wahrscheinlich aus dem Spiel selbst (z. B. Shader-Aufbau oder Nachladen).')) + '</div></div>'
     for (const su of sus) {
+      const satz = klartextSatz(su)
       html += '<div class="verd">'
         + '<div class="vk"><span class="vname">' + esc(su.name || '–') + '</span>'
         + '<span class="vart">' + esc((LumoraReport.KIND[su.kind] ? tr(LumoraReport.KIND[su.kind]) : su.kind)) + '</span></div>'
-        + '<div class="vev">' + esc(su.evidence || '') + '</div>'
+        // Erst der Satz fuer Menschen, darunter die technische Evidenz als Beleg.
+        + (satz ? '<div class="vev" style="font-family:\'Segoe UI\',sans-serif;font-size:12px;color:var(--text);margin-bottom:5px">' + esc(satz) + '</div>' : '')
+        + '<div class="vev">' + tr('Messwerte:') + ' ' + esc(su.evidence || '') + '</div>'
         + '<div class="vbar"><i style="width:' + Math.round((su.score || 0) * 100) + '%"></i></div>'
         + '</div>'
     }
