@@ -40,8 +40,15 @@
     throttle: '#ff2a3c', vram: '#ff2a3c', unknown: '#6d86a0'
   };
 
+  // Nimmt den Schluessel ODER den ganzen Bericht. Grund: das Geschwister verdict(r)
+  // nimmt das OBJEKT - an dieser Unsymmetrie ist die Werkbank ausgerutscht und hat
+  // ueberall verdictColor(bericht) aufgerufen. Ein Objekt ist nie === 'clean', also
+  // fiel JEDER Lauf in den Standardfall und alle Punkte waren rot (Nutzer-Befund
+  // 12.08.: "obwohl vorher auch gruene und gelbe dabei waren"). Beide Formen zu
+  // akzeptieren ist billiger und dauerhaft sicherer, als die Aufrufer nachzuziehen.
   function verdictColor(k) {
-    return k === 'clean' ? '#3fbf6a' : (k === 'game-internal' ? '#d8a13a' : '#ff6b6b');
+    var s = (k && typeof k === 'object') ? k.verdictKey : k;
+    return s === 'clean' ? '#3fbf6a' : (s === 'game-internal' ? '#d8a13a' : '#ff6b6b');
   }
 
   // Urteil in Klartext. verdictKey + Zahlen -> Satz; die UI uebersetzt.

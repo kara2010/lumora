@@ -151,6 +151,13 @@ if ($LASTEXITCODE -ne 0) { throw "ui-Pruefung fehlgeschlagen (s. Liste oben) - B
 & $node "$root\_testlab\link-check.js"
 if ($LASTEXITCODE -ne 0) { throw "Link-Pruefung fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
 
+# 0e) Geteiltes Berichts-Modul (App-Reiter + Werkbank + Webseite nutzen DIESELBE
+# analyze-report.js). Anlass: verdictColor nimmt den Schluessel ODER den Bericht -
+# die Werkbank uebergab das Objekt, das ist nie === 'clean', und so war jeder
+# Lauf-Punkt rot. Kein Bau-Schritt hat das bemerkt.
+& $node "$root\_testlab\report-check.js"
+if ($LASTEXITCODE -ne 0) { throw "Bericht-Pruefung fehlgeschlagen (s. Liste oben) - Bau abgebrochen" }
+
 # 1) Shell frisch bauen (cmake PC-unabhaengig suchen: VS2022 BuildTools ODER VS2026 Community -
 # die Entwicklungs-PCs haben unterschiedliche Toolchains; build\ ist jeweils lokal konfiguriert)
 $cmake = @(
