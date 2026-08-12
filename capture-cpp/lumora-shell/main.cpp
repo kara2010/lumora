@@ -5349,9 +5349,15 @@ static void onWebMessage(const std::wstring& raw, HWND replyWnd) {
     long long id = msg.value("id", 0ll);
     std::string channel = msg.value("channel", "");
     json args = msg.contains("args") && msg["args"].is_array() ? msg["args"] : json::array();
-    // Antwort ans QUELL-Fenster (Haupt-UI / Doorman / OSD) ueber dessen Marshalling-Message
+    // Antwort ans QUELL-Fenster (Haupt-UI / Doorman / OSD / Werkbank) ueber dessen
+    // Marshalling-Message. Werkbank + Analyse-OSD fehlten hier: ihre invoke-Antworten
+    // gingen als WM_SHELL_REPLY an ein Fenster, dessen wndProc die Message gar nicht
+    // kennt - die Antwort verpuffte (geleakter std::wstring), das Promise im WebView
+    // hing ewig. Sichtbares Symptom: die Laufliste der Werkbank blieb LEER, waehrend
+    // der per fetch geladene Lauf selbst normal erschien.
     UINT replyMsg = (replyWnd == g_doorHwnd) ? WM_SHELL_DOORMSG
-                  : (replyWnd == g_osdHwnd || replyWnd == g_osdEditHwnd) ? WM_SHELL_OSDMSG : WM_SHELL_REPLY;
+                  : (replyWnd == g_osdHwnd || replyWnd == g_osdEditHwnd
+                     || replyWnd == g_wbHwnd || replyWnd == g_anOsdHwnd) ? WM_SHELL_OSDMSG : WM_SHELL_REPLY;
     if (isSlowChannel(channel)) {
         std::thread([id, channel, args, replyWnd, replyMsg]() {
             CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // ShellLink/AppsFolder im Worker
