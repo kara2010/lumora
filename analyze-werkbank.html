@@ -37,9 +37,9 @@
     font: 13px/1 'Segoe UI Symbol', Consolas, monospace; padding: 8px 13px; }
   #fensterKnoepfe button:hover { color: var(--hell); background: rgba(255,255,255,.05); }
   #fensterKnoepfe button.zu:hover { color: #fff; background: var(--bad); }
-  #hilfeKnopf { background: none; border: 1px solid var(--line); color: var(--dim); cursor: pointer;
+  #hilfeKnopf, #exportKnopf { background: none; border: 1px solid var(--line); color: var(--dim); cursor: pointer;
     font: 11px/1 Consolas, monospace; padding: 5px 10px; align-self: center; letter-spacing: .1em; }
-  #hilfeKnopf:hover { color: var(--phos); border-color: var(--phos); }
+  #hilfeKnopf:hover, #exportKnopf:hover { color: var(--phos); border-color: var(--phos); }
 
   /* Erklaer-Overlay "Was sehe ich hier?": gleiche Labor-Aesthetik, nur Haarlinien */
   #hilfe { display: none; position: fixed; inset: 0; background: rgba(5,7,10,.92); z-index: 50;
@@ -169,6 +169,8 @@
     <span class="kopfstat"><b id="kLow" class="mono">–</b><span>1%-Low</span></span>
     <span class="kopfstat"><b id="kMed" class="mono">–</b><span data-i18n>Median</span></span>
     <span class="kopfstat"><b id="kSpk" class="mono">–</b><span data-i18n>Ruckler</span></span>
+    <span class="kopfstat" id="kLimitWrap" style="display:none"><b id="kLimit" class="mono" style="font-size:15px">–</b><span data-i18n>Limit</span></span>
+    <button id="exportKnopf" onclick="wbExport()" title="Als Text kopieren" style="display:none">⧉ <span data-i18n>Text</span></button>
     <button id="hilfeKnopf" onclick="hilfeAn(true)" title="Was sehe ich hier?">? <span data-i18n>Hilfe</span></button>
     <div id="fensterKnoepfe">
       <button onclick="wbCtl('min')" title="Minimieren">─</button>
@@ -302,6 +304,20 @@
     'Messwerte:': 'Measured:',
     'Was hier auffällig war:': 'What stood out here:',
     'Durchschnittliche Bilder pro Sekunde über den ganzen Lauf.': 'Average frames per second across the whole run.',
+    // Flaschenhals-Kennzahl + Export
+    'Limit': 'Limit',
+    'Text': 'Text',
+    'Kopiert ✓': 'Copied ✓',
+    'Woran der Lauf überwiegend hing – Anteil an der Messzeit. Eine Einschätzung aus GPU-/Kernlast, keine frame-genaue Messung.':
+      'What the run was mostly limited by – share of the measured time. An estimate from GPU/core load, not a frame-exact measurement.',
+    'GPU-Limit': 'GPU limit',
+    'CPU-Limit': 'CPU limit',
+    'Einzelkern-Limit': 'Single-core limit',
+    'FPS-Limit (VSync/Limiter)': 'FPS cap (VSync/limiter)',
+    'GPU drosselt': 'GPU throttling',
+    'Grafikspeicher voll': 'VRAM full',
+    'Nicht eindeutig': 'Not conclusive',
+    'Als Text kopieren': 'Copy as text',
     'Das schlechteste 1 % der Momente – so fühlt sich der Lauf in seinen schwächsten Sekunden an.': 'The worst 1% of moments – how the run feels in its weakest seconds.',
     'Mittlere Dauer eines Bildes. 16,7 ms entsprechen 60 FPS.': 'Median duration of one frame. 16.7 ms equals 60 FPS.',
     'Anzahl der erkannten Ruckler, daneben Ruckler pro Minute.': 'Number of detected stutters, next to it stutters per minute.',
@@ -392,7 +408,43 @@
     document.getElementById('kLow').textContent = (r.p1LowFps || 0).toFixed(0)
     document.getElementById('kMed').innerHTML = (r.medianFtMs || 0).toFixed(1) + '<em>ms</em>'
     document.getElementById('kSpk').innerHTML = (r.spikes || 0) + '<em>' + (r.spikesPerMin || 0).toFixed(1) + '/min</em>'
+    // Flaschenhals als Kopf-Kennzahl (lebte vorher nur im entfernten Reiter-Bericht):
+    // woran der Lauf UEBERWIEGEND hing, mit Anteil an der Messzeit.
+    const L = r.limit, lw = document.getElementById('kLimitWrap')
+    if (L && L.samples >= 10 && L.top && L.top !== 'unknown') {
+      lw.style.display = ''
+      document.getElementById('kLimit').innerHTML = LumoraReport.esc(tr(LumoraReport.LIMIT[L.top] || L.top)) + '<em>' + (L.topPct | 0) + '%</em>'
+      lw.title = tr('Woran der Lauf überwiegend hing – Anteil an der Messzeit. Eine Einschätzung aus GPU-/Kernlast, keine frame-genaue Messung.')
+    } else lw.style.display = 'none'
+    document.getElementById('exportKnopf').style.display = ''
     document.title = 'Lumora Analyse-Werkbank – ' + (spiel || berichtFile)
+  }
+
+  // Bericht als Text in die Zwischenablage (aus dem Reiter hierher umgezogen - hier
+  // liegt der Bericht schon geladen vor). Rueckmeldung direkt am Knopf statt Toast.
+  async function wbExport() {
+    const r = bericht; if (!r) return
+    const Z = []
+    Z.push('Lumora Ruckler-Analyse – ' + (r.wall || '').replace('T', ' '))
+    Z.push((r.game || '') + ' · ' + Math.round((r.durS || 0) / 60) + ' min · ' + (r.gpu || '') + (r.gpuDriver ? ' (Treiber ' + r.gpuDriver + ')' : ''))
+    const m = r.context || {}
+    Z.push([m.resolution, m.hdr ? 'HDR' : 'SDR', m.streaming ? 'Streaming aktiv' : null, 'Windows-Build ' + (m.winBuild || '?')].filter(Boolean).join(' · '))
+    Z.push('')
+    Z.push('Ø ' + (r.avgFps || 0).toFixed(0) + ' fps · 1%-Low ' + (r.p1LowFps || 0).toFixed(0) + ' fps · Median ' + (r.medianFtMs || 0).toFixed(1) + ' ms · ' + (r.spikes | 0) + ' Ruckler (' + (r.spikesPerMin || 0).toFixed(1) + '/min)')
+    Z.push('Urteil: ' + LumoraReport.verdict(r).replace(/<[^>]+>/g, ''))
+    if (r.limit && r.limit.top && r.limit.top !== 'unknown')
+      Z.push('Flaschenhals: ' + (LumoraReport.LIMIT[r.limit.top] || r.limit.top) + ' (' + (r.limit.topPct | 0) + '% der Messzeit)')
+    if (r.aggregate && r.aggregate.length) {
+      Z.push(''); Z.push('Verdächtige:')
+      for (const a of r.aggregate) Z.push('  - ' + (LumoraReport.KIND[a.kind] || a.kind) + (a.name ? ' ' + a.name : '') + ': ' + a.hits + '× Hauptverdächtiger')
+    }
+    if (r.note) { Z.push(''); Z.push('Notiz: ' + r.note) }
+    try {
+      await navigator.clipboard.writeText(Z.join('\n'))
+      const b = document.getElementById('exportKnopf')
+      b.textContent = tr('Kopiert ✓')
+      setTimeout(() => { b.innerHTML = '⧉ ' + tr('Text') }, 1500)
+    } catch (e) {}
   }
 
   // Zoombare Timeline (werkbank-timeline.js): Mausrad zoomt auf den Cursor, Ziehen
