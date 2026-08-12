@@ -535,10 +535,6 @@
               </div>
             </div>
           </div>
-          <div class="form-group" id="anReportBox" style="display:none">
-            <label>Ergebnis</label>
-            <div id="anReport"></div>
-          </div>
           <div class="form-group" id="anCompareBox" style="display:none">
             <label>Vergleich</label>
             <div id="anCompare"></div>
@@ -1230,7 +1226,6 @@ const I18N_EN = {
   // --- Netzwerk-Zaehler loeschen ----------------------------------------------
   'Zurücksetzen': 'Reset',
   'In der Werkbank öffnen': 'Open in the workbench',
-  'Zusammenfassung': 'Summary',
   'Alle löschen': 'Delete all',
   'Alle Netzwerk-Zähler löschen': 'Delete all network counters',
   'Einzelne Zähler löschst du direkt beim Spiel in der Bibliothek.': 'Individual counters can be deleted directly at the game in your library.',
@@ -1319,7 +1314,6 @@ const I18N_EN = {
   "⏹ Deaktivieren": "⏹ Deactivate",
 
   // --- Bericht teilen (3.3.0) ---
-  "🔬 In der Werkbank öffnen": "🔬 Open in the workbench",
   "Prozess ": "Process ",
   "Hochladen und Link kopieren": "Upload and copy link",
   "Wird hochgeladen …": "Uploading …",
@@ -1700,14 +1694,10 @@ const I18N_EN = {
   'Treiber': 'Driver', 'Programm': 'Program', 'GPU-Drosselung': 'GPU throttling', 'Grafikspeicher': 'VRAM',
   'Datenträger': 'Disk', 'Programmstart': 'Program start', 'Spielintern': 'Game-internal',
   'Dauer': 'Duration', 'Ø FPS': 'Avg FPS', '1%-Low': '1% low', 'Median ': 'median ',
-  'Alle Ruckler im Detail': 'All stutters in detail',
-  'Als Text kopieren': 'Copy as text',
-  'Bericht kopiert': 'Report copied',
   'Für Vergleich auswählen': 'Select for comparison',
   'Notiz…': 'Note…',
   'Anzeigen': 'Show',
   'Diesen Mess-Lauf wirklich löschen?': 'Really delete this measurement run?',
-  'Streaming aktiv': 'streaming active',
   'Achtung: unterschiedliche Spiele – Vergleich nur eingeschränkt aussagekräftig.': 'Note: different games – comparison is only partially meaningful.',
   'Achtung: nur einer der Läufe lief mit aktivem Streaming.': 'Note: only one of the runs had streaming active.',
   'Ruckler/min': 'Stutters/min',
@@ -3316,7 +3306,10 @@ ipcRenderer.on('analyze-status', (e, st) => {
 })
 ipcRenderer.on('analyze-done', async (e, file) => {
   await anRefreshHistory()
-  if (file) anShowReport(file)
+  // Werkbank nur oeffnen, wenn der Nutzer gerade im Analyse-Reiter ist und kein Spiel
+  // laeuft - nach einem Hotkey-Stop mitten im Spiel darf kein maximiertes Fenster
+  // aufreissen. Der Lauf wartet dann oben im Verlauf, ein Klick genuegt.
+  if (file && settingsTab === 'analyse' && !document.hidden && !spielLaeuft) anWerkbank(file)
 })
 async function anOpen() {
   ipcRenderer.invoke('analyze-status')
@@ -3342,43 +3335,12 @@ LumoraReport.setTranslator(function (t) { return window.tr(t) })
 const anEsc = LumoraReport.esc
 const anVerdict = LumoraReport.verdict
 const anVerdictColor = LumoraReport.verdictColor
-const anDrawChart = LumoraReport.drawChart
-const anStatTiles = LumoraReport.statTiles
-const anLimitSection = LumoraReport.limitSection
 const AN_KIND = LumoraReport.KIND
-const AN_LIMIT = LumoraReport.LIMIT
-const AN_LIMIT_COL = LumoraReport.LIMIT_COL
-
-async function anShowReport(file) {
-  const r = await ipcRenderer.invoke('analyze-get', file)
-  if (!r) return
-  const box = document.getElementById('anReportBox'), el = document.getElementById('anReport')
-  box.style.display = ''
-  const col = anVerdictColor(r.verdictKey)
-  const meta = r.context || {}
-  const metaTxt = [meta.resolution, meta.hdr ? 'HDR' : '', meta.streaming ? window.tr('Streaming aktiv') : '', anEsc(r.gpu || ''), r.gpuDriver ? 'Treiber ' + anEsc(r.gpuDriver) : '']
-    .filter(Boolean).join(' · ')
-  // KURZzusammenfassung (Nutzer-Entscheid 12.08.): der ausfuehrliche Bericht (Kurve,
-  // Verdaechtigen-Balken, Einzel-Ruckler) lebt komplett in der Werkbank - der Reiter
-  // zeigt nur Urteil, Kennzahlen und Flaschenhals. Der Text-Export (anExport) baut
-  // seinen vollen Inhalt selbst aus dem Report, ihm fehlt dadurch nichts.
-  el.innerHTML =
-    '<div class="an-hero" style="border-color:' + col + '55"><div class="an-hero-dot" style="background:' + col + '"></div>'
-    + '<div class="an-hero-txt">' + anVerdict(r) + '<div class="an-hero-meta">' + anEsc(r.wall || '') + (metaTxt ? ' · ' + metaTxt : '') + '</div></div></div>'
-    + anStatTiles(r)
-    + anLimitSection(r)
-    + '<div class="an-actions">'
-    + '<button class="btn-browse" onclick="anExport(\'' + anEsc(file) + '\')">' + window.tr('Als Text kopieren') + '</button>'
-    // Teilen-Knopf vorerst entfernt (Feature deaktiviert). anShare/anShareSend + das
-    // #shareOverlay + die analyze-share-IPC bleiben schlummernd im Code, damit sich die
-    // Funktion spaeter durch Wiedereinsetzen dieser einen Zeile reaktivieren laesst.
-    + '<button class="btn-primary" onclick="anWerkbank(\'' + anEsc(file) + '\')">' + window.tr('🔬 In der Werkbank öffnen') + '</button>'
-    + '</div>'
-  // NUR den Einstellungs-Scrollbereich bewegen - scrollIntoView scrollte auch die
-  // Eltern-Container und schob damit die Reiterleiste (#detailNav) aus dem Bild.
-  const sv = document.getElementById('settingsView')
-  if (sv) sv.scrollTo({ top: sv.scrollTop + box.getBoundingClientRect().top - sv.getBoundingClientRect().top - 10, behavior: 'smooth' })
-}
+// Kein Inline-Bericht mehr im Reiter (Nutzer-Entscheid 12.08.): ALLES - Urteil,
+// Kennzahlen, Flaschenhals, Kurve, Beweise, Export - lebt in der Werkbank, die sich
+// beim Klick auf einen Lauf sofort oeffnet. Der Reiter behaelt Start/Stop, Verlauf
+// und den Zwei-Laeufe-Vergleich. (Teilen-Feature schlummert weiter: anShare/
+// #shareOverlay + analyze-share-IPC bleiben fuer eine spaetere Reaktivierung.)
 async function anRefreshHistory() {
   anHist = (await ipcRenderer.invoke('analyze-list')) || []
   const el = document.getElementById('anHistory')
@@ -3396,7 +3358,6 @@ async function anRefreshHistory() {
       + '<span class="an-hgame">' + anEsc(h.game || '–') + '</span>'
       + '<span class="an-hmeta">' + anEsc((h.wall || '').replace('T', ' ')) + ' · ' + Math.round((h.durS || 0) / 60) + ' min · ' + (h.avgFps || 0).toFixed(0) + ' fps · ' + (h.spikesPerMin || 0).toFixed(1) + ' R/min</span>'
       + '<input class="an-note" placeholder="' + window.tr('Notiz…') + '" value="' + anEsc(h.note || '') + '" onclick="event.stopPropagation()" onchange="anNote(\'' + anEsc(h.file) + '\', this.value)">'
-      + '<button class="btn-browse" onclick="event.stopPropagation(); anShowReport(\'' + anEsc(h.file) + '\')">' + window.tr('Zusammenfassung') + '</button>'
       // Teilen-Verlaufsknoepfe (Link kopieren / zurueckziehen) vorerst entfernt - Feature deaktiviert.
       + '<button class="btn-cancel" onclick="event.stopPropagation(); anDelete(\'' + anEsc(h.file) + '\')">✕</button>'
       + '</div>'
@@ -3550,25 +3511,8 @@ async function anUnshare(file) {
 // Analyse-Werkbank: eigenes Auswerte-Fenster (zoombare Timeline, Spuren, Vergleich).
 // Die Shell prueft den Dateinamen (anSafeName) und oeffnet/fokussiert das Fenster.
 function anWerkbank(file) { ipcRenderer.invoke('analyze-werkbank', file || '') }
-async function anExport(file) {
-  const r = await ipcRenderer.invoke('analyze-get', file)
-  if (!r) return
-  const L = []
-  L.push('Lumora Ruckler-Analyse – ' + (r.wall || '').replace('T', ' '))
-  L.push((r.game || '') + ' · ' + Math.round((r.durS || 0) / 60) + ' min · ' + (r.gpu || '') + (r.gpuDriver ? ' (Treiber ' + r.gpuDriver + ')' : ''))
-  const m = r.context || {}
-  L.push([m.resolution, m.hdr ? 'HDR' : 'SDR', m.streaming ? 'Streaming aktiv' : null, 'Windows-Build ' + (m.winBuild || '?')].filter(Boolean).join(' · '))
-  L.push('')
-  L.push('Ø ' + (r.avgFps || 0).toFixed(0) + ' fps · 1%-Low ' + (r.p1LowFps || 0).toFixed(0) + ' fps · Median ' + (r.medianFtMs || 0).toFixed(1) + ' ms · ' + (r.spikes | 0) + ' Ruckler (' + (r.spikesPerMin || 0).toFixed(1) + '/min)')
-  L.push('Urteil: ' + anVerdict(r).replace(/<[^>]+>/g, ''))
-  if (r.aggregate && r.aggregate.length) {
-    L.push('')
-    L.push('Verdächtige:')
-    for (const a of r.aggregate) L.push('  - ' + (AN_KIND[a.kind] || a.kind) + (a.name ? ' ' + a.name : '') + ': ' + a.hits + '× Hauptverdächtiger')
-  }
-  if (r.note) { L.push(''); L.push('Notiz: ' + r.note) }
-  try { await navigator.clipboard.writeText(L.join('\n')); if (typeof showGamepadToast === 'function') showGamepadToast(window.tr('Bericht kopiert')) } catch (e) {}
-}
+// anExport (Text in die Zwischenablage) ist mit dem Inline-Bericht in die Werkbank
+// umgezogen - dort liegt der Bericht bereits geladen vor, ganz ohne IPC-Umweg.
 
 // Start-Knopf: gespeist aus dem Eigenstart-Status (launch-status, global) UND den
 // vom Fremdstart-Watcher gemeldeten laufenden Spielen (external-running, pro Pfad).
