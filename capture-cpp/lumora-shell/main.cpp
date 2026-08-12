@@ -5327,6 +5327,12 @@ static std::wstring windowStatePath() { return dataDir() + L"\\window-state.json
 // window-state.json war tagelang unangetastet - ob die Speicherpfade ueberhaupt laufen,
 // war aus dem Log nicht zu beantworten. Jede Speicherung hinterlaesst jetzt eine Spur.
 static void saveWindowState(HWND h, const char* grund) {
+    // Nie gezeigtes Fenster = nichts zu speichern. Eine Tray-only-Sitzung (Autostart
+    // --minimized, Fenster nie geoeffnet) meldet showCmd=SW_SHOWNORMAL - ihr Speichern
+    // beim Herunterfahren ueberschrieb das gute max=1 der Vorsitzung mit max=0. Genau
+    // so ging der Vollbild-Zustand ueber Nacht verloren (Log 12.08: 21:56 geladen max=1,
+    // 01:25 queryendsession max=0 sichtbar=0, 08:27 geladen max=0).
+    if (!g_mainShownOnce) { bcLogStream(std::string("fensterzustand NICHT gespeichert (") + grund + "): Fenster in dieser Sitzung nie gezeigt"); return; }
     WINDOWPLACEMENT wp{ sizeof(wp) };
     if (!GetWindowPlacement(h, &wp)) return;
     RECT& r = wp.rcNormalPosition;
