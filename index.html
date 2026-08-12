@@ -541,7 +541,7 @@
           </div>
           <div class="form-group">
             <label>Verlauf</label>
-            <p class="settings-hint">Ein Klick auf einen Lauf öffnet die Analyse-Werkbank mit allen Details. Hake zwei Läufe an, um sie zu vergleichen (z.&nbsp;B. vor/nach dem Abschalten eines verdächtigen Programms) – eine Notiz hilft, den Überblick zu behalten.</p>
+            <p class="settings-hint">Ein Klick auf einen Lauf öffnet die ausführliche Auswertung mit Zeitleiste und Beweisen. Hake zwei Läufe an, um sie zu vergleichen (z.&nbsp;B. vor/nach dem Abschalten eines verdächtigen Programms) – eine Notiz hilft, den Überblick zu behalten.</p>
             <div id="anHistory"><p class="settings-hint">Noch keine Messungen.</p></div>
           </div>
         </div>
@@ -1225,7 +1225,6 @@
 const I18N_EN = {
   // --- Netzwerk-Zaehler loeschen ----------------------------------------------
   'Zurücksetzen': 'Reset',
-  'In der Werkbank öffnen': 'Open in the workbench',
   'Alle löschen': 'Delete all',
   'Alle Netzwerk-Zähler löschen': 'Delete all network counters',
   'Einzelne Zähler löschst du direkt beim Spiel in der Bibliothek.': 'Individual counters can be deleted directly at the game in your library.',
@@ -1260,9 +1259,9 @@ const I18N_EN = {
   'Für schwierige Anschlüsse (Relay & IPv6-Test)': 'For tricky connections (relay & IPv6 test)',
   'Gruppe beitreten & mitstreamen': 'Join the group & stream along',
   'Beitreten & mitstreamen': 'Join & stream along',
-  'Werkbank': 'Workbench',
-  'Ein Klick auf einen Lauf öffnet die Analyse-Werkbank mit allen Details. Hake zwei Läufe an, um sie zu vergleichen (z. B. vor/nach dem Abschalten eines verdächtigen Programms) – eine Notiz hilft, den Überblick zu behalten.':
-      'Clicking a run opens the analysis workbench with all the details. Tick two runs to compare them (e.g. before/after disabling a suspicious program) – a note helps you keep track.',
+  'Details ansehen': 'View details',
+  'Ein Klick auf einen Lauf öffnet die ausführliche Auswertung mit Zeitleiste und Beweisen. Hake zwei Läufe an, um sie zu vergleichen (z. B. vor/nach dem Abschalten eines verdächtigen Programms) – eine Notiz hilft, den Überblick zu behalten.':
+      'Clicking a run opens the full evaluation with timeline and evidence. Tick two runs to compare them (e.g. before/after disabling a suspicious program) – a note helps you keep track.',
   'Ab wann zählt ein Frame als Ruckler? „Normal" meldet nur fühlbare Aussetzer (ab ~28 ms), „Empfindlich" auch kleine Unebenheiten, „Nur harte Ruckler" erst deutliche Hänger (ab ~45 ms).': 'When does a frame count as a stutter? "Normal" only reports noticeable hitches (from ~28 ms), "Sensitive" also small bumps, "Hard stutters only" only clear freezes (from ~45 ms).',
   "Lumora ist ein inoffizielles Tool und steht in keiner Verbindung zu Valve/Steam, Microsoft oder den jeweiligen Spieleherstellern. Spielecover, Logos und Markennamen sind Eigentum der jeweiligen Rechteinhaber. Coverbilder werden ausschließlich zur Identifikation der installierten Spiele von Steam bzw. dem Microsoft Store geladen und lokal gespeichert.": "Lumora is an unofficial tool and is not affiliated with Valve/Steam, Microsoft or the respective game publishers. Game covers, logos and brand names are the property of their respective owners. Cover images are downloaded from Steam or the Microsoft Store solely to identify installed games and are stored locally.",
   "— WebRTC-Stack (WHEP) im eigenen Medien-Relay · Paul-Louis Ageneau · MPL 2.0 ·": "— WebRTC stack (WHEP) in our own media relay · Paul-Louis Ageneau · MPL 2.0 ·",
@@ -3353,13 +3352,13 @@ async function anRefreshHistory() {
   // Weitergabe, sonst risse jeder Notiz-Klick das Auswerte-Fenster auf.
   el.innerHTML = anHist.map(h => {
     const col = anVerdictColor(h.verdictKey)
-    return '<div class="an-histrow" style="cursor:pointer" onclick="anWerkbank(\'' + anEsc(h.file) + '\')" title="' + window.tr('In der Werkbank öffnen') + '">'
+    return '<div class="an-histrow" style="cursor:pointer" onclick="anWerkbank(\'' + anEsc(h.file) + '\')" title="' + window.tr('Details ansehen') + '">'
       + '<input type="checkbox" ' + (anSel.includes(h.file) ? 'checked' : '') + ' onclick="event.stopPropagation()" onchange="anSelToggle(\'' + anEsc(h.file) + '\', this.checked)" title="' + window.tr('Für Vergleich auswählen') + '">'
       + '<span class="dot" style="background:' + col + '"></span>'
       + '<span class="an-hgame">' + anEsc(h.game || '–') + '</span>'
       + '<span class="an-hmeta">' + anEsc((h.wall || '').replace('T', ' ')) + ' · ' + Math.round((h.durS || 0) / 60) + ' min · ' + (h.avgFps || 0).toFixed(0) + ' fps · ' + (h.spikesPerMin || 0).toFixed(1) + ' R/min</span>'
       + '<input class="an-note" placeholder="' + window.tr('Notiz…') + '" value="' + anEsc(h.note || '') + '" onclick="event.stopPropagation()" onchange="anNote(\'' + anEsc(h.file) + '\', this.value)">'
-      + '<span class="an-wb-hint">🔬 ' + window.tr('Werkbank') + ' ›</span>'
+      + '<span class="an-wb-hint">' + window.tr('Details ansehen') + '</span>'
       // Teilen-Verlaufsknoepfe (Link kopieren / zurueckziehen) vorerst entfernt - Feature deaktiviert.
       + '<button class="btn-cancel" onclick="event.stopPropagation(); anDelete(\'' + anEsc(h.file) + '\')">✕</button>'
       + '</div>'
