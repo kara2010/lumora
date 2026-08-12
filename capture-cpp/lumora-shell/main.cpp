@@ -4223,9 +4223,44 @@ static void sendToWerkbank(const std::string& channel, const json& payload) {
 static LRESULT CALLBACK wbWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
     case WM_SHELL_OSDMSG: { auto* s = (std::wstring*)l; if (s) { if (g_wbWv) g_wbWv->PostWebMessageAsJson(s->c_str()); delete s; } return 0; }
-    case WM_SIZE: if (g_wbCtrl) { RECT rc; GetClientRect(h, &rc); g_wbCtrl->put_Bounds(rc); } return 0;
+    case WM_SIZE:
+        if (g_wbCtrl) { RECT rc; GetClientRect(h, &rc); g_wbCtrl->put_Bounds(rc); }
+        // Maximieren-Knopf in der Werkbank-Kopfzeile aktuell halten (wie Hauptfenster)
+        if (w == SIZE_MAXIMIZED) sendToWerkbank("wb-maximized", nullptr);
+        else if (w == SIZE_RESTORED) sendToWerkbank("wb-unmaximized", nullptr);
+        return 0;
     case WM_GETMINMAXINFO: {   // Timeline + Spuren + Panels brauchen Platz
         auto* mm = (MINMAXINFO*)l; mm->ptMinTrackSize.x = 1100; mm->ptMinTrackSize.y = 700; return 0; }
+    // Rahmenlos wie das Hauptfenster (Nutzer-Befund: "Standard-UI passt nicht zu Lumora").
+    // Gleiche Mechanik: NCCALCSIZE nimmt den Systemrahmen weg, maximiert wird auf die
+    // Arbeitsflaeche geschnitten (sonst ragt das Fenster in die Taskleiste, s. Hauptfenster).
+    case WM_NCCALCSIZE: {
+        auto* pr = (RECT*)l;
+        if (IsZoomed(h)) {
+            HMONITOR hm = MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO mi{ sizeof(mi) };
+            if (GetMonitorInfoW(hm, &mi)) {
+                RECT wa = mi.rcWork;
+                if (pr->left   < wa.left)   pr->left   = wa.left;
+                if (pr->top    < wa.top)    pr->top    = wa.top;
+                if (pr->right  > wa.right)  pr->right  = wa.right;
+                if (pr->bottom > wa.bottom) pr->bottom = wa.bottom;
+            }
+        }
+        return 0;
+    }
+    case WM_NCHITTEST: {   // Resize-Griffe am Rand (Ziehen uebernimmt -webkit-app-region der Kopfzeile)
+        LRESULT def = DefWindowProcW(h, m, w, l);
+        if (def != HTCLIENT || IsZoomed(h)) return def;
+        const int G = 6, GT = 3;
+        POINT p{ GET_X_LPARAM(l), GET_Y_LPARAM(l) }; ScreenToClient(h, &p);
+        RECT rc; GetClientRect(h, &rc);
+        bool L = p.x < G, R = p.x >= rc.right - G, T = p.y < GT, B = p.y >= rc.bottom - G;
+        if (T && L) return HTTOPLEFT; if (T && R) return HTTOPRIGHT;
+        if (B && L) return HTBOTTOMLEFT; if (B && R) return HTBOTTOMRIGHT;
+        if (T) return HTTOP; if (B) return HTBOTTOM; if (L) return HTLEFT; if (R) return HTRIGHT;
+        return HTCLIENT;
+    }
     case WM_CLOSE: ShowWindow(h, SW_HIDE); return 0;   // verstecken statt zerstoeren: schneller Wiederauf
     case WM_DESTROY: return 0;
     }
@@ -4241,6 +4276,7 @@ static void createWerkbankWindow(const std::string& file) {
         // Fenster lebt schon (WM_CLOSE versteckt nur): zeigen, fokussieren, Lauf pushen.
         ShowWindow(g_wbHwnd, SW_SHOW);
         if (IsIconic(g_wbHwnd)) ShowWindow(g_wbHwnd, SW_RESTORE);
+        else if (!IsWindowVisible(g_wbHwnd)) ShowWindow(g_wbHwnd, SW_SHOW);   // versteckt (WM_CLOSE) -> wieder zeigen, Zoom-Zustand bleibt
         SetForegroundWindow(g_wbHwnd);
         if (!file.empty()) sendToWerkbank("wb-open", file);
         return;
@@ -4258,10 +4294,18 @@ static void createWerkbankWindow(const std::string& file) {
       MONITORINFO mi{ sizeof(mi) }; if (GetMonitorInfoW(mon, &mi)) wa = mi.rcWork; }
     int w = (std::min)(1280L, wa.right - wa.left), h = (std::min)(800L, wa.bottom - wa.top);
     g_wbHwnd = CreateWindowExW(0, L"LumoraWerkbank", L"Lumora Analyse-Werkbank",
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        WS_OVERLAPPEDWINDOW,
         wa.left + (wa.right - wa.left - w) / 2, wa.top + (wa.bottom - wa.top - h) / 2, w, h,
         nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!g_wbHwnd) { bcLogStream("werkbank: CreateWindowExW fehlgeschlagen err=" + std::to_string(GetLastError())); return; }
+    // Runde Ecken + Frame-Neuberechnung (NCCALCSIZE greift sonst erst bei der naechsten
+    // Groessenaenderung) - gleiche Behandlung wie Haupt-/Tuersteher-Fenster.
+    { DWM_WINDOW_CORNER_PREFERENCE cp = DWMWCP_ROUND;
+      DwmSetWindowAttribute(g_wbHwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cp, sizeof(cp)); }
+    SetWindowPos(g_wbHwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    // Maximiert oeffnen: die Werkbank ist ein Auswerte-Vollbild, kein Beifenster
+    // (Nutzer-Befund: "kleines unbrauchbares Fenster"). Verkleinern bleibt moeglich.
+    ShowWindow(g_wbHwnd, SW_MAXIMIZE);
     SetForegroundWindow(g_wbHwnd);
     std::wstring userData = knownFolder(L"LOCALAPPDATA", FOLDERID_LocalAppData) + L"\\lumora-shell";   // robust: env ODER SHGetKnownFolderPath
     std::wstring navFile = widen(file);   // per Wert in den Callback (Query-Parameter beim ersten Navigate)
@@ -4276,6 +4320,11 @@ static void createWerkbankWindow(const std::string& file) {
                             g_wbCtrl = ctrl; g_wbCtrl->get_CoreWebView2(&g_wbWv);
                             if (!g_wbWv) return E_NOINTERFACE;
                             RECT rc; GetClientRect(g_wbHwnd, &rc); g_wbCtrl->put_Bounds(rc);
+                            // -webkit-app-region:drag der Kopfzeile aktivieren (rahmenloses
+                            // Fenster: Ziehen/Doppelklick-Maximieren wie beim Hauptfenster)
+                            { ComPtr<ICoreWebView2Settings> s0; g_wbWv->get_Settings(&s0);
+                              ComPtr<ICoreWebView2Settings9> s9; if (s0) s0.As(&s9);
+                              if (s9) s9->put_IsNonClientRegionSupportEnabled(TRUE); }
                             ComPtr<ICoreWebView2_3> wv3; g_wbWv.As(&wv3);
                             if (wv3) {
                                 wv3->SetVirtualHostNameToFolderMapping(L"app.lumora", g_appDir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
@@ -5262,6 +5311,15 @@ static json handleChannel(const std::string& channel, const json& args) {
     if (channel == "minimize-window") { ShowWindow(g_hwnd, SW_MINIMIZE); return true; }
     if (channel == "toggle-maximize") { ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE); return true; }
     if (channel == "close-window")    { PostMessageW(g_hwnd, WM_CLOSE, 0, 0); return true; }
+    // Fensterknoepfe der (rahmenlosen) Werkbank - eigenes Ziel, die drei Kanaele oben
+    // wirken fest auf das Hauptfenster.
+    if (channel == "wb-ctl" && args.size() >= 1 && args[0].is_string() && g_wbHwnd) {
+        const std::string was = args[0].get<std::string>();
+        if (was == "min") ShowWindow(g_wbHwnd, SW_MINIMIZE);
+        else if (was == "max") ShowWindow(g_wbHwnd, IsZoomed(g_wbHwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        else if (was == "close") PostMessageW(g_wbHwnd, WM_CLOSE, 0, 0);
+        return true;
+    }
     if (channel == "shell-open-external") {
         if (args.size() >= 1 && args[0].is_string()) {
             std::wstring u = widen(args[0].get<std::string>());
