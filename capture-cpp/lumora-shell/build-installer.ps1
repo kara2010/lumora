@@ -13,7 +13,17 @@ $stage = "$shell\stage"
 # osd-Rauchtest als Bau-Sperre (Schritt 0b). Die Nummer 3.2.6 bleibt verbrannt -
 # wer sie gezogen hatte, bekaeme dieselbe Nummer nie erneut als Update angeboten
 # (der Updater vergleicht nur die Versionsnummer, s. RELEASE.md 12).
-$version = "3.2.7"   # 3.2.7: Analyse-Werkbank - Messlaeufe als zoombare Zeitleiste mit
+$version = "3.2.8"   # 3.2.8: Fensterzustand bleibt zuverlaessig erhalten - gespeichert wird jetzt
+                     #        bei JEDER Aenderung (entprellt) statt nur beim Beenden, und eine
+                     #        Sitzung, die das Fenster nie gezeigt hat (Autostart im Infobereich),
+                     #        ueberschreibt den gemerkten Vollbild-Zustand nicht mehr. Die
+                     #        Ruckler-Auswertung ist der Ort fuer Berichte: Klick auf einen Lauf
+                     #        oeffnet sie sofort und maximiert, im Lumora-Fensterrahmen, mit
+                     #        Erklaer-Overlay, Klartext-Beweisen und Flaschenhals-Kennzahl; ihre
+                     #        Lauf-Liste wird wieder gefuellt (Antwort-Routing) und zeigt die
+                     #        richtigen Urteilsfarben. Stream-Vorschau pausiert, solange ein Spiel
+                     #        laeuft (spart lokale Decode-Last und ggf. den zweiten Encoder).
+$prev_3_2_7 = ""  # 3.2.7: Analyse-Werkbank - Messlaeufe als zoombare Zeitleiste mit
                      #        synchronisierten Spuren, Beweis-Panel je Ruckler, Lauf-Browser und
                      #        Vergleich zweier Laeufe als Overlay. Netzwerk-Statistik pro Spiel
                      #        (zuschaltbar) inkl. NET-Gruppe im OSD und jederzeit loeschbaren
