@@ -1,4 +1,4 @@
-// PoC-A: Beweist NUR den riskanten Teil - NVENC (API 13.1) nimmt auf der NVIDIA-GPU
+// PoC-A: Beweist NUR den riskanten Teil - NVENC (API 13.1) nimmt auf aktueller NVIDIA-Hardware
 // (Blackwell) eine Direct3D11-Textur direkt als Input und erzeugt H.264, OHNE
 // CPU-Readback. Fuellt eine synthetische BGRA-Textur pro Frame mit wechselnder
 // Farbe und encodet sie. Erfolg = gueltige poc.h264-Datei. WGC kommt in PoC-B.
