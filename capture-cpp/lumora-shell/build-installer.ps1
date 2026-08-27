@@ -13,7 +13,13 @@ $stage = "$shell\stage"
 # osd-Rauchtest als Bau-Sperre (Schritt 0b). Die Nummer 3.2.6 bleibt verbrannt -
 # wer sie gezogen hatte, bekaeme dieselbe Nummer nie erneut als Update angeboten
 # (der Updater vergleicht nur die Versionsnummer, s. RELEASE.md 12).
-$version = "3.2.8"   # 3.2.8: Fensterzustand bleibt zuverlaessig erhalten - gespeichert wird jetzt
+$version = "3.2.9"   # 3.2.9: Einstellungen frieren nicht mehr ein: die Datenquellen-Anzeige
+                     #        (osd-sources) startete bei jedem Oeffnen bis zu zwei PowerShell-
+                     #        Laeufe SYNCHRON auf dem UI-Thread (Get-ScheduledTask, kalt mehrere
+                     #        Sekunden) - der Thread pumpt beim WebView2 auch die Eingaben, die
+                     #        App wirkte auf frischen PCs beim Tab-Wechsel tot (9800X3D-Befund).
+                     #        Jetzt Ergebnis-Cache + nie-blockierende UI-Sicht + Vorwaermung.
+$prev_3_2_8 = ""  # 3.2.8: Fensterzustand bleibt zuverlaessig erhalten - gespeichert wird jetzt
                      #        bei JEDER Aenderung (entprellt) statt nur beim Beenden, und eine
                      #        Sitzung, die das Fenster nie gezeigt hat (Autostart im Infobereich),
                      #        ueberschreibt den gemerkten Vollbild-Zustand nicht mehr. Die
