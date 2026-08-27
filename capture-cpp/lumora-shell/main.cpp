@@ -136,7 +136,7 @@ static bool writeFile(const std::wstring& p, const std::string& data) {
     // schieben. Vorher ging trunc+write DIREKT ins Ziel - die Datei wurde also zuerst
     // GELEERT und dann gefuellt: ein Absturz oder ein vom Virenscanner blockierter
     // Schreibzugriff mittendrin hinterliess eine leere/halbe app-settings.json bzw.
-    // games.json (Anwender-Fall: Einstellungen "verschwinden", Spielsuche bei jedem
+    // games.json (Anwenderfall: Einstellungen "verschwinden", Spielsuche bei jedem
     // Start). Jetzt bleibt das Original bei JEDEM Fehlschlag unangetastet.
     // Fehlschlaege landen mit Windows-Fehlercode im Log - der Rueckgabewert wird von
     // praktisch allen Aufrufern ignoriert, ohne Logzeile war ein kaputter Datenordner
@@ -1186,7 +1186,7 @@ static std::string runCaptureOutput(const std::wstring& cmdLine, DWORD timeoutMs
         CloseHandle(wr); CloseHandle(pi.hThread);
         // ECHTER Timeout. Vorher: blockierendes ReadFile, die Zeitpruefung stand DAHINTER -
         // sie lief also erst, wenn schon Daten kamen. Ein Kind, das minutenlang NICHTS
-        // ausgibt (Anwender-Fall: Virenscanner klemmt jeden PowerShell-Start), hielt den
+        // ausgibt (Anwenderfall: Virenscanner klemmt jeden PowerShell-Start), hielt den
         // Thread unbegrenzt fest - haengender OSD-Einrichtungshelfer (g_osdSetupRunning
         // blieb fuer immer gesetzt) und alle 4s neue haengende runTask-Threads. Jetzt:
         // PeekNamedPipe (blockiert nie) + Prozess-Wait im Wechsel; nach Ablauf wird das
@@ -2932,7 +2932,7 @@ static bool pawnioInstalled() { return GetFileAttributesW((pawnioDirW() + L"\\Pa
 // Der Installer raeumt das beim Update selbst mit auf, das hier ist die zusaetzliche
 // Absicherung fuer alle anderen Faelle (z.B. Installationsordner manuell verschoben).
 // Ergebnis-Cache je Aufgabe. Jede Messung kostet einen PowerShell-Start (gemessen
-// 0,3 s warm bis ~8 s auf frischen/kleinen Maschinen) - und der realen Anwenderfall
+// 0,3 s warm bis ~8 s auf frischen/kleinen Maschinen) - und ein realer Anwenderfall
 // hat gezeigt, was passiert, wenn so eine Messung den UI-Thread erwischt: der Thread
 // pumpt beim windowed WebView2 auch die EINGABEN, die App wirkt sekundenlang tot
 // (Tab-Wechsel -> osd-sources -> zwei PowerShell-Laeufe SYNCHRON). Messende Aufrufer
@@ -2944,8 +2944,8 @@ static bool schtaskPresent(const wchar_t* task) {
     std::string out = runCaptureOutput(
         std::wstring(L"powershell -NoProfile -Command \"(Get-ScheduledTask -TaskName '") + task +
         L"' -ErrorAction SilentlyContinue).Actions.Execute\"", 8000);
-    // Dauer festhalten: auf der schwachen Hardware-Klasse brauchte allein der PowerShell-Start ~8s,
-    // beim Anwender kam offenbar nie etwas zurueck - genau das soll im Log sichtbar sein.
+    // Dauer festhalten: auf schwacher Hardware brauchte allein der PowerShell-Start ~8s,
+    // bei einem Anwender kam offenbar nie etwas zurueck - genau das soll im Log sichtbar sein.
     ULONGLONG ms = GetTickCount64() - t0;
     if (ms > 2000 || out.empty()) bcLogStream("schtaskPresent(" + narrow(task) + "): " + std::to_string(ms) + "ms, Ausgabe " + (out.empty() ? "LEER" : "ok"));
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
@@ -3451,7 +3451,7 @@ static struct {
     std::vector<std::pair<void*, std::string>> devices;   // handle + Modellname
 } g_nvml;
 // NVIDIA-Namen kuerzen (1:1 aus main.js:341): "NVIDIA "- und "GeForce "-Vorbau weg,
-// sonst passt "NVIDIA-GPU" nicht in die OSD-/Anzeige-Breite (Electron hatte das schon).
+// sonst passt "RTX 4080 SUPER" nicht in die OSD-/Anzeige-Breite (Electron hatte das schon).
 static std::string cleanNvidiaName(const std::string& raw) {
     std::string n = raw;
     n = std::regex_replace(n, std::regex("^NVIDIA\\s+", std::regex::icase), "");
@@ -6323,7 +6323,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     if (loadSettings().value("minimizeToTray", false)) createTray();
     registerHotkeys();
     applyAutostart();
-    // Datenordner-Selbstpruefung (Diagnosezeile, Anwender-Fall: Einstellungen weg,
+    // Datenordner-Selbstpruefung (Diagnosezeile, Anwenderfall: Einstellungen weg,
     // Spielsuche bei jedem Start - beides haengt an %APPDATA%\lumora, ueber den das Log
     // in %TEMP% bisher nichts sagte). Haelt fest: tatsaechlicher Pfad (Umleitung auf
     // Netz/OneDrive sofort sichtbar), Schreib-Lese-Probe MIT Dauer, Zustand der beiden
@@ -6358,7 +6358,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // schtask-Cache im Hintergrund vorwaermen: die Einstellungs-Seite (osd-sources)
     // liest ihn nur noch - ohne Vorwaermung zeigte der allererste Blick "nicht
     // eingerichtet", bis die Hintergrund-Messung durch ist. Drei PowerShell-Laeufe,
-    // seriell, unkritisch - aber NIE auf dem UI-Thread (realen Fall: Eingaben tot).
+    // seriell, unkritisch - aber NIE auf dem UI-Thread (realer Fall: Eingaben tot).
     std::thread([]() { fpsTaskPresent(); senseTaskPresent(); schtaskPresent(L"LumoraOSD-Analyze"); }).detach();
     timeBeginPeriod(1);                              // praeziser Hintergrund-Poll (wie Electron/RTSS)
     startHotkeyPollThread();   // Gamepad-/Tastatur-Hotkey-Poll im EIGENEN Thread (125 Hz), entkoppelt vom

@@ -17,7 +17,7 @@ $version = "3.2.9"   # 3.2.9: Einstellungen frieren nicht mehr ein: die Datenque
                      #        (osd-sources) startete bei jedem Oeffnen bis zu zwei PowerShell-
                      #        Laeufe SYNCHRON auf dem UI-Thread (Get-ScheduledTask, kalt mehrere
                      #        Sekunden) - der Thread pumpt beim WebView2 auch die Eingaben, die
-                     #        App wirkte auf frischen PCs beim Tab-Wechsel tot (Anwender-Befund).
+                     #        App wirkte auf frischen PCs beim Tab-Wechsel tot (realer Anwenderfall).
                      #        Jetzt Ergebnis-Cache + nie-blockierende UI-Sicht + Vorwaermung.
 $prev_3_2_8 = ""  # 3.2.8: Fensterzustand bleibt zuverlaessig erhalten - gespeichert wird jetzt
                      #        bei JEDER Aenderung (entprellt) statt nur beim Beenden, und eine
