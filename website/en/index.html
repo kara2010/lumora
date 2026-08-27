@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "3.2.8",
+        "softwareVersion": "3.2.9",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1041,8 +1041,16 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.2.8</span>
+          <span class="release-ver">3.2.9</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>Settings respond instantly on every machine</strong> – when opening the settings, Lumora asked Windows about its scheduled tasks in a blocking way. On machines where this query is slow (typically right after a fresh installation), the app then stopped responding to clicks for several seconds. The query now runs entirely in the background and its result is cached.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.2.8</span>
         </div>
         <ul>
           <li><strong>The stutter evaluation opens straight away – and explains itself</strong>: Clicking a measurement run opens the full evaluation immediately, maximised and in the familiar Lumora window frame. On first opening, a short introduction explains what the frame time curve and the tracks below it mean, and how to track down the cause of a stutter. Every finding is also stated as a full sentence – "Driver X blocked the processor unusually long at exactly this moment" – with the measurements kept below as evidence. The overview of earlier runs shows the matching verdict colour for each run, and the bottleneck appears as its own figure in the header.</li>
@@ -1079,6 +1087,7 @@
           <li><strong>More robust under the hood</strong>: Lumora now registers with Windows under a fixed app identity, giving it clean grouping in the taskbar and for notifications. If the display component crashes (for example after a graphics-driver reset while gaming), Lumora reloads the interface automatically instead of staying stuck as a blank window. And the installer checks whether the required Microsoft runtime is present and installs it if needed – so Lumora starts reliably even on freshly set-up systems.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.2.3</span>
@@ -1087,7 +1096,6 @@
           <li><strong>Xbox and Microsoft Store games finally show their icon</strong> – for those titles the icon is not stored in the executable but sits as an image in the game folder. Lumora found nothing there and left the tile blank; it now uses the game's package logo. Entries you already have fetch their icon automatically the next time you select them, and a custom image you set yourself is kept.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.2.2</span>
@@ -1463,7 +1471,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (34)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (35)</button>
   </div>
 </section>
 
@@ -1864,7 +1872,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Show less' : 'Show older versions (34)';
+    btn.textContent = open ? 'Show less' : 'Show older versions (35)';
   }
 
   function toggleFeatures() {
