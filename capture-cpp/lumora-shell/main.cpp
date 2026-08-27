@@ -2931,6 +2931,14 @@ static bool pawnioInstalled() { return GetFileAttributesW((pawnioDirW() + L"\\Pa
 // schtasks /run startete dann nichts Sichtbares (Pfad ungueltig bzw. falsche Version).
 // Der Installer raeumt das beim Update selbst mit auf, das hier ist die zusaetzliche
 // Absicherung fuer alle anderen Faelle (z.B. Installationsordner manuell verschoben).
+// Ergebnis-Cache je Aufgabe. Jede Messung kostet einen PowerShell-Start (gemessen
+// 0,3 s warm bis ~8 s auf frischen/kleinen Maschinen) - und der 9800X3D-Anwenderfall
+// hat gezeigt, was passiert, wenn so eine Messung den UI-Thread erwischt: der Thread
+// pumpt beim windowed WebView2 auch die EINGABEN, die App wirkt sekundenlang tot
+// (Tab-Wechsel -> osd-sources -> zwei PowerShell-Laeufe SYNCHRON). Messende Aufrufer
+// (unten) fuellen den Cache; der UI-Thread liest ihn NUR (schtaskPresentUi).
+static std::mutex g_schtaskMx;
+static std::map<std::wstring, bool> g_schtaskCache;
 static bool schtaskPresent(const wchar_t* task) {
     ULONGLONG t0 = GetTickCount64();
     std::string out = runCaptureOutput(
@@ -2941,9 +2949,27 @@ static bool schtaskPresent(const wchar_t* task) {
     ULONGLONG ms = GetTickCount64() - t0;
     if (ms > 2000 || out.empty()) bcLogStream("schtaskPresent(" + narrow(task) + "): " + std::to_string(ms) + "ms, Ausgabe " + (out.empty() ? "LEER" : "ok"));
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
-    if (out.empty()) return false;
-    wchar_t exeW[MAX_PATH]; GetModuleFileNameW(nullptr, exeW, MAX_PATH);
-    return _wcsicmp(widen(out).c_str(), exeW) == 0;
+    bool da = false;
+    if (!out.empty()) {
+        wchar_t exeW[MAX_PATH]; GetModuleFileNameW(nullptr, exeW, MAX_PATH);
+        da = _wcsicmp(widen(out).c_str(), exeW) == 0;
+    }
+    { std::lock_guard<std::mutex> lk(g_schtaskMx); g_schtaskCache[task] = da; }
+    return da;
+}
+// Nie-blockierende Sicht fuer den UI-Thread: Cache-Treffer -> Wert; sonst wird die
+// Messung in einen Hintergrund-Thread geschoben und fuer JETZT "nein" gemeldet. Das
+// ist bewusst nur fuer ANZEIGEN gedacht (osd-sources-Infozeile) - Entscheidungen
+// (Setup noetig? UAC zeigen?) treffen weiterhin die messenden Aufrufer im Thread.
+static bool schtaskPresentUi(const wchar_t* task) {
+    {
+        std::lock_guard<std::mutex> lk(g_schtaskMx);
+        auto it = g_schtaskCache.find(task);
+        if (it != g_schtaskCache.end()) return it->second;
+    }
+    std::wstring t = task;
+    std::thread([t]() { schtaskPresent(t.c_str()); }).detach();
+    return false;
 }
 static bool fpsTaskPresent()   { return schtaskPresent(L"LumoraOSD-FPS"); }
 static bool senseTaskPresent() { return schtaskPresent(L"LumoraOSD-Sensors"); }
@@ -5235,13 +5261,13 @@ static json handleChannel(const std::string& channel, const json& args) {
             : mGpu ? "MSI Afterburner" : "keine erkannt";
         std::string cpu = mCpu ? "MSI Afterburner"
             : senseBrokerAlive() ? "PawnIO-Treiber"
-            : (lubroker::cpuSensorModule() && pawnioInstalled() && senseTaskPresent()) ? "PawnIO-Treiber (startet mit dem OSD)"
+            : (lubroker::cpuSensorModule() && pawnioInstalled() && schtaskPresentUi(L"LumoraOSD-Sensors")) ? "PawnIO-Treiber (startet mit dem OSD)"
             : declined ? "nicht eingerichtet (nur Last/RAM/Takt)"
             : "Einrichtung folgt beim OSD-Start (bis dahin Last/RAM/Takt)";
         std::string src = s.value("osdFpsSource", std::string("auto"));
         bool useRtss = (src == "rtss") ? true : (src == "presentmon") ? false : lurtss::available();
         std::string fps = useRtss ? "RTSS/Afterburner"
-            : fpsTaskPresent() ? "PresentMon"
+            : schtaskPresentUi(L"LumoraOSD-FPS") ? "PresentMon"
             : declined ? "nicht eingerichtet"
             : "PresentMon (Einrichtung folgt beim OSD-Start)";
         return { {"gpu", gpu}, {"cpu", cpu}, {"fps", fps} };
@@ -6329,6 +6355,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     SetTimer(hwnd, TIMER_EXTWATCH, 2000, nullptr);   // Fremdstart-Watcher (HDR-Automatik + Spielzeit fuer nicht-Lumora-Starts)
     SetTimer(hwnd, TIMER_NETSTAT, 1000, nullptr);    // Netzwerk-Statistik: Ziel-PID melden + Broker-Heartbeat (1 Hz, billig ohne Spiel)
     SetTimer(hwnd, TIMER_OSDPRELOAD, 3000, nullptr); // OSD-WebView2 ~3s nach Start vorwaermen (Browser-Prozess laeuft dann schon) -> Oeffnen sofort
+    // schtask-Cache im Hintergrund vorwaermen: die Einstellungs-Seite (osd-sources)
+    // liest ihn nur noch - ohne Vorwaermung zeigte der allererste Blick "nicht
+    // eingerichtet", bis die Hintergrund-Messung durch ist. Drei PowerShell-Laeufe,
+    // seriell, unkritisch - aber NIE auf dem UI-Thread (9800X3D-Fall: Eingaben tot).
+    std::thread([]() { fpsTaskPresent(); senseTaskPresent(); schtaskPresent(L"LumoraOSD-Analyze"); }).detach();
     timeBeginPeriod(1);                              // praeziser Hintergrund-Poll (wie Electron/RTSS)
     startHotkeyPollThread();   // Gamepad-/Tastatur-Hotkey-Poll im EIGENEN Thread (125 Hz), entkoppelt vom
                                // UI-Thread: schnelles Toggeln + 2-Tasten-Kombis gehen nicht mehr verloren,
