@@ -2296,6 +2296,60 @@ static std::mutex g_kbMx;
 static const ULONGLONG GP_RELEASE_MS = 40;
 static bool g_gpMainWas = false, g_gpOsdWas = false, g_gpAnalyzeWas = false;
 static ULONGLONG g_gpMainSeen = 0, g_gpOsdSeen = 0, g_gpAnalyzeSeen = 0;
+// --- Hotkeys je Vordergrund-Programm aussetzen (Einstellung "hotkeyPauseExes") -------
+// Anlass: Virtual Pinball (und aehnliche Spiele) belegen genau die Tasten, aus denen
+// Hotkey-Kombis meist bestehen - ein Tastendruck im Spiel loeste ungewollt Lumora-
+// Aktionen aus. Die Loesung sitzt HIER zentral, weil sowohl die Gamepad-Kombis als
+// auch der Tastatur-Poll (unten in derselben Funktion) durch diesen einen Tick laufen.
+static std::string foregroundExeNameLow(HWND fg) {
+    if (!fg) return "";
+    DWORD pid = 0; GetWindowThreadProcessId(fg, &pid);
+    if (!pid) return "";
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return "";
+    wchar_t buf[MAX_PATH]; DWORD n = MAX_PATH;
+    std::string out;
+    if (QueryFullProcessImageNameW(h, 0, buf, &n) && n > 0) {
+        std::wstring full(buf, n);
+        size_t p = full.find_last_of(L"\\/");
+        std::wstring base = (p == std::wstring::npos) ? full : full.substr(p + 1);
+        out = narrow(base);
+        for (auto& c : out) c = (char)tolower((unsigned char)c);
+    }
+    CloseHandle(h);
+    return out;
+}
+// Vergleich OHNE ".exe"-Endung auf beiden Seiten - der Nutzer soll die Endung in der
+// Einstellung weglassen duerfen, ohne dass die Kombi lautlos nie greift.
+static std::string stripExeSuffix(std::string n) {
+    if (n.size() > 4 && _stricmp(n.c_str() + n.size() - 4, ".exe") == 0) n.resize(n.size() - 4);
+    return n;
+}
+static bool hotkeysPausedFor(std::string fgExeLow, const json& settings) {
+    if (fgExeLow.empty()) return false;
+    std::string liste = settings.value("hotkeyPauseExes", std::string());
+    if (liste.empty()) return false;
+    // Klein schreiben statt vom Aufrufer zu verlangen - foregroundExeNameLow liefert zwar
+    // immer schon Kleinbuchstaben, aber die Funktion soll auch robust bleiben, wenn sie
+    // (z.B. in einem Test) direkt mit einem Rohwert aufgerufen wird.
+    for (auto& c : fgExeLow) c = (char)tolower((unsigned char)c);
+    const std::string ziel = stripExeSuffix(fgExeLow);
+    size_t start = 0;
+    while (start <= liste.size()) {
+        size_t komma = liste.find(',', start);
+        std::string tok = liste.substr(start, komma == std::string::npos ? std::string::npos : komma - start);
+        size_t a = tok.find_first_not_of(" \t");
+        if (a != std::string::npos) {
+            size_t b = tok.find_last_not_of(" \t");
+            tok = tok.substr(a, b - a + 1);
+            for (auto& c : tok) c = (char)tolower((unsigned char)c);
+            if (stripExeSuffix(tok) == ziel) return true;
+        }
+        if (komma == std::string::npos) break;
+        start = komma + 1;
+    }
+    return false;
+}
 static void xinputTick() {   // 125 Hz; Flanke = einmal ausloesen pro Druck
     padPoll();   // EINE Abfrage pro Platz und Tick (leere Plaetze nur alle 2 s)
     ULONGLONG now = GetTickCount64();
@@ -2308,6 +2362,12 @@ static void xinputTick() {   // 125 Hz; Flanke = einmal ausloesen pro Druck
         else if (s_cached.is_null()) { s_cached = fresh; s_cachedAt = now; }   // Erststart: noch nichts im Cache
     }
     const json& s = s_cached;
+    // Vordergrund-Programm nur bei WECHSEL neu abfragen (OpenProcess/QueryFullProcessImageName
+    // 125x/s waeren unnoetiger Aufwand) - der HWND-Vergleich selbst ist praktisch kostenlos.
+    static HWND s_hkFgWnd = nullptr; static std::string s_hkFgExe;
+    HWND fgNow = GetForegroundWindow();
+    if (fgNow != s_hkFgWnd) { s_hkFgWnd = fgNow; s_hkFgExe = foregroundExeNameLow(fgNow); }
+    const bool hkPaused = hotkeysPausedFor(s_hkFgExe, s);
     // 1) Gamepad-Kombis (XInput) mit Release-Debounce gegen Read-Aussetzer.
     bool rawM = gamepadComboDown(s.value("gamepadHotkey", json::array()));
     if (rawM) g_gpMainSeen = now;
@@ -2318,9 +2378,12 @@ static void xinputTick() {   // 125 Hz; Flanke = einmal ausloesen pro Druck
     bool rawA = gamepadComboDown(s.value("gamepadAnalyzeHotkey", json::array()));
     if (rawA) g_gpAnalyzeSeen = now;
     bool a = rawA || (g_gpAnalyzeSeen && now - g_gpAnalyzeSeen < GP_RELEASE_MS);
-    if (m && !g_gpMainWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_MAIN, 0);
-    if (o && !g_gpOsdWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_OSD, 0);
-    if (a && !g_gpAnalyzeWas) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 0);
+    // Zustand IMMER nachziehen, auch waehrend pausiert ist (g_gpMainWas etc.) - sonst
+    // loest ein Tastendruck, der WAEHREND des Spielens gehalten wurde, beim Zurueckwechseln
+    // zu Lumora eine nachtraegliche Flanke aus. Nur das AUSLOESEN wird unterdrueckt.
+    if (m && !g_gpMainWas && !hkPaused) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_MAIN, 0);
+    if (o && !g_gpOsdWas && !hkPaused) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_OSD, 0);
+    if (a && !g_gpAnalyzeWas && !hkPaused) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 0);
     g_gpMainWas = m; g_gpOsdWas = o; g_gpAnalyzeWas = a;
     // 1b) Controller-Zustand an die UI pushen (~30 Hz, nur bei sichtbarem Fenster).
     // Die UI darf navigator.getGamepads NICHT mehr benutzen: allein die Registrierung
@@ -2357,7 +2420,10 @@ static void xinputTick() {   // 125 Hz; Flanke = einmal ausloesen pro Druck
         bool alt = dn(VK_MENU), ctrl = dn(VK_CONTROL), shift = dn(VK_SHIFT);
         for (auto& h : g_kbHotkeys) {
             bool on = dn((int)h.vk) && h.alt == alt && h.ctrl == ctrl && h.shift == shift;
-            if (on && !h.down) h.action();
+            // Wie bei den Gamepad-Kombis: h.down wird IMMER nachgezogen, nur das Ausloesen
+            // wird gesperrt - sonst zaehlt eine Taste, die schon waehrend des Spielens
+            // gedrueckt gehalten wurde, als frische Flanke, sobald Lumora wieder vorn ist.
+            if (on && !h.down && !hkPaused) h.action();
             h.down = on;
         }
     }
@@ -6080,6 +6146,45 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // des Falls, dass zwischen Loeschen und Spielende NOCH etwas uebertragen wird.
     // Ohne diesen Test faellt so ein Rechenfehler erst beim Anwender auf, und zwar als
     // "geloeschte Menge ist nach dem Spiel wieder da".
+    // Hotkey-Ausschluss per Vordergrund-Programm (Einstellung "hotkeyPauseExes"):
+    // prueft die Textabgleich-Logik (Gross/Klein, Leerzeichen, mit/ohne .exe, mehrere
+    // Eintraege) UND den echten WinAPI-Pfad (foregroundExeNameLow gegen das eigene,
+    // gerade erzeugte Testfenster - dessen Prozess ist diese exe selbst, der erwartete
+    // Name also bekannt).
+    for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-hotkeypause") == 0) {
+        wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
+        std::string res; int fehler = 0;
+        auto pruef = [&](const char* was, bool ok) {
+            res += std::string(ok ? "OK   " : "FEHL ") + was + "\n"; if (!ok) ++fehler;
+        };
+        auto liste = [](std::string l) { return json{ {"hotkeyPauseExes", l} }; };
+        pruef("leere Liste pausiert nie", !hotkeysPausedFor("vpinballx64.exe", liste("")));
+        pruef("exakter Treffer (mit .exe)", hotkeysPausedFor("vpinballx64.exe", liste("VPinballX64.exe")));
+        pruef("Treffer ohne .exe in der Einstellung", hotkeysPausedFor("vpinballx64.exe", liste("vpinballx64")));
+        pruef("Gross-/Kleinschreibung egal", hotkeysPausedFor("VPinballX64.EXE", liste("vpinballx64.exe")));
+        pruef("mehrere Eintraege, Leerzeichen nach Komma", hotkeysPausedFor("vpinballx.exe", liste("VPinballX64.exe, VPinballX.exe")));
+        pruef("kein Treffer bei anderem Programm", !hotkeysPausedFor("notepad.exe", liste("VPinballX64.exe, VPinballX.exe")));
+        pruef("leerer Vordergrundname pausiert nie", !hotkeysPausedFor("", liste("VPinballX64.exe")));
+        pruef("Teilstring loest NICHT aus (kein 'vpinballx' matcht 'vpinballx64')", !hotkeysPausedFor("vpinballx.exe", liste("vpinballx64.exe")));
+
+        WNDCLASSW wc{}; wc.lpfnWndProc = DefWindowProcW; wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"LumoraHkPauseTest"; RegisterClassW(&wc);
+        HWND h = CreateWindowExW(0, L"LumoraHkPauseTest", L"Test", WS_OVERLAPPEDWINDOW, 0, 0, 200, 100, nullptr, nullptr, wc.hInstance, nullptr);
+        std::string echterName = foregroundExeNameLow(h);
+        wchar_t selbstW[MAX_PATH]; GetModuleFileNameW(nullptr, selbstW, MAX_PATH);
+        std::string erwartet = narrow(selbstW);
+        size_t p = erwartet.find_last_of("\\/"); if (p != std::string::npos) erwartet = erwartet.substr(p + 1);
+        for (auto& c : erwartet) c = (char)tolower((unsigned char)c);
+        pruef("foregroundExeNameLow erkennt die eigene exe", echterName == erwartet);
+        res += "  erkannt: " + echterName + " | erwartet: " + erwartet + "\n";
+        pruef("echte exe wird von der eigenen Liste pausiert", hotkeysPausedFor(echterName, liste(erwartet)));
+        DestroyWindow(h);
+        pruef("leeres Fenster (kein Vordergrund) pausiert nie", !hotkeysPausedFor(foregroundExeNameLow(nullptr), liste("lumora-shell")));
+
+        res = "hotkeypause-Selbsttest: " + std::string(fehler ? "FEHLER" : "ok") + "\n" + res;
+        writeFile(std::wstring(tmp) + L"\\lumora-shell-test.txt", res);
+        return fehler ? 1 : 0;
+    }
     for (int i = 1; i < argc; ++i) if (wcscmp(argv[i], L"--test-netreset") == 0) {
         wchar_t tmp[MAX_PATH] = {}; GetEnvironmentVariableW(L"TEMP", tmp, MAX_PATH);
         std::string res; int fehler = 0;

@@ -359,6 +359,11 @@
               <button class="btn-cancel" onclick="clearGpHotkey('main')">Aus</button>
             </div>
             <p class="settings-hint" id="gpHotkeyHint" style="display:none"></p>
+            <div class="form-group" style="margin-top:14px">
+              <label>Hotkeys pausieren bei bestimmten Programmen</label>
+              <input type="text" id="setHotkeyPauseExes" placeholder="z. B. VPinballX64.exe, VPinballX.exe" autocomplete="off" spellcheck="false" onchange="onAppSettingChange()">
+              <p class="settings-hint">Programmnamen durch Komma getrennt (die .exe darf auch weggelassen werden). Solange eines davon im Vordergrund läuft, reagiert Lumora auf keinen deiner Hotkeys – weder Tastatur noch Gamepad. Sinnvoll bei Spielen, die dieselben Tasten selbst brauchen, etwa Virtual Pinball.</p>
+            </div>
           </div>
         </div>
 
@@ -1223,6 +1228,9 @@
 // 'language' (auto = Systemsprache), gecacht in localStorage fuer die
 // flackerfreie Anwendung direkt beim Start.
 const I18N_EN = {
+  'Hotkeys pausieren bei bestimmten Programmen': 'Pause hotkeys for specific programs',
+  'Programmnamen durch Komma getrennt (die .exe darf auch weggelassen werden). Solange eines davon im Vordergrund läuft, reagiert Lumora auf keinen deiner Hotkeys – weder Tastatur noch Gamepad. Sinnvoll bei Spielen, die dieselben Tasten selbst brauchen, etwa Virtual Pinball.': 'Program names separated by commas (the .exe may be omitted). While one of them is in the foreground, Lumora ignores all your hotkeys – keyboard and gamepad alike. Useful for games that need the same keys themselves, such as Virtual Pinball.',
+
   // --- Netzwerk-Zaehler loeschen ----------------------------------------------
   'Zurücksetzen': 'Reset',
   'Alle löschen': 'Delete all',
@@ -3844,6 +3852,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       document.getElementById('setStartMin').checked = !!s.startMinimized
       document.getElementById('setTray').checked = !!s.minimizeToTray
       document.getElementById('setSgdbKey').value = s.steamGridDbKey || ''
+      document.getElementById('setHotkeyPauseExes').value = s.hotkeyPauseExes || ''
       document.getElementById('setIbAuto').checked = s.inputBridgeAutoActivate !== false
       { const e = document.getElementById('setNetStats'); if (e) e.checked = !!s.netStats; netStatsAn = !!s.netStats }
       document.getElementById('setOsdEnabled').checked = !!s.osdEnabled
@@ -3930,6 +3939,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
         startMinimized: document.getElementById('setStartMin').checked,
         minimizeToTray: document.getElementById('setTray').checked,
         steamGridDbKey: document.getElementById('setSgdbKey').value.trim(),
+        hotkeyPauseExes: document.getElementById('setHotkeyPauseExes').value.trim(),
         inputBridgeAutoActivate: document.getElementById('setIbAuto').checked,
         netStats: (document.getElementById('setNetStats') || { checked: false }).checked,
       })
