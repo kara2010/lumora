@@ -83,3 +83,8 @@ _testlab/plan-*.json
 _privat/
 *-PLAN.md
 SICHTBARKEIT.md
+
+# Gesamtes Testlab-Verzeichnis dauerhaft aus dem Repo entfernt (Vorfall 2026-09-14:
+# persoenliche Pfade/Domain/Hostname/Screenshots lagen darin oeffentlich). Bleibt
+# lokal fuer build-installer.ps1 erhalten, wird nie wieder getrackt.
+_testlab/

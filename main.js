@@ -6367,7 +6367,7 @@ function checkForUpdates(manual) {
 // und beendet die App - das Skript wartet auf den Prozess-Exit, tauscht mit
 // .bak-Rollback und startet Lumora neu. Installation liegt unter
 // %LOCALAPPDATA%\Programs -> kein Admin noetig. Log: %TEMP%\lumora-update.log.
-const FU_MANIFEST_URL = 'https://[Hosting-Domain]/updates/app/manifest.json'
+const FU_MANIFEST_URL = 'https://lumora.kara-webdesign.de/updates/app/manifest.json'
 let fuPending = null   // Manifest eines ausstehenden Updates (nach fuCheck)
 let fuReady = false    // Staging vollstaendig verifiziert -> Neustart moeglich
 let fuDownloading = false  // Re-Entrancy-Schutz: laeuft gerade ein Datei-Download?
