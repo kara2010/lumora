@@ -1,0 +1,51 @@
+<!doctype html><meta charset="utf-8"><title>Lumora Stream-Selbsttest</title>
+<style>body{background:#111;color:#ddd;font:14px system-ui} video{width:640px;background:#000;display:block;margin:6px 0} pre{white-space:pre-wrap}</style>
+<video id="v" autoplay muted playsinline></video>
+<pre id="out">verbinde…</pre>
+<script>
+// Messsonde fuer stream-e2e.js: echter WHEP-Client (wie player.html), misst 'dauer' Sekunden
+// lang die Helligkeit der dekodierten Bilder und die libwebrtc-Statistik (inbound-rtp) und
+// meldet das Ergebnis per POST /result an das Testskript. Parameter: ?whep=<URL>&dauer=<s>
+const q = new URLSearchParams(location.search);
+const WHEP = q.get('whep') || 'http://127.0.0.1:8889/whep';
+const DAUER = parseInt(q.get('dauer') || '10', 10);
+const out = (o) => document.getElementById('out').textContent = JSON.stringify(o, null, 1);
+const erg = { phase: 'start', proben: [] };
+const melde = () => fetch('/result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(erg) }).catch(() => {});
+(async () => {
+  try {
+    const pc = new RTCPeerConnection();
+    pc.addTransceiver('video', { direction: 'recvonly' });
+    pc.addTransceiver('audio', { direction: 'recvonly' });
+    const v = document.getElementById('v');
+    pc.ontrack = (e) => { if (e.track.kind === 'video') v.srcObject = e.streams[0] || new MediaStream([e.track]); };
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    await new Promise(r => { if (pc.iceGatheringState === 'complete') r(); else { pc.onicegatheringstatechange = () => pc.iceGatheringState === 'complete' && r(); setTimeout(r, 2000); } });
+    const resp = await fetch(WHEP + '?vid=selbsttest&name=Selbsttest', { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp });
+    erg.whepStatus = resp.status;
+    if (resp.status !== 201) throw new Error('WHEP-Antwort ' + resp.status);
+    await pc.setRemoteDescription({ type: 'answer', sdp: await resp.text() });
+    erg.phase = 'verbunden';
+    const cv = document.createElement('canvas'); cv.width = 192; cv.height = 108;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    for (let i = 0; i < DAUER; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      ctx.drawImage(v, 0, 0, 192, 108);
+      const d = ctx.getImageData(0, 0, 192, 108).data; let s = 0, mx = 0;
+      for (let p = 0; p < d.length; p += 4) { const l = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]; s += l; if (l > mx) mx = l; }
+      const probe = { t: i + 1, lumaAvg: Math.round(s / (d.length / 4)), lumaMax: Math.round(mx), w: v.videoWidth, h: v.videoHeight, ice: pc.iceConnectionState };
+      const st = await pc.getStats(); const codecs = {};
+      st.forEach(r => { if (r.type === 'codec') codecs[r.id] = r.mimeType; });
+      st.forEach(r => {
+        if (r.type === 'inbound-rtp' && r.kind === 'video') {
+          probe.framesEmpfangen = r.framesReceived; probe.framesDekodiert = r.framesDecoded; probe.keyframes = r.keyFramesDecoded;
+          probe.pli = r.pliCount; probe.pakete = r.packetsReceived; probe.codec = codecs[r.codecId] || null; probe.decoder = r.decoderImplementation || null;
+        }
+      });
+      erg.proben.push(probe); out(erg);
+    }
+    erg.phase = 'fertig';
+  } catch (e) { erg.fehler = String(e); }
+  out(erg); await melde();
+})();
+</script>

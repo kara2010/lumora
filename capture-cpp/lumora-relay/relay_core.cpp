@@ -72,7 +72,31 @@ struct RelayCore::Session {
     uint64_t sendOk = 0, sendFail = 0, sendEx = 0;
     bool gateLogged = false;        // "erstes Keyframe durchgelassen" schon gemeldet?
     int64_t openedMs = 0;           // wann das Tor aufging (0 = nie)
+    // AV1-Waechter (Lehre aus dem Schwarzbild mit neuen NVIDIA-Treibern, 2026-10): der
+    // Browser EMPFING damals jedes Bild, konnte aber keines dekodieren und forderte per
+    // PLI pausenlos neue Keyframes - fuer uns unsichtbar, die Verbindung "lief". Jetzt
+    // zaehlen wir die PLIs aus dem RTCP-Rueckkanal: wer trotz mehrerer zugestellter
+    // Keyframes weiter nur Keyframes anfordert, dekodiert nichts -> auf H.264 umschalten.
+    int h264Pt = -1;                // H.264-PT aus dem Offer (Fallback-Ziel; -1 = Browser kann kein H.264)
+    std::atomic<uint32_t> pli{ 0 }; // PLI/FIR-Anfragen des Zuschauers (libdatachannel-Thread)
+    uint32_t keySent = 0;           // Keyframes seit Toroeffnung
+    bool fallback = false;          // bereits von AV1 auf H.264 umgeschaltet
+    uint32_t pliLogged = 0;         // letzter gemeldeter PLI-Stand (Diagnosezeile 1x je Anstieg)
 };
+
+// RTCP-Verbundpaket nach Keyframe-Anfragen durchsuchen: PSFB (PT 206) mit FMT 1 = PLI,
+// FMT 4 = FIR. Alles andere (RR, NACK, REMB, SDES) zaehlt nicht.
+static uint32_t countKeyframeRequests(const rtc::binary& b) {
+    uint32_t n = 0; size_t i = 0;
+    while (i + 4 <= b.size()) {
+        uint8_t b0 = (uint8_t)b[i], pt = (uint8_t)b[i + 1];
+        size_t words = ((size_t)(uint8_t)b[i + 2] << 8) | (uint8_t)b[i + 3];
+        if ((b0 >> 6) != 2) break;                                    // kein RTCP v2
+        if (pt == 206 && ((b0 & 0x1F) == 1 || (b0 & 0x1F) == 4)) ++n;
+        i += (words + 1) * 4;
+    }
+    return n;
+}
 
 // Verworfene Pakete SICHTBAR machen. libjuice meldet einen vollen Sendepuffer nur mit
 // JLOG_INFO("Send failed, buffer is full") - auf Log-Level Warning war das unsichtbar,
@@ -222,7 +246,9 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
                 pk->addToChain(make_shared<rtc::RtcpSrReporter>(s->vCfg));
                 pk->addToChain(make_shared<rtc::RtcpNackResponder>());
                 track->setMediaHandler(pk);
-                track->onMessage([](rtc::binary) {}, nullptr);   // RTCP-Rueckkanal konsumieren
+                s->h264Pt = pickH264Pt(&desc);                  // Fallback-Ziel fuer den AV1-Waechter
+                std::weak_ptr<Session> w = s;                   // RTCP-Rueckkanal: Keyframe-Anfragen zaehlen
+                track->onMessage([w](rtc::binary b) { if (auto ss = w.lock()) ss->pli += countKeyframeRequests(b); }, nullptr);
                 s->video = track;
                 return;
             }
@@ -236,7 +262,8 @@ string RelayCore::createSession(const string& offerSdp, const string& userAgent,
             pk->addToChain(make_shared<rtc::RtcpSrReporter>(s->vCfg));
             pk->addToChain(make_shared<rtc::RtcpNackResponder>());
             track->setMediaHandler(pk);
-            track->onMessage([](rtc::binary) {}, nullptr);   // RTCP-Rueckkanal konsumieren
+            std::weak_ptr<Session> w = s;                       // PLIs nur zaehlen (Diagnose), kein weiterer Fallback
+            track->onMessage([w](rtc::binary b) { if (auto ss = w.lock()) ss->pli += countKeyframeRequests(b); }, nullptr);
             s->video = track;
         } else if (type == "audio") {
             int pt = pickOpusPt(&desc); if (pt < 0) return;
@@ -412,6 +439,7 @@ void RelayCore::sendVideoAU(const uint8_t* au, size_t len, uint64_t pts90k) {
 // AV1-Temporal-Unit (low-overhead OBU-Format) nach OBU_SEQUENCE_HEADER (Typ 1) scannen:
 // der Encoder wiederholt den Sequence Header bei jedem Keyframe (repeatSeqHdr bzw.
 // KEY_FRAME_ALIGNED) -> sein Vorhandensein ist unser Keyframe-Signal fuer den Einstieg.
+static size_t av1SplitBeforeTileData(const uint8_t* d, size_t n);   // Definition unten (Selbsttest)
 static bool av1HasSeqHdr(const uint8_t* d, size_t n) {
     size_t i = 0;
     while (i < n) {
@@ -434,10 +462,32 @@ void RelayCore::sendVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k) {
     std::lock_guard<std::mutex> lk(mx_);
     av1Active_.store(true);
     bytesIn_ += len; lastIngestMs_ = nowMs();
+    // Selbsttest-Sabotage (s. setSelftestCorruptAv1): den Original-Fehler von 2026-10 exakt
+    // nachstellen - die TU wird VOR den Bilddaten (TILE_GROUP/FRAME) in zwei getrennte
+    // Sendungen = zwei RTP-Paketketten zerlegt. libwebrtc sieht ein "Bild" ohne Bilddaten
+    // und eines ohne Kopf, verwirft beide und feuert PLIs. (Nutzdaten zu verwuerfeln reicht
+    // NICHT: der Hardware-Decoder dekodiert Muell klaglos, 0 PLIs - gemessen.)
+    std::vector<uint8_t> teil2;
+    if (corruptAv1_) {
+        size_t split = av1SplitBeforeTileData(tu, len);
+        if (split > 2) {
+            teil2 = { 0x12, 0x00 }; teil2.insert(teil2.end(), tu + split, tu + len);
+            len = split;   // Teil 1 = TD + Kopf-OBUs; Teil 2 folgt unten mit gleichem Zeitstempel
+        }
+    }
     for (auto& s : sessions_) {
         if (!s->vAv1 || !s->video || !s->video->isOpen() || !s->vCfg) continue;
-        if (s->vFirst) { if (!key) continue; s->vFirst = false; s->openedMs = nowMs(); }   // sauberer Einstieg am Keyframe
+        if (s->vFirst) { if (!key) continue; s->vFirst = false; s->openedMs = nowMs(); s->keySent = 0; }   // sauberer Einstieg am Keyframe
         if (!s->gateLogged) { s->gateLogged = true; printf("relay: %s AV1 erstes Keyframe durchgelassen (%zu Bytes)\n", s->id.substr(0, 6).c_str(), len); }
+        if (key) ++s->keySent;
+        // AV1-Waechter: >= 3 Keyframes zugestellt und trotzdem >= 6 Keyframe-Anfragen in den
+        // ersten 15 s -> der Zuschauer kann diesen AV1-Strom nicht dekodieren. Normale
+        // Paketverluste erzeugen vereinzelte PLIs, nie diese Dichte direkt nach dem Start.
+        uint32_t pli = s->pli.load();
+        if (!s->fallback && s->h264Pt >= 0 && s->keySent >= 3 && pli >= 6 && nowMs() - s->openedMs <= 15000) {
+            fallbackToH264(*s);
+            continue;
+        }
         if (!s->vTsSet) { s->vTs = s->vCfg->startTimestamp; s->vTsSet = true; }
         else {
             int64_t d = (int64_t)pts90k - (int64_t)s->vLastPts;
@@ -449,21 +499,66 @@ void RelayCore::sendVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k) {
         try {
             if (s->video->send(reinterpret_cast<const std::byte*>(tu), len)) { s->bytesSent += len; ++s->sendOk; }
             else ++s->sendFail;
+            if (!teil2.empty()) s->video->send(reinterpret_cast<const std::byte*>(teil2.data()), teil2.size());   // Sabotage, s.o.
         } catch (...) { ++s->sendEx; }
     }
 }
 
+// Offset des ersten OBUs mit Bilddaten (TILE_GROUP=4 oder FRAME=6) in einer Temporal Unit,
+// 0 wenn keines gefunden. Nur fuer die Selbsttest-Sabotage oben.
+static size_t av1SplitBeforeTileData(const uint8_t* d, size_t n) {
+    size_t i = 0;
+    while (i < n) {
+        uint8_t hdr = d[i];
+        if (hdr & 0x80) return 0;
+        int type = (hdr >> 3) & 0x0F;
+        bool ext = (hdr & 0x04) != 0, hasSize = (hdr & 0x02) != 0;
+        if (type == 4 || type == 6) return i;
+        if (!hasSize) return 0;
+        size_t j = i + 1 + (ext ? 1 : 0);
+        uint64_t sz = 0; int shift = 0;
+        while (j < n) { uint8_t b = d[j++]; sz |= (uint64_t)(b & 0x7F) << shift; if (!(b & 0x80)) break; shift += 7; if (shift > 56) return 0; }
+        i = j + sz;
+    }
+    return 0;
+}
+
+// Zuschauer von AV1 auf H.264 umschalten, OHNE die Verbindung neu auszuhandeln: der Browser
+// hat im Offer beide Codecs angeboten, die Answer traegt beide Payload-Typen. libwebrtc
+// erkennt den Codec-Wechsel am Payload-Typ und baut den Decoder neu auf. SSRC, Sequenz-
+// nummer und Zeitstempel laufen weiter; das Keyframe-Tor schliesst sich wieder, bis das
+// erste H.264-IDR da ist (der Capture faehrt H.264 ueber codecDemand bedarfsgesteuert hoch).
+void RelayCore::fallbackToH264(Session& s) {
+    printf("relay: %s AV1-WAECHTER: %u Keyframes zugestellt, trotzdem %u Keyframe-Anfragen in %lld ms - Zuschauer dekodiert kein AV1 -> Fallback auf H.264 (PT %d)\n",
+           s.id.substr(0, 6).c_str(), s.keySent, s.pli.load(), (long long)(nowMs() - s.openedMs), s.h264Pt);
+    auto old = s.vCfg;
+    auto cfg = make_shared<rtc::RtpPacketizationConfig>(old->ssrc, old->cname, (uint8_t)s.h264Pt, rtc::H264RtpPacketizer::ClockRate);
+    cfg->sequenceNumber = old->sequenceNumber; cfg->timestamp = old->timestamp; cfg->startTimestamp = old->startTimestamp;
+    cfg->midId = old->midId; cfg->mid = old->mid;
+    auto pk = make_shared<rtc::H264RtpPacketizer>(rtc::NalUnit::Separator::StartSequence, cfg);
+    pk->addToChain(make_shared<rtc::RtcpSrReporter>(cfg));
+    pk->addToChain(make_shared<rtc::RtcpNackResponder>());
+    s.video->setMediaHandler(pk);
+    s.vCfg = cfg;
+    s.fallback = true; s.vAv1 = false; s.vFirst = true; s.gateLogged = false; s.keySent = 0;
+}
+
 // Je Zuschauer eine Zeile. "wartet-auf-Keyframe" ist der entscheidende Zustand: steht ein
 // Zuschauer dauerhaft darauf, bekommt er nie ein Bild, obwohl die Verbindung offen ist.
+// "pli=" zeigt die Keyframe-Anfragen des Browsers: steigt die Zahl bei laufendem Strom
+// stetig, dekodiert der Zuschauer nichts (oder verliert massiv Pakete).
 void RelayCore::logSessionDiag() {
     std::lock_guard<std::mutex> lk(mx_);
     for (auto& s : sessions_) {
         const char* st = !s->video ? "kein-Video" : (s->vFirst ? "WARTET-AUF-KEYFRAME" : "laeuft");
-        printf("relay: %s %s %s gesendet=%lluKB ok=%llu fehlgeschlagen=%llu ausnahmen=%llu %s\n",
-               s->id.substr(0, 6).c_str(), s->vAv1 ? "AV1" : "H264", st,
+        uint32_t pli = s->pli.load();
+        printf("relay: %s %s%s %s gesendet=%lluKB ok=%llu fehlgeschlagen=%llu ausnahmen=%llu pli=%u%s %s\n",
+               s->id.substr(0, 6).c_str(), s->vAv1 ? "AV1" : "H264", s->fallback ? "(Fallback)" : "", st,
                (unsigned long long)(s->bytesSent / 1024), (unsigned long long)s->sendOk,
                (unsigned long long)s->sendFail, (unsigned long long)s->sendEx,
+               pli, (pli > s->pliLogged + 5 && !s->vFirst) ? " PLI-ANSTIEG" : "",
                s->pc && s->pc->remoteAddress() ? s->pc->remoteAddress()->c_str() : "?");
+        s->pliLogged = pli;
     }
 }
 

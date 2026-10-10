@@ -67,6 +67,11 @@ public:
     // true sobald der Ingest AV1 liefert -> erst dann wird AV1 im SDP-Answer gewaehlt
     bool av1Active() const { return av1Active_.load(); }
 
+    // NUR fuer den Selbsttest (selftest/stream-e2e.js --negative): AV1-Nutzdaten vor dem
+    // Senden absichtlich beschaedigen, damit der Zuschauer nichts dekodieren kann. Beweist,
+    // dass der AV1-Waechter (PLI-Sturm -> H.264-Fallback) wirklich anspringt.
+    void setSelftestCorruptAv1(bool on) { corruptAv1_ = on; }
+
     bool ingestAlive() const;                            // Ingest in den letzten 3s gesehen?
     uint64_t framesIn() const { return framesIn_; }
     uint64_t bytesIn() const;                            // Ingest-Bytes gesamt (Video-AUs + Opus-Pakete)
@@ -81,6 +86,8 @@ private:
     void sendVideoAU(const uint8_t* au, size_t len, uint64_t pts90k);
     void sendVideoAuAv1(const uint8_t* tu, size_t len, uint64_t pts90k);
     void sendAudioFrame(const uint8_t* pkt, size_t len, uint64_t pts90k);
+    void fallbackToH264(Session& s);                     // AV1-Waechter: Zuschauer auf H.264 umschalten (mx_ gehalten)
+    bool corruptAv1_ = false;                            // s. setSelftestCorruptAv1
     std::deque<QItem> q_;
     std::mutex qmx_;
     std::condition_variable qcv_;

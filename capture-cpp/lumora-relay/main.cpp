@@ -15,7 +15,10 @@ int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);   // Shell liest zeilenweise vom Pipe
     uint16_t ingestPort = 8558, whepPort = 8889, ctrlPort = 9997, icePort = 8189;
     const char* codecMode = nullptr;   // Codec-Modus ab Prozessstart (Race-Fix, s. relay_core.h)
-    for (int i = 1; i < argc - 1; ++i) {
+    bool selftestCorruptAv1 = false;   // nur selftest/stream-e2e.js --negative (s. relay_core.h)
+    for (int i = 1; i < argc; ++i) {
+        if (!strcmp(argv[i], "--selftest-corrupt-av1")) { selftestCorruptAv1 = true; continue; }
+        if (i + 1 >= argc) break;
         if (!strcmp(argv[i], "--ingest-port")) ingestPort = (uint16_t)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--whep-port")) whepPort = (uint16_t)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ctrl-port")) ctrlPort = (uint16_t)atoi(argv[++i]);
@@ -26,6 +29,7 @@ int main(int argc, char** argv) {
     RelayConfig cfg; cfg.icePort = icePort;
     RelayCore core(cfg);
     if (codecMode) core.setCodecMode(codecMode);   // VOR dem ersten Lauschen - keine Session kann den Default sehen
+    if (selftestCorruptAv1) { core.setSelftestCorruptAv1(true); printf("relay: SELBSTTEST - AV1-Nutzdaten werden absichtlich beschaedigt\n"); }
 
     TsDemux demux;
     demux.onVideoAU = [&](const uint8_t* au, size_t len, uint64_t pts) { core.pushVideoAU(au, len, pts); };
