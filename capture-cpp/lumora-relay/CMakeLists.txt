@@ -1,5 +1,6 @@
 # lumora-media-relay: eigener WHEP-Relay (mediamtx-Ersatz)
-# Voraussetzung: _testlab\build-relay-deps.ps1 einmal gelaufen (MbedTLS + libdatachannel statisch).
+# Voraussetzung: deps\build-deps.ps1 einmal gelaufen (MbedTLS + libdatachannel statisch,
+# inkl. der Lumora-Patches in deps\patches - ohne sie liefert der Relay kein AV1-Bild).
 cmake_minimum_required(VERSION 3.20)
 project(lumora_relay CXX)
 set(CMAKE_CXX_STANDARD 17)

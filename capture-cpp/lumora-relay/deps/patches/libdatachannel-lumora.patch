@@ -1,0 +1,231 @@
+diff --git a/include/rtc/av1rtppacketizer.hpp b/include/rtc/av1rtppacketizer.hpp
+index c2b2b79..d44d833 100644
+--- a/include/rtc/av1rtppacketizer.hpp
++++ b/include/rtc/av1rtppacketizer.hpp
+@@ -40,6 +40,7 @@ private:
+ 
+ 	std::vector<binary> fragment(binary data) override;
+ 	std::vector<binary> fragmentObu(const binary &data);
++	std::vector<binary> packetizeTemporalUnit(const std::vector<binary> &obus);
+ 
+ 	const Packetization mPacketization;
+ 	const size_t mMaxFragmentSize;
+diff --git a/src/av1rtppacketizer.cpp b/src/av1rtppacketizer.cpp
+index b2e7877..d52cfdd 100644
+--- a/src/av1rtppacketizer.cpp
++++ b/src/av1rtppacketizer.cpp
+@@ -45,6 +45,14 @@ AV1RtpPacketizer::AV1RtpPacketizer(Packetization packetization,
+                                    size_t maxFragmentSize)
+     : RtpPacketizer(rtpConfig), mPacketization(packetization), mMaxFragmentSize(maxFragmentSize) {}
+ 
++// LUMORA-PATCH (Chrome zeigte bei AV1 nur Schwarz, obwohl RTP-Daten flossen; Firefox lief
++// nur dank H.264-Fallback): Die av1-rtp-spec (§4.4) verlangt, dass OBU-Elemente im RTP-
++// Payload OHNE obu_size-Feld uebertragen werden (obu_has_size_field MUST be 0) - die
++// Laengen traegt das Aggregations-Format selbst. Das Original kopierte die OBUs 1:1 MIT
++// size-Feld aus der low-overhead-TU; Chromes AV1-Depacketizer verwirft solche Pakete.
++// Zusaetzlich behoben: Index-Verrutscher bei OBUs mit Extension-Header (das Original
++// zaehlte das Ext-Byte doppelt bzw. las die leb128 an der falschen Stelle) und
++// Temporal-Delimiter/Padding-OBUs INNERHALB der TU werden uebersprungen.
+ std::vector<binary> AV1RtpPacketizer::extractTemporalUnitObus(const binary &data) {
+ 	std::vector<binary> obus;
+ 
+@@ -55,53 +63,153 @@ std::vector<binary> AV1RtpPacketizer::extractTemporalUnitObus(const binary &data
+ 
+ 	size_t index = 2;
+ 	while (index < data.size()) {
+-		if ((data.at(index) & obuHasSizeMask) == byte(0)) {
+-			return obus;
++		const byte hdr = data.at(index);
++		if ((hdr & obuHasSizeMask) == byte(0)) {
++			return obus;   // ohne size-Feld ist die TU nicht weiter parsebar
+ 		}
++		const size_t extBytes = ((hdr & obuHasExtensionMask) != byte(0)) ? 1 : 0;
+ 
+-		if ((data.at(index) & obuHasExtensionMask) != byte(0)) {
+-			index++;
+-		}
+-
+-		// https://aomediacodec.github.io/av1-spec/#leb128
++		// https://aomediacodec.github.io/av1-spec/#leb128 (beginnt NACH Header+Extension)
++		const size_t lebStart = index + obuHeaderSize + extBytes;
+ 		uint32_t obuLength = 0;
+ 		uint8_t leb128Size = 0;
+ 		while (leb128Size < 8) {
+-			auto leb128Index = index + leb128Size + obuHeaderSize;
+-			if (data.size() < leb128Index) {
+-				break;
++			if (lebStart + leb128Size >= data.size()) {
++				return obus;
+ 			}
+-
+-			auto leb128_byte = uint8_t(data.at(leb128Index));
+-
++			auto leb128_byte = uint8_t(data.at(lebStart + leb128Size));
+ 			obuLength |= ((leb128_byte & sevenLsbBitmask) << (leb128Size * 7));
+ 			leb128Size++;
+-
+ 			if (!(leb128_byte & msbBitmask)) {
+ 				break;
+ 			}
+ 		}
+ 
+-		obus.emplace_back(data.begin() + index,
+-		                  data.begin() + index + obuHeaderSize + leb128Size + obuLength);
++		const size_t payloadStart = lebStart + leb128Size;
++		if (payloadStart + obuLength > data.size()) {
++			return obus;   // abgeschnittene TU - nichts Halbes weitergeben
++		}
++
++		const auto obuType = (hdr & obuFrameTypeMask) >> obuFrameTypeBitshift;
++		if (obuType != byte(2) /*temporal delimiter*/ && obuType != byte(15) /*padding*/) {
++			binary obu;
++			obu.reserve(obuHeaderSize + extBytes + obuLength);
++			obu.push_back(hdr & ~obuHasSizeMask);   // has_size loeschen (Spec: MUST be 0 im RTP)
++			if (extBytes)
++				obu.push_back(data.at(index + 1));
++			obu.insert(obu.end(), data.begin() + payloadStart, data.begin() + payloadStart + obuLength);
++			obus.push_back(std::move(obu));
++		}
+ 
+-		index += obuHeaderSize + leb128Size + obuLength;
++		index = payloadStart + obuLength;
+ 	}
+ 
+ 	return obus;
+ }
+ 
++// leb128-Laengenfeld schreiben (av1-rtp-spec §4.4: Laenge jedes OBU-Elements ausser ggf. dem letzten)
++static void writeLeb128(binary &out, size_t v) {
++	do {
++		uint8_t b = uint8_t(v & 0x7F);
++		v >>= 7;
++		if (v)
++			b |= 0x80;
++		out.push_back(byte(b));
++	} while (v);
++}
++static size_t leb128Size(size_t v) {
++	size_t n = 1;
++	while (v >= 0x80) { v >>= 7; ++n; }
++	return n;
++}
++
++// LUMORA-PATCH 2 (Schwarzbild mit NVENC ab Treiber 617.42, AMD unberuehrt): Der Original-
++// Weg packetisierte jedes OBU einer Temporal Unit als EIGENE Paketkette (nur der Sequence
++// Header wurde dem naechsten OBU vorangestellt). Solange der Encoder ein einziges OBU_FRAME
++// je Bild lieferte, war das unsichtbar. Der neue NVIDIA-Treiber emittiert stattdessen
++// OBU_FRAME_HEADER + OBU_TILE_GROUP getrennt. Dann entstanden je Bild ZWEI Ketten:
++// [SeqHdr+FrameHeader] (Z=0,Y=0) und [TileGroup] (Z=0 ... Y=0). libwebrtc (Chrome, Edge,
++// WebView2, Firefox) leitet Bildanfang/-ende aber aus genau diesen Z-/Y-Bits ab
++// (is_first/is_last_packet_in_frame) - es sah ein "Keyframe" ohne Tile-Daten und ein
++// Delta-Bild ohne Frame-Header, verwarf beides und forderte per PLI endlos neue Keyframes.
++// Fix wie der libwebrtc-Packetizer selbst: ALLE OBUs der TU in EINE Paketkette aggregieren
++// (W-Feld / Laengenfelder), Paketgrenzen liegen immer in einem OBU-Fragment (Z/Y gesetzt),
++// N-Bit nur auf dem ersten Paket einer TU, die mit dem Sequence Header beginnt.
++std::vector<binary> AV1RtpPacketizer::packetizeTemporalUnit(const std::vector<binary> &obus) {
++	std::vector<binary> packets;
++	if (obus.empty())
++		return packets;
++	const size_t maxP = std::max<size_t>(mMaxFragmentSize, 32);
++	const bool startsWithSeqHdr =
++	    ((obus.front().at(0) & obuFrameTypeMask) >> obuFrameTypeBitshift) == obuFrameTypeSequenceHeader;
++
++	struct Elem { size_t obu, off, len; };
++	size_t i = 0, off = 0;
++	while (i < obus.size()) {
++		std::vector<Elem> elems;
++		size_t used = payloadHeaderSize;
++		const bool zFlag = (off > 0);
++		while (i < obus.size()) {
++			const size_t rest = obus[i].size() - off;
++			const size_t lenField = leb128Size(rest);
++			const size_t space = maxP - used;
++			if (space < lenField + 1)
++				break;
++			const bool lastObu = (i + 1 == obus.size());
++			if (lenField + rest <= space) {
++				// Rest des OBUs passt ganz. Endet es (fast) genau an der Paketgrenze und es folgen
++				// weitere OBUs, EIN Byte zurueckhalten: so bleibt die Kette ueber Z/Y verbunden,
++				// statt dass der Empfaenger an der OBU-Grenze ein neues Bild annimmt.
++				if (!lastObu && space - (lenField + rest) < 3) {
++					if (rest <= 1)
++						break;
++					elems.push_back({i, off, rest - 1});
++					off += rest - 1;
++					break;
++				}
++				elems.push_back({i, off, rest});
++				used += lenField + rest;
++				++i; off = 0;
++				if (lastObu)
++					break;
++			} else {
++				const size_t take = space - lenField;   // leb128(take) <= leb128(rest)
++				if (take == 0)
++					break;
++				elems.push_back({i, off, take});
++				off += take;
++				break;
++			}
++		}
++		if (elems.empty())
++			return packets;   // kann bei maxP >= 32 nicht eintreten - Endlosschleife ausschliessen
++
++		const Elem &last = elems.back();
++		const bool yFlag = (last.off + last.len < obus[last.obu].size());
++		const bool nFlag = startsWithSeqHdr && packets.empty();
++		const size_t w = elems.size() <= 3 ? elems.size() : 0;
++
++		binary pkt;
++		pkt.reserve(maxP);
++		uint8_t agg = uint8_t(w) << wBitshift;
++		if (zFlag) agg |= uint8_t(zMask);
++		if (yFlag) agg |= uint8_t(yMask);
++		if (nFlag) agg |= uint8_t(nMask);
++		pkt.push_back(byte(agg));
++		for (size_t k = 0; k < elems.size(); ++k) {
++			const Elem &e = elems[k];
++			if (w == 0 || k + 1 < elems.size())
++				writeLeb128(pkt, e.len);
++			pkt.insert(pkt.end(), obus[e.obu].begin() + e.off, obus[e.obu].begin() + e.off + e.len);
++		}
++		packets.push_back(std::move(pkt));
++	}
++	return packets;
++}
++
+ std::vector<binary> AV1RtpPacketizer::fragment(binary data) {
+ 	if (mPacketization == AV1RtpPacketizer::Packetization::TemporalUnit) {
+-		std::vector<binary> result;
+-		auto obus = extractTemporalUnitObus(data);
+-		for (auto obu : obus) {
+-			auto fragments = fragmentObu(obu);
+-			result.reserve(result.size() + fragments.size());
+-			for(auto &fragment : fragments)
+-				result.push_back(std::move(fragment));
+-		}
+-		return result;
++		return packetizeTemporalUnit(extractTemporalUnitObus(data));
+ 	} else {
+ 		return fragmentObu(data);
+ 	}
+diff --git a/src/impl/peerconnection.cpp b/src/impl/peerconnection.cpp
+index c9eefca..1588b27 100644
+--- a/src/impl/peerconnection.cpp
++++ b/src/impl/peerconnection.cpp
+@@ -1056,6 +1056,15 @@ void PeerConnection::processLocalDescription(Description description) {
+ 		mLocalDescription->addCandidates(std::move(existingCandidates));
+ 	}
+ 
++	// LUMORA-PATCH: SSRC->Track auch aus der LOKALEN Beschreibung fuellen.
++	// Original fuellt mTracksBySsrc nur aus der REMOTE-Beschreibung. Ein WHEP-Zuschauer
++	// bietet recvonly an und signalisiert daher keine SSRC -> die Map bleibt leer ->
++	// eingehendes RTCP (NACK/PLI/RR) wird in dispatchMedia kommentarlos verworfen, weil
++	// der Lookup auf unsere SENDE-SSRC fehlschlaegt. Ergebnis: keine einzige
++	// Paketwiederholung, jeder Verlust dauerhaft. Unsere Sende-SSRC steht in der lokalen
++	// Beschreibung (Description::Media::addSSRC), daher hier zusaetzlich mappen.
++	updateTrackSsrcCache(description);
++
+ 	mProcessor.enqueue(&PeerConnection::trigger<Description>, shared_from_this(),
+ 	                   &localDescriptionCallback, std::move(description));
+ }

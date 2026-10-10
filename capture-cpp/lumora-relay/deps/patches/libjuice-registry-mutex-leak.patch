@@ -1,0 +1,17 @@
+Fix: Mutex-Handle-Leak beim Freigeben der Connection-Registry (libjuice).
+release_registry() gibt die Registry frei, ohne den in acquire_registry()
+per mutex_init() angelegten Mutex zu zerstoeren. Auf Windows ist mutex_t ein
+CreateMutex-Kernel-Handle -> mit ICE-UDP-Mux leakt genau 1 Handle pro
+Session-Zyklus (Registry wird bei 0->1->0 Agents jedes Mal neu erzeugt).
+Nachgewiesen im lumora-relay-Soak-Test 2026-07-22 (Mutant-Handles +1/Zyklus).
+
+--- a/deps/libjuice/src/conn.c
++++ b/deps/libjuice/src/conn.c
+@@ -119,6 +119,7 @@ static void release_registry(conn_mode_entry_t *entry, conn_registry_t *registry
+ 			entry->registry_cleanup_func(registry);
+
+ 		entry->registry = NULL;
++		mutex_destroy(&registry->mutex);
+ 		free(registry->agents);
+ 		free(registry);
+ 		return;
