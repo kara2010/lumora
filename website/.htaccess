@@ -33,6 +33,14 @@ Options -Indexes
   # Die ID ist bewusst kurz und vorlesbar (6 Zeichen, ohne 0/1/i/l/o) - der Link soll
   # sich in einem Forenbeitrag oder Chat abtippen lassen. Intern KEIN Redirect, sondern
   # stille Weiterleitung: die schoene Adresse bleibt in der Adresszeile stehen.
+  # ==== EN-Unterseiten auf englische Namen umgestellt (2026-10-10) =====
+  # Alte Namen bleiben dauerhaft als 301 erreichbar (Sitemap-Historie, externe Links).
+  RewriteRule ^en/ruckler\-analyse\.html$ /en/stutter-analysis.html [R=301,L]
+  RewriteRule ^en/eingabe\-bruecke\.html$ /en/input-bridge.html [R=301,L]
+  RewriteRule ^en/portfreigabe\.html$ /en/port-forwarding.html [R=301,L]
+  RewriteRule ^en/impressum\.html$ /en/legal-notice.html [R=301,L]
+  RewriteRule ^en/datenschutz\.html$ /en/privacy.html [R=301,L]
+
   RewriteRule ^b/([a-z0-9]{6})/?$ bericht.php?id=$1 [L,QSA]
 </IfModule>
 

@@ -19,8 +19,8 @@ Download & info: <https://lumora-streaming.de/>
 <td width="50%"><a href="https://lumora-streaming.de/en/streaming.html"><img src="https://lumora-streaming.de/stream.webp" alt="Stream tab with live preview and share link"></a><br><sub><b><a href="https://lumora-streaming.de/en/streaming.html">Streaming</a></b> – send a link, friends watch in the browser (P2P WebRTC)</sub></td>
 </tr>
 <tr>
-<td><a href="https://lumora-streaming.de/en/ruckler-analyse.html"><img src="https://lumora-streaming.de/analyse.webp" alt="Stutter analysis report with verdict, key figures and frame time graph"></a><br><sub><b><a href="https://lumora-streaming.de/en/ruckler-analyse.html">Stutter analysis</a></b> – finds out <i>why</i> a game stutters, in plain language</sub></td>
-<td><a href="https://lumora-streaming.de/en/eingabe-bruecke.html"><img src="https://lumora-streaming.de/eingabe-bruecke.webp" alt="Input bridge mapping a wheel to a virtual Xbox controller"></a><br><sub><b><a href="https://lumora-streaming.de/en/eingabe-bruecke.html">Input bridge</a></b> – wheel, joystick or flight stick as a virtual Xbox pad</sub></td>
+<td><a href="https://lumora-streaming.de/en/stutter-analysis.html"><img src="https://lumora-streaming.de/analyse.webp" alt="Stutter analysis report with verdict, key figures and frame time graph"></a><br><sub><b><a href="https://lumora-streaming.de/en/stutter-analysis.html">Stutter analysis</a></b> – finds out <i>why</i> a game stutters, in plain language</sub></td>
+<td><a href="https://lumora-streaming.de/en/input-bridge.html"><img src="https://lumora-streaming.de/eingabe-bruecke.webp" alt="Input bridge mapping a wheel to a virtual Xbox controller"></a><br><sub><b><a href="https://lumora-streaming.de/en/input-bridge.html">Input bridge</a></b> – wheel, joystick or flight stick as a virtual Xbox pad</sub></td>
 </tr>
 </table>
 
@@ -34,9 +34,9 @@ Download & info: <https://lumora-streaming.de/>
   decoder; direct peer-to-peer connection (including an IPv6 direct path);
   group streams with room codes; optional access control that asks before
   anyone may watch. Port forwarding is explained in the
-  [port forwarding guide](https://lumora-streaming.de/en/portfreigabe.html);
+  [port forwarding guide](https://lumora-streaming.de/en/port-forwarding.html);
   Lumora as a [Discord screen-share alternative](https://lumora-streaming.de/en/discord-alternative.html).
-- **[Input bridge](https://lumora-streaming.de/en/eingabe-bruecke.html)** – turns a joystick, wheel or flight stick into a virtual
+- **[Input bridge](https://lumora-streaming.de/en/input-bridge.html)** – turns a joystick, wheel or flight stick into a virtual
   Xbox 360 controller (via the signed open-source driver ViGEmBus), so devices
   that report as DirectInput work in games that only accept XInput. Visual
   mapping, live input monitor, auto-calibration, axis↔trigger and button↔axis
@@ -45,7 +45,7 @@ Download & info: <https://lumora-streaming.de/>
   afterwards (native, no external tool).
 - **[Gaming OSD](https://lumora-streaming.de/en/gaming-osd.html)** – FPS, GPU and CPU readings in-game, without Afterburner & co.
   (own ETW-based frame timing).
-- **[Stutter analysis](https://lumora-streaming.de/en/ruckler-analyse.html)** – records frame times, background
+- **[Stutter analysis](https://lumora-streaming.de/en/stutter-analysis.html)** – records frame times, background
   programs, driver latencies and GPU state during a session and names the likely
   cause of every stutter in plain language.
 - **[Gamepad control](https://lumora-streaming.de/en/gamepad.html)** – the entire UI can be driven with an Xbox controller
@@ -110,10 +110,10 @@ The [`website/`](website/) folder contains the download page
 (lumora-streaming.de/). Feature pages in English:
 [Streaming](https://lumora-streaming.de/en/streaming.html) ·
 [Gaming OSD](https://lumora-streaming.de/en/gaming-osd.html) ·
-[Stutter analysis](https://lumora-streaming.de/en/ruckler-analyse.html) ·
-[Input bridge](https://lumora-streaming.de/en/eingabe-bruecke.html) ·
+[Stutter analysis](https://lumora-streaming.de/en/stutter-analysis.html) ·
+[Input bridge](https://lumora-streaming.de/en/input-bridge.html) ·
 [Gamepad](https://lumora-streaming.de/en/gamepad.html) ·
-[Port forwarding](https://lumora-streaming.de/en/portfreigabe.html) ·
+[Port forwarding](https://lumora-streaming.de/en/port-forwarding.html) ·
 [Discord alternative](https://lumora-streaming.de/en/discord-alternative.html)
 — German: [lumora-streaming.de](https://lumora-streaming.de/).
 

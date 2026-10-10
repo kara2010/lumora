@@ -723,11 +723,11 @@
           <p class="nav-drop-label">Discover</p>
           <a href="streaming.html"><span class="di" aria-hidden="true">📡</span><span class="dtxt">Game streaming<span class="dsub">Via link in 1080p60 – up to 4K</span></span></a>
           <a href="gaming-osd.html"><span class="di" aria-hidden="true">📊</span><span class="dtxt">Gaming OSD<span class="dsub">FPS, GPU &amp; CPU without Afterburner</span></span></a>
-          <a href="ruckler-analyse.html"><span class="di" aria-hidden="true">🔍</span><span class="dtxt">Stutter/Lag analysis<span class="dsub">Why does my game stutter?</span></span></a>
+          <a href="stutter-analysis.html"><span class="di" aria-hidden="true">🔍</span><span class="dtxt">Stutter/Lag analysis<span class="dsub">Why does my game stutter?</span></span></a>
           <a href="gamepad.html"><span class="di" aria-hidden="true">🎮</span><span class="dtxt">Gamepad control<span class="dsub">Couch gaming on the TV</span></span></a>
-          <a href="eingabe-bruecke.html"><span class="di" aria-hidden="true">🕹️</span><span class="dtxt">Input bridge<span class="dsub">Joystick as an Xbox controller</span></span></a>
+          <a href="input-bridge.html"><span class="di" aria-hidden="true">🕹️</span><span class="dtxt">Input bridge<span class="dsub">Joystick as an Xbox controller</span></span></a>
           <a href="discord-alternative.html"><span class="di" aria-hidden="true">💬</span><span class="dtxt">Discord comparison<span class="dsub">Streaming without Nitro</span></span></a>
-          <a href="portfreigabe.html"><span class="di" aria-hidden="true">🔌</span><span class="dtxt">Port forwarding<span class="dsub">Router guide when it won't connect</span></span></a>
+          <a href="port-forwarding.html"><span class="di" aria-hidden="true">🔌</span><span class="dtxt">Port forwarding<span class="dsub">Router guide when it won't connect</span></span></a>
         </div>
       </li>
       <li><a href="#install">Install</a></li>
@@ -973,7 +973,7 @@
         <div class="feature-icon">🕹️</div>
         <div>
           <h3>Input bridge: joystick &amp; wheel for any game</h3>
-          <p>Turns a joystick, wheel or flight stick into a virtual Xbox gamepad – for games that only recognise gamepads, including Microsoft Store / Game Pass titles, where nothing else works. Visual mapping, auto-calibration, per-game profiles. Accessible too: button instead of axis and vice versa. <a href="eingabe-bruecke.html" style="color:var(--accent2)">How the input bridge works →</a></p>
+          <p>Turns a joystick, wheel or flight stick into a virtual Xbox gamepad – for games that only recognise gamepads, including Microsoft Store / Game Pass titles, where nothing else works. Visual mapping, auto-calibration, per-game profiles. Accessible too: button instead of axis and vice versa. <a href="input-bridge.html" style="color:var(--accent2)">How the input bridge works →</a></p>
         </div>
       </div>
       <div class="feature">
@@ -1160,7 +1160,7 @@
           <span class="release-ver">3.1.0</span>
         </div>
         <ul>
-          <li><strong>New: Stutter/Lag analysis</strong> – finds the cause of micro-stutter. Start a measurement via hotkey, play for a few minutes, stop it: for every stutter, Lumora names the likely culprit (a background program, driver latency, GPU throttling, VRAM, storage, or a freshly started program), with its own measurement overlay, a plain-language report, history and a side-by-side comparison of two runs. <a href="ruckler-analyse.html" style="color:var(--accent2)">Learn more →</a></li>
+          <li><strong>New: Stutter/Lag analysis</strong> – finds the cause of micro-stutter. Start a measurement via hotkey, play for a few minutes, stop it: for every stutter, Lumora names the likely culprit (a background program, driver latency, GPU throttling, VRAM, storage, or a freshly started program), with its own measurement overlay, a plain-language report, history and a side-by-side comparison of two runs. <a href="stutter-analysis.html" style="color:var(--accent2)">Learn more →</a></li>
           <li><strong>New: Bottleneck detection</strong> – shows live during the measurement what's currently setting the pace: a GPU limit, CPU limit, single-core limit, an FPS cap, GPU throttling, or VRAM filling up.</li>
           <li><strong>Settings tidied up</strong>: "Appearance" and "Controls" are now sections inside the "General" tab.</li>
           <li><strong>Gaming OSD now fades in and out smoothly</strong> when toggled via hotkey – it used to appear/disappear abruptly.</li>
@@ -1231,7 +1231,7 @@
           <li><strong>AV1 only where it truly runs smoothly</strong>: the stream is sent in AV1 only to devices with a matching hardware decoder – weaker machines automatically get H.264 and thus a smooth picture instead of stutter.</li>
           <li><strong>Calmer quality adjustment</strong>: a viewer's brief reception hiccup no longer makes Lumora over-throttle or oscillate; the configured bitrate is respected reliably.</li>
           <li><strong>Demand-driven encoding</strong>: AV1 and H.264 are only produced in parallel when both kinds of viewers are actually present – no needless double encode that burdens weak hardware.</li>
-          <li><strong>New: input bridge</strong> – turns a joystick, wheel or flight stick into a virtual Xbox gamepad, for games that only recognise gamepads (including Microsoft Store / Game Pass titles). With visual mapping right on the pictured controller, a live view of your inputs, auto-calibration, axis↔trigger and button↔axis (combined pedals too), separate devices (wheel + separate pedals) and per-game profiles. Accessible too. <a href="eingabe-bruecke.html" style="color:var(--accent2)">Learn more →</a></li>
+          <li><strong>New: input bridge</strong> – turns a joystick, wheel or flight stick into a virtual Xbox gamepad, for games that only recognise gamepads (including Microsoft Store / Game Pass titles). With visual mapping right on the pictured controller, a live view of your inputs, auto-calibration, axis↔trigger and button↔axis (combined pedals too), separate devices (wheel + separate pedals) and per-game profiles. Accessible too. <a href="input-bridge.html" style="color:var(--accent2)">Learn more →</a></li>
           <li><strong>Automatic per-game HDR</strong> and the <strong>gaming OSD</strong> (FPS, GPU/CPU stats) now run on our own code – without extra tools like HDRTray or PresentMon, with a more accurate FPS readout.</li>
           <li><strong>Access control for your stream</strong>: when enabled, only people you explicitly approve can watch – each request appears as a small window over the game, with a regulars and a block list.</li>
           <li><strong>Own component updater</strong>: updates now swap only the changed parts and offer a restart when needed – fast and reliable, without the full installer.</li>
@@ -1718,7 +1718,7 @@
     Inoffizielles Tool · nicht verbunden mit Valve/Steam oder Microsoft · alle Marken und Coverbilder gehören den jeweiligen Rechteinhabern.
   </p>
   <p style="margin-top:14px;">
-    <a href="impressum.html">Imprint</a> &nbsp;·&nbsp; <a href="datenschutz.html">Privacy Policy</a>
+    <a href="legal-notice.html">Imprint</a> &nbsp;·&nbsp; <a href="privacy.html">Privacy Policy</a>
   </p>
 </footer>
 </div><!-- /.page -->
@@ -1733,11 +1733,11 @@
     <p class="drawer-group-label">Discover</p>
     <a class="drawer-item" href="streaming.html"><span class="ico" aria-hidden="true">📡</span><span class="txt">Game streaming<span class="sub">Via link in 1080p60 – up to 4K</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="gaming-osd.html"><span class="ico" aria-hidden="true">📊</span><span class="txt">Gaming OSD<span class="sub">FPS, GPU &amp; CPU without Afterburner</span></span><span class="chev" aria-hidden="true">›</span></a>
-    <a class="drawer-item" href="ruckler-analyse.html"><span class="ico" aria-hidden="true">🔍</span><span class="txt">Stutter/Lag analysis<span class="sub">Why does my game stutter?</span></span><span class="chev" aria-hidden="true">›</span></a>
+    <a class="drawer-item" href="stutter-analysis.html"><span class="ico" aria-hidden="true">🔍</span><span class="txt">Stutter/Lag analysis<span class="sub">Why does my game stutter?</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="gamepad.html"><span class="ico" aria-hidden="true">🎮</span><span class="txt">Gamepad control<span class="sub">Couch gaming on the TV</span></span><span class="chev" aria-hidden="true">›</span></a>
-    <a class="drawer-item" href="eingabe-bruecke.html"><span class="ico" aria-hidden="true">🕹️</span><span class="txt">Input bridge<span class="sub">Joystick as an Xbox controller</span></span><span class="chev" aria-hidden="true">›</span></a>
+    <a class="drawer-item" href="input-bridge.html"><span class="ico" aria-hidden="true">🕹️</span><span class="txt">Input bridge<span class="sub">Joystick as an Xbox controller</span></span><span class="chev" aria-hidden="true">›</span></a>
     <a class="drawer-item" href="discord-alternative.html"><span class="ico" aria-hidden="true">💬</span><span class="txt">Discord comparison<span class="sub">Streaming without Nitro</span></span><span class="chev" aria-hidden="true">›</span></a>
-    <a class="drawer-item" href="portfreigabe.html"><span class="ico" aria-hidden="true">🔌</span><span class="txt">Port forwarding<span class="sub">Router guide when it won't connect</span></span><span class="chev" aria-hidden="true">›</span></a>
+    <a class="drawer-item" href="port-forwarding.html"><span class="ico" aria-hidden="true">🔌</span><span class="txt">Port forwarding<span class="sub">Router guide when it won't connect</span></span><span class="chev" aria-hidden="true">›</span></a>
     <p class="drawer-group-label">This page</p>
     <a class="drawer-item" href="#features"><span class="ico" aria-hidden="true">✨</span><span class="txt">Features</span></a>
     <a class="drawer-item" href="#changelog"><span class="ico" aria-hidden="true">🆕</span><span class="txt">What’s new</span></a>
