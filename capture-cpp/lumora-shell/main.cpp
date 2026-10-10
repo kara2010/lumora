@@ -54,6 +54,7 @@
 #include <thread>
 #include <mutex>
 #include <map>
+#include <unordered_map>
 #include <set>
 #include <atomic>
 #include <random>
@@ -2294,8 +2295,8 @@ static std::mutex g_kbMx;
 // als ein Mensch bewusst toggelt). Frueher 150/80 ms - das verschluckte zusammen mit dem groben 40-ms-Takt
 // schnelles Gamepad-Toggeln (Kombi nie im selben Abtastfenster beisammen -> gar keine Flanke).
 static const ULONGLONG GP_RELEASE_MS = 40;
-static bool g_gpMainWas = false, g_gpOsdWas = false, g_gpAnalyzeWas = false;
-static ULONGLONG g_gpMainSeen = 0, g_gpOsdSeen = 0, g_gpAnalyzeSeen = 0;
+static bool g_gpMainWas = false, g_gpOsdWas = false, g_gpAnalyzeWas = false, g_gpAbWas = false;
+static ULONGLONG g_gpMainSeen = 0, g_gpOsdSeen = 0, g_gpAnalyzeSeen = 0, g_gpAbSeen = 0;
 // --- Hotkeys je Vordergrund-Programm aussetzen (Einstellung "hotkeyPauseExes") -------
 // Anlass: Virtual Pinball (und aehnliche Spiele) belegen genau die Tasten, aus denen
 // Hotkey-Kombis meist bestehen - ein Tastendruck im Spiel loeste ungewollt Lumora-
@@ -2378,13 +2379,17 @@ static void xinputTick() {   // 125 Hz; Flanke = einmal ausloesen pro Druck
     bool rawA = gamepadComboDown(s.value("gamepadAnalyzeHotkey", json::array()));
     if (rawA) g_gpAnalyzeSeen = now;
     bool a = rawA || (g_gpAnalyzeSeen && now - g_gpAnalyzeSeen < GP_RELEASE_MS);
+    bool rawB = gamepadComboDown(s.value("gamepadAbHotkey", json::array()));   // Afterburner-OSD (RTSS) ein/aus
+    if (rawB) g_gpAbSeen = now;
+    bool ab = rawB || (g_gpAbSeen && now - g_gpAbSeen < GP_RELEASE_MS);
     // Zustand IMMER nachziehen, auch waehrend pausiert ist (g_gpMainWas etc.) - sonst
     // loest ein Tastendruck, der WAEHREND des Spielens gehalten wurde, beim Zurueckwechseln
     // zu Lumora eine nachtraegliche Flanke aus. Nur das AUSLOESEN wird unterdrueckt.
     if (m && !g_gpMainWas && !hkPaused) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_MAIN, 0);
     if (o && !g_gpOsdWas && !hkPaused) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_OSD, 0);
     if (a && !g_gpAnalyzeWas && !hkPaused) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_ANALYZE, 0);
-    g_gpMainWas = m; g_gpOsdWas = o; g_gpAnalyzeWas = a;
+    if (ab && !g_gpAbWas && !hkPaused) PostMessageW(g_hwnd, WM_HOTKEY_CMD, HKC_AB, 0);
+    g_gpMainWas = m; g_gpOsdWas = o; g_gpAnalyzeWas = a; g_gpAbWas = ab;
     // 1b) Controller-Zustand an die UI pushen (~30 Hz, nur bei sichtbarem Fenster).
     // Die UI darf navigator.getGamepads NICHT mehr benutzen: allein die Registrierung
     // von gamepadconnected-Listenern startet Chromiums Gamepad-Monitor im Browser-
@@ -3550,16 +3555,33 @@ static void nvmlInitOnce() {
     }
     g_nvml.ok = !g_nvml.devices.empty();
 }
+// Letzter gueltiger NVML-Datensatz je Handle + Zeitpunkt. Hintergrund (Notebook mit
+// Hybrid-Grafik, gemeldet: "OSD pulsiert, GPU-Name wechselt sekuendlich"): schlaegt EIN
+// NVML-Aufruf fehl (dGPU gerade im Runtime-D3-Schlaf, Treiber kurz beschaeftigt), fiel
+// readGpuNative sofort auf den DXGI/PDH-Zweig zurueck - anderer Name (ungekuerzt),
+// temp/power/clock = null -> Zeilen klappen im OSD weg und wieder auf. Jetzt ueberbrueckt
+// der letzte gute Wert kurze Aussetzer; erst nach NVML_HOLD_MS wird umgeschaltet.
+static const ULONGLONG NVML_HOLD_MS = 5000;
+static std::unordered_map<void*, std::pair<json, ULONGLONG>> g_nvmlLast;
 static json readNvmlHandle(void* h, const std::string& model) {
-    NvmlUtil u{}; if (g_nvml.util(h, &u) != 0) return nullptr;
+    NvmlUtil u{}; int rc = g_nvml.util(h, &u);
+    if (rc != 0) {
+        static ULONGLONG lastLog = 0; ULONGLONG now = GetTickCount64();
+        if (now - lastLog > 10000) { lastLog = now; bcLogStream("osd-gpu: NVML-Auslastung fehlgeschlagen rc=" + std::to_string(rc) + " (" + model + ") - letzter Wert wird gehalten"); }
+        auto it = g_nvmlLast.find(h);
+        if (it != g_nvmlLast.end() && now - it->second.second < NVML_HOLD_MS) return it->second.first;
+        return nullptr;
+    }
     unsigned int t = 0, mw = 0, c = 0; NvmlMem mem{};
     if (g_nvml.temp) g_nvml.temp(h, 0, &t);          // 0 = NVML_TEMPERATURE_GPU
     if (g_nvml.power) g_nvml.power(h, &mw);
     if (g_nvml.clock) g_nvml.clock(h, 0, &c);        // 0 = NVML_CLOCK_GRAPHICS
     if (g_nvml.mem) g_nvml.mem(h, &mem);
-    return { {"brand", "NVIDIA"}, {"name", model}, {"load", u.gpu}, {"temp", t},
-             {"power", (double)((int)(mw / 100.0 + 0.5)) / 10.0},   // W mit 1 Nachkommastelle wie main.js
-             {"clock", c}, {"vram", (long long)(mem.used / 1048576)} };
+    json r = { {"brand", "NVIDIA"}, {"name", model}, {"load", u.gpu}, {"temp", t},
+               {"power", (double)((int)(mw / 100.0 + 0.5)) / 10.0},   // W mit 1 Nachkommastelle wie main.js
+               {"clock", c}, {"vram", (long long)(mem.used / 1048576)} };
+    g_nvmlLast[h] = { r, GetTickCount64() };
+    return r;
 }
 // AMD-Namen bereinigen (wie main.js): (R)/(TM) raus, "AMD "-Prefix + " Graphics"-Suffix weg.
 static std::string cleanAmdName(const std::string& raw) {
@@ -3645,7 +3667,10 @@ static json readGpuPdh() {
     }
     if (!pick) return nullptr;
     pick->GetDesc1(&pd);
-    std::string name = narrow(pd.Description);
+    // Namen GENAUSO kuerzen wie die NVML-/ADL-Zweige: wechselt die Quelle (z. B. NVML-
+    // Aussetzer -> PDH), darf der angezeigte Name nicht zwischen "RTX 2060" und
+    // "NVIDIA GeForce RTX 2060" springen.
+    std::string name = cleanNvidiaName(cleanAmdName(narrow(pd.Description)));
     std::string brand = pd.VendorId == 0x10DE ? "NVIDIA" : pd.VendorId == 0x1002 ? "AMD" : pd.VendorId == 0x8086 ? "INTEL" : "GPU";
     json load = nullptr, vram = nullptr;
     // GPU-3D-Last: Summe aller 3D-Engine-Instanzen (Wildcard-Counter -> Array)

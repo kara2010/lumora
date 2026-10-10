@@ -62,7 +62,7 @@
         "@type": "SoftwareApplication",
         "@id": "https://lumora-streaming.de/en/#app",
         "name": "Lumora",
-        "softwareVersion": "3.2.9",
+        "softwareVersion": "3.2.10",
         "operatingSystem": "Windows 10, Windows 11",
         "applicationCategory": "GameApplication",
         "license": "https://www.gnu.org/licenses/agpl-3.0.html",
@@ -1041,8 +1041,18 @@
     <div class="changelog">
       <div class="release">
         <div class="release-head">
-          <span class="release-ver">3.2.9</span>
+          <span class="release-ver">3.2.10</span>
           <span class="release-tag">current</span>
+        </div>
+        <ul>
+          <li><strong>Streaming picture back with current NVIDIA drivers</strong> – newer drivers deliver AV1 frames in a different layout, which the transport to the browser previously split in a way that let player and preview receive data without ever assembling a frame. Every frame is now packed the way browsers expect – the picture is back, for AV1 as well as H.264 and regardless of the driver version.</li>
+          <li><strong>Afterburner OSD via gamepad</strong> – the MSI Afterburner OSD can now also be toggled with a controller combination (Settings → Overlay).</li>
+          <li>On notebooks with hybrid graphics, the overlay holds the graphics card values through short sensor dropouts instead of flickering and changing the card’s name every second.</li>
+        </ul>
+      </div>
+      <div class="release">
+        <div class="release-head">
+          <span class="release-ver">3.2.9</span>
         </div>
         <ul>
           <li><strong>Settings respond instantly on every machine</strong> – when opening the settings, Lumora asked Windows about its scheduled tasks in a blocking way. On machines where this query is slow (typically right after a fresh installation), the app then stopped responding to clicks for several seconds. The query now runs entirely in the background and its result is cached.</li>
@@ -1079,6 +1089,7 @@
           <li>Your library and settings load more robustly at startup.</li>
         </ul>
       </div>
+      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.2.4</span>
@@ -1087,7 +1098,6 @@
           <li><strong>More robust under the hood</strong>: Lumora now registers with Windows under a fixed app identity, giving it clean grouping in the taskbar and for notifications. If the display component crashes (for example after a graphics-driver reset while gaming), Lumora reloads the interface automatically instead of staying stuck as a blank window. And the installer checks whether the required Microsoft runtime is present and installs it if needed – so Lumora starts reliably even on freshly set-up systems.</li>
         </ul>
       </div>
-      <div class="changelog-rest" id="changelogRest">
       <div class="release">
         <div class="release-head">
           <span class="release-ver">3.2.3</span>
@@ -1471,7 +1481,7 @@
       </div>
       </div><!-- /#changelogRest -->
     </div>
-    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (35)</button>
+    <button class="more-toggle" id="changelogToggle" onclick="toggleChangelog()" aria-expanded="false">Show older versions (36)</button>
   </div>
 </section>
 
@@ -1872,7 +1882,7 @@
     if (!rest || !btn) return;
     var open = rest.classList.toggle('open');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    btn.textContent = open ? 'Show less' : 'Show older versions (35)';
+    btn.textContent = open ? 'Show less' : 'Show older versions (36)';
   }
 
   function toggleFeatures() {

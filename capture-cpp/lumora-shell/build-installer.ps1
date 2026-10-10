@@ -13,7 +13,14 @@ $stage = "$shell\stage"
 # osd-Rauchtest als Bau-Sperre (Schritt 0b). Die Nummer 3.2.6 bleibt verbrannt -
 # wer sie gezogen hatte, bekaeme dieselbe Nummer nie erneut als Update angeboten
 # (der Updater vergleicht nur die Versionsnummer, s. RELEASE.md 12).
-$version = "3.2.9"   # 3.2.9: Einstellungen frieren nicht mehr ein: die Datenquellen-Anzeige
+$version = "3.2.10"  # 3.2.10: Streaming-Bild zurueck mit aktuellen NVIDIA-Treibern: der Encoder
+                     #        liefert AV1-Frame-Header und Tile-Group als getrennte OBUs, der
+                     #        Relay schickte jedes OBU als eigene RTP-Paketkette - Browser sahen
+                     #        Bilder ohne Bilddaten und verwarfen alles (Schwarzbild in Player +
+                     #        Vorschau). Jetzt wandert die ganze Temporal Unit als EINE Kette.
+                     #        Dazu: Gamepad-Hotkey fuers Afterburner-OSD; OSD-Werte halten
+                     #        kurze NVML-Aussetzer (Hybrid-Notebooks) statt zu flackern.
+$prev_3_2_9 = ""  # 3.2.9: Einstellungen frieren nicht mehr ein: die Datenquellen-Anzeige
                      #        (osd-sources) startete bei jedem Oeffnen bis zu zwei PowerShell-
                      #        Laeufe SYNCHRON auf dem UI-Thread (Get-ScheduledTask, kalt mehrere
                      #        Sekunden) - der Thread pumpt beim WebView2 auch die Eingaben, die

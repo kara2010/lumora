@@ -451,6 +451,13 @@
               <button class="btn-browse" id="osdAbHotkeyBtn" onclick="toggleHotkeyCapture('osdAb')">Ändern</button>
               <button class="btn-cancel" onclick="clearHotkey('osdAb')">Aus</button>
             </div>
+            <div class="hotkey-row">
+              <span class="hotkey-kind" title="Gamepad">🎮</span>
+              <span class="hotkey-display" id="gpAbHotkeyDisplay">—</span>
+              <button class="btn-browse" id="gpAbHotkeyCaptureBtn" onclick="toggleGpHotkeyCapture('ab')">Aufnehmen</button>
+              <button class="btn-cancel" onclick="clearGpHotkey('ab')">Aus</button>
+            </div>
+            <p class="settings-hint" id="gpAbHotkeyHint" style="display:none"></p>
             <p class="settings-hint">Blendet das OSD von MSI Afterburner aus bzw. wieder ein – derselbe Schalter, den auch Afterburners eigener OSD-Hotkey nutzt. Das Lumora-Panel (eigener Hotkey oben) bleibt davon <b>unabhängig</b>: Afterburner z. B. links, Lumora rechts.</p>
 
             <h3 class="settings-sec">Datenquellen</h3>
@@ -3887,9 +3894,11 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       appSettingsCache.analyzeHotkey = s.analyzeHotkey !== undefined ? s.analyzeHotkey : 'Alt+A'
       refreshHotkeyDisplay('analyze')
       appSettingsCache.gamepadAnalyzeHotkey = Array.isArray(s.gamepadAnalyzeHotkey) ? s.gamepadAnalyzeHotkey : []
+      appSettingsCache.gamepadAbHotkey = Array.isArray(s.gamepadAbHotkey) ? s.gamepadAbHotkey : []
       refreshGpHotkeyDisplay('main')
       refreshGpHotkeyDisplay('osd')
       refreshGpHotkeyDisplay('analyze')
+      refreshGpHotkeyDisplay('ab')
       document.getElementById('setStreamQuality').value = s.streamQuality || '1080'
       document.getElementById('setStreamFps').value = String(s.streamFps || 60)
       document.getElementById('setStreamEncoder').value = s.streamEncoder || 'auto'
@@ -5540,7 +5549,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
     // ======================================================================
     // Hotkey-Konfiguration (globaler Toggle-Shortcut)
     // ======================================================================
-    const appSettingsCache = { toggleHotkey: 'Alt+L', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O', osdAbHotkey: 'Alt+B', streamHotkey: '', analyzeHotkey: 'Alt+A', gamepadHotkey: [], gamepadOsdHotkey: [], gamepadAnalyzeHotkey: [] }
+    const appSettingsCache = { toggleHotkey: 'Alt+L', osdHotkey: 'Alt+O', osdEditHotkey: 'Alt+Shift+O', osdAbHotkey: 'Alt+B', streamHotkey: '', analyzeHotkey: 'Alt+A', gamepadHotkey: [], gamepadOsdHotkey: [], gamepadAnalyzeHotkey: [], gamepadAbHotkey: [] }
     // Tastatur-Hotkeys nach gleichem Muster: 'main' (Oberfläche in den
     // Vordergrund), 'osd' (Overlay ein/aus), 'osdEdit' (OSD-Konfigurationsmodus),
     // 'osdAb' (natives Afterburner-OSD ein-/ausblenden).
@@ -5622,6 +5631,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       main:    { key: 'gamepadHotkey',        disp: 'gpHotkeyDisplay',    btn: 'gpHotkeyCaptureBtn',    hint: 'gpHotkeyHint' },
       osd:     { key: 'gamepadOsdHotkey',     disp: 'gpOsdHotkeyDisplay', btn: 'gpOsdHotkeyCaptureBtn', hint: 'gpOsdHotkeyHint' },
       analyze: { key: 'gamepadAnalyzeHotkey', disp: 'gpAnHotkeyDisplay',  btn: 'gpAnHotkeyCaptureBtn',  hint: 'gpAnHotkeyHint' },
+      ab:      { key: 'gamepadAbHotkey',      disp: 'gpAbHotkeyDisplay',  btn: 'gpAbHotkeyCaptureBtn',  hint: 'gpAbHotkeyHint' },   // Afterburner-OSD (RTSS) ein/aus
     }
     function refreshGpHotkeyDisplay(slot) {
       const s = GP_SLOTS[slot]; const d = document.getElementById(s.disp)
@@ -6319,10 +6329,11 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       //    native XInput-Poll im Hauptprozess (funktioniert auch minimiert). Hier
       //    ermitteln wir die Kombi nur noch, um die Navigation nicht auszulösen,
       //    während der Hotkey gedrückt wird.
-      const cMain = appSettingsCache.gamepadHotkey, cOsd = appSettingsCache.gamepadOsdHotkey, cAn = appSettingsCache.gamepadAnalyzeHotkey
+      const cMain = appSettingsCache.gamepadHotkey, cOsd = appSettingsCache.gamepadOsdHotkey, cAn = appSettingsCache.gamepadAnalyzeHotkey, cAb = appSettingsCache.gamepadAbHotkey
       const comboDown = (cMain && cMain.length && cMain.every(i => b[i] && b[i].pressed)) ||
                         (cOsd && cOsd.length && cOsd.every(i => b[i] && b[i].pressed)) ||
-                        (cAn && cAn.length && cAn.every(i => b[i] && b[i].pressed))
+                        (cAn && cAn.length && cAn.every(i => b[i] && b[i].pressed)) ||
+                        (cAb && cAb.length && cAb.every(i => b[i] && b[i].pressed))
 
       // 2b) LB/RB = Reiter blättern. Läuft VOR dem Kombi-Guard, damit auch die Loslass-Flanke
       //     erkannt wird. Geschaltet wird beim Loslassen und nur, wenn währenddessen keine Kombi
@@ -6344,7 +6355,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       //     Vorgabe ist leer, weshalb es beim Testen nie auffiel.
       //     Muss VOR dem Kombi-Guard stehen: solange die Kombi gedrückt ist, kehrt die
       //     Funktion unten um, und die Loslass-Flanke käme nie hier an.
-      const hkAlle = new Set([...(cMain || []), ...(cOsd || []), ...(cAn || [])])
+      const hkAlle = new Set([...(cMain || []), ...(cOsd || []), ...(cAn || []), ...(cAb || [])])
       // Ein Hotkey aus EINEM Knopf ist der Knopf selbst - der darf nie zusätzlich
       // seine Einzelaktion auslösen.
       const nurHotkey = new Set(
@@ -6456,6 +6467,7 @@ ipcRenderer.on('external-running', (event, paths) => { externalRunning = new Set
       appSettingsCache.gamepadHotkey = Array.isArray(s.gamepadHotkey) ? s.gamepadHotkey : []
       appSettingsCache.gamepadOsdHotkey = Array.isArray(s.gamepadOsdHotkey) ? s.gamepadOsdHotkey : []
       appSettingsCache.gamepadAnalyzeHotkey = Array.isArray(s.gamepadAnalyzeHotkey) ? s.gamepadAnalyzeHotkey : []
+      appSettingsCache.gamepadAbHotkey = Array.isArray(s.gamepadAbHotkey) ? s.gamepadAbHotkey : []
     }).catch(() => {})
 
     // Header-Live-Indikator initialisieren, falls beim Start schon ein Stream läuft
