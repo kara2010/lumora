@@ -16,12 +16,12 @@ Download & Infos: <https://lumora-streaming.de/>
 
 <table>
 <tr>
-<td width="50%"><img src="https://lumora-streaming.de/3.webp" alt="Gaming-OSD mit GPU-, CPU- und FPS-Werten über einem laufenden Spiel"><br><sub><b>Gaming-OSD</b> – GPU, CPU & FPS live über dem Spiel, ohne Afterburner</sub></td>
-<td width="50%"><img src="https://lumora-streaming.de/stream.webp" alt="Stream-Tab mit Live-Vorschau und Teilen-Link"><br><sub><b>Streaming</b> – Link verschicken, Freunde schauen im Browser zu (P2P)</sub></td>
+<td width="50%"><a href="https://lumora-streaming.de/gaming-osd.html"><img src="https://lumora-streaming.de/3.webp" alt="Gaming-OSD mit GPU-, CPU- und FPS-Werten über einem laufenden Spiel"></a><br><sub><b><a href="https://lumora-streaming.de/gaming-osd.html">Gaming-OSD</a></b> – GPU, CPU & FPS live über dem Spiel, ohne Afterburner</sub></td>
+<td width="50%"><a href="https://lumora-streaming.de/streaming.html"><img src="https://lumora-streaming.de/stream.webp" alt="Stream-Tab mit Live-Vorschau und Teilen-Link"></a><br><sub><b><a href="https://lumora-streaming.de/streaming.html">Streaming</a></b> – Link verschicken, Freunde schauen im Browser zu (P2P)</sub></td>
 </tr>
 <tr>
-<td><img src="https://lumora-streaming.de/analyse.webp" alt="Ruckler-Bericht mit Klartext-Urteil, Kennzahlen und Frametime-Kurve"><br><sub><b>Ruckler-Analyse</b> – findet in Klartext heraus, <i>warum</i> ein Spiel ruckelt</sub></td>
-<td><img src="https://lumora-streaming.de/eingabe-bruecke.webp" alt="Eingabe-Brücke: Lenkrad als virtueller Xbox-Controller"><br><sub><b>Eingabe-Brücke</b> – Lenkrad, Joystick oder Flightstick als Xbox-Pad</sub></td>
+<td><a href="https://lumora-streaming.de/ruckler-analyse.html"><img src="https://lumora-streaming.de/analyse.webp" alt="Ruckler-Bericht mit Klartext-Urteil, Kennzahlen und Frametime-Kurve"></a><br><sub><b><a href="https://lumora-streaming.de/ruckler-analyse.html">Ruckler-Analyse</a></b> – findet in Klartext heraus, <i>warum</i> ein Spiel ruckelt</sub></td>
+<td><a href="https://lumora-streaming.de/eingabe-bruecke.html"><img src="https://lumora-streaming.de/eingabe-bruecke.webp" alt="Eingabe-Brücke: Lenkrad als virtueller Xbox-Controller"></a><br><sub><b><a href="https://lumora-streaming.de/eingabe-bruecke.html">Eingabe-Brücke</a></b> – Lenkrad, Joystick oder Flightstick als Xbox-Pad</sub></td>
 </tr>
 </table>
 
@@ -29,13 +29,15 @@ Download & Infos: <https://lumora-streaming.de/>
 
 - **Store-übergreifend** – findet Spiele von Steam, Microsoft Store / Xbox,
   EA, Epic, GOG u. a. und scannt automatisch alle Laufwerke.
-- **Game-Streaming per Link** – ein laufendes Spiel direkt an jeden Browser
+- **[Game-Streaming per Link](https://lumora-streaming.de/streaming.html)** – ein laufendes Spiel direkt an jeden Browser
   streamen (eigene C++-Aufnahme + Hardware-Encoder → eigenes WebRTC/WHEP-Relay).
   Standardmäßig Full HD (1080p60), auf Wunsch bis 4K; AV1 oder H.264 je nach
   Decoder des Zuschauers; direkte Peer-to-Peer-Verbindung (inklusive
   IPv6-Direktweg); Gruppen-Streams mit Raumcodes; auf Wunsch Zutrittsschutz,
-  der vor jedem Zuschauer erst fragt.
-- **Eingabe-Brücke** – macht aus Joystick, Lenkrad oder Flightstick einen
+  der vor jedem Zuschauer erst fragt. Dazu die
+  [Portfreigabe-Anleitung](https://lumora-streaming.de/portfreigabe.html) und
+  Lumora als [Discord-Alternative fürs Screen-Sharing](https://lumora-streaming.de/discord-alternative.html).
+- **[Eingabe-Brücke](https://lumora-streaming.de/eingabe-bruecke.html)** – macht aus Joystick, Lenkrad oder Flightstick einen
   virtuellen Xbox-360-Controller (über den signierten Open-Source-Treiber
   ViGEmBus), damit Geräte, die sich als DirectInput melden, auch in Spielen
   funktionieren, die nur XInput akzeptieren. Visuelle Zuordnung, Live-Monitor
@@ -43,9 +45,12 @@ Download & Infos: <https://lumora-streaming.de/>
   Geräte (Lenkrad + Pedale) und Profile pro Spiel.
 - **Automatisches HDR** – aktiviert HDR beim Spielstart und schaltet danach
   zurück (nativ, ohne externes Werkzeug).
-- **Gaming-OSD** – FPS, GPU- und CPU-Werte im Spiel, ohne Afterburner & Co.
+- **[Gaming-OSD](https://lumora-streaming.de/gaming-osd.html)** – FPS, GPU- und CPU-Werte im Spiel, ohne Afterburner & Co.
   (eigene ETW-basierte Frame-Messung).
-- **Gamepad-Steuerung** – die gesamte Oberfläche ist per Xbox-Controller
+- **[Ruckler-Analyse](https://lumora-streaming.de/ruckler-analyse.html)** – zeichnet während einer Sitzung
+  Frametimes, Hintergrundprogramme, Treiber-Latenzen und GPU-Zustand auf und
+  benennt zu jedem Ruckler die wahrscheinliche Ursache in Klartext.
+- **[Gamepad-Steuerung](https://lumora-streaming.de/gamepad.html)** – die gesamte Oberfläche ist per Xbox-Controller
   bedienbar (Couch-Gaming am TV).
 - **Cover & Artwork** – Cover, Hero-Banner, Beschreibung, Genre und
   Release-Jahr werden automatisch geladen (Steam, Microsoft Store, optional
@@ -104,7 +109,15 @@ Baum, den 3.0.0 ablöst.
 ## Website
 
 Der Ordner [`website/`](website/) enthält die Downloadseite
-(lumora-streaming.de/).
+(lumora-streaming.de/). Themenseiten:
+[Streaming](https://lumora-streaming.de/streaming.html) ·
+[Gaming-OSD](https://lumora-streaming.de/gaming-osd.html) ·
+[Ruckler-Analyse](https://lumora-streaming.de/ruckler-analyse.html) ·
+[Eingabe-Brücke](https://lumora-streaming.de/eingabe-bruecke.html) ·
+[Gamepad](https://lumora-streaming.de/gamepad.html) ·
+[Portfreigabe](https://lumora-streaming.de/portfreigabe.html) ·
+[Discord-Alternative](https://lumora-streaming.de/discord-alternative.html)
+— Englisch: [lumora-streaming.de/en/](https://lumora-streaming.de/en/).
 
 ## Autor
 

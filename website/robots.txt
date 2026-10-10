@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
+Disallow: /download.php
 
 Sitemap: https://lumora-streaming.de/sitemap.xml

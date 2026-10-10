@@ -15,12 +15,12 @@ Download & info: <https://lumora-streaming.de/>
 
 <table>
 <tr>
-<td width="50%"><img src="https://lumora-streaming.de/3.webp" alt="Gaming OSD with GPU, CPU and FPS over a running game"><br><sub><b>Gaming OSD</b> – GPU, CPU & FPS live over the game, no Afterburner needed</sub></td>
-<td width="50%"><img src="https://lumora-streaming.de/stream.webp" alt="Stream tab with live preview and share link"><br><sub><b>Streaming</b> – send a link, friends watch in the browser (P2P WebRTC)</sub></td>
+<td width="50%"><a href="https://lumora-streaming.de/en/gaming-osd.html"><img src="https://lumora-streaming.de/3.webp" alt="Gaming OSD with GPU, CPU and FPS over a running game"></a><br><sub><b><a href="https://lumora-streaming.de/en/gaming-osd.html">Gaming OSD</a></b> – GPU, CPU & FPS live over the game, no Afterburner needed</sub></td>
+<td width="50%"><a href="https://lumora-streaming.de/en/streaming.html"><img src="https://lumora-streaming.de/stream.webp" alt="Stream tab with live preview and share link"></a><br><sub><b><a href="https://lumora-streaming.de/en/streaming.html">Streaming</a></b> – send a link, friends watch in the browser (P2P WebRTC)</sub></td>
 </tr>
 <tr>
-<td><img src="https://lumora-streaming.de/analyse.webp" alt="Stutter analysis report with verdict, key figures and frame time graph"><br><sub><b>Stutter analysis</b> – finds out <i>why</i> a game stutters, in plain language</sub></td>
-<td><img src="https://lumora-streaming.de/eingabe-bruecke.webp" alt="Input bridge mapping a wheel to a virtual Xbox controller"><br><sub><b>Input bridge</b> – wheel, joystick or flight stick as a virtual Xbox pad</sub></td>
+<td><a href="https://lumora-streaming.de/en/ruckler-analyse.html"><img src="https://lumora-streaming.de/analyse.webp" alt="Stutter analysis report with verdict, key figures and frame time graph"></a><br><sub><b><a href="https://lumora-streaming.de/en/ruckler-analyse.html">Stutter analysis</a></b> – finds out <i>why</i> a game stutters, in plain language</sub></td>
+<td><a href="https://lumora-streaming.de/en/eingabe-bruecke.html"><img src="https://lumora-streaming.de/eingabe-bruecke.webp" alt="Input bridge mapping a wheel to a virtual Xbox controller"></a><br><sub><b><a href="https://lumora-streaming.de/en/eingabe-bruecke.html">Input bridge</a></b> – wheel, joystick or flight stick as a virtual Xbox pad</sub></td>
 </tr>
 </table>
 
@@ -28,22 +28,27 @@ Download & info: <https://lumora-streaming.de/>
 
 - **Cross-store** – finds games from Steam, Microsoft Store / Xbox, EA, Epic,
   GOG and more, scanning all drives automatically.
-- **Game streaming via link** – stream a running game straight to any browser
+- **[Game streaming via link](https://lumora-streaming.de/en/streaming.html)** – stream a running game straight to any browser
   (own C++ capture + hardware encoder → own WebRTC/WHEP relay). Full HD
   (1080p60) by default, up to 4K; AV1 or H.264 depending on the viewer's
   decoder; direct peer-to-peer connection (including an IPv6 direct path);
   group streams with room codes; optional access control that asks before
-  anyone may watch.
-- **Input bridge** – turns a joystick, wheel or flight stick into a virtual
+  anyone may watch. Port forwarding is explained in the
+  [port forwarding guide](https://lumora-streaming.de/en/portfreigabe.html);
+  Lumora as a [Discord screen-share alternative](https://lumora-streaming.de/en/discord-alternative.html).
+- **[Input bridge](https://lumora-streaming.de/en/eingabe-bruecke.html)** – turns a joystick, wheel or flight stick into a virtual
   Xbox 360 controller (via the signed open-source driver ViGEmBus), so devices
   that report as DirectInput work in games that only accept XInput. Visual
   mapping, live input monitor, auto-calibration, axis↔trigger and button↔axis
   remapping, separate devices (wheel + pedals) and per-game profiles.
 - **Automatic HDR** – enables HDR when a game launches and switches it back
   afterwards (native, no external tool).
-- **Gaming OSD** – FPS, GPU and CPU readings in-game, without Afterburner & co.
+- **[Gaming OSD](https://lumora-streaming.de/en/gaming-osd.html)** – FPS, GPU and CPU readings in-game, without Afterburner & co.
   (own ETW-based frame timing).
-- **Gamepad control** – the entire UI can be driven with an Xbox controller
+- **[Stutter analysis](https://lumora-streaming.de/en/ruckler-analyse.html)** – records frame times, background
+  programs, driver latencies and GPU state during a session and names the likely
+  cause of every stutter in plain language.
+- **[Gamepad control](https://lumora-streaming.de/en/gamepad.html)** – the entire UI can be driven with an Xbox controller
   (couch gaming on the TV).
 - **Covers & artwork** – covers, hero banners, description, genre and release
   year are fetched automatically (Steam, Microsoft Store, optionally
@@ -102,7 +107,15 @@ that 3.0.0 supersedes.
 ## Website
 
 The [`website/`](website/) folder contains the download page
-(lumora-streaming.de/).
+(lumora-streaming.de/). Feature pages in English:
+[Streaming](https://lumora-streaming.de/en/streaming.html) ·
+[Gaming OSD](https://lumora-streaming.de/en/gaming-osd.html) ·
+[Stutter analysis](https://lumora-streaming.de/en/ruckler-analyse.html) ·
+[Input bridge](https://lumora-streaming.de/en/eingabe-bruecke.html) ·
+[Gamepad](https://lumora-streaming.de/en/gamepad.html) ·
+[Port forwarding](https://lumora-streaming.de/en/portfreigabe.html) ·
+[Discord alternative](https://lumora-streaming.de/en/discord-alternative.html)
+— German: [lumora-streaming.de](https://lumora-streaming.de/).
 
 ## Author
 

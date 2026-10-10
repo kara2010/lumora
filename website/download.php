@@ -1,4 +1,7 @@
 <?php
+// Kein Index-Kandidat: liefert eine Exe aus. Ohne diesen Header landete die URL in der
+// Search Console unter "Gecrawlt - zurzeit nicht indexiert" und kostete Crawl-Budget.
+header('X-Robots-Tag: noindex, nofollow');
 define('COUNTER_FILE', __DIR__ . '/data/count.txt');
 
 // Auszuliefernde Datei NICHT mehr hart verdrahten (das lieferte nach dem 3.0.0-Release
